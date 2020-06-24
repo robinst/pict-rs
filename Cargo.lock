@@ -786,8 +786,7 @@ checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
 [[package]]
 name = "ffmpeg-next"
 version = "4.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e37dadc7853e912107a8a671b7b22bff1309c09d0ba8851493028f06a36fc9f"
+source = "git+https://git.asonix.dog/asonix/rust-ffmpeg?branch=main#47f5ee8b0538f74ed7a4af9df0bda57c14b441d8"
 dependencies = [
  "bitflags",
  "ffmpeg-sys-next",
@@ -797,8 +796,7 @@ dependencies = [
 [[package]]
 name = "ffmpeg-sys-next"
 version = "4.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01bba495d04757f7a3e471b3e411759a8968571c4618235bc1c9e1099b4a84d1"
+source = "git+https://git.asonix.dog/asonix/rust-ffmpeg-sys?branch=main#993c84e710605ffc55787600deafda3f575abe6f"
 dependencies = [
  "bindgen 0.54.0",
  "cc",
