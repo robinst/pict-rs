@@ -21,8 +21,12 @@ mod upload_manager;
 mod validate;
 
 use self::{
-    config::Config, error::UploadError, middleware::Tracing, processor::process_image,
-    upload_manager::UploadManager, validate::image_webp,
+    config::Config,
+    error::UploadError,
+    middleware::Tracing,
+    processor::process_image,
+    upload_manager::UploadManager,
+    validate::{image_webp, video_mp4},
 };
 
 const MEGABYTES: usize = 1024 * 1024;
@@ -30,6 +34,29 @@ const HOURS: u32 = 60 * 60;
 
 static CONFIG: Lazy<Config> = Lazy::new(|| Config::from_args());
 static MAGICK_INIT: Once = Once::new();
+
+// try moving a file
+#[instrument]
+async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
+    if let Some(path) = to.parent() {
+        debug!("Creating directory {:?}", path);
+        actix_fs::create_dir_all(path.to_owned()).await?;
+    }
+
+    debug!("Checking if {:?} already exists", to);
+    if let Err(e) = actix_fs::metadata(to.clone()).await {
+        if e.kind() != Some(std::io::ErrorKind::NotFound) {
+            return Err(e.into());
+        }
+    } else {
+        return Err(UploadError::FileExists);
+    }
+
+    debug!("Moving {:?} to {:?}", from, to);
+    actix_fs::copy(from.clone(), to).await?;
+    actix_fs::remove_file(from).await?;
+    Ok(())
+}
 
 // Try writing to a file
 #[instrument(skip(bytes))]
@@ -67,24 +94,57 @@ async fn safe_save_file(path: PathBuf, bytes: bytes::Bytes) -> Result<(), Upload
     Ok(())
 }
 
-fn to_ext(mime: mime::Mime) -> &'static str {
+pub(crate) fn tmp_file() -> PathBuf {
+    use rand::distributions::{Alphanumeric, Distribution};
+    let limit: usize = 10;
+    let rng = rand::thread_rng();
+
+    let s: String = Alphanumeric.sample_iter(rng).take(limit).collect();
+
+    let name = format!("{}.tmp", s);
+
+    let mut path = std::env::temp_dir();
+    path.push("pict-rs");
+    path.push(&name);
+
+    path
+}
+
+fn to_ext(mime: mime::Mime) -> Result<&'static str, UploadError> {
     if mime == mime::IMAGE_PNG {
-        ".png"
+        Ok(".png")
     } else if mime == mime::IMAGE_JPEG {
-        ".jpg"
-    } else if mime == mime::IMAGE_GIF {
-        ".gif"
+        Ok(".jpg")
+    } else if mime == video_mp4() {
+        Ok(".mp4")
+    } else if mime == image_webp() {
+        Ok(".webp")
     } else {
-        ".webp"
+        Err(UploadError::UnsupportedFormat)
     }
 }
 
-fn from_ext(ext: std::ffi::OsString) -> mime::Mime {
-    match ext.to_str() {
-        Some("png") => mime::IMAGE_PNG,
-        Some("jpg") => mime::IMAGE_JPEG,
-        Some("gif") => mime::IMAGE_GIF,
-        _ => image_webp(),
+fn from_name(name: &str) -> Result<mime::Mime, UploadError> {
+    match name
+        .rsplit('.')
+        .next()
+        .ok_or(UploadError::UnsupportedFormat)?
+    {
+        "jpg" => Ok(mime::IMAGE_JPEG),
+        "webp" => Ok(image_webp()),
+        "png" => Ok(mime::IMAGE_PNG),
+        "mp4" => Ok(video_mp4()),
+        "gif" => Ok(mime::IMAGE_GIF),
+        _ => Err(UploadError::UnsupportedFormat),
+    }
+}
+
+fn from_ext(ext: &str) -> Result<mime::Mime, UploadError> {
+    match ext {
+        "jpg" => Ok(mime::IMAGE_JPEG),
+        "png" => Ok(mime::IMAGE_PNG),
+        "webp" => Ok(image_webp()),
+        _ => Err(UploadError::UnsupportedFormat),
     }
 }
 
@@ -121,6 +181,11 @@ async fn upload(
         "msg": "ok",
         "files": files
     })))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct UrlQuery {
+    url: String,
 }
 
 /// download an image from a URL
@@ -165,33 +230,71 @@ async fn delete(
     Ok(HttpResponse::NoContent().finish())
 }
 
-/// Serve files
+type ProcessQuery = Vec<(String, String)>;
+
+/// Process files
 #[instrument(skip(manager, whitelist))]
-async fn serve(
-    segments: web::Path<String>,
+async fn process(
+    query: web::Query<ProcessQuery>,
+    ext: web::Path<String>,
     manager: web::Data<UploadManager>,
     whitelist: web::Data<Option<HashSet<String>>>,
 ) -> Result<HttpResponse, UploadError> {
-    let mut segments: Vec<String> = segments
-        .into_inner()
-        .split('/')
-        .map(|s| s.to_string())
-        .collect();
-    let alias = segments.pop().ok_or(UploadError::MissingFilename)?;
+    let (alias, operations) =
+        query
+            .into_inner()
+            .into_iter()
+            .fold((String::new(), Vec::new()), |(s, mut acc), (k, v)| {
+                if k == "src" {
+                    (v, acc)
+                } else {
+                    acc.push((k, v));
+                    (s, acc)
+                }
+            });
 
-    debug!("Building chain");
-    let chain = self::processor::build_chain(&segments, whitelist.as_ref().as_ref());
-    debug!("Chain built");
+    if alias == "" {
+        return Err(UploadError::MissingFilename);
+    }
 
     let name = manager.from_alias(alias).await?;
-    let base = manager.image_dir();
-    let path = self::processor::build_path(base, &chain, name.clone());
 
-    let ext = path
-        .extension()
-        .ok_or(UploadError::MissingExtension)?
-        .to_owned();
-    let ext = from_ext(ext);
+    let operations = if let Some(whitelist) = whitelist.as_ref() {
+        operations
+            .into_iter()
+            .filter(|(k, _)| whitelist.contains(&k.to_lowercase()))
+            .collect()
+    } else {
+        operations
+    };
+
+    let chain = self::processor::build_chain(&operations);
+
+    let ext = ext.into_inner();
+    let content_type = from_ext(&ext)?;
+    let processed_name = format!("{}.{}", name, ext);
+    let base = manager.image_dir();
+    let mut path = self::processor::build_path(base, &chain, processed_name);
+
+    if let Some((updated_path, exists)) = self::processor::prepare_image(path.clone()).await? {
+        path = updated_path.clone();
+
+        if exists.is_new() {
+            // Save the transcoded file in another task
+            debug!("Spawning storage task");
+            let span = Span::current();
+            let manager2 = manager.clone();
+            let name = name.clone();
+            actix_rt::spawn(async move {
+                let entered = span.enter();
+                if let Err(e) = manager2.store_variant(updated_path, name).await {
+                    error!("Error storing variant, {}", e);
+                    return;
+                }
+                drop(entered);
+            });
+        }
+    }
 
     // If the thumbnail doesn't exist, we need to create it
     if let Err(e) = actix_fs::metadata(path.clone()).await {
@@ -203,15 +306,30 @@ async fn serve(
         let mut original_path = manager.image_dir();
         original_path.push(name.clone());
 
-        // apply chain to the provided image
-        let img_bytes = match process_image(original_path.clone(), chain).await? {
-            Some(bytes) => bytes,
-            None => {
-                let stream = actix_fs::read_to_stream(original_path).await?;
+        if let Some((updated_path, exists)) =
+            self::processor::prepare_image(original_path.clone()).await?
+        {
+            original_path = updated_path.clone();
 
-                return Ok(srv_response(stream, ext));
+            if exists.is_new() {
+                // Save the transcoded file in another task
+                debug!("Spawning storage task");
+                let span = Span::current();
+                let manager2 = manager.clone();
+                let name = name.clone();
+                actix_rt::spawn(async move {
+                    let entered = span.enter();
+                    if let Err(e) = manager2.store_variant(updated_path, name).await {
+                        error!("Error storing variant, {}", e);
+                        return;
+                    }
+                    drop(entered);
+                });
             }
-        };
+        }
+
+        // apply chain to the provided image
+        let img_bytes = process_image(original_path.clone(), chain).await?;
 
         let path2 = path.clone();
         let img_bytes2 = img_bytes.clone();
@@ -221,7 +339,7 @@ async fn serve(
         let span = Span::current();
         actix_rt::spawn(async move {
             let entered = span.enter();
-            if let Err(e) = manager.store_variant(path2.clone()).await {
+            if let Err(e) = manager.store_variant(path2.clone(), name).await {
                 error!("Error storing variant, {}", e);
                 return;
             }
@@ -236,13 +354,29 @@ async fn serve(
             Box::pin(futures::stream::once(async {
                 Ok(img_bytes) as Result<_, UploadError>
             })),
-            ext,
+            content_type,
         ));
     }
 
     let stream = actix_fs::read_to_stream(path).await?;
 
-    Ok(srv_response(stream, ext))
+    Ok(srv_response(stream, content_type))
+}
+
+/// Serve files
+#[instrument(skip(manager))]
+async fn serve(
+    alias: web::Path<String>,
+    manager: web::Data<UploadManager>,
+) -> Result<HttpResponse, UploadError> {
+    let name = manager.from_alias(alias.into_inner()).await?;
+    let content_type = from_name(&name)?;
+    let mut path = manager.image_dir();
+    path.push(name);
+
+    let stream = actix_fs::read_to_stream(path).await?;
+
+    Ok(srv_response(stream, content_type))
 }
 
 // A helper method to produce responses with proper cache headers
@@ -259,11 +393,6 @@ where
         ]))
         .content_type(ext.to_string())
         .streaming(stream.err_into())
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct UrlQuery {
-    url: String,
 }
 
 #[actix_rt::main]
@@ -368,7 +497,8 @@ async fn main() -> Result<(), anyhow::Error> {
                             .route(web::delete().to(delete))
                             .route(web::get().to(delete)),
                     )
-                    .service(web::resource("/{tail:.*}").route(web::get().to(serve))),
+                    .service(web::resource("/original/{filename}").route(web::get().to(serve)))
+                    .service(web::resource("/process.{ext}").route(web::get().to(process))),
             )
             .service(
                 web::resource("/import")

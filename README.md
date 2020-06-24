@@ -93,19 +93,19 @@ pict-rs offers four endpoints:
     response format are the same as the `POST /image` endpoint.
 - `GET /image/download?url=...` Download an image from a remote server, returning the same JSON
     payload as the `POST` endpoint
-- `GET /image/{file}` for getting a full-resolution image. `file` here is the `file` key from the
+- `GET /image/original/{file}` for getting a full-resolution image. `file` here is the `file` key from the
     `/image` endpoint's JSON
-- `GET /image/{transformations...}/{file}` get a file with transformations applied.
+- `GET /image/process.{ext}?src={file}&...` get a file with transformations applied.
     existing transformations include
-    - `identity`: apply no changes
-    - `blur{float}`: apply a gaussian blur to the file
-    - `thumbnail{int}`: produce a thumbnail of the image fitting inside an `{int}` by `{int}` square
+    - `identity=true`: apply no changes
+    - `blur={float}`: apply a gaussian blur to the file
+    - `thumbnail={int}`: produce a thumbnail of the image fitting inside an `{int}` by `{int}` square
+    Supported `ext` file extensions include `png`, `jpg`, and `webp`
     An example of usage could be
     ```
-    GET /image/thumbnail256/blur3.0/asdf.png
+    GET /image/process.jpg?src=asdf.png&thumbnail=256&blur=3.0
     ```
-    which would create a 256x256px
-    thumbnail and blur it
+    which would create a 256x256px JPEG thumbnail and blur it
 - `DELETE /image/delete/{delete_token}/{file}` or `GET /image/delete/{delete_token}/{file}` to delete a file,
     where `delete_token` and `file` are from the `/image` endpoint's JSON
 

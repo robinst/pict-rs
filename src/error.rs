@@ -24,9 +24,6 @@ pub(crate) enum UploadError {
     #[error("No files present in upload")]
     NoFiles,
 
-    #[error("Uploaded image could not be served, extension is missing")]
-    MissingExtension,
-
     #[error("Requested a file that doesn't exist")]
     MissingAlias,
 
@@ -59,6 +56,9 @@ pub(crate) enum UploadError {
 
     #[error("Error validating Gif file, {0}")]
     Gif(#[from] GifError),
+
+    #[error("Error transcoding, {0}")]
+    Transcode(crate::validate::transcode::Error),
 
     #[error("Tried to create file, but file already exists")]
     FileExists,

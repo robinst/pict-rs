@@ -132,7 +132,16 @@ RUN \
     libwebp6:$ARCH \
     libwebpdemux2:$ARCH \
     libwebpmux3:$ARCH \
-    libgomp1:$ARCH
+    libgomp1:$ARCH \
+    libavcodec-dev:$ARCH \
+    libavfilter-dev:$ARCH \
+    libavdevice-dev:$ARCH \
+    libavformat-dev:$ARCH \
+    libavresample-dev:$ARCH \
+    libavutil-dev:$ARCH \
+    libswscale-dev:$ARCH \
+    libswresample-dev:$ARCH \
+    ffmpeg
 
 ENV \
  PATH=$PATH:/opt/build/.cargo/bin \

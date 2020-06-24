@@ -128,6 +128,14 @@ RUN \
     libgexiv2-dev:$ARCH \
     libxml2:$ARCH \
     libltdl7:$ARCH \
+    libavcodec-dev:$ARCH \
+    libavfilter-dev:$ARCH \
+    libavdevice-dev:$ARCH \
+    libavformat-dev:$ARCH \
+    libavresample-dev:$ARCH \
+    libavutil-dev:$ARCH \
+    libswscale-dev:$ARCH \
+    libswresample-dev:$ARCH \
     llvm-dev \
     libclang-dev \
     clang
@@ -192,6 +200,14 @@ RUN \
     libltdl7 \
     libgomp1 \
     libxml2 \
+    libavcodec58 \
+    libavfilter7 \
+    libavdevice58 \
+    libavformat58 \
+    libavresample4 \
+    libavutil56 \
+    libswscale5 \
+    libswresample3 \
     tini
 
 COPY --from=pict-rs-builder /opt/build/pict-rs/target/$TARGET/$BUILD_MODE/pict-rs /usr/local/bin/pict-rs

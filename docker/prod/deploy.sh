@@ -16,6 +16,7 @@ function print_help() {
     echo ""
     echo "Args:"
     echo "	tag: The git tag to be applied to the repository and docker build"
+    echo "	branch: The git branch to use for tagging and publishing"
 }
 
 function build_image() {
@@ -30,8 +31,10 @@ function build_image() {
 
 # Creating the new tag
 new_tag="$1"
+branch="$2"
 
 require "$new_tag" "tag"
+require "$branch" "branch"
 
 if ! docker run --rm -it arm64v8/alpine:3.11 /bin/sh -c 'echo "docker is configured correctly"'
 then
@@ -41,7 +44,7 @@ fi
 
 set -xe
 
-git checkout master
+git checkout $branch
 
 # Changing the docker-compose prod
 sed -i "s/asonix\/pictrs:.*/asonix\/pictrs:$new_tag/" docker-compose.yml

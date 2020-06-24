@@ -470,6 +470,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.54.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66c0bb6167449588ff70803f4127f0684f9063097eca5016f37eb52b92c2cf36"
+dependencies = [
+ "bitflags",
+ "cexpr",
+ "cfg-if",
+ "clang-sys",
+ "clap",
+ "env_logger",
+ "lazy_static",
+ "lazycell",
+ "log",
+ "peeking_take_while",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "which",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -632,12 +656,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "color_quant"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dbbb57365263e881e805dc77d94697c9118fd94d8da011240555aa7b23445bd"
-
-[[package]]
 name = "copyless"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -764,6 +782,31 @@ name = "fake-simd"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
+
+[[package]]
+name = "ffmpeg-next"
+version = "4.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e37dadc7853e912107a8a671b7b22bff1309c09d0ba8851493028f06a36fc9f"
+dependencies = [
+ "bitflags",
+ "ffmpeg-sys-next",
+ "libc",
+]
+
+[[package]]
+name = "ffmpeg-sys-next"
+version = "4.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01bba495d04757f7a3e471b3e411759a8968571c4618235bc1c9e1099b4a84d1"
+dependencies = [
+ "bindgen 0.54.0",
+ "cc",
+ "libc",
+ "num_cpus",
+ "pkg-config",
+ "regex",
+]
 
 [[package]]
 name = "flate2"
@@ -964,16 +1007,6 @@ checksum = "edc8f7e79962171a99792ff6895fac7abe89380c02f9abf9dc73c88f2e56697c"
 dependencies = [
  "libc",
  "pkg-config",
-]
-
-[[package]]
-name = "gif"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "471d90201b3b223f3451cd4ad53e34295f16a1df17b1edf3736d47761c3981af"
-dependencies = [
- "color_quant",
- "lzw",
 ]
 
 [[package]]
@@ -1207,17 +1240,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "lzw"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d947cbb889ed21c2a84be6ffbaebf5b4e0f4340638cba0444907e38b56be084"
-
-[[package]]
 name = "magick_rust"
 version = "0.14.0"
 source = "git+https://git.asonix.dog/asonix/magick-rust#cd25f601629a2af0cffa5e4767720de69fd256dd"
 dependencies = [
- "bindgen",
+ "bindgen 0.53.3",
  "libc",
  "pkg-config",
 ]
@@ -1438,7 +1465,7 @@ checksum = "d4fd5641d01c8f18a23da7b6fe29298ff4b55afcccdf78973b24cf3175fee32e"
 
 [[package]]
 name = "pict-rs"
-version = "0.1.12"
+version = "0.2.0-alpha.1"
 dependencies = [
  "actix-form-data",
  "actix-fs",
@@ -1447,8 +1474,9 @@ dependencies = [
  "anyhow",
  "base64 0.12.2",
  "bytes",
+ "ffmpeg-next",
+ "ffmpeg-sys-next",
  "futures",
- "gif",
  "magick_rust",
  "mime",
  "once_cell",

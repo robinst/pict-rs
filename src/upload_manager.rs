@@ -108,12 +108,11 @@ impl UploadManager {
 
     /// Store the path to a generated image variant so we can easily clean it up later
     #[instrument(skip(self))]
-    pub(crate) async fn store_variant(&self, path: PathBuf) -> Result<(), UploadError> {
-        let filename = path
-            .file_name()
-            .and_then(|f| f.to_str())
-            .map(|s| s.to_string())
-            .ok_or(UploadError::Path)?;
+    pub(crate) async fn store_variant(
+        &self,
+        path: PathBuf,
+        filename: String,
+    ) -> Result<(), UploadError> {
         let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
 
         let fname_tree = self.inner.filename_tree.clone();
@@ -276,7 +275,7 @@ impl UploadManager {
     {
         // -- READ IN BYTES FROM CLIENT --
         debug!("Reading stream");
-        let tmpfile = tmp_file();
+        let tmpfile = crate::tmp_file();
         safe_save_stream(tmpfile.clone(), stream).await?;
 
         let content_type = if validate {
@@ -312,7 +311,7 @@ impl UploadManager {
     {
         // -- READ IN BYTES FROM CLIENT --
         debug!("Reading stream");
-        let tmpfile = tmp_file();
+        let tmpfile = crate::tmp_file();
         safe_save_stream(tmpfile.clone(), stream).await?;
 
         // -- VALIDATE IMAGE --
@@ -426,7 +425,7 @@ impl UploadManager {
         let mut real_path = self.image_dir();
         real_path.push(name);
 
-        safe_move_file(tmpfile, real_path).await?;
+        crate::safe_move_file(tmpfile, real_path).await?;
 
         Ok(())
     }
@@ -505,7 +504,7 @@ impl UploadManager {
             let mut path = image_dir.clone();
             let s: String = Alphanumeric.sample_iter(rng).take(limit).collect();
 
-            let filename = file_name(s, content_type.clone());
+            let filename = file_name(s, content_type.clone())?;
 
             path.push(filename.clone());
 
@@ -596,7 +595,7 @@ impl UploadManager {
         loop {
             debug!("Alias gen loop");
             let s: String = Alphanumeric.sample_iter(rng).take(limit).collect();
-            let alias = file_name(s, content_type.clone());
+            let alias = file_name(s, content_type.clone())?;
 
             let res = self.save_alias(hash, &alias).await?;
 
@@ -633,44 +632,6 @@ impl UploadManager {
 
         return Ok(Ok(()));
     }
-}
-
-pub(crate) fn tmp_file() -> PathBuf {
-    use rand::distributions::{Alphanumeric, Distribution};
-    let limit: usize = 10;
-    let rng = rand::thread_rng();
-
-    let s: String = Alphanumeric.sample_iter(rng).take(limit).collect();
-
-    let name = format!("{}.tmp", s);
-
-    let mut path = std::env::temp_dir();
-    path.push("pict-rs");
-    path.push(&name);
-
-    path
-}
-
-#[instrument]
-async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
-    if let Some(path) = to.parent() {
-        debug!("Creating directory {:?}", path);
-        actix_fs::create_dir_all(path.to_owned()).await?;
-    }
-
-    debug!("Checking if {:?} already exists", to);
-    if let Err(e) = actix_fs::metadata(to.clone()).await {
-        if e.kind() != Some(std::io::ErrorKind::NotFound) {
-            return Err(e.into());
-        }
-    } else {
-        return Err(UploadError::FileExists);
-    }
-
-    debug!("Moving {:?} to {:?}", from, to);
-    actix_fs::copy(from.clone(), to).await?;
-    actix_fs::remove_file(from).await?;
-    Ok(())
 }
 
 #[instrument(skip(stream))]
@@ -710,8 +671,8 @@ fn trans_err(e: UploadError) -> sled::transaction::ConflictableTransactionError<
     sled::transaction::ConflictableTransactionError::Abort(e)
 }
 
-fn file_name(name: String, content_type: mime::Mime) -> String {
-    format!("{}{}", name, to_ext(content_type))
+fn file_name(name: String, content_type: mime::Mime) -> Result<String, UploadError> {
+    Ok(format!("{}{}", name, to_ext(content_type)?))
 }
 
 fn alias_key(hash: &[u8], id: &str) -> Vec<u8> {

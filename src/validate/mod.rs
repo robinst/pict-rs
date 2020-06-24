@@ -1,13 +1,13 @@
-use crate::{config::Format, error::UploadError, upload_manager::tmp_file};
+use crate::{config::Format, error::UploadError, tmp_file};
 use actix_web::web;
 use magick_rust::MagickWand;
 use rexiv2::{MediaType, Metadata};
-use std::{
-    fs::File,
-    io::{BufReader, BufWriter, Write},
-    path::PathBuf,
-};
-use tracing::{debug, error, instrument, trace, warn, Span};
+use std::path::PathBuf;
+use tracing::{debug, error, instrument, warn, Span};
+
+pub(crate) mod transcode;
+
+use self::transcode::{Error as TranscodeError, Target};
 
 pub(crate) trait Op {
     fn op<F, T>(&self, f: F) -> Result<T, UploadError>
@@ -57,15 +57,19 @@ impl Op for MagickWand {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GifError {
-    #[error("Error decoding gif")]
-    Decode(#[from] gif::DecodingError),
+    #[error("{0}")]
+    Decode(#[from] TranscodeError),
 
-    #[error("Error reading bytes")]
+    #[error("{0}")]
     Io(#[from] std::io::Error),
 }
 
 pub(crate) fn image_webp() -> mime::Mime {
     "image/webp".parse().unwrap()
+}
+
+pub(crate) fn video_mp4() -> mime::Mime {
+    "video/mp4".parse().unwrap()
 }
 
 pub(crate) fn ptos(p: &PathBuf) -> Result<String, UploadError> {
@@ -103,7 +107,7 @@ pub(crate) async fn validate_image(
                 let newfile = tmp_file();
                 validate_gif(&tmpfile, &newfile)?;
 
-                mime::IMAGE_GIF
+                video_mp4()
             }
             (Some(Format::Jpeg), MediaType::Jpeg) | (None, MediaType::Jpeg) => {
                 validate_format(&tmpfile_str, "JPEG")?;
@@ -137,7 +141,10 @@ pub(crate) async fn validate_image(
                         return Err(UploadError::UnsupportedFormat);
                     }
 
-                    wand.op(|w| w.write_image(&newfile_str))?;
+                    if let Err(e) = wand.op(|w| w.write_image(&newfile_str)) {
+                        std::fs::remove_file(&newfile_str)?;
+                        return Err(e.into());
+                    }
                 }
 
                 std::fs::rename(&newfile, &tmpfile)?;
@@ -156,7 +163,10 @@ pub(crate) async fn validate_image(
                     wand.op_mut(|w| w.set_image_format(format.to_magick_format()))?;
 
                     debug!("writing: {}", newfile_str);
-                    wand.op(|w| w.write_image(&newfile_str))?;
+                    if let Err(e) = wand.op(|w| w.write_image(&newfile_str)) {
+                        std::fs::remove_file(&newfile_str)?;
+                        return Err(e.into());
+                    }
                 }
 
                 std::fs::rename(&newfile, &tmpfile)?;
@@ -180,30 +190,11 @@ pub(crate) async fn validate_image(
 #[instrument]
 fn validate_gif(from: &PathBuf, to: &PathBuf) -> Result<(), GifError> {
     debug!("Transmuting GIF");
-    use gif::{Parameter, SetParameter};
 
-    let mut decoder = gif::Decoder::new(BufReader::new(File::open(from)?));
-
-    decoder.set(gif::ColorOutput::Indexed);
-
-    let mut reader = decoder.read_info()?;
-
-    let width = reader.width();
-    let height = reader.height();
-    let global_palette = reader.global_palette().unwrap_or(&[]);
-
-    let mut writer = BufWriter::new(File::create(to)?);
-    let mut encoder = gif::Encoder::new(&mut writer, width, height, global_palette)?;
-
-    gif::Repeat::Infinite.set_param(&mut encoder)?;
-
-    while let Some(frame) = reader.read_next_frame()? {
-        trace!("Writing frame");
-        encoder.write_frame(frame)?;
+    if let Err(e) = self::transcode::transcode(from, to, Target::Mp4) {
+        std::fs::remove_file(to)?;
+        return Err(e.into());
     }
-
-    drop(encoder);
-    writer.flush()?;
 
     std::fs::rename(to, from)?;
     Ok(())
