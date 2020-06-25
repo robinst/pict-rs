@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 
-shift
+set -xe
+
 cargo run --target=$TARGET -- "$@"

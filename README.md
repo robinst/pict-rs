@@ -4,7 +4,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.1.4
+pict-rs 0.2.0-alpha.2
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] --path <path>
@@ -15,10 +15,10 @@ FLAGS:
     -V, --version                  Prints version information
 
 OPTIONS:
-    -a, --addr <addr>                      The address and port the server binds to. Default: 0.0.0.0:8080 [env:
-                                           PICTRS_ADDR=]  [default: 0.0.0.0:8080]
-    -f, --format <format>                  An optional image format to convert all uploaded files into, supports 'jpg'
-                                           and 'png' [env: PICTRS_FORMAT=]
+    -a, --addr <addr>                      The address and port the server binds to. [env: PICTRS_ADDR=]  [default:
+                                           0.0.0.0:8080]
+    -f, --format <format>                  An optional image format to convert all uploaded files into, supports 'jpg',
+                                           'png', and 'webp' [env: PICTRS_FORMAT=]
     -m, --max-file-size <max-file-size>    Specify the maximum allowed uploaded file size (in Megabytes) [env:
                                            PICTRS_MAX_FILE_SIZE=]  [default: 40]
     -p, --path <path>                      The path to the data directory, e.g. data/ [env: PICTRS_PATH=]
@@ -59,8 +59,9 @@ dependencies already present
 $ git clone https://git.asonix.dog/asonix/pict-rs
 $ cd pict-rs/docker/dev
 $ ./dev.sh
-$ build
-$ run -- -p data/
+$ check # runs cargo check
+$ build # runs cargo build
+$ run -p data/
 ```
 Development environments are provided for amd64, arm32v7, and arm64v8. By default `dev.sh` will load
 into the contianer targetting amd64, but arch arguments can be passed to change the target.
@@ -70,7 +71,7 @@ $ build
 
 # note:
 # This command may not work unless qemu-user-static has been configured for your docker instance
-$ run -- -p data/
+$ run -p data/
 ```
 
 ### API

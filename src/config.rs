@@ -14,7 +14,7 @@ pub(crate) struct Config {
         long,
         env = "PICTRS_ADDR",
         default_value = "0.0.0.0:8080",
-        help = "The address and port the server binds to. Default: 0.0.0.0:8080"
+        help = "The address and port the server binds to."
     )]
     addr: SocketAddr,
 
