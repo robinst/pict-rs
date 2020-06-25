@@ -5,13 +5,13 @@ ARG UID=1000
 ARG GID=1000
 
 ENV \
- ARCH=amd64 \
- HOST=x86_64-unknown-linux \
- TOOL=x86_64-linux-gnu \
- TARGET=x86_64-unknown-linux-gnu \
- CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc \
- CC_X86_64_UNKNOWN_LINUX_GNU=x86_64-linux-gnu-gcc \
- CXX_X86_64_UNKNOWN_LINUX_GNU=x86_64-linux-gnu-g++ \
+ ARCH=armhf \
+ HOST=arm-unknown-linux \
+ TOOL=arm-linux-gnueabihf \
+ TARGET=armv7-unknown-linux-gnueabihf \
+ CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc \
+ CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc \
+ CXX_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-g++ \
  BUILD_MODE=release
 
 ENV \
@@ -141,7 +141,8 @@ RUN \
     libavutil-dev:$ARCH \
     libswscale-dev:$ARCH \
     libswresample-dev:$ARCH \
-    ffmpeg
+    ffmpeg && \
+ rm -rf /usr/include/x86_64-linux-gnu
 
 ENV \
  PATH=$PATH:/opt/build/.cargo/bin \
@@ -158,6 +159,7 @@ ENV \
 COPY --from=rust --chown=build:build /opt/build/.cargo /opt/build/.cargo
 COPY --from=rust --chown=build:build /opt/build/.rustup /opt/build/.rustup
 COPY --from=imagemagick-builder /usr/local/ /usr/local
+COPY root/ /
 
 USER build
 

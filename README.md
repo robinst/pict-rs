@@ -59,8 +59,18 @@ dependencies already present
 $ git clone https://git.asonix.dog/asonix/pict-rs
 $ cd pict-rs/docker/dev
 $ ./dev.sh
-$ cargo build
-$ cargo run
+$ build
+$ run -- -p data/
+```
+Development environments are provided for amd64, arm32v7, and arm64v8. By default `dev.sh` will load
+into the contianer targetting amd64, but arch arguments can be passed to change the target.
+```
+$ ./dev.sh arm32v7
+$ build
+
+# note:
+# This command may not work unless qemu-user-static has been configured for your docker instance
+$ run -- -p data/
 ```
 
 ### API

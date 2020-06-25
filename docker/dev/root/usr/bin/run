@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+shift
+cargo run --target=$TARGET -- "$@"
