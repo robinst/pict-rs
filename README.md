@@ -110,6 +110,7 @@ pict-rs offers four endpoints:
     - `identity=true`: apply no changes
     - `blur={float}`: apply a gaussian blur to the file
     - `thumbnail={int}`: produce a thumbnail of the image fitting inside an `{int}` by `{int}` square
+
     Supported `ext` file extensions include `png`, `jpg`, and `webp`
     An example of usage could be
     ```
