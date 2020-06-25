@@ -112,6 +112,7 @@ pict-rs offers four endpoints:
     - `thumbnail={int}`: produce a thumbnail of the image fitting inside an `{int}` by `{int}` square
 
     Supported `ext` file extensions include `png`, `jpg`, and `webp`
+
     An example of usage could be
     ```
     GET /image/process.jpg?src=asdf.png&thumbnail=256&blur=3.0
