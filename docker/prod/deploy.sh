@@ -12,7 +12,7 @@ function print_help() {
     echo "deploy.sh"
     echo ""
     echo "Usage:"
-    echo "	deploy.sh [tag]"
+    echo "	deploy.sh [tag] [branch]"
     echo ""
     echo "Args:"
     echo "	tag: The git tag to be applied to the repository and docker build"
@@ -24,6 +24,8 @@ function build_image() {
     arch=$2
 
     ./build-image.sh asonix/pictrs $tag $arch
+
+    docker tag asonix/pictrs:$arch-$tag asonix/pictrs:$arch-latest
 
     docker push asonix/pictrs:$arch-$tag
     docker push asonix/pictrs:$arch-latest
