@@ -396,6 +396,66 @@ where
         .streaming(stream.err_into())
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum FileOrAlias {
+    File { file: String },
+    Alias { alias: String },
+}
+
+async fn purge(
+    query: web::Query<FileOrAlias>,
+    upload_manager: web::Data<UploadManager>,
+) -> Result<HttpResponse, UploadError> {
+    let aliases = match query.into_inner() {
+        FileOrAlias::File { file } => upload_manager.aliases_by_filename(file).await?,
+        FileOrAlias::Alias { alias } => upload_manager.aliases_by_alias(alias).await?,
+    };
+
+    for alias in aliases.iter() {
+        upload_manager
+            .delete_without_token(alias.to_owned())
+            .await?;
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "msg": "ok",
+        "aliases": aliases
+    })))
+}
+
+async fn aliases(
+    query: web::Query<FileOrAlias>,
+    upload_manager: web::Data<UploadManager>,
+) -> Result<HttpResponse, UploadError> {
+    let aliases = match query.into_inner() {
+        FileOrAlias::File { file } => upload_manager.aliases_by_filename(file).await?,
+        FileOrAlias::Alias { alias } => upload_manager.aliases_by_alias(alias).await?,
+    };
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "msg": "ok",
+        "aliases": aliases,
+    })))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ByAlias {
+    alias: String,
+}
+
+async fn filename_by_alias(
+    query: web::Query<ByAlias>,
+    upload_manager: web::Data<UploadManager>,
+) -> Result<HttpResponse, UploadError> {
+    let filename = upload_manager.from_alias(query.into_inner().alias).await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "msg": "ok",
+        "filename": filename,
+    })))
+}
+
 #[actix_rt::main]
 async fn main() -> Result<(), anyhow::Error> {
     MAGICK_INIT.call_once(|| {
@@ -508,7 +568,10 @@ async fn main() -> Result<(), anyhow::Error> {
                         web::resource("/import")
                             .wrap(import_form.clone())
                             .route(web::post().to(upload)),
-                    ),
+                    )
+                    .service(web::resource("/purge").route(web::post().to(purge)))
+                    .service(web::resource("/aliases").route(web::get().to(aliases)))
+                    .service(web::resource("/filename").route(web::get().to(filename_by_alias))),
             )
     })
     .bind(CONFIG.bind_address())?

@@ -135,6 +135,60 @@ impl UploadManager {
         Ok(())
     }
 
+    /// Get a list of aliases for a given file
+    pub(crate) async fn aliases_by_filename(
+        &self,
+        filename: String,
+    ) -> Result<Vec<String>, UploadError> {
+        let fname_tree = self.inner.filename_tree.clone();
+        let hash = web::block(move || fname_tree.get(filename.as_bytes()))
+            .await?
+            .ok_or(UploadError::MissingAlias)?;
+
+        self.aliases_by_hash(&hash).await
+    }
+
+    /// Get a list of aliases for a given alias
+    pub(crate) async fn aliases_by_alias(&self, alias: String) -> Result<Vec<String>, UploadError> {
+        let alias_tree = self.inner.alias_tree.clone();
+        let hash = web::block(move || alias_tree.get(alias.as_bytes()))
+            .await?
+            .ok_or(UploadError::MissingFilename)?;
+
+        self.aliases_by_hash(&hash).await
+    }
+
+    async fn aliases_by_hash(&self, hash: &sled::IVec) -> Result<Vec<String>, UploadError> {
+        let (start, end) = alias_key_bounds(hash);
+        let db = self.inner.db.clone();
+        let aliases =
+            web::block(move || db.range(start..end).values().collect::<Result<Vec<_>, _>>())
+                .await?;
+
+        debug!("Got {} aliases for hash", aliases.len());
+        let aliases = aliases
+            .into_iter()
+            .filter_map(|s| String::from_utf8(s.to_vec()).ok())
+            .collect::<Vec<_>>();
+
+        for alias in aliases.iter() {
+            debug!("{}", alias);
+        }
+
+        Ok(aliases)
+    }
+
+    /// Delete an alias without a delete token
+    pub(crate) async fn delete_without_token(&self, alias: String) -> Result<(), UploadError> {
+        let token_key = delete_key(&alias);
+        let alias_tree = self.inner.alias_tree.clone();
+        let token = web::block(move || alias_tree.get(token_key.as_bytes()))
+            .await?
+            .ok_or(UploadError::MissingAlias)?;
+
+        self.delete(alias, String::from_utf8(token.to_vec())?).await
+    }
+
     /// Delete the alias, and the file & variants if no more aliases exist
     #[instrument(skip(self, alias, token))]
     pub(crate) async fn delete(&self, alias: String, token: String) -> Result<(), UploadError> {
