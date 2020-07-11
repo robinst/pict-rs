@@ -61,20 +61,32 @@ fn pixel_value(pixel: Pixel) -> i32 {
     unsafe { std::mem::transmute::<_, i32>(av_px_fmt) }
 }
 
+fn to_even(num: u32) -> u32 {
+    if num % 2 == 0 {
+        num
+    } else {
+        num - 1
+    }
+}
+
 fn filter(
     decoder: &codec::decoder::Video,
     encoder: &codec::encoder::Video,
 ) -> Result<filter::Graph, Error> {
     let mut filter = filter::Graph::new();
 
-    let aspect = Rational::new(decoder.width() as i32, decoder.height() as i32).reduce();
+    let aspect = Rational::new(
+        to_even(decoder.width()) as i32,
+        to_even(decoder.height()) as i32,
+    )
+    .reduce();
 
     let av_px_fmt = pixel_value(decoder.format());
 
     let args = format!(
         "video_size={width}x{height}:pix_fmt={pix_fmt}:time_base={time_base_num}/{time_base_den}:pixel_aspect={pix_aspect_num}/{pix_aspect_den}",
-        width=decoder.width(),
-        height=decoder.height(),
+        width=to_even(decoder.width()),
+        height=to_even(decoder.height()),
         pix_fmt=av_px_fmt,
         time_base_num=decoder.time_base().numerator(),
         time_base_den=decoder.time_base().denominator(),
@@ -223,8 +235,8 @@ fn transcoder(
     encoder.set_bit_rate(decoder.bit_rate());
     encoder.set_max_bit_rate(decoder.max_bit_rate());
 
-    encoder.set_width(decoder.width());
-    encoder.set_height(decoder.height());
+    encoder.set_width(to_even(decoder.width()));
+    encoder.set_height(to_even(decoder.height()));
     encoder.set_bit_rate(decoder.bit_rate());
     encoder.set_max_bit_rate(decoder.max_bit_rate());
     encoder.set_time_base(decoder.frame_rate().ok_or(Error::FrameRate)?.invert());
