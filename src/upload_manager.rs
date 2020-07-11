@@ -1,4 +1,10 @@
-use crate::{config::Format, error::UploadError, to_ext, validate::validate_image};
+use crate::{
+    config::Format,
+    error::UploadError,
+    migrate::{alias_key_bounds, variant_key_bounds, LatestDb},
+    to_ext,
+    validate::validate_image,
+};
 use actix_web::web;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use sha2::Digest;
@@ -84,10 +90,9 @@ impl UploadManager {
         mut root_dir: PathBuf,
         format: Option<Format>,
     ) -> Result<Self, UploadError> {
-        let mut sled_dir = root_dir.clone();
-        sled_dir.push("db");
+        let root_clone = root_dir.clone();
         // sled automatically creates it's own directories
-        let db = web::block(move || sled::open(sled_dir)).await?;
+        let db = web::block(move || LatestDb::exists(root_clone).migrate()).await?;
 
         root_dir.push("files");
 
@@ -684,16 +689,6 @@ fn alias_key(hash: &[u8], id: &str) -> Vec<u8> {
     key
 }
 
-fn alias_key_bounds(hash: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let mut start = hash.to_vec();
-    start.extend(&[0]);
-
-    let mut end = hash.to_vec();
-    end.extend(&[1]);
-
-    (start, end)
-}
-
 fn alias_id_key(alias: &str) -> String {
     format!("{}/id", alias)
 }
@@ -707,14 +702,4 @@ fn variant_key(hash: &[u8], path: &str) -> Vec<u8> {
     key.extend(&[2]);
     key.extend(path.as_bytes());
     key
-}
-
-fn variant_key_bounds(hash: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let mut start = hash.to_vec();
-    start.extend(&[2]);
-
-    let mut end = hash.to_vec();
-    end.extend(&[3]);
-
-    (start, end)
 }

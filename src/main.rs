@@ -16,6 +16,7 @@ use tracing_subscriber::EnvFilter;
 mod config;
 mod error;
 mod middleware;
+mod migrate;
 mod processor;
 mod upload_manager;
 mod validate;
