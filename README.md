@@ -77,7 +77,7 @@ $ run -p data/
 ```
 
 ### API
-pict-rs offers four endpoints:
+pict-rs offers the following endpoints:
 - `POST /image` for uploading an image. Uploaded content must be valid multipart/form-data with an
     image array located within the `images[]` key
 
