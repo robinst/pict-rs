@@ -50,6 +50,13 @@ pub(crate) struct Config {
         default_value = "40"
     )]
     max_file_size: usize,
+
+    #[structopt(
+        long,
+        env = "PICTRS_API_KEY",
+        help = "An optional string to be checked on requests to privileged endpoints"
+    )]
+    api_key: Option<String>,
 }
 
 impl Config {
@@ -77,6 +84,10 @@ impl Config {
 
     pub(crate) fn max_file_size(&self) -> usize {
         self.max_file_size
+    }
+
+    pub(crate) fn api_key(&self) -> Option<&str> {
+        self.api_key.as_ref().map(|s| s.as_str())
     }
 }
 

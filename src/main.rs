@@ -24,7 +24,7 @@ mod validate;
 use self::{
     config::Config,
     error::UploadError,
-    middleware::Tracing,
+    middleware::{Internal, Tracing},
     processor::process_image,
     upload_manager::UploadManager,
     validate::{image_webp, video_mp4},
@@ -502,9 +502,13 @@ async fn main() -> Result<(), anyhow::Error> {
                     .service(web::resource("/process.{ext}").route(web::get().to(process))),
             )
             .service(
-                web::resource("/import")
-                    .wrap(import_form.clone())
-                    .route(web::post().to(upload)),
+                web::scope("/internal")
+                    .wrap(Internal(CONFIG.api_key().map(|s| s.to_owned())))
+                    .service(
+                        web::resource("/import")
+                            .wrap(import_form.clone())
+                            .route(web::post().to(upload)),
+                    ),
             )
     })
     .bind(CONFIG.bind_address())?
