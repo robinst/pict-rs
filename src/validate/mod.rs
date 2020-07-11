@@ -105,7 +105,7 @@ pub(crate) async fn validate_image(
         let content_type = match (prescribed_format, meta.get_media_type()?) {
             (_, MediaType::Gif) => {
                 let newfile = tmp_file();
-                validate_gif(&tmpfile, &newfile)?;
+                validate_frames(&tmpfile, &newfile)?;
 
                 video_mp4()
             }
@@ -173,6 +173,12 @@ pub(crate) async fn validate_image(
 
                 format.to_mime()
             }
+            (_, MediaType::Other(mp4)) if mp4 == "video/mp4" || mp4 == "video/quicktime" => {
+                let newfile = tmp_file();
+                validate_frames(&tmpfile, &newfile)?;
+
+                video_mp4()
+            }
             (_, media_type) => {
                 warn!("Unsupported media type, {}", media_type);
                 return Err(UploadError::UnsupportedFormat);
@@ -188,7 +194,7 @@ pub(crate) async fn validate_image(
 }
 
 #[instrument]
-fn validate_gif(from: &PathBuf, to: &PathBuf) -> Result<(), GifError> {
+fn validate_frames(from: &PathBuf, to: &PathBuf) -> Result<(), GifError> {
     debug!("Transmuting GIF");
 
     if let Err(e) = self::transcode::transcode(from, to, Target::Mp4) {
