@@ -9,6 +9,9 @@ pub(crate) enum UploadError {
     #[error("Couldn't save file, {0}")]
     Save(#[from] actix_fs::Error),
 
+    #[error("Error in DB migration, {0}")]
+    Migrate(#[from] sled032::Error),
+
     #[error("Error in DB, {0}")]
     Db(#[from] sled::Error),
 

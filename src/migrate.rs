@@ -1,8 +1,10 @@
 use crate::UploadError;
-use sled as sled032;
+use sled as sled034;
+use sled032;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
+const SLED_034: &str = "db-0.34";
 const SLED_032: &str = "db-0.32";
 const SLED_0320_RC1: &str = "db";
 
@@ -18,7 +20,7 @@ impl LatestDb {
         LatestDb { root_dir, version }
     }
 
-    pub(crate) fn migrate(self) -> Result<sled032::Db, UploadError> {
+    pub(crate) fn migrate(self) -> Result<sled034::Db, UploadError> {
         let LatestDb { root_dir, version } = self;
 
         version.migrate(root_dir)
@@ -28,11 +30,19 @@ impl LatestDb {
 enum DbVersion {
     Sled0320Rc1,
     Sled032,
+    Sled034,
     Fresh,
 }
 
 impl DbVersion {
     fn exists(root: PathBuf) -> Self {
+        let mut sled_dir = root.clone();
+        sled_dir.push("sled");
+        sled_dir.push(SLED_034);
+        if std::fs::metadata(sled_dir).is_ok() {
+            return DbVersion::Sled034;
+        }
+
         let mut sled_dir = root.clone();
         sled_dir.push("sled");
         sled_dir.push(SLED_032);
@@ -49,17 +59,39 @@ impl DbVersion {
         DbVersion::Fresh
     }
 
-    fn migrate(self, root: PathBuf) -> Result<sled032::Db, UploadError> {
+    fn migrate(self, root: PathBuf) -> Result<sled034::Db, UploadError> {
         match self {
-            DbVersion::Sled0320Rc1 => migrate_0_32_0_rc1(root),
-            DbVersion::Sled032 | DbVersion::Fresh => {
+            DbVersion::Sled0320Rc1 => {
+                migrate_0_32_0_rc1(root.clone())?;
+                migrate_0_32(root)
+            }
+            DbVersion::Sled032 => migrate_0_32(root),
+            DbVersion::Sled034 | DbVersion::Fresh => {
                 let mut sled_dir = root;
                 sled_dir.push("sled");
-                sled_dir.push(SLED_032);
-                Ok(sled032::open(sled_dir)?)
+                sled_dir.push(SLED_034);
+                Ok(sled034::open(sled_dir)?)
             }
         }
     }
+}
+
+fn migrate_0_32(mut root: PathBuf) -> Result<sled034::Db, UploadError> {
+    info!("Migrating database from 0.32 to 0.34");
+    root.push("sled");
+
+    let mut sled_dir = root.clone();
+    sled_dir.push(SLED_032);
+
+    let mut new_sled_dir = root.clone();
+    new_sled_dir.push(SLED_034);
+
+    let old_db = sled032::open(sled_dir)?;
+    let new_db = sled034::open(new_sled_dir)?;
+
+    new_db.import(old_db.export());
+
+    Ok(new_db)
 }
 
 fn migrate_0_32_0_rc1(root: PathBuf) -> Result<sled032::Db, UploadError> {

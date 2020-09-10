@@ -10,6 +10,11 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+ffmpeg43 = ["ffmpeg", "ffmpeg-next/ffmpeg43"]
+ffmpeg42 = ["ffmpeg", "ffmpeg-next/ffmpeg42"]
+ffmpeg = ["ffmpeg-next/codec", "ffmpeg-next/filter", "ffmpeg-next/device", "ffmpeg-next/format", "ffmpeg-next/resampling", "ffmpeg-next/postprocessing", "ffmpeg-next/software-resampling", "ffmpeg-next/software-scaling"]
+
 [dependencies]
 actix-form-data = { git = "https://git.asonix.dog/Aardwolf/actix-form-data" }
 actix-fs = { git = "https://git.asonix.dog/asonix/actix-fs", branch = "main" }
@@ -27,7 +32,8 @@ rexiv2 = { version = "0.9.0", git = "https://git.asonix.dog/asonix/rexiv2" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.9.0"
-sled = "0.32.0"
+sled032 = { version = "0.32.0", package = "sled" }
+sled = { version = "0.34.4" }
 structopt = "0.3.14"
 thiserror = "1.0"
 tracing = "0.1.15"
