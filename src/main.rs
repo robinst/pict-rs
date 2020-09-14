@@ -533,7 +533,7 @@ async fn main() -> Result<(), anyhow::Error> {
         );
 
     HttpServer::new(move || {
-        let client = Client::build()
+        let client = Client::builder()
             .header("User-Agent", "pict-rs v0.1.0-master")
             .finish();
 

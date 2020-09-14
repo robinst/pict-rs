@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.2.0-alpha.4"
+version = "0.2.0-alpha.5"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -16,10 +16,10 @@ ffmpeg42 = ["ffmpeg", "ffmpeg-next/ffmpeg42"]
 ffmpeg = ["ffmpeg-next/codec", "ffmpeg-next/filter", "ffmpeg-next/device", "ffmpeg-next/format", "ffmpeg-next/resampling", "ffmpeg-next/postprocessing", "ffmpeg-next/software-resampling", "ffmpeg-next/software-scaling"]
 
 [dependencies]
-actix-form-data = { git = "https://git.asonix.dog/Aardwolf/actix-form-data" }
+actix-form-data = "0.5.0"
 actix-fs = { git = "https://git.asonix.dog/asonix/actix-fs", branch = "main" }
 actix-rt = "1.1.1"
-actix-web = { version = "3.0.0-alpha.2", features = ["rustls"] }
+actix-web = { version = "3.0.1", default-features = false, features = ["rustls"] }
 anyhow = "1.0"
 base64 = "0.12.1"
 bytes = "0.5"
