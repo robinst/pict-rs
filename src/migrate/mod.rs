@@ -1,12 +1,53 @@
 use crate::UploadError;
-use sled as sled034;
-use sled032;
+use sled;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
-const SLED_034: &str = "db-0.34";
-const SLED_032: &str = "db-0.32";
-const SLED_0320_RC1: &str = "db";
+mod s032;
+mod s034;
+
+type SledIter = Box<dyn Iterator<Item = Result<(Vec<u8>, Vec<u8>), UploadError>>>;
+
+trait SledDb {
+    type SledTree: SledTree;
+
+    fn open_tree(&self, name: &str) -> Result<Self::SledTree, UploadError>;
+
+    fn self_tree(&self) -> &Self::SledTree;
+}
+
+impl<T> SledDb for &T
+where
+    T: SledDb,
+{
+    type SledTree = T::SledTree;
+
+    fn open_tree(&self, name: &str) -> Result<Self::SledTree, UploadError> {
+        (*self).open_tree(name)
+    }
+
+    fn self_tree(&self) -> &Self::SledTree {
+        (*self).self_tree()
+    }
+}
+
+trait SledTree {
+    fn get<K>(&self, key: K) -> Result<Option<Vec<u8>>, UploadError>
+    where
+        K: AsRef<[u8]>;
+
+    fn insert<K, V>(&self, key: K, value: V) -> Result<(), UploadError>
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>;
+
+    fn iter(&self) -> SledIter;
+
+    fn range<K, R>(&self, range: R) -> SledIter
+    where
+        K: AsRef<[u8]>,
+        R: std::ops::RangeBounds<K>;
+}
 
 pub(crate) struct LatestDb {
     root_dir: PathBuf,
@@ -20,7 +61,7 @@ impl LatestDb {
         LatestDb { root_dir, version }
     }
 
-    pub(crate) fn migrate(self) -> Result<sled034::Db, UploadError> {
+    pub(crate) fn migrate(self) -> Result<sled::Db, UploadError> {
         let LatestDb { root_dir, version } = self;
 
         version.migrate(root_dir)
@@ -36,84 +77,62 @@ enum DbVersion {
 
 impl DbVersion {
     fn exists(root: PathBuf) -> Self {
-        let mut sled_dir = root.clone();
-        sled_dir.push("sled");
-        sled_dir.push(SLED_034);
-        if std::fs::metadata(sled_dir).is_ok() {
+        if s034::exists(root.clone()) {
             return DbVersion::Sled034;
         }
 
-        let mut sled_dir = root.clone();
-        sled_dir.push("sled");
-        sled_dir.push(SLED_032);
-        if std::fs::metadata(sled_dir).is_ok() {
+        if s032::exists(root.clone()) {
             return DbVersion::Sled032;
         }
 
-        let mut sled_dir = root;
-        sled_dir.push(SLED_0320_RC1);
-        if std::fs::metadata(sled_dir).is_ok() {
+        if s032::exists_rc1(root.clone()) {
             return DbVersion::Sled0320Rc1;
         }
 
         DbVersion::Fresh
     }
 
-    fn migrate(self, root: PathBuf) -> Result<sled034::Db, UploadError> {
+    fn migrate(self, root: PathBuf) -> Result<sled::Db, UploadError> {
         match self {
-            DbVersion::Sled0320Rc1 => {
-                migrate_0_32_0_rc1(root.clone())?;
-                migrate_0_32(root)
-            }
+            DbVersion::Sled0320Rc1 => migrate_0_32_0_rc1(root),
             DbVersion::Sled032 => migrate_0_32(root),
-            DbVersion::Sled034 | DbVersion::Fresh => {
-                let mut sled_dir = root;
-                sled_dir.push("sled");
-                sled_dir.push(SLED_034);
-                Ok(sled034::open(sled_dir)?)
-            }
+            DbVersion::Sled034 | DbVersion::Fresh => s034::open(root),
         }
     }
 }
 
-fn migrate_0_32(mut root: PathBuf) -> Result<sled034::Db, UploadError> {
-    info!("Migrating database from 0.32 to 0.34");
-    root.push("sled");
+fn migrate_0_32_0_rc1(root: PathBuf) -> Result<sled::Db, UploadError> {
+    info!("Migrating database from 0.32.0-rc1 to 0.32.0");
 
-    let mut sled_dir = root.clone();
-    sled_dir.push(SLED_032);
+    let old_db = s032::open_rc1(root.clone())?;
+    let new_db = s034::open(root)?;
 
-    let mut new_sled_dir = root.clone();
-    new_sled_dir.push(SLED_034);
-
-    let old_db = sled032::open(sled_dir)?;
-    let new_db = sled034::open(new_sled_dir)?;
-
-    new_db.import(old_db.export());
-
-    Ok(new_db)
+    migrate(old_db, new_db)
 }
 
-fn migrate_0_32_0_rc1(root: PathBuf) -> Result<sled032::Db, UploadError> {
-    info!("Migrating database from 0.32.0-rc1 to 0.32.0");
-    let mut sled_dir = root.clone();
-    sled_dir.push("db");
+fn migrate_0_32(root: PathBuf) -> Result<sled::Db, UploadError> {
+    info!("Migrating database from 0.32 to 0.34");
 
-    let mut new_sled_dir = root;
-    new_sled_dir.push("sled");
-    new_sled_dir.push(SLED_032);
+    let old_db = s032::open(root.clone())?;
+    let new_db = s034::open(root)?;
 
-    let old_db = sled032::open(sled_dir)?;
-    let new_db = sled032::open(new_sled_dir)?;
+    migrate(old_db, new_db)
+}
 
+fn migrate<Old, New>(old_db: Old, new_db: New) -> Result<New, UploadError>
+where
+    Old: SledDb,
+    New: SledDb,
+{
     let old_alias_tree = old_db.open_tree("alias")?;
     let new_alias_tree = new_db.open_tree("alias")?;
 
     let old_fname_tree = old_db.open_tree("filename")?;
     let new_fname_tree = new_db.open_tree("filename")?;
 
-    for res in old_alias_tree.iter().keys() {
-        let k = res?;
+    for res in old_alias_tree.iter() {
+        let (k, _) = res?;
+
         if let Some(v) = old_alias_tree.get(&k)? {
             if !k.contains(&b"/"[0]) {
                 // k is an alias
@@ -135,8 +154,8 @@ fn migrate_0_32_0_rc1(root: PathBuf) -> Result<sled032::Db, UploadError> {
         }
     }
 
-    for res in old_fname_tree.iter().keys() {
-        let k = res?;
+    for res in old_fname_tree.iter() {
+        let (k, _) = res?;
         if let Some(v) = old_fname_tree.get(&k)? {
             debug!(
                 "Moving file -> hash for file {}",
@@ -148,37 +167,43 @@ fn migrate_0_32_0_rc1(root: PathBuf) -> Result<sled032::Db, UploadError> {
         }
     }
 
-    Ok(new_db) as Result<sled032::Db, UploadError>
+    Ok(new_db)
 }
 
-fn migrate_main_tree(
-    alias: &sled032::IVec,
-    hash: &sled032::IVec,
-    old_db: &sled032::Db,
-    new_db: &sled032::Db,
-) -> Result<(), UploadError> {
+fn migrate_main_tree<Old, New>(
+    alias: &[u8],
+    hash: &[u8],
+    old_db: Old,
+    new_db: New,
+) -> Result<(), UploadError>
+where
+    Old: SledDb,
+    New: SledDb,
+{
+    let main_tree = new_db.open_tree("main")?;
+
     debug!(
         "Migrating files for {}",
         String::from_utf8_lossy(alias.as_ref())
     );
-    if let Some(v) = old_db.get(&hash)? {
-        new_db.insert(&hash, v)?;
+    if let Some(v) = old_db.self_tree().get(&hash)? {
+        main_tree.insert(&hash, v)?;
     } else {
         warn!("Missing filename");
     }
 
     let (start, end) = alias_key_bounds(&hash);
-    for res in old_db.range(start..end) {
+    for res in old_db.self_tree().range(start..end) {
         let (k, v) = res?;
         debug!("Moving alias {}", String::from_utf8_lossy(v.as_ref()));
-        new_db.insert(k, v)?;
+        main_tree.insert(k, v)?;
     }
 
     let (start, end) = variant_key_bounds(&hash);
-    for res in old_db.range(start..end) {
+    for res in old_db.self_tree().range(start..end) {
         let (k, v) = res?;
         debug!("Moving variant {}", String::from_utf8_lossy(v.as_ref()));
-        new_db.insert(k, v)?;
+        main_tree.insert(k, v)?;
     }
 
     Ok(())
