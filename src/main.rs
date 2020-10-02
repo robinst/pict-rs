@@ -2,13 +2,13 @@ use actix_form_data::{Field, Form, Value};
 use actix_web::{
     client::Client,
     guard,
-    http::header::{CacheControl, CacheDirective},
+    http::header::{CacheControl, CacheDirective, LastModified},
     middleware::{Compress, Logger},
     web, App, HttpResponse, HttpServer,
 };
 use futures::stream::{Stream, TryStreamExt};
 use once_cell::sync::Lazy;
-use std::{collections::HashSet, path::PathBuf, sync::Once};
+use std::{collections::HashSet, path::PathBuf, sync::Once, time::SystemTime};
 use structopt::StructOpt;
 use tracing::{debug, error, info, instrument, Span};
 use tracing_subscriber::EnvFilter;
@@ -31,7 +31,9 @@ use self::{
 };
 
 const MEGABYTES: usize = 1024 * 1024;
-const HOURS: u32 = 60 * 60;
+const MINUTES: u32 = 60;
+const HOURS: u32 = 60 * MINUTES;
+const DAYS: u32 = 24 * HOURS;
 
 static CONFIG: Lazy<Config> = Lazy::new(|| Config::from_args());
 static MAGICK_INIT: Once = Once::new();
@@ -356,12 +358,19 @@ async fn process(
                 Ok(img_bytes) as Result<_, UploadError>
             })),
             content_type,
+            7 * DAYS,
+            SystemTime::now(),
         ));
     }
 
     let stream = actix_fs::read_to_stream(path).await?;
 
-    Ok(srv_response(stream, content_type))
+    Ok(srv_response(
+        stream,
+        content_type,
+        7 * DAYS,
+        SystemTime::now(),
+    ))
 }
 
 /// Serve files
@@ -377,19 +386,30 @@ async fn serve(
 
     let stream = actix_fs::read_to_stream(path).await?;
 
-    Ok(srv_response(stream, content_type))
+    Ok(srv_response(
+        stream,
+        content_type,
+        7 * DAYS,
+        SystemTime::now(),
+    ))
 }
 
 // A helper method to produce responses with proper cache headers
-fn srv_response<S, E>(stream: S, ext: mime::Mime) -> HttpResponse
+fn srv_response<S, E>(
+    stream: S,
+    ext: mime::Mime,
+    expires: u32,
+    modified: SystemTime,
+) -> HttpResponse
 where
     S: Stream<Item = Result<bytes::Bytes, E>> + Unpin + 'static,
     E: Into<UploadError>,
 {
     HttpResponse::Ok()
+        .set(LastModified(modified.into()))
         .set(CacheControl(vec![
             CacheDirective::Public,
-            CacheDirective::MaxAge(24 * HOURS),
+            CacheDirective::MaxAge(expires),
             CacheDirective::Extension("immutable".to_owned(), None),
         ]))
         .content_type(ext.to_string())
