@@ -32,19 +32,3 @@ services:
       - RUST_LOG=info,pict_rs=debug
     volumes:
       - ../../:/opt/build/repo
-
-  pictrs-arm32v7:
-    build:
-      context: .
-      dockerfile: Dockerfile.arm32v7
-      args:
-        UID: "${USER_ID:-1000}"
-        GID: "${GROUP_ID:-1000}"
-    ports:
-      - "8080:8080"
-    stdin_open: true
-    tty: true
-    environment:
-      - RUST_LOG=info,pict_rs=debug
-    volumes:
-      - ../../:/opt/build/repo
