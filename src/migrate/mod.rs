@@ -102,7 +102,7 @@ impl DbVersion {
 }
 
 fn migrate_0_32_0_rc1(root: PathBuf) -> Result<sled::Db, UploadError> {
-    info!("Migrating database from 0.32.0-rc1 to 0.32.0");
+    info!("Migrating database from 0.32.0-rc1 to 0.34.0");
 
     let old_db = s032::open_rc1(root.clone())?;
     let new_db = s034::open(root)?;
