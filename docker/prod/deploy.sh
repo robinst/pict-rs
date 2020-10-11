@@ -60,8 +60,9 @@ git tag $new_tag
 git push origin $new_tag
 git push
 
-# Build for arm64v8 and amd64
+# Build for arm64v8, arm32v7 and amd64
 build_image $new_tag arm64v8
+build_image $new_tag arm32v7
 build_image $new_tag amd64
 
 # Build for other archs
