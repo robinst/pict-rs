@@ -172,7 +172,7 @@ where
             if !k.contains(&b"/"[0]) {
                 if let Some(id) = old_alias_tree.get(alias_id_key(&String::from_utf8_lossy(&k)))? {
                     counter += 1;
-                    info!("Migrating alias #{}", counter);
+                    debug!("Migrating alias #{}", counter);
                     // k is an alias
                     migrate_main_tree(&k, &v, &old_db, &new_db, &String::from_utf8_lossy(&id))?;
                     debug!(
@@ -190,6 +190,7 @@ where
             }
             new_alias_tree.insert(k.clone(), v)?;
             new_migrate_tree.insert("last_migrated", k)?;
+            new_alias_tree.flush()?;
             new_migrate_tree.flush()?;
         } else {
             warn!("MISSING {}", String::from_utf8_lossy(k.as_ref()));
@@ -198,6 +199,7 @@ where
     info!("Moved {} unique aliases", counter);
 
     new_migrate_tree.insert("done", "true")?;
+    new_migrate_tree.flush()?;
 
     Ok(new_db)
 }
@@ -224,7 +226,8 @@ where
     if let Some(filename) = old_db.self_tree().get(&hash)? {
         main_tree.insert(&hash, filename.clone())?;
         new_fname_tree.insert(filename, hash.clone())?;
-
+        main_tree.flush()?;
+        new_fname_tree.flush()?;
     } else {
         warn!("Missing filename");
     }
@@ -232,6 +235,7 @@ where
     let key = alias_key(&hash, id);
     if let Some(v) = old_db.self_tree().get(&key)? {
         main_tree.insert(key, v)?;
+        main_tree.flush()?;
     } else {
         warn!("Not migrating alias {} id {}", String::from_utf8_lossy(&alias), id);
         return Ok(());
@@ -245,8 +249,9 @@ where
             let (k, v) = res?;
             debug!("Moving variant #{} for {}", counter, String::from_utf8_lossy(v.as_ref()));
             main_tree.insert(k, v)?;
+            main_tree.flush()?;
         }
-        info!("Moved {} variants for {}", counter, String::from_utf8_lossy(alias.as_ref()));
+        debug!("Moved {} variants for {}", counter, String::from_utf8_lossy(alias.as_ref()));
     }
 
     Ok(())
