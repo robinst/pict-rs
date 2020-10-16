@@ -1,7 +1,7 @@
 use crate::{
     config::Format,
     error::UploadError,
-    migrate::{alias_key_bounds, variant_key_bounds, LatestDb},
+    migrate::{alias_key_bounds, variant_key_bounds, LatestDb, alias_id_key, alias_key},
     to_ext,
     validate::validate_image,
 };
@@ -10,6 +10,18 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use sha2::Digest;
 use std::{path::PathBuf, pin::Pin, sync::Arc};
 use tracing::{debug, error, info, instrument, warn, Span};
+
+// TREE STRUCTURE
+// - Alias Tree
+//   - alias -> hash
+//   - alias / id -> u64(id)
+//   - alias / delete -> delete token
+// - Main Tree
+//   - hash -> filename
+//   - hash 0 u64(id) -> alias
+//   - hash 2 variant path -> variant path
+// - Filename Tree
+//   - filename -> hash
 
 #[derive(Clone)]
 pub struct UploadManager {
@@ -738,19 +750,6 @@ fn trans_err(e: UploadError) -> sled::transaction::ConflictableTransactionError<
 
 fn file_name(name: String, content_type: mime::Mime) -> Result<String, UploadError> {
     Ok(format!("{}{}", name, to_ext(content_type)?))
-}
-
-fn alias_key(hash: &[u8], id: &str) -> Vec<u8> {
-    let mut key = hash.to_vec();
-    // add a separator to the key between the hash and the ID
-    key.extend(&[0]);
-    key.extend(id.as_bytes());
-
-    key
-}
-
-fn alias_id_key(alias: &str) -> String {
-    format!("{}/id", alias)
 }
 
 fn delete_key(alias: &str) -> String {

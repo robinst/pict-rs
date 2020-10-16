@@ -14,6 +14,18 @@ pub(crate) fn exists(mut base: PathBuf) -> bool {
     std::fs::metadata(base).is_ok()
 }
 
+pub(crate) fn migrating(base: PathBuf) -> bool {
+    if let Ok(db) = open(base) {
+        if let Ok(tree) = db.open_tree("migrate") {
+            if let Ok(Some(_)) = tree.get("done") {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
 pub(crate) fn open(mut base: PathBuf) -> Result<sled034::Db, UploadError> {
     base.push("sled");
     base.push(SLED_034);
@@ -65,5 +77,9 @@ impl SledTree for sled034::Tree {
             res.map(|(k, v)| (k.as_ref().to_vec(), v.as_ref().to_vec()))
                 .map_err(UploadError::from)
         }))
+    }
+
+    fn flush(&self) -> Result<(), UploadError> {
+        sled034::Tree::flush(self).map(|_| ()).map_err(UploadError::from)
     }
 }

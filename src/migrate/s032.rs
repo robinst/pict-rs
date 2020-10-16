@@ -78,4 +78,8 @@ impl SledTree for sled032::Tree {
                 .map_err(UploadError::from)
         }))
     }
+
+    fn flush(&self) -> Result<(), UploadError> {
+        sled032::Tree::flush(self).map(|_| ()).map_err(UploadError::from)
+    }
 }
