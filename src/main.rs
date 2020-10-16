@@ -61,6 +61,15 @@ async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
     Ok(())
 }
 
+async fn safe_create_parent(path: PathBuf) -> Result<(), UploadError> {
+    if let Some(path) = path.parent() {
+        debug!("Creating directory {:?}", path);
+        actix_fs::create_dir_all(path.to_owned()).await?;
+    }
+
+    Ok(())
+}
+
 // Try writing to a file
 #[instrument(skip(bytes))]
 async fn safe_save_file(path: PathBuf, bytes: bytes::Bytes) -> Result<(), UploadError> {

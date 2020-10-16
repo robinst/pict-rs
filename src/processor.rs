@@ -6,7 +6,7 @@ use actix_web::web;
 use bytes::Bytes;
 use magick_rust::MagickWand;
 use std::path::PathBuf;
-use tracing::{debug, instrument, Span};
+use tracing::{debug, instrument, Span, error};
 
 pub(crate) trait Processor {
     fn name() -> &'static str
@@ -231,6 +231,7 @@ pub(crate) async fn prepare_image(
         let orig_path = original_path_str.clone();
 
         let tmpfile = crate::tmp_file();
+        crate::safe_create_parent(tmpfile.clone()).await?;
         let tmpfile2 = tmpfile.clone();
 
         let res = web::block(move || {
@@ -241,6 +242,7 @@ pub(crate) async fn prepare_image(
         .await;
 
         if let Err(e) = res {
+            error!("transcode error: {:?}", e);
             actix_fs::remove_file(tmpfile2).await?;
             return Err(e.into());
         }

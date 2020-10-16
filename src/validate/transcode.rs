@@ -249,9 +249,9 @@ fn transcoder(
 
     Ok(Transcoder {
         stream: input.index(),
-        filter: filter,
-        decoder: decoder,
-        encoder: encoder,
+        filter,
+        decoder,
+        encoder,
     })
 }
 

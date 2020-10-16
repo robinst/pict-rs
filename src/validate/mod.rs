@@ -88,6 +88,13 @@ fn validate_format(file: &str, format: &str) -> Result<(), UploadError> {
     Ok(())
 }
 
+fn safe_create_parent(path: &PathBuf) -> Result<(), UploadError> {
+    if let Some(path) = path.parent() {
+        std::fs::create_dir_all(path)?;
+    }
+    Ok(())
+}
+
 // import & export image using the image crate
 #[instrument]
 pub(crate) async fn validate_image(
@@ -105,6 +112,7 @@ pub(crate) async fn validate_image(
         let content_type = match (prescribed_format, meta.get_media_type()?) {
             (_, MediaType::Gif) => {
                 let newfile = tmp_file();
+                safe_create_parent(&newfile)?;
                 validate_frames(&tmpfile, &newfile)?;
 
                 video_mp4()
@@ -129,6 +137,7 @@ pub(crate) async fn validate_image(
                 if webp == "image/webp" =>
             {
                 let newfile = tmp_file();
+                safe_create_parent(&newfile)?;
                 let newfile_str = ptos(&newfile)?;
                 // clean metadata by writing new webp, since exiv2 doesn't support webp yet
                 {
@@ -153,6 +162,7 @@ pub(crate) async fn validate_image(
             }
             (Some(format), _) => {
                 let newfile = tmp_file();
+                safe_create_parent(&newfile)?;
                 let newfile_str = ptos(&newfile)?;
                 {
                     let mut wand = MagickWand::new();
@@ -175,6 +185,7 @@ pub(crate) async fn validate_image(
             }
             (_, MediaType::Other(mp4)) if mp4 == "video/mp4" || mp4 == "video/quicktime" => {
                 let newfile = tmp_file();
+                safe_create_parent(&newfile)?;
                 validate_frames(&tmpfile, &newfile)?;
 
                 video_mp4()
