@@ -1,4 +1,5 @@
 use crate::{
+    config::Format,
     error::UploadError,
     validate::{ptos, Op},
 };
@@ -6,7 +7,7 @@ use actix_web::web;
 use bytes::Bytes;
 use magick_rust::MagickWand;
 use std::path::PathBuf;
-use tracing::{debug, instrument, Span, error};
+use tracing::{debug, error, instrument, Span};
 
 pub(crate) trait Processor {
     fn name() -> &'static str
@@ -261,6 +262,7 @@ pub(crate) async fn prepare_image(
 pub(crate) async fn process_image(
     original_file: PathBuf,
     chain: ProcessChain,
+    format: Format,
 ) -> Result<Bytes, UploadError> {
     let original_path_str = ptos(&original_file)?;
 
@@ -272,15 +274,13 @@ pub(crate) async fn process_image(
         debug!("Reading image");
         wand.op(|w| w.read_image(&original_path_str))?;
 
-        let format = wand.op(|w| w.get_image_format())?;
-
         debug!("Processing image");
         for processor in chain.inner.into_iter() {
             debug!("Step");
             processor.process(&mut wand)?;
         }
 
-        let vec = wand.op(|w| w.write_image_blob(&format))?;
+        let vec = wand.op(|w| w.write_image_blob(format.to_magick_format()))?;
         drop(entered);
         return Ok(Bytes::from(vec)) as Result<Bytes, UploadError>;
     })

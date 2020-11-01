@@ -22,7 +22,7 @@ mod upload_manager;
 mod validate;
 
 use self::{
-    config::Config,
+    config::{Config, Format},
     error::UploadError,
     middleware::{Internal, Tracing},
     processor::process_image,
@@ -284,6 +284,9 @@ async fn process(
 
     let ext = ext.into_inner();
     let content_type = from_ext(&ext)?;
+    let format = ext
+        .parse::<Format>()
+        .map_err(|_| UploadError::UnsupportedFormat)?;
     let processed_name = format!("{}.{}", name, ext);
     let base = manager.image_dir();
     let mut path = self::processor::build_path(base, &chain, processed_name);
@@ -341,7 +344,7 @@ async fn process(
         }
 
         // apply chain to the provided image
-        let img_bytes = process_image(original_path.clone(), chain).await?;
+        let img_bytes = process_image(original_path.clone(), chain, format).await?;
 
         let path2 = path.clone();
         let img_bytes2 = img_bytes.clone();
