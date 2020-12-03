@@ -15,6 +15,7 @@ services:
     environment:
       - RUST_LOG=info,pict_rs=debug
     volumes:
+      - ../../data:/mnt
       - ../../:/opt/build/repo
 
   pictrs-arm64v8:
@@ -31,6 +32,7 @@ services:
     environment:
       - RUST_LOG=info,pict_rs=debug
     volumes:
+      - ../../data:/mnt
       - ../../:/opt/build/repo
 
   pictrs-arm32v7:
@@ -47,4 +49,5 @@ services:
     environment:
       - RUST_LOG=info,pict_rs=debug
     volumes:
+      - ../../data:/mnt
       - ../../:/opt/build/repo
