@@ -46,16 +46,112 @@ impl std::fmt::Debug for UploadManager {
 
 type UploadStream<E> = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, E>>>>;
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
+pub(crate) struct Serde<T> {
+    inner: T,
+}
+
+impl<T> Serde<T> {
+    pub(crate) fn new(inner: T) -> Self {
+        Serde { inner }
+    }
+}
+
+mod my_serde {
+    impl<T> serde::Serialize for super::Serde<T>
+    where
+        T: std::fmt::Display,
+    {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let s = self.inner.to_string();
+            serde::Serialize::serialize(s.as_str(), serializer)
+        }
+    }
+
+    impl<'de, T> serde::Deserialize<'de> for super::Serde<T>
+    where
+        T: std::str::FromStr,
+        <T as std::str::FromStr>::Err: std::fmt::Display,
+    {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let s: String = serde::Deserialize::deserialize(deserializer)?;
+            let inner = s
+                .parse::<T>()
+                .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+
+            Ok(super::Serde { inner })
+        }
+    }
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub(crate) struct Details {
+    width: usize,
+    height: usize,
+    content_type: Serde<mime::Mime>,
     created_at: time::OffsetDateTime,
 }
 
+fn mime_from_media_type(media_type: rexiv2::MediaType) -> mime::Mime {
+    match media_type {
+        rexiv2::MediaType::Jpeg => mime::IMAGE_JPEG,
+        rexiv2::MediaType::Png => mime::IMAGE_PNG,
+        rexiv2::MediaType::Gif => mime::IMAGE_GIF,
+        rexiv2::MediaType::Other(s) if s == "image/webp" => s.parse::<mime::Mime>().unwrap(),
+        rexiv2::MediaType::Other(s) if s == "video/mp4" || s == "video/quicktime" => {
+            "video/mp4".parse::<mime::Mime>().unwrap()
+        }
+        _ => mime::APPLICATION_OCTET_STREAM,
+    }
+}
+
 impl Details {
-    pub(crate) fn now() -> Self {
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self, UploadError> {
+        let metadata = rexiv2::Metadata::new_from_buffer(bytes)?;
+        let mime_type = mime_from_media_type(metadata.get_media_type()?);
+        let width = metadata.get_pixel_width();
+        let height = metadata.get_pixel_height();
+        let details = Details::now(width as usize, height as usize, mime_type);
+        Ok(details)
+    }
+
+    pub(crate) async fn from_path(path: PathBuf) -> Result<Self, UploadError> {
+        let (mime_type, width, height) = web::block(move || {
+            rexiv2::Metadata::new_from_path(&path).and_then(|metadata| {
+                metadata
+                    .get_media_type()
+                    .map(mime_from_media_type)
+                    .map(|mime_type| {
+                        (
+                            mime_type,
+                            metadata.get_pixel_width(),
+                            metadata.get_pixel_height(),
+                        )
+                    })
+            })
+        })
+        .await?;
+
+        Ok(Details::now(width as usize, height as usize, mime_type))
+    }
+
+    fn now(width: usize, height: usize, content_type: mime::Mime) -> Self {
         Details {
+            width,
+            height,
+            content_type: Serde::new(content_type),
             created_at: time::OffsetDateTime::now_utc(),
         }
+    }
+
+    pub(crate) fn content_type(&self) -> mime::Mime {
+        self.content_type.inner.clone()
     }
 
     pub(crate) fn system_time(&self) -> std::time::SystemTime {
@@ -184,7 +280,10 @@ impl UploadManager {
         let main_tree = self.inner.main_tree.clone();
         debug!("Getting details");
         let opt = match web::block(move || main_tree.get(key)).await? {
-            Some(ivec) => Some(serde_json::from_slice(&ivec)?),
+            Some(ivec) => match serde_json::from_slice(&ivec) {
+                Ok(details) => Some(details),
+                Err(_) => None,
+            },
             None => None,
         };
         debug!("Got details");
@@ -196,6 +295,7 @@ impl UploadManager {
         &self,
         path: PathBuf,
         filename: String,
+        details: &Details,
     ) -> Result<(), UploadError> {
         let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
 
@@ -207,7 +307,7 @@ impl UploadManager {
 
         let key = variant_details_key(&hash, &path_string);
         let main_tree = self.inner.main_tree.clone();
-        let details_value = serde_json::to_string(&Details::now())?;
+        let details_value = serde_json::to_string(details)?;
         debug!("Storing details");
         web::block(move || main_tree.insert(key, details_value.as_bytes())).await?;
         debug!("Stored details");

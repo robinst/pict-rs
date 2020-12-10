@@ -136,30 +136,6 @@ fn to_ext(mime: mime::Mime) -> Result<&'static str, UploadError> {
     }
 }
 
-fn from_name(name: &str) -> Result<mime::Mime, UploadError> {
-    match name
-        .rsplit('.')
-        .next()
-        .ok_or(UploadError::UnsupportedFormat)?
-    {
-        "jpg" => Ok(mime::IMAGE_JPEG),
-        "webp" => Ok(image_webp()),
-        "png" => Ok(mime::IMAGE_PNG),
-        "mp4" => Ok(video_mp4()),
-        "gif" => Ok(mime::IMAGE_GIF),
-        _ => Err(UploadError::UnsupportedFormat),
-    }
-}
-
-fn from_ext(ext: &str) -> Result<mime::Mime, UploadError> {
-    match ext {
-        "jpg" => Ok(mime::IMAGE_JPEG),
-        "png" => Ok(mime::IMAGE_PNG),
-        "webp" => Ok(image_webp()),
-        _ => Err(UploadError::UnsupportedFormat),
-    }
-}
-
 /// Handle responding to succesful uploads
 #[instrument(skip(value, manager))]
 async fn upload(
@@ -244,14 +220,12 @@ async fn delete(
 
 type ProcessQuery = Vec<(String, String)>;
 
-/// Process files
-#[instrument(skip(manager, whitelist))]
-async fn process(
+async fn prepare_process(
     query: web::Query<ProcessQuery>,
-    ext: web::Path<String>,
-    manager: web::Data<UploadManager>,
-    whitelist: web::Data<Option<HashSet<String>>>,
-) -> Result<HttpResponse, UploadError> {
+    ext: &str,
+    manager: &UploadManager,
+    whitelist: &Option<HashSet<String>>,
+) -> Result<(processor::ProcessChain, Format, String, PathBuf), UploadError> {
     let (alias, operations) =
         query
             .into_inner()
@@ -282,14 +256,42 @@ async fn process(
 
     let chain = self::processor::build_chain(&operations);
 
-    let ext = ext.into_inner();
-    let content_type = from_ext(&ext)?;
     let format = ext
         .parse::<Format>()
         .map_err(|_| UploadError::UnsupportedFormat)?;
     let processed_name = format!("{}.{}", name, ext);
     let base = manager.image_dir();
     let thumbnail_path = self::processor::build_path(base, &chain, processed_name);
+
+    Ok((chain, format, name, thumbnail_path))
+}
+
+async fn process_details(
+    query: web::Query<ProcessQuery>,
+    ext: web::Path<String>,
+    manager: web::Data<UploadManager>,
+    whitelist: web::Data<Option<HashSet<String>>>,
+) -> Result<HttpResponse, UploadError> {
+    let (_, _, name, thumbnail_path) =
+        prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
+
+    let details = manager.variant_details(thumbnail_path, name).await?;
+
+    let details = details.ok_or(UploadError::NoFiles)?;
+
+    Ok(HttpResponse::Ok().json(details))
+}
+
+/// Process files
+#[instrument(skip(manager, whitelist))]
+async fn process(
+    query: web::Query<ProcessQuery>,
+    ext: web::Path<String>,
+    manager: web::Data<UploadManager>,
+    whitelist: web::Data<Option<HashSet<String>>>,
+) -> Result<HttpResponse, UploadError> {
+    let (chain, format, name, thumbnail_path) =
+        prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
     // If the thumbnail doesn't exist, we need to create it
     let thumbnail_exists = if let Err(e) = actix_fs::metadata(thumbnail_path.clone()).await {
@@ -339,16 +341,27 @@ async fn process(
         let path2 = thumbnail_path.clone();
         let img_bytes2 = img_bytes.clone();
 
+        let store_details = details.is_none();
+        let details = if let Some(details) = details {
+            details
+        } else {
+            let details = Details::from_bytes(&img_bytes)?;
+            manager
+                .store_variant_details(path2.clone(), name.clone(), &details)
+                .await?;
+            details
+        };
+
         // Save the file in another task, we want to return the thumbnail now
         debug!("Spawning storage task");
         let span = Span::current();
-        let store_details = details.is_none();
+        let details2 = details.clone();
         actix_rt::spawn(async move {
             let entered = span.enter();
             if store_details {
                 debug!("Storing details");
                 if let Err(e) = manager
-                    .store_variant_details(path2.clone(), name.clone())
+                    .store_variant_details(path2.clone(), name.clone(), &details2)
                     .await
                 {
                     error!("Error storing details, {}", e);
@@ -366,28 +379,58 @@ async fn process(
             drop(entered);
         });
 
-        let details = details.unwrap_or(Details::now());
-
         return Ok(srv_response(
             Box::pin(futures::stream::once(async {
                 Ok(img_bytes) as Result<_, UploadError>
             })),
-            content_type,
+            details.content_type(),
             7 * DAYS,
             details.system_time(),
         ));
     }
 
-    let stream = actix_fs::read_to_stream(thumbnail_path).await?;
+    let details = if let Some(details) = details {
+        details
+    } else {
+        let details = Details::from_path(thumbnail_path.clone()).await?;
+        manager
+            .store_variant_details(thumbnail_path.clone(), name, &details)
+            .await?;
+        details
+    };
 
-    let details = details.unwrap_or(Details::now());
+    let stream = actix_fs::read_to_stream(thumbnail_path).await?;
 
     Ok(srv_response(
         stream,
-        content_type,
+        details.content_type(),
         7 * DAYS,
         details.system_time(),
     ))
+}
+
+/// Fetch file details
+async fn details(
+    alias: web::Path<String>,
+    manager: web::Data<UploadManager>,
+) -> Result<HttpResponse, UploadError> {
+    let name = manager.from_alias(alias.into_inner()).await?;
+    let mut path = manager.image_dir();
+    path.push(name.clone());
+
+    let details = manager.variant_details(path.clone(), name.clone()).await?;
+
+    let details = if let Some(details) = details {
+        details
+    } else {
+        let new_details = Details::from_path(path.clone()).await?;
+        manager
+            .store_variant_details(path.clone(), name, &new_details)
+            .await?;
+        new_details
+    };
+
+    Ok(HttpResponse::Ok().json(details))
 }
 
 /// Serve files
@@ -397,23 +440,26 @@ async fn serve(
     manager: web::Data<UploadManager>,
 ) -> Result<HttpResponse, UploadError> {
     let name = manager.from_alias(alias.into_inner()).await?;
-    let content_type = from_name(&name)?;
     let mut path = manager.image_dir();
     path.push(name.clone());
 
     let details = manager.variant_details(path.clone(), name.clone()).await?;
 
-    if details.is_none() {
-        manager.store_variant_details(path.clone(), name).await?;
-    }
-
-    let details = details.unwrap_or(Details::now());
+    let details = if let Some(details) = details {
+        details
+    } else {
+        let details = Details::from_path(path.clone()).await?;
+        manager
+            .store_variant_details(path.clone(), name, &details)
+            .await?;
+        details
+    };
 
     let stream = actix_fs::read_to_stream(path).await?;
 
     Ok(srv_response(
         stream,
-        content_type,
+        details.content_type(),
         7 * DAYS,
         details.system_time(),
     ))
@@ -604,7 +650,17 @@ async fn main() -> Result<(), anyhow::Error> {
                             .route(web::get().to(delete)),
                     )
                     .service(web::resource("/original/{filename}").route(web::get().to(serve)))
-                    .service(web::resource("/process.{ext}").route(web::get().to(process))),
+                    .service(web::resource("/process.{ext}").route(web::get().to(process)))
+                    .service(
+                        web::scope("/details")
+                            .service(
+                                web::resource("/original/{filename}").route(web::get().to(details)),
+                            )
+                            .service(
+                                web::resource("/process.{ext}")
+                                    .route(web::get().to(process_details)),
+                            ),
+                    ),
             )
             .service(
                 web::scope("/internal")

@@ -4,7 +4,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-alpha.0
+pict-rs 0.3.0-alpha.1
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] --path <path>
@@ -105,6 +105,21 @@ pict-rs offers the following endpoints:
     payload as the `POST` endpoint
 - `GET /image/original/{file}` for getting a full-resolution image. `file` here is the `file` key from the
     `/image` endpoint's JSON
+- `GET /image/details/original/{file}` for getting the details of a full-resolution image.
+    The returned JSON is structured like so:
+    ```json
+    {
+        "width": 800,
+        "height": 537,
+        "content_type": "image/webp",
+        "created_at": [
+            2020,
+            345,
+            67376,
+            394363487
+        ]
+    }
+    ```
 - `GET /image/process.{ext}?src={file}&...` get a file with transformations applied.
     existing transformations include
     - `identity=true`: apply no changes
@@ -121,6 +136,8 @@ pict-rs offers the following endpoints:
     GET /image/process.jpg?src=asdf.png&thumbnail=256&blur=3.0
     ```
     which would create a 256x256px JPEG thumbnail and blur it
+- `GET /image/details/process.{ext}?src={file}&...` for getting the details of a processed image.
+    The returned JSON is the same format as listed for the full-resolution details endpoint.
 - `DELETE /image/delete/{delete_token}/{file}` or `GET /image/delete/{delete_token}/{file}` to
     delete a file, where `delete_token` and `file` are from the `/image` endpoint's JSON
 
