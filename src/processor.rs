@@ -113,6 +113,63 @@ impl Processor for Thumbnail {
     }
 }
 
+pub(crate) struct Resize(usize);
+
+impl Processor for Resize {
+    fn name() -> &'static str
+    where
+        Self: Sized,
+    {
+        "resize"
+    }
+
+    fn is_processor(s: &str) -> bool
+    where
+        Self: Sized,
+    {
+        s == Self::name()
+    }
+
+    fn parse(_: &str, v: &str) -> Option<Box<dyn Processor + Send>>
+    where
+        Self: Sized,
+    {
+        let size = v.parse().ok()?;
+        Some(Box::new(Resize(size)))
+    }
+
+    fn path(&self, mut path: PathBuf) -> PathBuf {
+        path.push(Self::name());
+        path.push(self.0.to_string());
+        path
+    }
+
+    fn process(&self, wand: &mut MagickWand) -> Result<(), UploadError> {
+        debug!("Resize");
+        let width = wand.get_image_width();
+        let height = wand.get_image_height();
+
+        if width > self.0 || height > self.0 {
+            let width_ratio = width as f64 / self.0 as f64;
+            let height_ratio = height as f64 / self.0 as f64;
+
+            let (new_width, new_height) = if width_ratio < height_ratio {
+                (width as f64 / height_ratio, self.0 as f64)
+            } else {
+                (self.0 as f64, height as f64 / width_ratio)
+            };
+
+            wand.resize_image(
+                new_width as usize,
+                new_height as usize,
+                magick_rust::bindings::FilterType_Lanczos2Filter,
+            );
+        }
+
+        Ok(())
+    }
+}
+
 pub(crate) struct Blur(f64);
 
 impl Processor for Blur {
@@ -178,6 +235,7 @@ pub(crate) fn build_chain(args: &[(String, String)]) -> ProcessChain {
 
             parse!(Identity, k, v);
             parse!(Thumbnail, k, v);
+            parse!(Resize, k, v);
             parse!(Blur, k, v);
 
             debug!("Skipping {}: {}, invalid", k, v);

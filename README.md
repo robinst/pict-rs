@@ -4,7 +4,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.2.0-alpha.3
+pict-rs 0.3.0-alpha.0
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] --path <path>
@@ -109,7 +109,10 @@ pict-rs offers the following endpoints:
     existing transformations include
     - `identity=true`: apply no changes
     - `blur={float}`: apply a gaussian blur to the file
-    - `thumbnail={int}`: produce a thumbnail of the image fitting inside an `{int}` by `{int}` square
+    - `thumbnail={int}`: produce a thumbnail of the image fitting inside an `{int}` by `{int}`
+        square using raw pixel sampling
+    - `resize={int}`: produce a thumbnail of the image fitting inside an `{int}` by `{int}` square
+        using a Lanczos2 filter. This is slower than sampling but looks a bit better in some cases
 
     Supported `ext` file extensions include `png`, `jpg`, and `webp`
 

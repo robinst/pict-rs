@@ -9,9 +9,6 @@ pub(crate) enum UploadError {
     #[error("Couldn't save file, {0}")]
     Save(#[from] actix_fs::Error),
 
-    #[error("Error in DB migration, {0}")]
-    Migrate(#[from] sled032::Error),
-
     #[error("Error in DB, {0}")]
     Db(#[from] sled::Error),
 
@@ -71,6 +68,9 @@ pub(crate) enum UploadError {
 
     #[error("Error in MagickWand, {0}")]
     Wand(String),
+
+    #[error("{0}")]
+    Json(#[from] serde_json::Error),
 }
 
 impl From<actix_web::client::SendRequestError> for UploadError {

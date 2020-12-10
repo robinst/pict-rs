@@ -1,7 +1,7 @@
 use crate::{
     config::Format,
     error::UploadError,
-    migrate::{alias_key_bounds, variant_key_bounds, LatestDb, alias_id_key, alias_key},
+    migrate::{alias_id_key, alias_key, alias_key_bounds, variant_key_bounds, LatestDb},
     to_ext,
     validate::validate_image,
 };
@@ -45,6 +45,23 @@ impl std::fmt::Debug for UploadManager {
 }
 
 type UploadStream<E> = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, E>>>>;
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub(crate) struct Details {
+    created_at: time::OffsetDateTime,
+}
+
+impl Details {
+    pub(crate) fn now() -> Self {
+        Details {
+            created_at: time::OffsetDateTime::now_utc(),
+        }
+    }
+
+    pub(crate) fn system_time(&self) -> std::time::SystemTime {
+        self.created_at.into()
+    }
+}
 
 struct FilenameIVec {
     inner: sled::IVec,
@@ -145,6 +162,55 @@ impl UploadManager {
         debug!("Storing variant");
         web::block(move || main_tree.insert(key, path_string.as_bytes())).await?;
         debug!("Stored variant");
+
+        Ok(())
+    }
+
+    /// Get the image details for a given variant
+    pub(crate) async fn variant_details(
+        &self,
+        path: PathBuf,
+        filename: String,
+    ) -> Result<Option<Details>, UploadError> {
+        let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
+
+        let fname_tree = self.inner.filename_tree.clone();
+        debug!("Getting hash");
+        let hash: sled::IVec = web::block(move || fname_tree.get(filename.as_bytes()))
+            .await?
+            .ok_or(UploadError::MissingFilename)?;
+
+        let key = variant_details_key(&hash, &path_string);
+        let main_tree = self.inner.main_tree.clone();
+        debug!("Getting details");
+        let opt = match web::block(move || main_tree.get(key)).await? {
+            Some(ivec) => Some(serde_json::from_slice(&ivec)?),
+            None => None,
+        };
+        debug!("Got details");
+
+        Ok(opt)
+    }
+
+    pub(crate) async fn store_variant_details(
+        &self,
+        path: PathBuf,
+        filename: String,
+    ) -> Result<(), UploadError> {
+        let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
+
+        let fname_tree = self.inner.filename_tree.clone();
+        debug!("Getting hash");
+        let hash: sled::IVec = web::block(move || fname_tree.get(filename.as_bytes()))
+            .await?
+            .ok_or(UploadError::MissingFilename)?;
+
+        let key = variant_details_key(&hash, &path_string);
+        let main_tree = self.inner.main_tree.clone();
+        let details_value = serde_json::to_string(&Details::now())?;
+        debug!("Storing details");
+        web::block(move || main_tree.insert(key, details_value.as_bytes())).await?;
+        debug!("Stored details");
 
         Ok(())
     }
@@ -470,9 +536,13 @@ impl UploadManager {
         for key in keys {
             let main_tree = self.inner.main_tree.clone();
             if let Some(path) = web::block(move || main_tree.remove(key)).await? {
-                debug!("Deleting {:?}", String::from_utf8(path.to_vec()));
-                if let Err(e) = remove_path(path).await {
-                    errors.push(e);
+                let s = String::from_utf8_lossy(&path);
+                debug!("Deleting {}", s);
+                // ignore json objects
+                if !s.starts_with('{') {
+                    if let Err(e) = remove_path(path).await {
+                        errors.push(e);
+                    }
                 }
             }
         }
@@ -760,5 +830,13 @@ fn variant_key(hash: &[u8], path: &str) -> Vec<u8> {
     let mut key = hash.to_vec();
     key.extend(&[2]);
     key.extend(path.as_bytes());
+    key
+}
+
+fn variant_details_key(hash: &[u8], path: &str) -> Vec<u8> {
+    let mut key = hash.to_vec();
+    key.extend(&[2]);
+    key.extend(path.as_bytes());
+    key.extend(b"details");
     key
 }

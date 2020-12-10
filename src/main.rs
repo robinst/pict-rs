@@ -26,7 +26,7 @@ use self::{
     error::UploadError,
     middleware::{Internal, Tracing},
     processor::process_image,
-    upload_manager::UploadManager,
+    upload_manager::{Details, UploadManager},
     validate::{image_webp, video_mp4},
 };
 
@@ -289,38 +289,28 @@ async fn process(
         .map_err(|_| UploadError::UnsupportedFormat)?;
     let processed_name = format!("{}.{}", name, ext);
     let base = manager.image_dir();
-    let mut path = self::processor::build_path(base, &chain, processed_name);
-
-    if let Some((updated_path, exists)) = self::processor::prepare_image(path.clone()).await? {
-        path = updated_path.clone();
-
-        if exists.is_new() {
-            // Save the transcoded file in another task
-            debug!("Spawning storage task");
-            let span = Span::current();
-            let manager2 = manager.clone();
-            let name = name.clone();
-            actix_rt::spawn(async move {
-                let entered = span.enter();
-                if let Err(e) = manager2.store_variant(updated_path, name).await {
-                    error!("Error storing variant, {}", e);
-                    return;
-                }
-                drop(entered);
-            });
-        }
-    }
+    let thumbnail_path = self::processor::build_path(base, &chain, processed_name);
 
     // If the thumbnail doesn't exist, we need to create it
-    if let Err(e) = actix_fs::metadata(path.clone()).await {
+    let thumbnail_exists = if let Err(e) = actix_fs::metadata(thumbnail_path.clone()).await {
         if e.kind() != Some(std::io::ErrorKind::NotFound) {
             error!("Error looking up processed image, {}", e);
             return Err(e.into());
         }
+        false
+    } else {
+        true
+    };
 
+    let details = manager
+        .variant_details(thumbnail_path.clone(), name.clone())
+        .await?;
+
+    if !thumbnail_exists || details.is_none() {
         let mut original_path = manager.image_dir();
         original_path.push(name.clone());
 
+        // Create and save a JPG for motion images (gif, mp4)
         if let Some((updated_path, exists)) =
             self::processor::prepare_image(original_path.clone()).await?
         {
@@ -346,14 +336,25 @@ async fn process(
         // apply chain to the provided image
         let img_bytes = process_image(original_path.clone(), chain, format).await?;
 
-        let path2 = path.clone();
+        let path2 = thumbnail_path.clone();
         let img_bytes2 = img_bytes.clone();
 
         // Save the file in another task, we want to return the thumbnail now
         debug!("Spawning storage task");
         let span = Span::current();
+        let store_details = details.is_none();
         actix_rt::spawn(async move {
             let entered = span.enter();
+            if store_details {
+                debug!("Storing details");
+                if let Err(e) = manager
+                    .store_variant_details(path2.clone(), name.clone())
+                    .await
+                {
+                    error!("Error storing details, {}", e);
+                    return;
+                }
+            }
             if let Err(e) = manager.store_variant(path2.clone(), name).await {
                 error!("Error storing variant, {}", e);
                 return;
@@ -365,23 +366,27 @@ async fn process(
             drop(entered);
         });
 
+        let details = details.unwrap_or(Details::now());
+
         return Ok(srv_response(
             Box::pin(futures::stream::once(async {
                 Ok(img_bytes) as Result<_, UploadError>
             })),
             content_type,
             7 * DAYS,
-            SystemTime::now(),
+            details.system_time(),
         ));
     }
 
-    let stream = actix_fs::read_to_stream(path).await?;
+    let stream = actix_fs::read_to_stream(thumbnail_path).await?;
+
+    let details = details.unwrap_or(Details::now());
 
     Ok(srv_response(
         stream,
         content_type,
         7 * DAYS,
-        SystemTime::now(),
+        details.system_time(),
     ))
 }
 
@@ -394,7 +399,15 @@ async fn serve(
     let name = manager.from_alias(alias.into_inner()).await?;
     let content_type = from_name(&name)?;
     let mut path = manager.image_dir();
-    path.push(name);
+    path.push(name.clone());
+
+    let details = manager.variant_details(path.clone(), name.clone()).await?;
+
+    if details.is_none() {
+        manager.store_variant_details(path.clone(), name).await?;
+    }
+
+    let details = details.unwrap_or(Details::now());
 
     let stream = actix_fs::read_to_stream(path).await?;
 
@@ -402,7 +415,7 @@ async fn serve(
         stream,
         content_type,
         7 * DAYS,
-        SystemTime::now(),
+        details.system_time(),
     ))
 }
 
