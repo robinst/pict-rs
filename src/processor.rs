@@ -170,6 +170,82 @@ impl Processor for Resize {
     }
 }
 
+pub(crate) struct Crop(usize, usize);
+
+impl Processor for Crop {
+    fn name() -> &'static str
+    where
+        Self: Sized,
+    {
+        "crop"
+    }
+
+    fn is_processor(s: &str) -> bool {
+        s == Self::name()
+    }
+
+    fn parse(_: &str, v: &str) -> Option<Box<dyn Processor + Send>> {
+        let mut iter = v.split('x');
+        let first = iter.next()?;
+        let second = iter.next()?;
+
+        let width = first.parse::<usize>().ok()?;
+        let height = second.parse::<usize>().ok()?;
+
+        if width == 0 || height == 0 {
+            return None;
+        }
+
+        if width > 20 || height > 20 {
+            return None;
+        }
+
+        Some(Box::new(Crop(width, height)))
+    }
+
+    fn path(&self, mut path: PathBuf) -> PathBuf {
+        path.push(Self::name());
+        path.push(format!("{}x{}", self.0, self.1));
+        path
+    }
+
+    fn process(&self, wand: &mut MagickWand) -> Result<(), UploadError> {
+        let width = wand.get_image_width();
+        let height = wand.get_image_height();
+
+        // 16x9 becomes 16/9, which is bigger than 16/10. a bigger number means a wider image
+        //
+        // Crop ratios bigger than Image ratios mean cropping the image's height and leaving the
+        // width alone.
+        let img_ratio = width as f64 / height as f64;
+        let crop_ratio = self.0 as f64 / self.1 as f64;
+
+        let final_width;
+        let final_height;
+
+        let x_offset;
+        let y_offset;
+
+        if crop_ratio > img_ratio {
+            final_height = (width as f64 / self.0 as f64 * self.1 as f64) as usize;
+            final_width = width;
+
+            x_offset = 0;
+            y_offset = ((height - final_height) as f64 / 2.0) as isize;
+        } else {
+            final_height = height;
+            final_width = (height as f64 / self.1 as f64 * self.0 as f64) as usize;
+
+            x_offset = ((width - final_width) as f64 / 2.0) as isize;
+            y_offset = 0;
+        }
+
+        wand.op(|w| w.crop_image(final_width, final_height, x_offset, y_offset))?;
+
+        Ok(())
+    }
+}
+
 pub(crate) struct Blur(f64);
 
 impl Processor for Blur {
@@ -236,6 +312,7 @@ pub(crate) fn build_chain(args: &[(String, String)]) -> ProcessChain {
             parse!(Identity, k, v);
             parse!(Thumbnail, k, v);
             parse!(Resize, k, v);
+            parse!(Crop, k, v);
             parse!(Blur, k, v);
 
             debug!("Skipping {}: {}, invalid", k, v);

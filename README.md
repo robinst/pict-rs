@@ -128,6 +128,11 @@ pict-rs offers the following endpoints:
         square using raw pixel sampling
     - `resize={int}`: produce a thumbnail of the image fitting inside an `{int}` by `{int}` square
         using a Lanczos2 filter. This is slower than sampling but looks a bit better in some cases
+    - `crop={int-w}x{int-h}`: produce a cropped version of the image with an `{int-w}` by `{int-h}`
+        aspect ratio. The resulting crop will be centered on the image. Either the width or height
+        of the image will remain full-size, depending on the image's aspect ratio and the requested
+        aspect ratio. For example, a 1600x900 image cropped with a 1x1 aspect ratio will become 900x900. A
+        1600x1100 image cropped with a 16x9 aspect ratio will become 1600x900.
 
     Supported `ext` file extensions include `png`, `jpg`, and `webp`
 
