@@ -35,7 +35,7 @@ const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
 const DAYS: u32 = 24 * HOURS;
 
-static CONFIG: Lazy<Config> = Lazy::new(|| Config::from_args());
+static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
 static MAGICK_INIT: Once = Once::new();
 
 // try moving a file
@@ -150,17 +150,35 @@ async fn upload(
 
     let mut files = Vec::new();
     for image in images.into_iter().filter_map(|i| i.file()) {
-        if let Some(saved_as) = image
+        if let Some(alias) = image
             .saved_as
             .as_ref()
             .and_then(|s| s.file_name())
             .and_then(|s| s.to_str())
         {
-            info!("Uploaded {} as {:?}", image.filename, saved_as);
-            let delete_token = manager.delete_token(saved_as.to_owned()).await?;
+            info!("Uploaded {} as {:?}", image.filename, alias);
+            let delete_token = manager.delete_token(alias.to_owned()).await?;
+
+            let name = manager.from_alias(alias.to_owned()).await?;
+            let mut path = manager.image_dir();
+            path.push(name.clone());
+
+            let details = manager.variant_details(path.clone(), name.clone()).await?;
+
+            let details = if let Some(details) = details {
+                details
+            } else {
+                let new_details = Details::from_path(path.clone()).await?;
+                manager
+                    .store_variant_details(path, name, &new_details)
+                    .await?;
+                new_details
+            };
+
             files.push(serde_json::json!({
-                "file": saved_as,
-                "delete_token": delete_token
+                "file": alias,
+                "delete_token": delete_token,
+                "details": details,
             }));
         }
     }

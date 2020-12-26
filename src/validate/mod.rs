@@ -29,7 +29,7 @@ impl Op for MagickWand {
             Err(e) => {
                 if let Ok(e) = self.get_exception() {
                     error!("WandError: {}", e.0);
-                    Err(UploadError::Wand(e.0.to_owned()))
+                    Err(UploadError::Wand(e.0))
                 } else {
                     Err(UploadError::Wand(e.to_owned()))
                 }
@@ -46,7 +46,7 @@ impl Op for MagickWand {
             Err(e) => {
                 if let Ok(e) = self.get_exception() {
                     error!("WandError: {}", e.0);
-                    Err(UploadError::Wand(e.0.to_owned()))
+                    Err(UploadError::Wand(e.0))
                 } else {
                     Err(UploadError::Wand(e.to_owned()))
                 }
@@ -152,7 +152,7 @@ pub(crate) async fn validate_image(
 
                     if let Err(e) = wand.op(|w| w.write_image(&newfile_str)) {
                         std::fs::remove_file(&newfile_str)?;
-                        return Err(e.into());
+                        return Err(e);
                     }
                 }
 
@@ -175,7 +175,7 @@ pub(crate) async fn validate_image(
                     debug!("writing: {}", newfile_str);
                     if let Err(e) = wand.op(|w| w.write_image(&newfile_str)) {
                         std::fs::remove_file(&newfile_str)?;
-                        return Err(e.into());
+                        return Err(e);
                     }
                 }
 

@@ -1,5 +1,4 @@
 use crate::UploadError;
-use sled;
 use std::path::PathBuf;
 
 mod s034;
@@ -83,7 +82,7 @@ enum DbVersion {
 
 impl DbVersion {
     fn exists(root: PathBuf) -> Self {
-        if s034::exists(root.clone()) && !s034::migrating(root.clone()) {
+        if s034::exists(root.clone()) && !s034::migrating(root) {
             return DbVersion::Sled034;
         }
 

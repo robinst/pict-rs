@@ -87,7 +87,7 @@ impl Config {
     }
 
     pub(crate) fn api_key(&self) -> Option<&str> {
-        self.api_key.as_ref().map(|s| s.as_str())
+        self.api_key.as_deref()
     }
 }
 

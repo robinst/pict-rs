@@ -103,8 +103,7 @@ where
 
     fn call(&mut self, req: S::Request) -> Self::Future {
         if let Some(value) = req.headers().get("x-api-token") {
-            if value.to_str().is_ok() && value.to_str().ok() == self.0.as_ref().map(|s| s.as_str())
-            {
+            if value.to_str().is_ok() && value.to_str().ok() == self.0.as_deref() {
                 let fut = self.1.call(req);
                 return Box::pin(async move { fut.await });
             }

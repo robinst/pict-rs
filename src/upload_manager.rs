@@ -57,36 +57,34 @@ impl<T> Serde<T> {
     }
 }
 
-mod my_serde {
-    impl<T> serde::Serialize for super::Serde<T>
+impl<T> serde::Serialize for Serde<T>
+where
+    T: std::fmt::Display,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        T: std::fmt::Display,
+        S: serde::Serializer,
     {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            let s = self.inner.to_string();
-            serde::Serialize::serialize(s.as_str(), serializer)
-        }
+        let s = self.inner.to_string();
+        serde::Serialize::serialize(s.as_str(), serializer)
     }
+}
 
-    impl<'de, T> serde::Deserialize<'de> for super::Serde<T>
+impl<'de, T> serde::Deserialize<'de> for Serde<T>
+where
+    T: std::str::FromStr,
+    <T as std::str::FromStr>::Err: std::fmt::Display,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        T: std::str::FromStr,
-        <T as std::str::FromStr>::Err: std::fmt::Display,
+        D: serde::Deserializer<'de>,
     {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            let s: String = serde::Deserialize::deserialize(deserializer)?;
-            let inner = s
-                .parse::<T>()
-                .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+        let s: String = serde::Deserialize::deserialize(deserializer)?;
+        let inner = s
+            .parse::<T>()
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
 
-            Ok(super::Serde { inner })
-        }
+        Ok(Serde { inner })
     }
 }
 
@@ -198,10 +196,7 @@ enum Dup {
 
 impl Dup {
     fn exists(&self) -> bool {
-        match self {
-            Dup::Exists => true,
-            _ => false,
-        }
+        matches!(self, Dup::Exists)
     }
 }
 
@@ -392,7 +387,7 @@ impl UploadManager {
                 debug!("Deleting alias -> delete-token mapping");
                 let existing_token = alias_tree
                     .remove(delete_key(&alias2).as_bytes())?
-                    .ok_or(trans_err(UploadError::MissingAlias))?;
+                    .ok_or_else(|| trans_err(UploadError::MissingAlias))?;
 
                 // Bail if invalid token
                 if existing_token != token {
@@ -404,14 +399,14 @@ impl UploadManager {
                 debug!("Deleting alias -> id mapping");
                 let id = alias_tree
                     .remove(alias_id_key(&alias2).as_bytes())?
-                    .ok_or(trans_err(UploadError::MissingAlias))?;
+                    .ok_or_else(|| trans_err(UploadError::MissingAlias))?;
                 let id = String::from_utf8(id.to_vec()).map_err(|e| trans_err(e.into()))?;
 
                 // -- GET HASH FOR HASH TREE CLEANUP --
                 debug!("Deleting alias -> hash mapping");
                 let hash = alias_tree
                     .remove(alias2.as_bytes())?
-                    .ok_or(trans_err(UploadError::MissingAlias))?;
+                    .ok_or_else(|| trans_err(UploadError::MissingAlias))?;
 
                 // -- REMOVE HASH TREE ELEMENT --
                 debug!("Deleting hash -> alias mapping");
@@ -877,7 +872,7 @@ impl UploadManager {
             return Ok(Err(UploadError::DuplicateAlias));
         }
 
-        return Ok(Ok(()));
+        Ok(Ok(()))
     }
 }
 

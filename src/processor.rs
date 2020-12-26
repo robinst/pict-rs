@@ -304,7 +304,7 @@ impl std::fmt::Debug for ProcessChain {
 #[instrument]
 pub(crate) fn build_chain(args: &[(String, String)]) -> ProcessChain {
     let inner = args
-        .into_iter()
+        .iter()
         .filter_map(|(k, v)| {
             let k = k.as_str();
             let v = v.as_str();
@@ -345,10 +345,7 @@ pub(crate) enum Exists {
 
 impl Exists {
     pub(crate) fn is_new(&self) -> bool {
-        match self {
-            Exists::New => true,
-            _ => false,
-        }
+        matches!(self, Exists::New)
     }
 }
 
@@ -417,7 +414,7 @@ pub(crate) async fn process_image(
 
         let vec = wand.op(|w| w.write_image_blob(format.to_magick_format()))?;
         drop(entered);
-        return Ok(Bytes::from(vec)) as Result<Bytes, UploadError>;
+        Ok(Bytes::from(vec)) as Result<Bytes, UploadError>
     })
     .await?;
 
