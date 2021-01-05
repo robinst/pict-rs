@@ -4,7 +4,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-alpha.1
+pict-rs 0.3.0-alpha.4
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] --path <path>
@@ -53,6 +53,8 @@ $ sudo chown -R 991:991 volumes/pictrs
 $ wget https://git.asonix.dog/asonix/pict-rs/raw/branch/master/docker/prod/docker-compose.yml
 $ sudo docker-compose up -d
 ```
+###### Note
+pict-rs makes use of the system's temporary folder. This is generally `/tmp` on linux
 
 #### Docker Development
 The development system loads a rust environment inside a docker container with the neccessary

@@ -35,6 +35,22 @@ const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
 const DAYS: u32 = 24 * HOURS;
 
+static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
+    use rand::{
+        distributions::{Alphanumeric, Distribution},
+        thread_rng,
+    };
+
+    let mut rng = thread_rng();
+    let tmp_nonce = Alphanumeric
+        .sample_iter(&mut rng)
+        .take(7)
+        .collect::<String>();
+
+    let mut path = std::env::temp_dir();
+    path.push(format!("pict-rs-{}", tmp_nonce));
+    path
+});
 static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
 static MAGICK_INIT: Once = Once::new();
 
@@ -115,8 +131,7 @@ pub(crate) fn tmp_file() -> PathBuf {
 
     let name = format!("{}.tmp", s);
 
-    let mut path = std::env::temp_dir();
-    path.push("pict-rs");
+    let mut path = TMP_DIR.clone();
     path.push(&name);
 
     path
@@ -713,6 +728,10 @@ async fn main() -> Result<(), anyhow::Error> {
     .bind(CONFIG.bind_address())?
     .run()
     .await?;
+
+    if actix_fs::metadata(&*TMP_DIR).await.is_ok() {
+        actix_fs::remove_dir_all(&*TMP_DIR).await?;
+    }
 
     Ok(())
 }
