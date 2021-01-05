@@ -191,7 +191,7 @@ RUN \
     pictrs && \
  apt-get update && \
  apt-get upgrade -y && \
- apt-get install -y \
+ apt-get install -y --no-install-recommends \
     libgexiv2-2 \
     libpng16-16 \
     libjpeg8 \

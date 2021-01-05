@@ -214,11 +214,28 @@ async fn download(
     let alias = manager.upload(stream).await?;
     let delete_token = manager.delete_token(alias.clone()).await?;
 
+    let name = manager.from_alias(alias.to_owned()).await?;
+    let mut path = manager.image_dir();
+    path.push(name.clone());
+
+    let details = manager.variant_details(path.clone(), name.clone()).await?;
+
+    let details = if let Some(details) = details {
+        details
+    } else {
+        let new_details = Details::from_path(path.clone()).await?;
+        manager
+            .store_variant_details(path, name, &new_details)
+            .await?;
+        new_details
+    };
+
     Ok(HttpResponse::Created().json(serde_json::json!({
         "msg": "ok",
         "files": [{
             "file": alias,
-            "delete_token": delete_token
+            "delete_token": delete_token,
+            "details": details,
         }]
     })))
 }
