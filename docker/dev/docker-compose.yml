@@ -17,6 +17,7 @@ services:
     volumes:
       - ../../data:/mnt
       - ../../:/opt/build/repo
+      - ~/.cargo:/opt/build/.cargo
 
   pictrs-arm64v8:
     build:
@@ -34,6 +35,7 @@ services:
     volumes:
       - ../../data:/mnt
       - ../../:/opt/build/repo
+      - ~/.cargo:/opt/build/.cargo
 
   pictrs-arm32v7:
     build:
@@ -51,3 +53,4 @@ services:
     volumes:
       - ../../data:/mnt
       - ../../:/opt/build/repo
+      - ~/.cargo:/opt/build/.cargo
