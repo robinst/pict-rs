@@ -1,8 +1,23 @@
 use actix_form_data::{Field, Form, Value};
 use actix_fs::file;
-use actix_web::{App, HttpRequest, HttpResponse, HttpServer, client::Client, guard, http::{HeaderValue, header::{ACCEPT_RANGES, CONTENT_LENGTH, CacheControl, CacheDirective, ContentRange, ContentRangeSpec, Header, LastModified}}, middleware::{Compress, Logger}, web};
+use actix_web::{
+    client::Client,
+    guard,
+    http::{
+        header::{
+            CacheControl, CacheDirective, ContentRange, ContentRangeSpec, Header, LastModified,
+            ACCEPT_RANGES, CONTENT_LENGTH,
+        },
+        HeaderValue,
+    },
+    middleware::{Compress, Logger},
+    web, App, HttpRequest, HttpResponse, HttpServer,
+};
 use bytes::Bytes;
-use futures::{StreamExt, stream::{Stream, TryStreamExt}};
+use futures::{
+    stream::{Stream, TryStreamExt},
+    StreamExt,
+};
 use once_cell::sync::Lazy;
 use std::{
     collections::HashSet, convert::TryInto, io, path::PathBuf, sync::Once, time::SystemTime,
@@ -428,7 +443,6 @@ async fn process(
             drop(entered);
         });
 
-        
         match req.headers().get("Range") {
             Some(range_head) => {
                 let range = parse_range_header(range_head)?;
@@ -440,12 +454,13 @@ async fn process(
                 }));
 
                 return Ok(srv_ranged_response(
-                    stream, 
+                    stream,
                     details.content_type(),
                     7 * DAYS,
-                    details.system_time(), 
+                    details.system_time(),
                     Some((range[0], range[1])),
-                    Some(img_bytes.len() as u64)));
+                    Some(img_bytes.len() as u64),
+                ));
             }
             None => {
                 return Ok(srv_response(
@@ -549,7 +564,11 @@ fn parse_range_header(range_head: &HeaderValue) -> Result<Vec<u64>, UploadError>
     Ok(range)
 }
 
-async fn ranged_file_resp(path: PathBuf, req: HttpRequest, details: Details) -> Result<HttpResponse, UploadError> {
+async fn ranged_file_resp(
+    path: PathBuf,
+    req: HttpRequest,
+    details: Details,
+) -> Result<HttpResponse, UploadError> {
     match req.headers().get("Range") {
         //Range header exists - return as ranged
         Some(range_head) => {
@@ -581,16 +600,14 @@ async fn ranged_file_resp(path: PathBuf, req: HttpRequest, details: Details) -> 
                 .await?
                 .take(whole_to + 1)
                 .enumerate()
-                .map(move |bytes_res| {
-                    match bytes_res.1 {
-                        Ok(mut bytes) => {
-                            if bytes_res.0 == whole_to && partial_len <= bytes.len() {
-                                return Ok(bytes.split_to(partial_len));
-                            }
-                            return Ok(bytes);
+                .map(move |bytes_res| match bytes_res.1 {
+                    Ok(mut bytes) => {
+                        if bytes_res.0 == whole_to && partial_len <= bytes.len() {
+                            return Ok(bytes.split_to(partial_len));
                         }
-                        Err(e) => Err(e),
+                        return Ok(bytes);
                     }
+                    Err(e) => Err(e),
                 });
 
             return Ok(srv_ranged_response(
