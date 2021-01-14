@@ -74,6 +74,9 @@ pub(crate) enum UploadError {
 
     #[error("{0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Range header not satisfiable")]
+    Range,
 }
 
 impl From<actix_web::client::SendRequestError> for UploadError {
@@ -119,6 +122,7 @@ impl ResponseError for UploadError {
             | UploadError::ParseReq(_) => StatusCode::BAD_REQUEST,
             UploadError::MissingAlias | UploadError::MissingFilename => StatusCode::NOT_FOUND,
             UploadError::InvalidToken => StatusCode::FORBIDDEN,
+            UploadError::Range => StatusCode::RANGE_NOT_SATISFIABLE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
