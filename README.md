@@ -4,7 +4,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-alpha.4
+pict-rs 0.3.0-alpha.5
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] --path <path>
