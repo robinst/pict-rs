@@ -6,7 +6,7 @@ use crate::{
     validate::validate_image,
 };
 use actix_web::web;
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::stream::{Stream, StreamExt};
 use sha2::Digest;
 use std::{path::PathBuf, pin::Pin, sync::Arc};
 use tracing::{debug, error, info, instrument, warn, Span};
@@ -218,7 +218,7 @@ impl UploadManager {
         root_dir.push("files");
 
         // Ensure file dir exists
-        actix_fs::create_dir_all(root_dir.clone()).await?;
+        async_fs::create_dir_all(root_dir.clone()).await?;
 
         Ok(UploadManager {
             inner: Arc::new(UploadManagerInner {
@@ -603,7 +603,7 @@ impl UploadManager {
 
         let mut errors = Vec::new();
         debug!("Deleting {:?}", path);
-        if let Err(e) = actix_fs::remove_file(path).await {
+        if let Err(e) = async_fs::remove_file(path).await {
             errors.push(e.into());
         }
 
@@ -676,7 +676,8 @@ impl UploadManager {
     async fn hash(&self, tmpfile: PathBuf) -> Result<Hash, UploadError> {
         let mut hasher = self.inner.hasher.clone();
 
-        let mut stream = actix_fs::read_to_stream(tmpfile).await?;
+        let file = async_fs::File::open(tmpfile).await?;
+        let mut stream = Box::pin(crate::read_to_stream(file));
 
         while let Some(res) = stream.next().await {
             let bytes = res?;
@@ -750,8 +751,8 @@ impl UploadManager {
 
             path.push(filename.clone());
 
-            if let Err(e) = actix_fs::metadata(path).await {
-                if e.kind() == Some(std::io::ErrorKind::NotFound) {
+            if let Err(e) = async_fs::metadata(path).await {
+                if e.kind() == std::io::ErrorKind::NotFound {
                     debug!("Generated unused filename {}", filename);
                     return Ok(filename);
                 }
@@ -877,19 +878,19 @@ impl UploadManager {
 }
 
 #[instrument(skip(stream))]
-async fn safe_save_stream<E>(to: PathBuf, stream: UploadStream<E>) -> Result<(), UploadError>
+async fn safe_save_stream<E>(to: PathBuf, mut stream: UploadStream<E>) -> Result<(), UploadError>
 where
     UploadError: From<E>,
     E: Unpin,
 {
     if let Some(path) = to.parent() {
         debug!("Creating directory {:?}", path);
-        actix_fs::create_dir_all(path.to_owned()).await?;
+        async_fs::create_dir_all(path.to_owned()).await?;
     }
 
-    debug!("Checking if {:?} alreayd exists", to);
-    if let Err(e) = actix_fs::metadata(to.clone()).await {
-        if e.kind() != Some(std::io::ErrorKind::NotFound) {
+    debug!("Checking if {:?} already exists", to);
+    if let Err(e) = async_fs::metadata(to.clone()).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
             return Err(e.into());
         }
     } else {
@@ -897,15 +898,22 @@ where
     }
 
     debug!("Writing stream to {:?}", to);
-    let stream = stream.err_into::<UploadError>();
-    actix_fs::write_stream(to, stream).await?;
+
+    let mut file = async_fs::File::create(to).await?;
+
+    use futures_lite::AsyncWriteExt;
+    while let Some(res) = stream.next().await {
+        let bytes = res?;
+        file.write_all(&bytes).await?;
+    }
+    file.flush().await?;
 
     Ok(())
 }
 
 async fn remove_path(path: sled::IVec) -> Result<(), UploadError> {
     let path_string = String::from_utf8(path.to_vec())?;
-    actix_fs::remove_file(path_string).await?;
+    async_fs::remove_file(path_string).await?;
     Ok(())
 }
 

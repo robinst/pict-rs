@@ -6,14 +6,14 @@ pub(crate) enum UploadError {
     #[error("Couln't upload file, {0}")]
     Upload(String),
 
-    #[error("Couldn't save file, {0}")]
-    Save(#[from] actix_fs::Error),
-
     #[error("Error in DB, {0}")]
     Db(#[from] sled::Error),
 
     #[error("Error parsing string, {0}")]
     ParseString(#[from] std::string::FromUtf8Error),
+
+    #[error("Error parsing request, {0}")]
+    ParseReq(String),
 
     #[error("Error interacting with filesystem, {0}")]
     Io(#[from] std::io::Error),
@@ -71,6 +71,9 @@ pub(crate) enum UploadError {
 
     #[error("{0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Range header not satisfiable")]
+    Range,
 }
 
 impl From<actix_web::client::SendRequestError> for UploadError {
@@ -112,9 +115,11 @@ impl ResponseError for UploadError {
             UploadError::Gif(_)
             | UploadError::DuplicateAlias
             | UploadError::NoFiles
-            | UploadError::Upload(_) => StatusCode::BAD_REQUEST,
+            | UploadError::Upload(_)
+            | UploadError::ParseReq(_) => StatusCode::BAD_REQUEST,
             UploadError::MissingAlias | UploadError::MissingFilename => StatusCode::NOT_FOUND,
             UploadError::InvalidToken => StatusCode::FORBIDDEN,
+            UploadError::Range => StatusCode::RANGE_NOT_SATISFIABLE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

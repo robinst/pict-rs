@@ -356,7 +356,7 @@ pub(crate) async fn prepare_image(
     let jpg_path = format!("{}.jpg", original_path_str);
     let jpg_path = PathBuf::from(jpg_path);
 
-    if actix_fs::metadata(jpg_path.clone()).await.is_ok() {
+    if async_fs::metadata(jpg_path.clone()).await.is_ok() {
         return Ok(Some((jpg_path, Exists::Exists)));
     }
 
@@ -376,7 +376,7 @@ pub(crate) async fn prepare_image(
 
         if let Err(e) = res {
             error!("transcode error: {:?}", e);
-            actix_fs::remove_file(tmpfile2).await?;
+            async_fs::remove_file(tmpfile2).await?;
             return Err(e.into());
         }
 
