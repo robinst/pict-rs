@@ -1,26 +1,18 @@
 use actix_form_data::{Field, Form, Value};
-use actix_fs::file;
 use actix_web::{
     client::Client,
+    dev::HttpResponseBuilder,
     guard,
-    http::{
-        header::{
-            CacheControl, CacheDirective, ContentRange, ContentRangeSpec, Header, LastModified,
-            ACCEPT_RANGES, CONTENT_LENGTH,
-        },
-        HeaderValue,
-    },
+    http::header::{CacheControl, CacheDirective, LastModified, ACCEPT_RANGES},
     middleware::{Compress, Logger},
-    web, App, HttpRequest, HttpResponse, HttpServer,
+    web, App, HttpResponse, HttpServer,
 };
 use bytes::Bytes;
-use futures::{
-    stream::{Stream, TryStreamExt},
-    StreamExt,
-};
+use futures::stream::{once, Stream};
+use futures_lite::{AsyncReadExt, AsyncWriteExt};
 use once_cell::sync::Lazy;
 use std::{
-    collections::HashSet, convert::TryInto, io, path::PathBuf, sync::Once, time::SystemTime,
+    collections::HashSet, future::ready, io, path::PathBuf, pin::Pin, sync::Once, time::SystemTime,
 };
 use structopt::StructOpt;
 use tracing::{debug, error, info, instrument, Span};
@@ -31,6 +23,7 @@ mod error;
 mod middleware;
 mod migrate;
 mod processor;
+mod range;
 mod upload_manager;
 mod validate;
 
@@ -43,6 +36,7 @@ use self::{
     validate::{image_webp, video_mp4},
 };
 
+const CHUNK_SIZE: usize = 65_356;
 const MEGABYTES: usize = 1024 * 1024;
 const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
@@ -72,12 +66,12 @@ static MAGICK_INIT: Once = Once::new();
 async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
     if let Some(path) = to.parent() {
         debug!("Creating directory {:?}", path);
-        actix_fs::create_dir_all(path.to_owned()).await?;
+        async_fs::create_dir_all(path.to_owned()).await?;
     }
 
     debug!("Checking if {:?} already exists", to);
-    if let Err(e) = actix_fs::metadata(to.clone()).await {
-        if e.kind() != Some(std::io::ErrorKind::NotFound) {
+    if let Err(e) = async_fs::metadata(to.clone()).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
             return Err(e.into());
         }
     } else {
@@ -85,15 +79,15 @@ async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
     }
 
     debug!("Moving {:?} to {:?}", from, to);
-    actix_fs::copy(from.clone(), to).await?;
-    actix_fs::remove_file(from).await?;
+    async_fs::copy(from.clone(), to).await?;
+    async_fs::remove_file(from).await?;
     Ok(())
 }
 
 async fn safe_create_parent(path: PathBuf) -> Result<(), UploadError> {
     if let Some(path) = path.parent() {
         debug!("Creating directory {:?}", path);
-        actix_fs::create_dir_all(path.to_owned()).await?;
+        async_fs::create_dir_all(path.to_owned()).await?;
     }
 
     Ok(())
@@ -105,13 +99,13 @@ async fn safe_save_file(path: PathBuf, bytes: bytes::Bytes) -> Result<(), Upload
     if let Some(path) = path.parent() {
         // create the directory for the file
         debug!("Creating directory {:?}", path);
-        actix_fs::create_dir_all(path.to_owned()).await?;
+        async_fs::create_dir_all(path.to_owned()).await?;
     }
 
     // Only write the file if it doesn't already exist
     debug!("Checking if {:?} already exists", path);
-    if let Err(e) = actix_fs::metadata(path.clone()).await {
-        if e.kind() != Some(std::io::ErrorKind::NotFound) {
+    if let Err(e) = async_fs::metadata(path.clone()).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
             return Err(e.into());
         }
     } else {
@@ -120,16 +114,17 @@ async fn safe_save_file(path: PathBuf, bytes: bytes::Bytes) -> Result<(), Upload
 
     // Open the file for writing
     debug!("Creating {:?}", path);
-    let file = actix_fs::file::create(path.clone()).await?;
+    let mut file = async_fs::File::create(path.clone()).await?;
 
     // try writing
     debug!("Writing to {:?}", path);
-    if let Err(e) = actix_fs::file::write(file, bytes).await {
+    if let Err(e) = file.write_all(&bytes).await {
         error!("Error writing {:?}, {}", path, e);
         // remove file if writing failed before completion
-        actix_fs::remove_file(path).await?;
+        async_fs::remove_file(path).await?;
         return Err(e.into());
     }
+    file.flush().await?;
     debug!("{:?} written", path);
 
     Ok(())
@@ -348,7 +343,7 @@ async fn process_details(
 /// Process files
 #[instrument(skip(manager, whitelist))]
 async fn process(
-    req: HttpRequest,
+    range: Option<range::RangeHeader>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
@@ -358,8 +353,8 @@ async fn process(
         prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
     // If the thumbnail doesn't exist, we need to create it
-    let thumbnail_exists = if let Err(e) = actix_fs::metadata(thumbnail_path.clone()).await {
-        if e.kind() != Some(std::io::ErrorKind::NotFound) {
+    let thumbnail_exists = if let Err(e) = async_fs::metadata(thumbnail_path.clone()).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
             error!("Error looking up processed image, {}", e);
             return Err(e.into());
         }
@@ -443,36 +438,34 @@ async fn process(
             drop(entered);
         });
 
-        match req.headers().get("Range") {
-            Some(range_head) => {
-                let range = parse_range_header(range_head)?;
+        let (builder, stream) = match range {
+            Some(range_header) => {
+                if !range_header.is_bytes() {
+                    return Err(UploadError::Range);
+                }
 
-                let resp_bytes = img_bytes.slice(range[0] as usize..range[1] as usize);
+                if range_header.is_empty() {
+                    return Err(UploadError::Range);
+                } else if range_header.len() == 1 {
+                    let range = range_header.ranges().next().unwrap();
 
-                let stream = Box::pin(futures::stream::once(async move {
-                    Ok(resp_bytes) as Result<_, UploadError>
-                }));
-
-                return Ok(srv_ranged_response(
-                    stream,
-                    details.content_type(),
-                    7 * DAYS,
-                    details.system_time(),
-                    Some((range[0], range[1])),
-                    Some(img_bytes.len() as u64),
-                ));
+                    let mut builder = HttpResponse::PartialContent();
+                    builder.set(range.to_content_range(img_bytes.len() as u64));
+                    (builder, range.chop_bytes(img_bytes))
+                } else {
+                    return Err(UploadError::Range);
+                }
             }
-            None => {
-                return Ok(srv_response(
-                    Box::pin(futures::stream::once(async {
-                        Ok(img_bytes) as Result<_, UploadError>
-                    })),
-                    details.content_type(),
-                    7 * DAYS,
-                    details.system_time(),
-                ));
-            }
+            None => (HttpResponse::Ok(), once(ready(Ok(img_bytes)))),
         };
+
+        return Ok(srv_response(
+            builder,
+            stream,
+            details.content_type(),
+            7 * DAYS,
+            details.system_time(),
+        ));
     }
 
     let details = if let Some(details) = details {
@@ -485,7 +478,7 @@ async fn process(
         details
     };
 
-    ranged_file_resp(thumbnail_path, req, details).await
+    ranged_file_resp(thumbnail_path, range, details).await
 }
 
 /// Fetch file details
@@ -515,7 +508,7 @@ async fn details(
 /// Serve files
 #[instrument(skip(manager))]
 async fn serve(
-    req: web::HttpRequest,
+    range: Option<range::RangeHeader>,
     alias: web::Path<String>,
     manager: web::Data<UploadManager>,
 ) -> Result<HttpResponse, UploadError> {
@@ -535,105 +528,78 @@ async fn serve(
         details
     };
 
-    ranged_file_resp(path, req, details).await
+    ranged_file_resp(path, range, details).await
 }
 
-fn parse_range_header(range_head: &HeaderValue) -> Result<Vec<u64>, UploadError> {
-    let range_head_str = range_head.to_str().map_err(|_| {
-        UploadError::ParseReq("Range header contains non-utf8 characters".to_string())
-    })?;
+fn read_to_stream(mut file: async_fs::File) -> impl Stream<Item = Result<Bytes, io::Error>> {
+    async_stream::stream! {
+        let mut buf = Vec::with_capacity(CHUNK_SIZE);
 
-    let range_dashed = range_head_str
-        .split('=')
-        .skip(1)
-        .next()
-        .ok_or(UploadError::ParseReq("Malformed Range header".to_string()))?;
+        while {
+            buf.clear();
+            let mut take = (&mut file).take(CHUNK_SIZE as u64);
 
-    let range: Vec<u64> = range_dashed
-        .split('-')
-        .map(|s| s.parse::<u64>())
-        .collect::<Result<Vec<u64>, _>>()
-        .map_err(|_| {
-            UploadError::ParseReq("Cannot parse byte locations in range header".to_string())
-        })?;
+            let read_bytes_result = take.read_to_end(&mut buf).await;
 
-    if range[0] > range[1] {
-        return Err(UploadError::Range);
+            let read_bytes = read_bytes_result.as_ref().map(|num| *num).unwrap_or(0);
+
+            yield read_bytes_result.map(|_| Bytes::copy_from_slice(&buf));
+
+            read_bytes > 0
+        } {}
     }
-
-    Ok(range)
 }
 
 async fn ranged_file_resp(
     path: PathBuf,
-    req: HttpRequest,
+    range: Option<range::RangeHeader>,
     details: Details,
 ) -> Result<HttpResponse, UploadError> {
-    match req.headers().get("Range") {
+    let (builder, stream) = match range {
         //Range header exists - return as ranged
-        Some(range_head) => {
-            let range = parse_range_header(range_head)?;
-
-            let (out_file, _) = file::seek(
-                file::open(path).await?,
-                io::SeekFrom::Current(range[0].try_into().map_err(|_| {
-                    UploadError::ParseReq("Byte locations too high in range header".to_string())
-                })?),
-            )
-            .await?;
-
-            let (out_file, meta) = file::metadata(out_file)
-                .await
-                .map_err(|_| UploadError::Upload("Error reading metadata".to_string()))?;
-
-            if meta.len() < range[0] {
+        Some(range_header) => {
+            if !range_header.is_bytes() {
                 return Err(UploadError::Range);
             }
 
-            // file::read_to_stream() creates a stream in 65,356 byte chunks.
-            let whole_to = ((range[1] - range[0]) as f64 / 65_356.0).floor() as usize;
-            let partial_len = ((range[1] - range[0]) % 65_356) as usize;
+            if range_header.is_empty() {
+                return Err(UploadError::Range);
+            } else if range_header.len() == 1 {
+                let file = async_fs::File::open(path).await?;
 
-            //debug!("Range of {}. Returning {} whole chunks, and {} bytes of the partial chunk", range[1]-range[0], whole_to, partial_len);
+                let meta = file.metadata().await?;
 
-            let stream = file::read_to_stream(out_file)
-                .await?
-                .take(whole_to + 1)
-                .enumerate()
-                .map(move |bytes_res| match bytes_res.1 {
-                    Ok(mut bytes) => {
-                        if bytes_res.0 == whole_to && partial_len <= bytes.len() {
-                            return Ok(bytes.split_to(partial_len));
-                        }
-                        return Ok(bytes);
-                    }
-                    Err(e) => Err(e),
-                });
+                let range = range_header.ranges().next().unwrap();
 
-            return Ok(srv_ranged_response(
-                stream,
-                details.content_type(),
-                7 * DAYS,
-                details.system_time(),
-                Some((range[0], range[1])),
-                Some(meta.len()),
-            ));
+                let mut builder = HttpResponse::PartialContent();
+                builder.set(range.to_content_range(meta.len()));
+
+                (builder, range.chop_file(file).await?)
+            } else {
+                return Err(UploadError::Range);
+            }
         }
         //No Range header in the request - return the entire document
         None => {
-            let stream = actix_fs::read_to_stream(path).await?;
-            return Ok(srv_response(
-                stream,
-                details.content_type(),
-                7 * DAYS,
-                details.system_time(),
-            ));
+            let file = async_fs::File::open(path).await?;
+            let stream: Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>>>> =
+                Box::pin(read_to_stream(file));
+            (HttpResponse::Ok(), stream)
         }
     };
+
+    Ok(srv_response(
+        builder,
+        stream,
+        details.content_type(),
+        7 * DAYS,
+        details.system_time(),
+    ))
 }
 
 // A helper method to produce responses with proper cache headers
 fn srv_response<S, E>(
+    mut builder: HttpResponseBuilder,
     stream: S,
     ext: mime::Mime,
     expires: u32,
@@ -641,9 +607,10 @@ fn srv_response<S, E>(
 ) -> HttpResponse
 where
     S: Stream<Item = Result<bytes::Bytes, E>> + Unpin + 'static,
-    E: Into<UploadError>,
+    E: 'static,
+    actix_web::Error: From<E>,
 {
-    HttpResponse::Ok()
+    builder
         .set(LastModified(modified.into()))
         .set(CacheControl(vec![
             CacheDirective::Public,
@@ -652,35 +619,7 @@ where
         ]))
         .set_header(ACCEPT_RANGES, "bytes")
         .content_type(ext.to_string())
-        .streaming(stream.err_into())
-}
-
-fn srv_ranged_response<S, E>(
-    stream: S,
-    ext: mime::Mime,
-    expires: u32,
-    modified: SystemTime,
-    range: Option<(u64, u64)>,
-    instance_length: Option<u64>,
-) -> HttpResponse
-where
-    S: Stream<Item = Result<bytes::Bytes, E>> + Unpin + 'static,
-    E: Into<UploadError>,
-{
-    HttpResponse::PartialContent()
-        .set(LastModified(modified.into()))
-        .set(CacheControl(vec![
-            CacheDirective::Public,
-            CacheDirective::MaxAge(expires),
-            CacheDirective::Extension("immutable".to_owned(), None),
-        ]))
-        .set(ContentRange(ContentRangeSpec::Bytes {
-            range,
-            instance_length,
-        }))
-        .set_header(ACCEPT_RANGES, "bytes")
-        .content_type(ext.to_string())
-        .streaming(stream.err_into())
+        .streaming(stream)
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -875,8 +814,8 @@ async fn main() -> Result<(), anyhow::Error> {
     .run()
     .await?;
 
-    if actix_fs::metadata(&*TMP_DIR).await.is_ok() {
-        actix_fs::remove_dir_all(&*TMP_DIR).await?;
+    if async_fs::metadata(&*TMP_DIR).await.is_ok() {
+        async_fs::remove_dir_all(&*TMP_DIR).await?;
     }
 
     Ok(())
