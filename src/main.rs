@@ -8,11 +8,10 @@ use actix_web::{
     web, App, HttpResponse, HttpServer,
 };
 use bytes::Bytes;
-use futures::stream::{once, Stream};
-use futures_lite::{AsyncReadExt, AsyncWriteExt};
+use futures::stream::{once, Stream, TryStreamExt};
 use once_cell::sync::Lazy;
 use std::{
-    collections::HashSet, future::ready, io, path::PathBuf, pin::Pin, sync::Once, time::SystemTime,
+    collections::HashSet, future::ready, path::PathBuf, pin::Pin, sync::Once, time::SystemTime,
 };
 use structopt::StructOpt;
 use tracing::{debug, error, info, instrument, Span};
@@ -36,7 +35,6 @@ use self::{
     validate::{image_webp, video_mp4},
 };
 
-const CHUNK_SIZE: usize = 65_356;
 const MEGABYTES: usize = 1024 * 1024;
 const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
@@ -66,12 +64,12 @@ static MAGICK_INIT: Once = Once::new();
 async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
     if let Some(path) = to.parent() {
         debug!("Creating directory {:?}", path);
-        async_fs::create_dir_all(path.to_owned()).await?;
+        actix_fs::create_dir_all(path.to_owned()).await?;
     }
 
     debug!("Checking if {:?} already exists", to);
-    if let Err(e) = async_fs::metadata(to.clone()).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
+    if let Err(e) = actix_fs::metadata(to.clone()).await {
+        if e.kind() != Some(std::io::ErrorKind::NotFound) {
             return Err(e.into());
         }
     } else {
@@ -79,15 +77,15 @@ async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
     }
 
     debug!("Moving {:?} to {:?}", from, to);
-    async_fs::copy(from.clone(), to).await?;
-    async_fs::remove_file(from).await?;
+    actix_fs::copy(from.clone(), to).await?;
+    actix_fs::remove_file(from).await?;
     Ok(())
 }
 
 async fn safe_create_parent(path: PathBuf) -> Result<(), UploadError> {
     if let Some(path) = path.parent() {
         debug!("Creating directory {:?}", path);
-        async_fs::create_dir_all(path.to_owned()).await?;
+        actix_fs::create_dir_all(path.to_owned()).await?;
     }
 
     Ok(())
@@ -99,13 +97,13 @@ async fn safe_save_file(path: PathBuf, bytes: bytes::Bytes) -> Result<(), Upload
     if let Some(path) = path.parent() {
         // create the directory for the file
         debug!("Creating directory {:?}", path);
-        async_fs::create_dir_all(path.to_owned()).await?;
+        actix_fs::create_dir_all(path.to_owned()).await?;
     }
 
     // Only write the file if it doesn't already exist
     debug!("Checking if {:?} already exists", path);
-    if let Err(e) = async_fs::metadata(path.clone()).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
+    if let Err(e) = actix_fs::metadata(path.clone()).await {
+        if e.kind() != Some(std::io::ErrorKind::NotFound) {
             return Err(e.into());
         }
     } else {
@@ -114,17 +112,16 @@ async fn safe_save_file(path: PathBuf, bytes: bytes::Bytes) -> Result<(), Upload
 
     // Open the file for writing
     debug!("Creating {:?}", path);
-    let mut file = async_fs::File::create(path.clone()).await?;
+    let file = actix_fs::file::create(path.clone()).await?;
 
     // try writing
     debug!("Writing to {:?}", path);
-    if let Err(e) = file.write_all(&bytes).await {
+    if let Err(e) = actix_fs::file::write(file, bytes).await {
         error!("Error writing {:?}, {}", path, e);
         // remove file if writing failed before completion
-        async_fs::remove_file(path).await?;
+        actix_fs::remove_file(path).await?;
         return Err(e.into());
     }
-    file.flush().await?;
     debug!("{:?} written", path);
 
     Ok(())
@@ -353,8 +350,8 @@ async fn process(
         prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
     // If the thumbnail doesn't exist, we need to create it
-    let thumbnail_exists = if let Err(e) = async_fs::metadata(thumbnail_path.clone()).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
+    let thumbnail_exists = if let Err(e) = actix_fs::metadata(thumbnail_path.clone()).await {
+        if e.kind() != Some(std::io::ErrorKind::NotFound) {
             error!("Error looking up processed image, {}", e);
             return Err(e.into());
         }
@@ -531,25 +528,6 @@ async fn serve(
     ranged_file_resp(path, range, details).await
 }
 
-fn read_to_stream(mut file: async_fs::File) -> impl Stream<Item = Result<Bytes, io::Error>> {
-    async_stream::stream! {
-        let mut buf = Vec::with_capacity(CHUNK_SIZE);
-
-        while {
-            buf.clear();
-            let mut take = (&mut file).take(CHUNK_SIZE as u64);
-
-            let read_bytes_result = take.read_to_end(&mut buf).await;
-
-            let read_bytes = read_bytes_result.as_ref().map(|num| *num).unwrap_or(0);
-
-            yield read_bytes_result.map(|_| Bytes::copy_from_slice(&buf));
-
-            read_bytes > 0
-        } {}
-    }
-}
-
 async fn ranged_file_resp(
     path: PathBuf,
     range: Option<range::RangeHeader>,
@@ -565,9 +543,9 @@ async fn ranged_file_resp(
             if range_header.is_empty() {
                 return Err(UploadError::Range);
             } else if range_header.len() == 1 {
-                let file = async_fs::File::open(path).await?;
+                let file = actix_fs::file::open(path).await?;
 
-                let meta = file.metadata().await?;
+                let (file, meta) = actix_fs::file::metadata(file).await?;
 
                 let range = range_header.ranges().next().unwrap();
 
@@ -581,9 +559,10 @@ async fn ranged_file_resp(
         }
         //No Range header in the request - return the entire document
         None => {
-            let file = async_fs::File::open(path).await?;
-            let stream: Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>>>> =
-                Box::pin(read_to_stream(file));
+            let stream = actix_fs::read_to_stream(path)
+                .await?
+                .map_err(UploadError::from);
+            let stream: Pin<Box<dyn Stream<Item = Result<Bytes, UploadError>>>> = Box::pin(stream);
             (HttpResponse::Ok(), stream)
         }
     };
@@ -814,8 +793,8 @@ async fn main() -> Result<(), anyhow::Error> {
     .run()
     .await?;
 
-    if async_fs::metadata(&*TMP_DIR).await.is_ok() {
-        async_fs::remove_dir_all(&*TMP_DIR).await?;
+    if actix_fs::metadata(&*TMP_DIR).await.is_ok() {
+        actix_fs::remove_dir_all(&*TMP_DIR).await?;
     }
 
     Ok(())

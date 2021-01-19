@@ -1,4 +1,4 @@
-use crate::{UploadError, CHUNK_SIZE};
+use crate::UploadError;
 use actix_web::{
     dev::Payload,
     http::{
@@ -8,9 +8,8 @@ use actix_web::{
     web::Bytes,
     FromRequest, HttpRequest,
 };
-use futures::stream::{once, Once, Stream};
-use futures_lite::{AsyncReadExt, AsyncSeekExt};
-use std::io;
+use futures::stream::{once, Once, Stream, StreamExt, TryStreamExt};
+use std::{fs, io};
 use std::{
     future::{ready, Ready},
     pin::Pin,
@@ -47,7 +46,7 @@ impl Range {
         }
     }
 
-    pub(crate) fn chop_bytes(&self, bytes: Bytes) -> Once<Ready<Result<Bytes, io::Error>>> {
+    pub(crate) fn chop_bytes(&self, bytes: Bytes) -> Once<Ready<Result<Bytes, UploadError>>> {
         match self {
             Range::RangeStart(start) => once(ready(Ok(bytes.slice(*start as usize..)))),
             Range::SuffixLength(from_start) => once(ready(Ok(bytes.slice(..*from_start as usize)))),
@@ -59,26 +58,31 @@ impl Range {
 
     pub(crate) async fn chop_file(
         &self,
-        mut file: async_fs::File,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>>>>, io::Error> {
+        file: fs::File,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, UploadError>>>>, UploadError> {
         match self {
             Range::RangeStart(start) => {
-                file.seek(io::SeekFrom::Start(*start)).await?;
+                let (file, _) = actix_fs::file::seek(file, io::SeekFrom::Start(*start)).await?;
 
-                Ok(Box::pin(crate::read_to_stream(file)))
+                Ok(Box::pin(
+                    actix_fs::file::read_to_stream(file)
+                        .await?
+                        .map_err(UploadError::from),
+                ))
             }
             Range::SuffixLength(from_start) => {
-                file.seek(io::SeekFrom::Start(0)).await?;
+                let (file, _) = actix_fs::file::seek(file, io::SeekFrom::Start(0)).await?;
 
-                Ok(Box::pin(read_num_bytes_to_stream(file, *from_start)))
+                Ok(Box::pin(
+                    read_num_bytes_to_stream(file, *from_start as usize).await?,
+                ))
             }
             Range::Segment(start, end) => {
-                file.seek(io::SeekFrom::Start(*start)).await?;
+                let (file, _) = actix_fs::file::seek(file, io::SeekFrom::Start(*start)).await?;
 
-                Ok(Box::pin(read_num_bytes_to_stream(
-                    file,
-                    end.saturating_sub(*start),
-                )))
+                Ok(Box::pin(
+                    read_num_bytes_to_stream(file, end.saturating_sub(*start) as usize).await?,
+                ))
             }
         }
     }
@@ -184,25 +188,31 @@ fn parse_range(s: &str) -> Result<Range, UploadError> {
     }
 }
 
-fn read_num_bytes_to_stream(
-    mut file: async_fs::File,
-    mut num_bytes: u64,
-) -> impl Stream<Item = Result<Bytes, io::Error>> {
-    async_stream::stream! {
-        let mut buf = Vec::with_capacity((CHUNK_SIZE as u64).min(num_bytes) as usize);
+async fn read_num_bytes_to_stream(
+    file: fs::File,
+    mut num_bytes: usize,
+) -> Result<impl Stream<Item = Result<Bytes, UploadError>>, UploadError> {
+    let mut stream = actix_fs::file::read_to_stream(file).await?;
 
-        while {
-            buf.clear();
-            let mut take = (&mut file).take((CHUNK_SIZE as u64).min(num_bytes));
+    let stream = async_stream::stream! {
+        while let Some(res) = stream.next().await {
+            let read_bytes = res.as_ref().map(|b| b.len()).unwrap_or(0);
 
-            let read_bytes_result = take.read_to_end(&mut buf).await;
+            if read_bytes == 0 {
+                break;
+            }
 
-            let read_bytes = read_bytes_result.as_ref().map(|num| *num).unwrap_or(0);
+            yield res.map_err(UploadError::from).map(|bytes| {
+                if bytes.len() > num_bytes {
+                    bytes.slice(0..num_bytes)
+                } else {
+                    bytes
+                }
+            });
 
-            yield read_bytes_result.map(|_| Bytes::copy_from_slice(&buf));
+            num_bytes = num_bytes.saturating_sub(read_bytes);
+        }
+    };
 
-            num_bytes = num_bytes.saturating_sub(read_bytes as u64);
-            read_bytes > 0 && num_bytes > 0
-        } {}
-    }
+    Ok(stream)
 }
