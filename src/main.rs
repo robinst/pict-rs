@@ -7,7 +7,6 @@ use actix_web::{
     middleware::{Compress, Logger},
     web, App, HttpResponse, HttpServer,
 };
-use bytes::Bytes;
 use futures::stream::{once, Stream, TryStreamExt};
 use once_cell::sync::Lazy;
 use std::{
@@ -50,6 +49,7 @@ static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
     let tmp_nonce = Alphanumeric
         .sample_iter(&mut rng)
         .take(7)
+        .map(char::from)
         .collect::<String>();
 
     let mut path = std::env::temp_dir();
@@ -93,7 +93,7 @@ async fn safe_create_parent(path: PathBuf) -> Result<(), UploadError> {
 
 // Try writing to a file
 #[instrument(skip(bytes))]
-async fn safe_save_file(path: PathBuf, bytes: bytes::Bytes) -> Result<(), UploadError> {
+async fn safe_save_file(path: PathBuf, bytes: web::Bytes) -> Result<(), UploadError> {
     if let Some(path) = path.parent() {
         // create the directory for the file
         debug!("Creating directory {:?}", path);
@@ -132,7 +132,11 @@ pub(crate) fn tmp_file() -> PathBuf {
     let limit: usize = 10;
     let rng = rand::thread_rng();
 
-    let s: String = Alphanumeric.sample_iter(rng).take(limit).collect();
+    let s: String = Alphanumeric
+        .sample_iter(rng)
+        .take(limit)
+        .map(char::from)
+        .collect();
 
     let name = format!("{}.tmp", s);
 
@@ -203,7 +207,7 @@ async fn upload(
         }
     }
 
-    Ok(HttpResponse::Created().json(serde_json::json!({
+    Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
         "files": files
     })))
@@ -250,7 +254,7 @@ async fn download(
         new_details
     };
 
-    Ok(HttpResponse::Created().json(serde_json::json!({
+    Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
         "files": [{
             "file": alias,
@@ -334,7 +338,7 @@ async fn process_details(
 
     let details = details.ok_or(UploadError::NoFiles)?;
 
-    Ok(HttpResponse::Ok().json(details))
+    Ok(HttpResponse::Ok().json(&details))
 }
 
 /// Process files
@@ -447,7 +451,7 @@ async fn process(
                     let range = range_header.ranges().next().unwrap();
 
                     let mut builder = HttpResponse::PartialContent();
-                    builder.set(range.to_content_range(img_bytes.len() as u64));
+                    builder.insert_header(range.to_content_range(img_bytes.len() as u64));
                     (builder, range.chop_bytes(img_bytes))
                 } else {
                     return Err(UploadError::Range);
@@ -499,7 +503,7 @@ async fn details(
         new_details
     };
 
-    Ok(HttpResponse::Ok().json(details))
+    Ok(HttpResponse::Ok().json(&details))
 }
 
 /// Serve files
@@ -550,7 +554,7 @@ async fn ranged_file_resp(
                 let range = range_header.ranges().next().unwrap();
 
                 let mut builder = HttpResponse::PartialContent();
-                builder.set(range.to_content_range(meta.len()));
+                builder.insert_header(range.to_content_range(meta.len()));
 
                 (builder, range.chop_file(file).await?)
             } else {
@@ -562,7 +566,8 @@ async fn ranged_file_resp(
             let stream = actix_fs::read_to_stream(path)
                 .await?
                 .map_err(UploadError::from);
-            let stream: Pin<Box<dyn Stream<Item = Result<Bytes, UploadError>>>> = Box::pin(stream);
+            let stream: Pin<Box<dyn Stream<Item = Result<web::Bytes, UploadError>>>> =
+                Box::pin(stream);
             (HttpResponse::Ok(), stream)
         }
     };
@@ -585,18 +590,18 @@ fn srv_response<S, E>(
     modified: SystemTime,
 ) -> HttpResponse
 where
-    S: Stream<Item = Result<bytes::Bytes, E>> + Unpin + 'static,
+    S: Stream<Item = Result<web::Bytes, E>> + Unpin + 'static,
     E: 'static,
     actix_web::Error: From<E>,
 {
     builder
-        .set(LastModified(modified.into()))
-        .set(CacheControl(vec![
+        .insert_header(LastModified(modified.into()))
+        .insert_header(CacheControl(vec![
             CacheDirective::Public,
             CacheDirective::MaxAge(expires),
             CacheDirective::Extension("immutable".to_owned(), None),
         ]))
-        .set_header(ACCEPT_RANGES, "bytes")
+        .insert_header((ACCEPT_RANGES, "bytes"))
         .content_type(ext.to_string())
         .streaming(stream)
 }
@@ -623,7 +628,7 @@ async fn purge(
             .await?;
     }
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
+    Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",
         "aliases": aliases
     })))
@@ -638,7 +643,7 @@ async fn aliases(
         FileOrAlias::Alias { alias } => upload_manager.aliases_by_alias(alias).await?,
     };
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
+    Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",
         "aliases": aliases,
     })))
@@ -655,7 +660,7 @@ async fn filename_by_alias(
 ) -> Result<HttpResponse, UploadError> {
     let filename = upload_manager.from_alias(query.into_inner().alias).await?;
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
+    Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",
         "filename": filename,
     })))

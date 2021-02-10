@@ -4,7 +4,6 @@ use crate::{
     validate::{ptos, Op},
 };
 use actix_web::web;
-use bytes::Bytes;
 use magick_rust::MagickWand;
 use std::path::PathBuf;
 use tracing::{debug, error, instrument, Span};
@@ -372,7 +371,7 @@ pub(crate) async fn prepare_image(
 
             transcode(orig_path, tmpfile, Target::Jpeg).map_err(UploadError::Transcode)
         })
-        .await;
+        .await?;
 
         if let Err(e) = res {
             error!("transcode error: {:?}", e);
@@ -395,7 +394,7 @@ pub(crate) async fn process_image(
     original_file: PathBuf,
     chain: ProcessChain,
     format: Format,
-) -> Result<Bytes, UploadError> {
+) -> Result<web::Bytes, UploadError> {
     let original_path_str = ptos(&original_file)?;
 
     let span = Span::current();
@@ -414,9 +413,9 @@ pub(crate) async fn process_image(
 
         let vec = wand.op(|w| w.write_image_blob(format.to_magick_format()))?;
         drop(entered);
-        Ok(Bytes::from(vec)) as Result<Bytes, UploadError>
+        Ok(web::Bytes::from(vec)) as Result<web::Bytes, UploadError>
     })
-    .await?;
+    .await??;
 
     Ok(bytes)
 }

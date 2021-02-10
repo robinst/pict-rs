@@ -44,7 +44,7 @@ impl std::fmt::Debug for UploadManager {
     }
 }
 
-type UploadStream<E> = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, E>>>>;
+type UploadStream<E> = Pin<Box<dyn Stream<Item = Result<web::Bytes, E>>>>;
 
 #[derive(Clone)]
 pub(crate) struct Serde<T> {
@@ -134,7 +134,7 @@ impl Details {
                     })
             })
         })
-        .await?;
+        .await??;
 
         Ok(Details::now(width as usize, height as usize, mime_type))
     }
@@ -213,7 +213,7 @@ impl UploadManager {
     ) -> Result<Self, UploadError> {
         let root_clone = root_dir.clone();
         // sled automatically creates it's own directories
-        let db = web::block(move || LatestDb::exists(root_clone).migrate()).await?;
+        let db = web::block(move || LatestDb::exists(root_clone).migrate()).await??;
 
         root_dir.push("files");
 
@@ -245,13 +245,13 @@ impl UploadManager {
         let fname_tree = self.inner.filename_tree.clone();
         debug!("Getting hash");
         let hash: sled::IVec = web::block(move || fname_tree.get(filename.as_bytes()))
-            .await?
+            .await??
             .ok_or(UploadError::MissingFilename)?;
 
         let key = variant_key(&hash, &path_string);
         let main_tree = self.inner.main_tree.clone();
         debug!("Storing variant");
-        web::block(move || main_tree.insert(key, path_string.as_bytes())).await?;
+        web::block(move || main_tree.insert(key, path_string.as_bytes())).await??;
         debug!("Stored variant");
 
         Ok(())
@@ -268,13 +268,13 @@ impl UploadManager {
         let fname_tree = self.inner.filename_tree.clone();
         debug!("Getting hash");
         let hash: sled::IVec = web::block(move || fname_tree.get(filename.as_bytes()))
-            .await?
+            .await??
             .ok_or(UploadError::MissingFilename)?;
 
         let key = variant_details_key(&hash, &path_string);
         let main_tree = self.inner.main_tree.clone();
         debug!("Getting details");
-        let opt = match web::block(move || main_tree.get(key)).await? {
+        let opt = match web::block(move || main_tree.get(key)).await?? {
             Some(ivec) => match serde_json::from_slice(&ivec) {
                 Ok(details) => Some(details),
                 Err(_) => None,
@@ -297,14 +297,14 @@ impl UploadManager {
         let fname_tree = self.inner.filename_tree.clone();
         debug!("Getting hash");
         let hash: sled::IVec = web::block(move || fname_tree.get(filename.as_bytes()))
-            .await?
+            .await??
             .ok_or(UploadError::MissingFilename)?;
 
         let key = variant_details_key(&hash, &path_string);
         let main_tree = self.inner.main_tree.clone();
         let details_value = serde_json::to_string(details)?;
         debug!("Storing details");
-        web::block(move || main_tree.insert(key, details_value.as_bytes())).await?;
+        web::block(move || main_tree.insert(key, details_value.as_bytes())).await??;
         debug!("Stored details");
 
         Ok(())
@@ -317,7 +317,7 @@ impl UploadManager {
     ) -> Result<Vec<String>, UploadError> {
         let fname_tree = self.inner.filename_tree.clone();
         let hash = web::block(move || fname_tree.get(filename.as_bytes()))
-            .await?
+            .await??
             .ok_or(UploadError::MissingAlias)?;
 
         self.aliases_by_hash(&hash).await
@@ -327,7 +327,7 @@ impl UploadManager {
     pub(crate) async fn aliases_by_alias(&self, alias: String) -> Result<Vec<String>, UploadError> {
         let alias_tree = self.inner.alias_tree.clone();
         let hash = web::block(move || alias_tree.get(alias.as_bytes()))
-            .await?
+            .await??
             .ok_or(UploadError::MissingFilename)?;
 
         self.aliases_by_hash(&hash).await
@@ -342,7 +342,7 @@ impl UploadManager {
                 .values()
                 .collect::<Result<Vec<_>, _>>()
         })
-        .await?;
+        .await??;
 
         debug!("Got {} aliases for hash", aliases.len());
         let aliases = aliases
@@ -362,7 +362,7 @@ impl UploadManager {
         let token_key = delete_key(&alias);
         let alias_tree = self.inner.alias_tree.clone();
         let token = web::block(move || alias_tree.get(token_key.as_bytes()))
-            .await?
+            .await??
             .ok_or(UploadError::MissingAlias)?;
 
         self.delete(alias, String::from_utf8(token.to_vec())?).await
@@ -415,7 +415,7 @@ impl UploadManager {
                 Ok(hash)
             })
         })
-        .await?;
+        .await??;
 
         // -- CHECK IF ANY OTHER ALIASES EXIST --
         let main_tree = self.inner.main_tree.clone();
@@ -424,7 +424,7 @@ impl UploadManager {
         let any_aliases = web::block(move || {
             Ok(main_tree.range(start..end).next().is_some()) as Result<bool, UploadError>
         })
-        .await?;
+        .await??;
 
         // Bail if there are existing aliases
         if any_aliases {
@@ -437,7 +437,7 @@ impl UploadManager {
         let hash2 = hash.clone();
         debug!("Deleting hash -> filename mapping");
         let filename = web::block(move || main_tree.remove(&hash2))
-            .await?
+            .await??
             .ok_or(UploadError::MissingFile)?;
 
         // -- DELETE FILES --
@@ -468,7 +468,11 @@ impl UploadManager {
         debug!("Generating delete token");
         use rand::distributions::{Alphanumeric, Distribution};
         let rng = rand::thread_rng();
-        let s: String = Alphanumeric.sample_iter(rng).take(10).collect();
+        let s: String = Alphanumeric
+            .sample_iter(rng)
+            .take(10)
+            .map(char::from)
+            .collect();
         let delete_token = s.clone();
 
         debug!("Saving delete token");
@@ -481,7 +485,7 @@ impl UploadManager {
                 Some(s.as_bytes()),
             )
         })
-        .await?;
+        .await??;
 
         if let Err(sled::CompareAndSwapError {
             current: Some(ivec),
@@ -579,13 +583,13 @@ impl UploadManager {
         let tree = self.inner.alias_tree.clone();
         debug!("Getting hash from alias");
         let hash = web::block(move || tree.get(alias.as_bytes()))
-            .await?
+            .await??
             .ok_or(UploadError::MissingAlias)?;
 
         let main_tree = self.inner.main_tree.clone();
         debug!("Getting filename from hash");
         let filename = web::block(move || main_tree.get(hash))
-            .await?
+            .await??
             .ok_or(UploadError::MissingFile)?;
 
         let filename = String::from_utf8(filename.to_vec())?;
@@ -610,7 +614,7 @@ impl UploadManager {
         let fname_tree = self.inner.filename_tree.clone();
         debug!("Deleting filename -> hash mapping");
         let hash = web::block(move || fname_tree.remove(filename))
-            .await?
+            .await??
             .ok_or(UploadError::MissingFile)?;
 
         let (start, end) = variant_key_bounds(&hash);
@@ -624,13 +628,13 @@ impl UploadManager {
 
             Ok(keys) as Result<Vec<sled::IVec>, UploadError>
         })
-        .await?;
+        .await??;
 
         debug!("{} files prepared for deletion", keys.len());
 
         for key in keys {
             let main_tree = self.inner.main_tree.clone();
-            if let Some(path) = web::block(move || main_tree.remove(key)).await? {
+            if let Some(path) = web::block(move || main_tree.remove(key)).await?? {
                 let s = String::from_utf8_lossy(&path);
                 debug!("Deleting {}", s);
                 // ignore json objects
@@ -685,12 +689,12 @@ impl UploadManager {
                 hasher.update(&bytes);
                 Ok(hasher) as Result<_, UploadError>
             })
-            .await?;
+            .await??;
         }
 
         let hash =
             web::block(move || Ok(hasher.finalize_reset().to_vec()) as Result<_, UploadError>)
-                .await?;
+                .await??;
 
         Ok(Hash::new(hash))
     }
@@ -715,7 +719,7 @@ impl UploadManager {
                 Some(filename2.as_bytes()),
             )
         })
-        .await?;
+        .await??;
 
         if let Err(sled::CompareAndSwapError {
             current: Some(ivec),
@@ -730,7 +734,7 @@ impl UploadManager {
         let fname_tree = self.inner.filename_tree.clone();
         let filename2 = filename.clone();
         debug!("Saving filename -> hash relation");
-        web::block(move || fname_tree.insert(filename2, hash.inner)).await?;
+        web::block(move || fname_tree.insert(filename2, hash.inner)).await??;
 
         Ok((Dup::New, filename))
     }
@@ -741,11 +745,15 @@ impl UploadManager {
         let image_dir = self.image_dir();
         use rand::distributions::{Alphanumeric, Distribution};
         let mut limit: usize = 10;
-        let rng = rand::thread_rng();
+        let mut rng = rand::thread_rng();
         loop {
             debug!("Filename generation loop");
             let mut path = image_dir.clone();
-            let s: String = Alphanumeric.sample_iter(rng).take(limit).collect();
+            let s: String = Alphanumeric
+                .sample_iter(&mut rng)
+                .take(limit)
+                .map(char::from)
+                .collect();
 
             let filename = file_name(s, content_type.clone())?;
 
@@ -799,7 +807,7 @@ impl UploadManager {
         loop {
             debug!("hash -> alias save loop");
             let db = self.inner.db.clone();
-            let id = web::block(move || db.generate_id()).await?.to_string();
+            let id = web::block(move || db.generate_id()).await??.to_string();
 
             let key = alias_key(&hash.inner, &id);
             let main_tree = self.inner.main_tree.clone();
@@ -808,13 +816,13 @@ impl UploadManager {
             let res = web::block(move || {
                 main_tree.compare_and_swap(key, None as Option<sled::IVec>, Some(alias2.as_bytes()))
             })
-            .await?;
+            .await??;
 
             if res.is_ok() {
                 let alias_tree = self.inner.alias_tree.clone();
                 let key = alias_id_key(&alias);
                 debug!("Saving alias -> id mapping");
-                web::block(move || alias_tree.insert(key.as_bytes(), id.as_bytes())).await?;
+                web::block(move || alias_tree.insert(key.as_bytes(), id.as_bytes())).await??;
 
                 break;
             }
@@ -834,10 +842,14 @@ impl UploadManager {
     ) -> Result<String, UploadError> {
         use rand::distributions::{Alphanumeric, Distribution};
         let mut limit: usize = 10;
-        let rng = rand::thread_rng();
+        let mut rng = rand::thread_rng();
         loop {
             debug!("Alias gen loop");
-            let s: String = Alphanumeric.sample_iter(rng).take(limit).collect();
+            let s: String = Alphanumeric
+                .sample_iter(&mut rng)
+                .take(limit)
+                .map(char::from)
+                .collect();
             let alias = file_name(s, content_type.clone())?;
 
             let res = self.save_alias(hash, &alias).await?;
@@ -866,7 +878,7 @@ impl UploadManager {
         let res = web::block(move || {
             tree.compare_and_swap(alias.as_bytes(), None as Option<sled::IVec>, Some(vec))
         })
-        .await?;
+        .await??;
 
         if res.is_err() {
             warn!("Duplicate alias");

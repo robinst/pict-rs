@@ -26,16 +26,16 @@ impl ResponseError for ApiError {
     }
 
     fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code()).json(serde_json::json!({ "msg": self.to_string() }))
+        HttpResponse::build(self.status_code())
+            .json(&serde_json::json!({ "msg": self.to_string() }))
     }
 }
 
-impl<S> Transform<S> for Tracing
+impl<S, Request> Transform<S, Request> for Tracing
 where
-    S: Service,
+    S: Service<Request>,
     S::Future: 'static,
 {
-    type Request = S::Request;
     type Response = S::Response;
     type Error = S::Error;
     type InitError = ();
@@ -47,21 +47,20 @@ where
     }
 }
 
-impl<S> Service for TracingMiddleware<S>
+impl<S, Request> Service<Request> for TracingMiddleware<S>
 where
-    S: Service,
+    S: Service<Request>,
     S::Future: 'static,
 {
-    type Request = S::Request;
     type Response = S::Response;
     type Error = S::Error;
     type Future = Instrumented<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: S::Request) -> Self::Future {
+    fn call(&self, req: Request) -> Self::Future {
         let uuid = Uuid::new_v4();
 
         self.inner
@@ -70,12 +69,11 @@ where
     }
 }
 
-impl<S> Transform<S> for Internal
+impl<S> Transform<S, ServiceRequest> for Internal
 where
-    S: Service<Request = ServiceRequest, Error = actix_web::Error>,
+    S: Service<ServiceRequest, Error = actix_web::Error>,
     S::Future: 'static,
 {
-    type Request = S::Request;
     type Response = S::Response;
     type Error = S::Error;
     type InitError = ();
@@ -87,21 +85,20 @@ where
     }
 }
 
-impl<S> Service for InternalMiddleware<S>
+impl<S> Service<ServiceRequest> for InternalMiddleware<S>
 where
-    S: Service<Request = ServiceRequest, Error = actix_web::Error>,
+    S: Service<ServiceRequest, Error = actix_web::Error>,
     S::Future: 'static,
 {
-    type Request = S::Request;
     type Response = S::Response;
     type Error = S::Error;
     type Future = LocalBoxFuture<'static, Result<S::Response, S::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.1.poll_ready(cx)
     }
 
-    fn call(&mut self, req: S::Request) -> Self::Future {
+    fn call(&self, req: ServiceRequest) -> Self::Future {
         if let Some(value) = req.headers().get("x-api-token") {
             if value.to_str().is_ok() && value.to_str().ok() == self.0.as_deref() {
                 let fut = self.1.call(req);

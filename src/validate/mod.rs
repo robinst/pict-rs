@@ -199,7 +199,7 @@ pub(crate) async fn validate_image(
         drop(entered);
         Ok(content_type) as Result<mime::Mime, UploadError>
     })
-    .await?;
+    .await??;
 
     Ok(content_type)
 }

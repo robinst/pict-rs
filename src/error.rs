@@ -100,15 +100,9 @@ impl From<actix_form_data::Error> for UploadError {
     }
 }
 
-impl<T> From<actix_web::error::BlockingError<T>> for UploadError
-where
-    T: Into<UploadError> + std::fmt::Debug,
-{
-    fn from(e: actix_web::error::BlockingError<T>) -> Self {
-        match e {
-            actix_web::error::BlockingError::Error(e) => e.into(),
-            _ => UploadError::Canceled,
-        }
+impl From<actix_web::error::BlockingError> for UploadError {
+    fn from(_: actix_web::error::BlockingError) -> Self {
+        UploadError::Canceled
     }
 }
 
@@ -128,6 +122,7 @@ impl ResponseError for UploadError {
     }
 
     fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code()).json(serde_json::json!({ "msg": self.to_string() }))
+        HttpResponse::build(self.status_code())
+            .json(&serde_json::json!({ "msg": self.to_string() }))
     }
 }
