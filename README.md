@@ -1,6 +1,11 @@
 # pict-rs
 _a simple image hosting service_
 
+## Links
+- Find the code on [gitea](https://git.asonix.dog/asonix/pict-rs)
+- Join the discussion on [matrix](https://matrix.to/#/#pictrs:matrix.asonix.dog?via=matrix.asonix.dog)
+- Hit me up on [mastodon](https://masto.asonix.dog/@asonix)
+
 ## Usage
 ### Running
 ```
