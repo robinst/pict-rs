@@ -43,7 +43,7 @@ pub(crate) enum UploadError {
     Download(actix_web::http::StatusCode),
 
     #[error("Unable to download image, {0}")]
-    Payload(#[from] actix_web::client::PayloadError),
+    Payload(#[from] awc::error::PayloadError),
 
     #[error("Unable to send request, {0}")]
     SendRequest(String),
@@ -79,8 +79,8 @@ pub(crate) enum UploadError {
     Range,
 }
 
-impl From<actix_web::client::SendRequestError> for UploadError {
-    fn from(e: actix_web::client::SendRequestError) -> Self {
+impl From<awc::error::SendRequestError> for UploadError {
+    fn from(e: awc::error::SendRequestError) -> Self {
         UploadError::SendRequest(e.to_string())
     }
 }

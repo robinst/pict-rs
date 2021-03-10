@@ -1,12 +1,12 @@
 use actix_form_data::{Field, Form, Value};
 use actix_web::{
-    client::Client,
     dev::HttpResponseBuilder,
     guard,
     http::header::{CacheControl, CacheDirective, LastModified, ACCEPT_RANGES},
     middleware::{Compress, Logger},
     web, App, HttpResponse, HttpServer,
 };
+use awc::Client;
 use futures::stream::{once, Stream, TryStreamExt};
 use once_cell::sync::Lazy;
 use std::{
