@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.3.0-alpha.10"
+version = "0.3.0-alpha.11"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -20,7 +20,7 @@ async-stream = "0.3.0"
 awc = { version = "3.0.0-beta.3", default-features = false, features = ["compress", "rustls"] }
 base64 = "0.13.0"
 futures = "0.3.4"
-magick_rust = { version = "0.14.0", git = "https://github.com/nlfiedler/magick-rust" }
+magick_rust = { version = "0.14.0", git = "https://git.asonix.dog/asonix/magick-rust.git" }
 mime = "0.3.1"
 once_cell = "1.4.0"
 rand = "0.8.0"
@@ -44,7 +44,8 @@ features = ["codec", "filter", "device", "format", "resampling", "postprocessing
 
 [dependencies.ffmpeg-sys-next]
 version = "4.3.5"
-git = "https://github.com/baadc0de/rust-ffmpeg-sys"
+git = "https://github.com/jwiesler/rust-ffmpeg-sys"
+branch = "master"
 
 [patch.crates-io]
-ffmpeg-sys-next = { git = "https://github.com/baadc0de/rust-ffmpeg-sys", branch = "master" }
+ffmpeg-sys-next = { git = "https://github.com/jwiesler/rust-ffmpeg-sys", branch = "master" }

@@ -590,7 +590,7 @@ fn srv_response<S, E>(
 ) -> HttpResponse
 where
     S: Stream<Item = Result<web::Bytes, E>> + Unpin + 'static,
-    E: 'static,
+    E: std::error::Error + 'static,
     actix_web::Error: From<E>,
 {
     builder

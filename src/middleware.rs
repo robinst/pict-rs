@@ -1,7 +1,7 @@
 use actix_web::{
-    dev::{Body, Service, ServiceRequest, Transform},
+    dev::{Service, ServiceRequest, Transform},
     http::StatusCode,
-    BaseHttpResponse, ResponseError,
+    HttpResponse, ResponseError,
 };
 use futures::future::{ok, LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
@@ -25,8 +25,8 @@ impl ResponseError for ApiError {
         StatusCode::UNAUTHORIZED
     }
 
-    fn error_response(&self) -> BaseHttpResponse<Body> {
-        BaseHttpResponse::build(self.status_code())
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code())
             .content_type("application/json")
             .body(
                 serde_json::to_string(&serde_json::json!({ "msg": self.to_string() }))

@@ -1,5 +1,5 @@
 use crate::validate::GifError;
-use actix_web::{dev::Body, http::StatusCode, BaseHttpResponse, ResponseError};
+use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum UploadError {
@@ -121,8 +121,8 @@ impl ResponseError for UploadError {
         }
     }
 
-    fn error_response(&self) -> BaseHttpResponse<Body> {
-        BaseHttpResponse::build(self.status_code())
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code())
             .content_type("application/json")
             .body(
                 serde_json::to_string(&serde_json::json!({ "msg": self.to_string() }))
