@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.3.0-alpha.11"
+version = "0.3.0-alpha.12"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -13,11 +13,11 @@ edition = "2018"
 [dependencies]
 actix-form-data = "0.6.0-beta.1"
 actix-fs = { git = "https://git.asonix.dog/asonix/actix-fs", branch = "asonix/actix-rt-2" }
-actix-rt = "2.0.2"
-actix-web = { version = "4.0.0-beta.4", default-features = false, features = ["compress"] }
+actix-rt = "2.2.0"
+actix-web = { version = "4.0.0-beta.8", default-features = false, features = ["compress-brotli", "compress-gzip", "compress-zstd"] }
 anyhow = "1.0"
 async-stream = "0.3.0"
-awc = { version = "3.0.0-beta.3", default-features = false, features = ["compress", "rustls"] }
+awc = { version = "3.0.0-beta.7", default-features = false, features = ["compress-brotli", "compress-gzip", "compress-zstd", "rustls"] }
 base64 = "0.13.0"
 futures = "0.3.4"
 magick_rust = { version = "0.14.0", git = "https://git.asonix.dog/asonix/magick-rust.git" }

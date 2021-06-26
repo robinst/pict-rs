@@ -750,9 +750,9 @@ async fn main() -> Result<(), anyhow::Error> {
             .wrap(Compress::default())
             .wrap(Logger::default())
             .wrap(Tracing)
-            .data(manager.clone())
-            .data(client)
-            .data(CONFIG.filter_whitelist())
+            .app_data(web::Data::new(manager.clone()))
+            .app_data(web::Data::new(client))
+            .app_data(web::Data::new(CONFIG.filter_whitelist()))
             .service(
                 web::scope("/image")
                     .service(
