@@ -25,10 +25,10 @@ function build_image() {
 
     ./build-image.sh asonix/pictrs $tag $arch
 
-    docker tag asonix/pictrs:$arch-$tag asonix/pictrs:$arch-latest
+    sudo docker tag asonix/pictrs:$arch-$tag asonix/pictrs:$arch-latest
 
-    docker push asonix/pictrs:$arch-$tag
-    docker push asonix/pictrs:$arch-latest
+    sudo docker push asonix/pictrs:$arch-$tag
+    sudo docker push asonix/pictrs:$arch-latest
 }
 
 # Creating the new tag
@@ -38,7 +38,7 @@ branch="$2"
 require "$new_tag" "tag"
 require "$branch" "branch"
 
-if ! docker run --rm -it arm64v8/alpine:3.11 /bin/sh -c 'echo "docker is configured correctly"'
+if ! sudo docker run --rm -it arm64v8/alpine:3.11 /bin/sh -c 'echo "docker is configured correctly"'
 then
     echo "docker is not configured to run on qemu-emulated architectures, fixing will require sudo"
     sudo docker run --rm --privileged multiarch/qemu-user-static --reset -p yes

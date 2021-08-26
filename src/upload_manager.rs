@@ -681,7 +681,7 @@ impl UploadManager {
         let mut hasher = self.inner.hasher.clone();
 
         let file = actix_fs::file::open(tmpfile).await?;
-        let mut stream = Box::pin(actix_fs::file::read_to_stream(file).await?);
+        let mut stream = Box::pin(actix_fs::file::read_to_stream(file).await?.faster());
 
         while let Some(res) = stream.next().await {
             let bytes = res?;
@@ -913,7 +913,7 @@ where
 
     let file = actix_fs::file::create(to).await?;
 
-    actix_fs::file::write_stream(file, stream.map_err(UploadError::from)).await?;
+    actix_fs::file::write_stream_faster(file, stream.map_err(UploadError::from)).await?;
 
     Ok(())
 }

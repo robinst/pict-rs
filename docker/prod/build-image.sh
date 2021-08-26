@@ -28,7 +28,7 @@ require "$REPO" repo
 require "$TAG" tag
 require "$ARCH" arch
 
-docker build \
+sudo docker build \
     --pull \
     --build-arg TAG=$TAG \
     -t $REPO:$ARCH-$TAG \

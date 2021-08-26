@@ -2,7 +2,7 @@ use actix_form_data::{Field, Form, Value};
 use actix_web::{
     guard,
     http::header::{CacheControl, CacheDirective, LastModified, ACCEPT_RANGES},
-    middleware::{Compress, Logger},
+    middleware::Logger,
     web, App, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::Client;
@@ -17,6 +17,8 @@ use tracing_subscriber::EnvFilter;
 
 mod config;
 mod error;
+mod exiv2;
+mod ffmpeg;
 mod middleware;
 mod migrate;
 mod processor;
@@ -564,6 +566,7 @@ async fn ranged_file_resp(
         None => {
             let stream = actix_fs::read_to_stream(path)
                 .await?
+                .faster()
                 .map_err(UploadError::from);
             let stream: Pin<Box<dyn Stream<Item = Result<web::Bytes, UploadError>>>> =
                 Box::pin(stream);
@@ -747,7 +750,6 @@ async fn main() -> Result<(), anyhow::Error> {
             .finish();
 
         App::new()
-            .wrap(Compress::default())
             .wrap(Logger::default())
             .wrap(Tracing)
             .app_data(web::Data::new(manager.clone()))

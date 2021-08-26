@@ -67,6 +67,7 @@ impl Range {
                 Ok(Box::pin(
                     actix_fs::file::read_to_stream(file)
                         .await?
+                        .faster()
                         .map_err(UploadError::from),
                 ))
             }
