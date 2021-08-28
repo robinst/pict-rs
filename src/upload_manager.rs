@@ -96,47 +96,18 @@ pub(crate) struct Details {
     created_at: time::OffsetDateTime,
 }
 
-fn mime_from_media_type(media_type: rexiv2::MediaType) -> mime::Mime {
-    match media_type {
-        rexiv2::MediaType::Jpeg => mime::IMAGE_JPEG,
-        rexiv2::MediaType::Png => mime::IMAGE_PNG,
-        rexiv2::MediaType::Gif => mime::IMAGE_GIF,
-        rexiv2::MediaType::Other(s) if s == "image/webp" => s.parse::<mime::Mime>().unwrap(),
-        rexiv2::MediaType::Other(s) if s == "video/mp4" || s == "video/quicktime" => {
-            "video/mp4".parse::<mime::Mime>().unwrap()
-        }
-        _ => mime::APPLICATION_OCTET_STREAM,
-    }
-}
-
 impl Details {
-    pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self, UploadError> {
-        let metadata = rexiv2::Metadata::new_from_buffer(bytes)?;
-        let mime_type = mime_from_media_type(metadata.get_media_type()?);
-        let width = metadata.get_pixel_width();
-        let height = metadata.get_pixel_height();
-        let details = Details::now(width as usize, height as usize, mime_type);
-        Ok(details)
-    }
+    pub(crate) async fn from_path<P>(path: P) -> Result<Self, UploadError>
+    where
+        P: AsRef<std::path::Path>,
+    {
+        let details = crate::exiv2::details(&path).await?;
 
-    pub(crate) async fn from_path(path: PathBuf) -> Result<Self, UploadError> {
-        let (mime_type, width, height) = web::block(move || {
-            rexiv2::Metadata::new_from_path(&path).and_then(|metadata| {
-                metadata
-                    .get_media_type()
-                    .map(mime_from_media_type)
-                    .map(|mime_type| {
-                        (
-                            mime_type,
-                            metadata.get_pixel_width(),
-                            metadata.get_pixel_height(),
-                        )
-                    })
-            })
-        })
-        .await??;
-
-        Ok(Details::now(width as usize, height as usize, mime_type))
+        Ok(Details::now(
+            details.width,
+            details.height,
+            details.mime_type,
+        ))
     }
 
     fn now(width: usize, height: usize, content_type: mime::Mime) -> Self {

@@ -1,4 +1,4 @@
-use crate::validate::GifError;
+use crate::{exiv2::Exvi2Error, ffmpeg::VideoError, magick::MagickError};
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 
 #[derive(Debug, thiserror::Error)]
@@ -57,26 +57,23 @@ pub(crate) enum UploadError {
     #[error("Tried to save an image with an already-taken name")]
     DuplicateAlias,
 
-    #[error("Error validating Gif file, {0}")]
-    Gif(#[from] GifError),
-
-    #[error("Error transcoding, {0}")]
-    Transcode(crate::validate::transcode::Error),
-
     #[error("Tried to create file, but file already exists")]
     FileExists,
-
-    #[error("File metadata could not be parsed, {0}")]
-    Validate(#[from] rexiv2::Rexiv2Error),
-
-    #[error("Error in MagickWand, {0}")]
-    Wand(String),
 
     #[error("{0}")]
     Json(#[from] serde_json::Error),
 
     #[error("Range header not satisfiable")]
     Range,
+
+    #[error("{0}")]
+    VideoError(#[from] VideoError),
+
+    #[error("{0}")]
+    Exvi2Error(#[from] Exvi2Error),
+
+    #[error("{0}")]
+    MagickError(#[from] MagickError),
 }
 
 impl From<awc::error::SendRequestError> for UploadError {
@@ -109,7 +106,9 @@ impl From<actix_web::error::BlockingError> for UploadError {
 impl ResponseError for UploadError {
     fn status_code(&self) -> StatusCode {
         match self {
-            UploadError::Gif(_)
+            UploadError::VideoError(_)
+            | UploadError::Exvi2Error(_)
+            | UploadError::MagickError(_)
             | UploadError::DuplicateAlias
             | UploadError::NoFiles
             | UploadError::Upload(_)

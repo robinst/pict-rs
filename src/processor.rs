@@ -1,12 +1,10 @@
-use crate::{
-    config::Format,
-    error::UploadError,
-    validate::{ptos, Op},
-};
-use actix_web::web;
-use magick_rust::MagickWand;
+use crate::{error::UploadError, ffmpeg::ThumbnailFormat};
 use std::path::PathBuf;
-use tracing::{debug, error, instrument, Span};
+use tracing::{debug, error, instrument};
+
+fn ptos(path: &PathBuf) -> Result<String, UploadError> {
+    Ok(path.to_str().ok_or(UploadError::Path)?.to_owned())
+}
 
 pub(crate) trait Processor {
     fn name() -> &'static str
@@ -22,7 +20,7 @@ pub(crate) trait Processor {
         Self: Sized;
 
     fn path(&self, path: PathBuf) -> PathBuf;
-    fn process(&self, wand: &mut MagickWand) -> Result<(), UploadError>;
+    fn command(&self, args: Vec<String>) -> Vec<String>;
 }
 
 pub(crate) struct Identity;
@@ -46,7 +44,6 @@ impl Processor for Identity {
     where
         Self: Sized,
     {
-        debug!("Identity");
         Some(Box::new(Identity))
     }
 
@@ -54,8 +51,8 @@ impl Processor for Identity {
         path
     }
 
-    fn process(&self, _: &mut MagickWand) -> Result<(), UploadError> {
-        Ok(())
+    fn command(&self, args: Vec<String>) -> Vec<String> {
+        args
     }
 }
 
@@ -90,25 +87,10 @@ impl Processor for Thumbnail {
         path
     }
 
-    fn process(&self, wand: &mut MagickWand) -> Result<(), UploadError> {
-        debug!("Thumbnail");
-        let width = wand.get_image_width();
-        let height = wand.get_image_height();
+    fn command(&self, mut args: Vec<String>) -> Vec<String> {
+        args.extend(["-sample".to_string(), format!("{}x{}>", self.0, self.0)]);
 
-        if width > self.0 || height > self.0 {
-            let width_ratio = width as f64 / self.0 as f64;
-            let height_ratio = height as f64 / self.0 as f64;
-
-            let (new_width, new_height) = if width_ratio < height_ratio {
-                (width as f64 / height_ratio, self.0 as f64)
-            } else {
-                (self.0 as f64, height as f64 / width_ratio)
-            };
-
-            wand.op(|w| w.sample_image(new_width as usize, new_height as usize))?;
-        }
-
-        Ok(())
+        args
     }
 }
 
@@ -143,29 +125,15 @@ impl Processor for Resize {
         path
     }
 
-    fn process(&self, wand: &mut MagickWand) -> Result<(), UploadError> {
-        debug!("Resize");
-        let width = wand.get_image_width();
-        let height = wand.get_image_height();
+    fn command(&self, mut args: Vec<String>) -> Vec<String> {
+        args.extend([
+            "-filter".to_string(),
+            "-Lanczos2".to_string(),
+            "-resize".to_string(),
+            format!("{}x{}>", self.0, self.0),
+        ]);
 
-        if width > self.0 || height > self.0 {
-            let width_ratio = width as f64 / self.0 as f64;
-            let height_ratio = height as f64 / self.0 as f64;
-
-            let (new_width, new_height) = if width_ratio < height_ratio {
-                (width as f64 / height_ratio, self.0 as f64)
-            } else {
-                (self.0 as f64, height as f64 / width_ratio)
-            };
-
-            wand.resize_image(
-                new_width as usize,
-                new_height as usize,
-                magick_rust::bindings::FilterType_Lanczos2Filter,
-            );
-        }
-
-        Ok(())
+        args
     }
 }
 
@@ -208,40 +176,15 @@ impl Processor for Crop {
         path
     }
 
-    fn process(&self, wand: &mut MagickWand) -> Result<(), UploadError> {
-        let width = wand.get_image_width();
-        let height = wand.get_image_height();
+    fn command(&self, mut args: Vec<String>) -> Vec<String> {
+        args.extend([
+            "-gravity".to_string(),
+            "center".to_string(),
+            "-crop".to_string(),
+            format!("{}:{}+0+0", self.0, self.1),
+        ]);
 
-        // 16x9 becomes 16/9, which is bigger than 16/10. a bigger number means a wider image
-        //
-        // Crop ratios bigger than Image ratios mean cropping the image's height and leaving the
-        // width alone.
-        let img_ratio = width as f64 / height as f64;
-        let crop_ratio = self.0 as f64 / self.1 as f64;
-
-        let final_width;
-        let final_height;
-
-        let x_offset;
-        let y_offset;
-
-        if crop_ratio > img_ratio {
-            final_height = (width as f64 / self.0 as f64 * self.1 as f64) as usize;
-            final_width = width;
-
-            x_offset = 0;
-            y_offset = ((height - final_height) as f64 / 2.0) as isize;
-        } else {
-            final_height = height;
-            final_width = (height as f64 / self.1 as f64 * self.0 as f64) as usize;
-
-            x_offset = ((width - final_width) as f64 / 2.0) as isize;
-            y_offset = 0;
-        }
-
-        wand.op(|w| w.crop_image(final_width, final_height, x_offset, y_offset))?;
-
-        Ok(())
+        args
     }
 }
 
@@ -270,13 +213,10 @@ impl Processor for Blur {
         path
     }
 
-    fn process(&self, wand: &mut MagickWand) -> Result<(), UploadError> {
-        debug!("Blur");
-        if self.0 > 0.0 {
-            wand.op(|w| w.gaussian_blur_image(0.0, self.0))?;
-        }
+    fn command(&self, mut args: Vec<String>) -> Vec<String> {
+        args.extend(["-gaussian-blur".to_string(), self.0.to_string()]);
 
-        Ok(())
+        args
     }
 }
 
@@ -333,6 +273,13 @@ pub(crate) fn build_path(base: PathBuf, chain: &ProcessChain, filename: String) 
     path
 }
 
+pub(crate) fn build_args(chain: &ProcessChain) -> Vec<String> {
+    chain
+        .inner
+        .iter()
+        .fold(Vec::new(), |acc, processor| processor.command(acc))
+}
+
 fn is_motion(s: &str) -> bool {
     s.ends_with(".gif") || s.ends_with(".mp4")
 }
@@ -363,23 +310,17 @@ pub(crate) async fn prepare_image(
         let orig_path = original_path_str.clone();
 
         let tmpfile = crate::tmp_file();
-        crate::safe_create_parent(tmpfile.clone()).await?;
-        let tmpfile2 = tmpfile.clone();
+        crate::safe_create_parent(&tmpfile).await?;
 
-        let res = web::block(move || {
-            use crate::validate::transcode::{transcode, Target};
-
-            transcode(orig_path, tmpfile, Target::Jpeg).map_err(UploadError::Transcode)
-        })
-        .await?;
+        let res = crate::ffmpeg::thumbnail(orig_path, &tmpfile, ThumbnailFormat::Jpeg).await;
 
         if let Err(e) = res {
             error!("transcode error: {:?}", e);
-            actix_fs::remove_file(tmpfile2).await?;
+            actix_fs::remove_file(tmpfile.clone()).await?;
             return Err(e.into());
         }
 
-        return match crate::safe_move_file(tmpfile2, jpg_path.clone()).await {
+        return match crate::safe_move_file(tmpfile, jpg_path.clone()).await {
             Err(UploadError::FileExists) => Ok(Some((jpg_path, Exists::Exists))),
             Err(e) => Err(e),
             _ => Ok(Some((jpg_path, Exists::New))),
@@ -387,35 +328,4 @@ pub(crate) async fn prepare_image(
     }
 
     Ok(None)
-}
-
-#[instrument]
-pub(crate) async fn process_image(
-    original_file: PathBuf,
-    chain: ProcessChain,
-    format: Format,
-) -> Result<web::Bytes, UploadError> {
-    let original_path_str = ptos(&original_file)?;
-
-    let span = Span::current();
-    let bytes = web::block(move || {
-        let entered = span.enter();
-
-        let mut wand = MagickWand::new();
-        debug!("Reading image");
-        wand.op(|w| w.read_image(&original_path_str))?;
-
-        debug!("Processing image");
-        for processor in chain.inner.into_iter() {
-            debug!("Step");
-            processor.process(&mut wand)?;
-        }
-
-        let vec = wand.op(|w| w.write_image_blob(format.to_magick_format()))?;
-        drop(entered);
-        Ok(web::Bytes::from(vec)) as Result<web::Bytes, UploadError>
-    })
-    .await??;
-
-    Ok(bytes)
 }

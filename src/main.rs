@@ -6,11 +6,9 @@ use actix_web::{
     web, App, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::Client;
-use futures::stream::{once, Stream, TryStreamExt};
+use futures::stream::{Stream, TryStreamExt};
 use once_cell::sync::Lazy;
-use std::{
-    collections::HashSet, future::ready, path::PathBuf, pin::Pin, sync::Once, time::SystemTime,
-};
+use std::{collections::HashSet, path::PathBuf, pin::Pin, time::SystemTime};
 use structopt::StructOpt;
 use tracing::{debug, error, info, instrument, Span};
 use tracing_subscriber::EnvFilter;
@@ -19,6 +17,7 @@ mod config;
 mod error;
 mod exiv2;
 mod ffmpeg;
+mod magick;
 mod middleware;
 mod migrate;
 mod processor;
@@ -30,7 +29,6 @@ use self::{
     config::{Config, Format},
     error::UploadError,
     middleware::{Internal, Tracing},
-    processor::process_image,
     upload_manager::{Details, UploadManager},
     validate::{image_webp, video_mp4},
 };
@@ -58,7 +56,6 @@ static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
     path
 });
 static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
-static MAGICK_INIT: Once = Once::new();
 
 // try moving a file
 #[instrument]
@@ -83,8 +80,11 @@ async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
     Ok(())
 }
 
-async fn safe_create_parent(path: PathBuf) -> Result<(), UploadError> {
-    if let Some(path) = path.parent() {
+async fn safe_create_parent<P>(path: P) -> Result<(), UploadError>
+where
+    P: AsRef<std::path::Path>,
+{
+    if let Some(path) = path.as_ref().parent() {
         debug!("Creating directory {:?}", path);
         actix_fs::create_dir_all(path.to_owned()).await?;
     }
@@ -285,7 +285,7 @@ async fn prepare_process(
     ext: &str,
     manager: &UploadManager,
     whitelist: &Option<HashSet<String>>,
-) -> Result<(processor::ProcessChain, Format, String, PathBuf), UploadError> {
+) -> Result<(Format, String, PathBuf, Vec<String>), UploadError> {
     let (alias, operations) =
         query
             .into_inner()
@@ -322,8 +322,9 @@ async fn prepare_process(
     let processed_name = format!("{}.{}", name, ext);
     let base = manager.image_dir();
     let thumbnail_path = self::processor::build_path(base, &chain, processed_name);
+    let thumbnail_args = self::processor::build_args(&chain);
 
-    Ok((chain, format, name, thumbnail_path))
+    Ok((format, name, thumbnail_path, thumbnail_args))
 }
 
 async fn process_details(
@@ -332,7 +333,7 @@ async fn process_details(
     manager: web::Data<UploadManager>,
     whitelist: web::Data<Option<HashSet<String>>>,
 ) -> Result<HttpResponse, UploadError> {
-    let (_, _, name, thumbnail_path) =
+    let (_, name, thumbnail_path, _) =
         prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
     let details = manager.variant_details(thumbnail_path, name).await?;
@@ -351,7 +352,7 @@ async fn process(
     manager: web::Data<UploadManager>,
     whitelist: web::Data<Option<HashSet<String>>>,
 ) -> Result<HttpResponse, UploadError> {
-    let (chain, format, name, thumbnail_path) =
+    let (format, name, thumbnail_path, thumbnail_args) =
         prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
     // If the thumbnail doesn't exist, we need to create it
@@ -396,78 +397,25 @@ async fn process(
             }
         }
 
+        safe_create_parent(&thumbnail_path).await?;
+
         // apply chain to the provided image
-        let img_bytes = process_image(original_path.clone(), chain, format).await?;
+        magick::process_image(&original_path, &thumbnail_path, thumbnail_args, format).await?;
 
-        let path2 = thumbnail_path.clone();
-        let img_bytes2 = img_bytes.clone();
-
-        let store_details = details.is_none();
         let details = if let Some(details) = details {
             details
         } else {
-            let details = Details::from_bytes(&img_bytes)?;
+            let details = Details::from_path(&thumbnail_path).await?;
             manager
-                .store_variant_details(path2.clone(), name.clone(), &details)
+                .store_variant_details(thumbnail_path.clone(), name.clone(), &details)
+                .await?;
+            manager
+                .store_variant(thumbnail_path.clone(), name.clone())
                 .await?;
             details
         };
 
-        // Save the file in another task, we want to return the thumbnail now
-        debug!("Spawning storage task");
-        let span = Span::current();
-        let details2 = details.clone();
-        actix_rt::spawn(async move {
-            let entered = span.enter();
-            if store_details {
-                debug!("Storing details");
-                if let Err(e) = manager
-                    .store_variant_details(path2.clone(), name.clone(), &details2)
-                    .await
-                {
-                    error!("Error storing details, {}", e);
-                    return;
-                }
-            }
-            if let Err(e) = manager.store_variant(path2.clone(), name).await {
-                error!("Error storing variant, {}", e);
-                return;
-            }
-
-            if let Err(e) = safe_save_file(path2, img_bytes2).await {
-                error!("Error saving file, {}", e);
-            }
-            drop(entered);
-        });
-
-        let (builder, stream) = match range {
-            Some(range_header) => {
-                if !range_header.is_bytes() {
-                    return Err(UploadError::Range);
-                }
-
-                if range_header.is_empty() {
-                    return Err(UploadError::Range);
-                } else if range_header.len() == 1 {
-                    let range = range_header.ranges().next().unwrap();
-
-                    let mut builder = HttpResponse::PartialContent();
-                    builder.insert_header(range.to_content_range(img_bytes.len() as u64));
-                    (builder, range.chop_bytes(img_bytes))
-                } else {
-                    return Err(UploadError::Range);
-                }
-            }
-            None => (HttpResponse::Ok(), once(ready(Ok(img_bytes)))),
-        };
-
-        return Ok(srv_response(
-            builder,
-            stream,
-            details.content_type(),
-            7 * DAYS,
-            details.system_time(),
-        ));
+        return ranged_file_resp(thumbnail_path, range, details).await;
     }
 
     let details = if let Some(details) = details {
@@ -670,10 +618,6 @@ async fn filename_by_alias(
 
 #[actix_rt::main]
 async fn main() -> Result<(), anyhow::Error> {
-    MAGICK_INIT.call_once(|| {
-        magick_rust::magick_wand_genesis();
-    });
-
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info");
     }

@@ -78,7 +78,7 @@ RUN \
     --disable-static \
     --disable-docs \
     --prefix=/usr/local \
-    --with-utilities=no \
+    --with-utilities=yes \
     --with-magick-plus-plus=no \
     --without-perl \
     --with-xml=yes \
@@ -121,7 +121,7 @@ FROM cross-build as pict-rs-builder
 
 RUN \
  apt-get install -y \
-    libgexiv2-dev:$ARCH \
+    exiv2:$ARCH \
     libxml2:$ARCH \
     libltdl7:$ARCH \
     llvm-dev \
@@ -133,15 +133,7 @@ RUN \
     libwebpdemux2:$ARCH \
     libwebpmux3:$ARCH \
     libgomp1:$ARCH \
-    libavcodec-dev:$ARCH \
-    libavfilter-dev:$ARCH \
-    libavdevice-dev:$ARCH \
-    libavformat-dev:$ARCH \
-    libavresample-dev:$ARCH \
-    libavutil-dev:$ARCH \
-    libswscale-dev:$ARCH \
-    libswresample-dev:$ARCH \
-    ffmpeg && \
+    ffmpeg:$ARCH && \
  rm -rf /usr/include/x86_64-linux-gnu
 
 ENV \
