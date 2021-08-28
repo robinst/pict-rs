@@ -68,9 +68,10 @@ FROM amd64/alpine:3.14
 ARG UID=991
 ARG GID=991
 ARG BINARY=pict-rs
+ARG BUILD_MODE=release
 
 COPY --from=builder \
- /opt/build/repo/target/aarch64-unknown-linux-musl/release/$BINARY \
+ /opt/build/pict-rs/target/aarch64-unknown-linux-musl/$BUILD_MODE/$BINARY \
  /usr/local/bin/$BINARY
 
 RUN \

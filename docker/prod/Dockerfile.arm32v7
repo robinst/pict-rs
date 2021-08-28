@@ -59,7 +59,7 @@ RUN \
 WORKDIR /opt/build/pict-rs
 
 RUN \
- USER=build cargo build --release --target $TARGET --$BUILD_MODE && \
+ USER=build cargo build --target $TARGET --$BUILD_MODE && \
  $TOOL-strip target/$TARGET/$BUILD_MODE/$BINARY
 
 # production environment
@@ -68,9 +68,10 @@ FROM amd64/alpine:3.14
 ARG UID=991
 ARG GID=991
 ARG BINARY=pict-rs
+ARG BUILD_MODE=release
 
 COPY --from=builder \
- /opt/build/repo/target/arm-unknown-linux-musleabihf/release/$BINARY \
+ /opt/build/pict-rs/target/arm-unknown-linux-musleabihf/$BUILD_MODE/$BINARY \
  /usr/local/bin/$BINARY
 
 RUN \
