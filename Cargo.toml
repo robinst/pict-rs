@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.3.0-alpha.12"
+version = "0.3.0-alpha.13"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -30,7 +30,7 @@ sha2 = "0.9.0"
 sled = { version = "0.34.6" }
 structopt = "0.3.14"
 thiserror = "1.0"
-time = { version = "0.2.23", features = ["serde"] }
+time = { version = "0.3.0", features = ["serde"] }
 tokio = { version = "1", default-features = false, features = ["io-util", "process", "sync"] }
 tracing = "0.1.15"
 tracing-futures = "0.2.4"

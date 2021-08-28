@@ -85,7 +85,7 @@ dependencies = [
  "serde",
  "sha-1",
  "smallvec",
- "time",
+ "time 0.2.27",
  "tokio",
 ]
 
@@ -233,7 +233,7 @@ dependencies = [
  "serde_urlencoded",
  "smallvec",
  "socket2",
- "time",
+ "time 0.2.27",
  "url",
 ]
 
@@ -995,7 +995,7 @@ dependencies = [
 
 [[package]]
 name = "pict-rs"
-version = "0.3.0-alpha.12"
+version = "0.3.0-alpha.13"
 dependencies = [
  "actix-form-data",
  "actix-fs",
@@ -1016,7 +1016,7 @@ dependencies = [
  "sled",
  "structopt",
  "thiserror",
- "time",
+ "time 0.3.2",
  "tokio",
  "tracing",
  "tracing-futures",
@@ -1530,12 +1530,21 @@ checksum = "4752a97f8eebd6854ff91f1c1824cd6160626ac4bd44287f7f4ea2035a02a242"
 dependencies = [
  "const_fn",
  "libc",
- "serde",
  "standback",
  "stdweb",
  "time-macros",
  "version_check",
  "winapi",
+]
+
+[[package]]
+name = "time"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e0a10c9a9fb3a5dce8c2239ed670f1a2569fcf42da035f5face1b19860d52b0"
+dependencies = [
+ "libc",
+ "serde",
 ]
 
 [[package]]

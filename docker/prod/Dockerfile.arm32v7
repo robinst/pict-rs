@@ -1,166 +1,55 @@
-# Target environment
-FROM arm32v7/ubuntu:20.04 as target-env
+# cross-build environment
+FROM rustembedded/cross:arm-unknown-linux-musleabihf AS arm32v7-builder
 
-ENV \
- TARGET=armv7-unknown-linux-gnueabihf \
- BUILD_MODE=release
-
-# Basic cross-build environment
-FROM ubuntu:20.04 as cross-build
-
-ENV \
- ARCH=armhf \
- HOST=arm-unknown-linux \
- TOOL=arm-linux-gnueabihf \
- TARGET=armv7-unknown-linux-gnueabihf \
- CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc \
- CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc \
- CXX_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-g++ \
- BUILD_MODE=release
+ARG UID=991
+ARG GID=991
 
 ENV \
  TOOLCHAIN=stable \
- DEBIAN_FRONTEND=noninteractive \
- PKG_CONFIG_ALLOW_CROSS=1 \
- PKG_CONFIG_PATH=/usr/lib/$TOOL/pkgconfig:/usr/lib/pkgconfig \
- LD_LIBRARY_PATH=/usr/lib/$TOOL:/usr/$TOOL/lib \
- LD_RUN_PATH=/usr/lib/$TOOL:/usr/$TOOL/lib \
- LDFLAGS="-L/usr/lib/$TOOL -L/usr/$TOOL/lib -Wl,-rpath-link,/usr/lib/$TOOL -Wl,-rpath-link,/usr/$TOOL/lib" \
- CFLAGS="-I/usr/include/$TOOL -I/usr/$TOOL/include -I/usr/include" \
- CPPFLAGS="-I/usr/include/$TOOL -I/usr/$TOOL/include -I/usr/include"
+ TARGET=arm-unknown-linux-musleabihf \
+ TOOL=arm-linux-musleabihf \
+ BUILD_MODE=release
 
 RUN \
- sed 's/http:\/\/\(.*\).ubuntu.com\/ubuntu\//[arch-=amd64,i386] http:\/\/ports.ubuntu.com\/ubuntu-ports\//g' /etc/apt/sources.list > /etc/apt/sources.list.d/ports.list && \
- sed -i 's/http:\/\/\(.*\).ubuntu.com\/ubuntu\//[arch=amd64,i386] http:\/\/\1.archive.ubuntu.com\/ubuntu\//g' /etc/apt/sources.list && \
- addgroup --gid 991 build && \
+ apt-get update && \
+ apt-get upgrade -y
+
+RUN \
+ addgroup --gid "${GID}" build && \
  adduser \
     --disabled-password \
     --gecos "" \
     --ingroup build \
-    --uid 991 \
+    --uid "${UID}" \
     --home /opt/build \
-    build && \
- dpkg --add-architecture $ARCH && \
- apt-get update && \
- apt-get upgrade -y && \
- apt-get install -y \
-    pkg-config \
-    build-essential \
-    crossbuild-essential-$ARCH
+    build
 
+ADD https://sh.rustup.rs /opt/build/rustup.sh
+
+RUN \
+ chown -R build:build /opt/build
+
+USER build
 WORKDIR /opt/build
 
-
-# Environment for ImageMagick
-FROM cross-build as imagemagick-builder
-
-RUN \
- apt-get install -y \
-    libltdl-dev:$ARCH \
-    libjpeg-dev:$ARCH \
-    libpng-dev:$ARCH \
-    libwebp-dev:$ARCH \
-    liblzma-dev:$ARCH \
-    libxml2-dev:$ARCH
-
-ADD --chown=build:build https://imagemagick.org/download/ImageMagick.tar.gz /opt/build/ImageMagick.tar.gz
-
-USER build
-
-RUN \
- tar zxf ImageMagick.tar.gz && \
- mv ImageMagick-* ImageMagick
-
-WORKDIR /opt/build/ImageMagick
-
-RUN \
- ./configure \
-    CC=$TOOL-gcc \
-    CXX=$TOOL-g++ \
-    --enable-shared \
-    --with-modules \
-    --disable-static \
-    --disable-docs \
-    --prefix=/usr/local \
-    --with-utilities=no \
-    --with-magick-plus-plus=no \
-    --without-perl \
-    --with-xml=yes \
-    --with-png=yes \
-    --with-jpeg=yes \
-    --with-webp=yes \
-    --host=$HOST && \
- make
-
-USER root
-
-RUN \
- make install && \
- ldconfig /usr/local/lib
-
-
-# Environment for Rust
-FROM cross-build as rust
-
-RUN \
- apt-get install -y curl
-
-ENV \
- PATH=$PATH:/opt/build/.cargo/bin
-
-ADD --chown=build:build https://sh.rustup.rs /opt/build/rustup.sh
-
-USER build
+ENV PATH=/opt/build/.cargo/bin:/usr/local/musl/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN \
  chmod +x rustup.sh && \
  ./rustup.sh --default-toolchain $TOOLCHAIN --profile minimal -y && \
  rustup target add $TARGET
 
-USER root
-
-
-# Environment for pict-rs
-FROM cross-build as pict-rs-builder
-
-RUN \
- apt-get install -y \
-    libgexiv2-dev:$ARCH \
-    libxml2:$ARCH \
-    libltdl7:$ARCH \
-    libavcodec-dev:$ARCH \
-    libavfilter-dev:$ARCH \
-    libavdevice-dev:$ARCH \
-    libavformat-dev:$ARCH \
-    libavresample-dev:$ARCH \
-    libavutil-dev:$ARCH \
-    libswscale-dev:$ARCH \
-    libswresample-dev:$ARCH \
-    llvm-dev \
-    libclang-dev \
-    clang && \
- rm -rf /usr/include/x86_64-linux-gnu
-
-ENV \
- PATH=$PATH:/opt/build/.cargo/bin \
- PKG_CONFIG_PATH=$PKG_CONFIG_PATH:/usr/local/lib/pkgconfig \
- LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib \
- LD_RUN_PATH=$LD_RUN_PATH:/usr/local/lib \
- LDFLAGS="$LDFLAGS -L/usr/local/lib" \
- IMAGE_MAGICK_LIB_DIRS=/usr/local/lib \
- IMAGE_MAGICK_INCLUDE_DIRS=/usr/local/include/ImageMagick-7 \
- CFLAGS="$CFLAGS -I/usr/local/include/ImageMagick-7" \
- CPPFLAGS="$CPPFLAGS -I/usr/local/include/ImageMagick-7" \
- RUSTFLAGS="-L/usr/lib/$TOOL -C link-arg=-Wl,-rpath-link,/usr/lib/$TOOL -L/usr/$TOOL/lib -C link-arg=-Wl,-rpath-link,/usr/$TOOL/lib"
-
-COPY --from=rust --chown=build:build /opt/build/.cargo /opt/build/.cargo
-COPY --from=rust --chown=build:build /opt/build/.rustup /opt/build/.rustup
-COPY --from=imagemagick-builder /usr/local/ /usr/local
+# build script
+FROM arm32v7-builder as builder
 
 ARG TAG=main
 ARG GIT_REPOSITORY=https://git.asonix.dog/asonix/pict-rs
+ARG BINARY=pict-rs
 
-ADD --chown=build:build $GIT_REPOSITORY/archive/$TAG.tar.gz /opt/build/$TAG.tar.gz
+ADD \
+ --chown=build:build \
+ $GIT_REPOSITORY/archive/$TAG.tar.gz \
+ /opt/build/$TAG.tar.gz
 
 USER build
 
@@ -170,55 +59,27 @@ RUN \
 WORKDIR /opt/build/pict-rs
 
 RUN \
- USER=build cargo build --target=$TARGET --$BUILD_MODE && \
- $TOOL-strip /opt/build/pict-rs/target/$TARGET/$BUILD_MODE/pict-rs
+ USER=build cargo build --release --target $TARGET --$BUILD_MODE && \
+ $TOOL-strip target/$TARGET/$BUILD_MODE/$BINARY
 
-
-# Producing target binary
-FROM target-env
+# production environment
+FROM amd64/alpine:3.14
 
 ARG UID=991
 ARG GID=991
+ARG BINARY=pict-rs
+
+COPY --from=builder \
+ /opt/build/repo/target/arm-unknown-linux-musleabihf/release/$BINARY \
+ /usr/local/bin/$BINARY
 
 RUN \
- addgroup --gid $GID pictrs && \
- adduser \
-    --disabled-password \
-    --gecos "" \
-    --ingroup pictrs \
-    --uid $UID \
-    --home /opt/pict-rs \
-    pictrs && \
- apt-get update && \
- apt-get upgrade -y && \
- apt-get install -y --no-install-recommends \
-    libgexiv2-2 \
-    libpng16-16 \
-    libjpeg8 \
-    libwebp6 \
-    libwebpdemux2 \
-    libwebpmux3 \
-    libltdl7 \
-    libgomp1 \
-    libxml2 \
-    libavcodec58 \
-    libavfilter7 \
-    libavdevice58 \
-    libavformat58 \
-    libavresample4 \
-    libavutil56 \
-    libswscale5 \
-    libswresample3 \
-    tini
-
-COPY --from=pict-rs-builder /opt/build/pict-rs/target/$TARGET/$BUILD_MODE/pict-rs /usr/local/bin/pict-rs
-COPY --from=imagemagick-builder /usr/local /usr/local
-
-ENV \
- LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
+ apk add tini ffmpeg imagemagick exiv2 && \
+ addgroup -g $GID pictrs && \
+ adduser -D -G pictrs -u $UID -g "" -h /opt/pict-rs pictrs
 
 RUN \
- chown pictrs:pictrs /mnt
+ chown -R pictrs:pictrs /mnt
 
 COPY root/ /
 
@@ -226,5 +87,5 @@ VOLUME /mnt
 WORKDIR /opt/pict-rs
 USER pictrs
 EXPOSE 8080
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/usr/local/bin/pict-rs", "-p", "/mnt"]
