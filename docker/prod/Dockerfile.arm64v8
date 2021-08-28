@@ -59,7 +59,7 @@ RUN \
 WORKDIR /opt/build/pict-rs
 
 RUN \
- USER=build cargo build --release --target $TARGET --$BUILD_MODE && \
+ USER=build cargo build --target $TARGET --$BUILD_MODE && \
  $TOOL-strip target/$TARGET/$BUILD_MODE/$BINARY
 
 # production environment
