@@ -128,7 +128,7 @@ impl Processor for Resize {
     fn command(&self, mut args: Vec<String>) -> Vec<String> {
         args.extend([
             "-filter".to_string(),
-            "-Lanczos2".to_string(),
+            "Lanczos2".to_string(),
             "-resize".to_string(),
             format!("{}x{}>", self.0, self.0),
         ]);

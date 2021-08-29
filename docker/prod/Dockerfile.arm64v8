@@ -63,7 +63,7 @@ RUN \
  $TOOL-strip target/$TARGET/$BUILD_MODE/$BINARY
 
 # production environment
-FROM amd64/alpine:3.14
+FROM arm64v8/alpine:3.14
 
 ARG UID=991
 ARG GID=991
