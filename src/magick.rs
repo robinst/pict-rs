@@ -31,8 +31,7 @@ static MAX_CONVERSIONS: once_cell::sync::OnceCell<tokio::sync::Semaphore> =
     once_cell::sync::OnceCell::new();
 
 fn semaphore() -> &'static tokio::sync::Semaphore {
-    MAX_CONVERSIONS
-        .get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
+    MAX_CONVERSIONS.get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get().max(1) * 5))
 }
 
 pub(crate) async fn convert_file<P1, P2>(

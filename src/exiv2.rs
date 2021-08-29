@@ -14,7 +14,7 @@ static MAX_READS: once_cell::sync::OnceCell<tokio::sync::Semaphore> =
     once_cell::sync::OnceCell::new();
 
 fn semaphore() -> &'static tokio::sync::Semaphore {
-    MAX_READS.get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get() * 4))
+    MAX_READS.get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get() * 5))
 }
 
 pub(crate) async fn clear_metadata<P>(file: P) -> Result<(), Exvi2Error>
