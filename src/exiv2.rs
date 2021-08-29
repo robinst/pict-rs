@@ -19,14 +19,6 @@ pub(crate) enum Exvi2Error {
     Unsupported,
 }
 
-pub(crate) enum ValidInputType {
-    Mp4,
-    Gif,
-    Png,
-    Jpeg,
-    Webp,
-}
-
 pub(crate) struct Details {
     pub(crate) mime_type: mime::Mime,
     pub(crate) width: usize,
@@ -60,42 +52,6 @@ where
     }
 
     Ok(())
-}
-
-pub(crate) async fn input_type<P>(file: P) -> Result<ValidInputType, Exvi2Error>
-where
-    P: AsRef<std::path::Path>,
-{
-    let permit = semaphore().acquire().await?;
-
-    let output = tokio::process::Command::new("exiv2")
-        .arg(&"pr")
-        .arg(&file.as_ref())
-        .output()
-        .await?;
-    drop(permit);
-
-    let s = String::from_utf8_lossy(&output.stdout);
-
-    let mime_line = s
-        .lines()
-        .find(|line| line.starts_with("MIME"))
-        .ok_or_else(|| Exvi2Error::Missing)?;
-
-    let mut segments = mime_line.rsplit(':');
-    let mime_type = segments.next().ok_or_else(|| Exvi2Error::Missing)?;
-
-    let input_type = match mime_type.trim() {
-        "video/mp4" => ValidInputType::Mp4,
-        "video/quicktime" => ValidInputType::Mp4,
-        "image/gif" => ValidInputType::Gif,
-        "image/png" => ValidInputType::Png,
-        "image/jpeg" => ValidInputType::Jpeg,
-        "image/webp" => ValidInputType::Webp,
-        _ => return Err(Exvi2Error::Unsupported),
-    };
-
-    Ok(input_type)
 }
 
 pub(crate) async fn details<P>(file: P) -> Result<Details, Exvi2Error>

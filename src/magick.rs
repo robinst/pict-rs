@@ -13,20 +13,12 @@ pub(crate) enum MagickError {
     Format,
 }
 
-pub(crate) enum ValidFormat {
-    Jpeg,
+pub(crate) enum ValidInputType {
+    Mp4,
+    Gif,
     Png,
+    Jpeg,
     Webp,
-}
-
-impl ValidFormat {
-    fn as_magic_type(&self) -> &'static str {
-        match self {
-            ValidFormat::Jpeg => "JPEG",
-            ValidFormat::Png => "PNG",
-            ValidFormat::Webp => "WEBP",
-        }
-    }
 }
 
 static MAX_CONVERSIONS: once_cell::sync::OnceCell<tokio::sync::Semaphore> =
@@ -69,7 +61,7 @@ where
     Ok(())
 }
 
-pub(crate) async fn validate_format<P>(file: &P, format: ValidFormat) -> Result<(), MagickError>
+pub(crate) async fn input_type<P>(file: &P) -> Result<ValidInputType, MagickError>
 where
     P: AsRef<std::path::Path>,
 {
@@ -85,13 +77,22 @@ where
 
     let s = String::from_utf8_lossy(&output.stdout);
 
-    if s.lines()
-        .all(|item| item.is_empty() || item == format.as_magic_type())
-    {
-        return Ok(());
-    }
+    let mut lines = s.lines();
+    let first = lines.next();
 
-    Err(MagickError::Format)
+    let opt = lines.fold(first, |acc, item| match acc {
+        Some(prev) if prev == item => Some(prev),
+        _ => None,
+    });
+
+    match opt {
+        Some("MP4") => Ok(ValidInputType::Mp4),
+        Some("GIF") => Ok(ValidInputType::Gif),
+        Some("PNG") => Ok(ValidInputType::Png),
+        Some("JPEG") => Ok(ValidInputType::Jpeg),
+        Some("WEBP") => Ok(ValidInputType::Webp),
+        _ => Err(MagickError::Format),
+    }
 }
 
 pub(crate) async fn process_image<P1, P2>(

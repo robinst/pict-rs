@@ -1,6 +1,4 @@
-use crate::{
-    config::Format, error::UploadError, exiv2::ValidInputType, magick::ValidFormat, tmp_file,
-};
+use crate::{config::Format, error::UploadError, magick::ValidInputType, tmp_file};
 
 pub(crate) fn image_webp() -> mime::Mime {
     "image/webp".parse().unwrap()
@@ -16,7 +14,7 @@ pub(crate) async fn validate_image(
     tmpfile: std::path::PathBuf,
     prescribed_format: Option<Format>,
 ) -> Result<mime::Mime, UploadError> {
-    let input_type = crate::exiv2::input_type(&tmpfile).await?;
+    let input_type = crate::magick::input_type(&tmpfile).await?;
 
     match (prescribed_format, input_type) {
         (_, ValidInputType::Gif) | (_, ValidInputType::Mp4) => {
@@ -28,8 +26,6 @@ pub(crate) async fn validate_image(
             Ok(video_mp4())
         }
         (Some(Format::Jpeg), ValidInputType::Jpeg) | (None, ValidInputType::Jpeg) => {
-            tracing::debug!("Validating format");
-            crate::magick::validate_format(&tmpfile, ValidFormat::Jpeg).await?;
             tracing::debug!("Clearing metadata");
             crate::exiv2::clear_metadata(&tmpfile).await?;
             tracing::debug!("Validated");
@@ -37,8 +33,6 @@ pub(crate) async fn validate_image(
             Ok(mime::IMAGE_JPEG)
         }
         (Some(Format::Png), ValidInputType::Png) | (None, ValidInputType::Png) => {
-            tracing::debug!("Validating format");
-            crate::magick::validate_format(&tmpfile, ValidFormat::Png).await?;
             tracing::debug!("Clearing metadata");
             crate::exiv2::clear_metadata(&tmpfile).await?;
             tracing::debug!("Validated");
@@ -46,8 +40,6 @@ pub(crate) async fn validate_image(
             Ok(mime::IMAGE_PNG)
         }
         (Some(Format::Webp), ValidInputType::Webp) | (None, ValidInputType::Webp) => {
-            tracing::debug!("Validating format");
-            crate::magick::validate_format(&tmpfile, ValidFormat::Webp).await?;
             tracing::debug!("Clearing metadata");
             crate::exiv2::clear_metadata(&tmpfile).await?;
             tracing::debug!("Validated");
