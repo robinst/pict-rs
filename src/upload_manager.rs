@@ -101,7 +101,7 @@ impl Details {
     where
         P: AsRef<std::path::Path>,
     {
-        let details = crate::exiv2::details(&path).await?;
+        let details = crate::magick::details(&path).await?;
 
         Ok(Details::now(
             details.width,

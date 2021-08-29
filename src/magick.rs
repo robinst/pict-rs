@@ -21,6 +21,12 @@ pub(crate) enum ValidInputType {
     Webp,
 }
 
+pub(crate) struct Details {
+    pub(crate) mime_type: mime::Mime,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+}
+
 static MAX_CONVERSIONS: once_cell::sync::OnceCell<tokio::sync::Semaphore> =
     once_cell::sync::OnceCell::new();
 
@@ -59,6 +65,65 @@ where
     }
 
     Ok(())
+}
+
+pub(crate) async fn details<P>(file: P) -> Result<Details, MagickError>
+where
+    P: AsRef<std::path::Path>,
+{
+    let permit = semaphore().acquire().await?;
+
+    let output = tokio::process::Command::new("magick")
+        .args([&"identify", &"-ping", &"-format", &"%w %h | %m\n"])
+        .arg(&file.as_ref())
+        .output()
+        .await?;
+
+    drop(permit);
+
+    let s = String::from_utf8_lossy(&output.stdout);
+    tracing::debug!("lines: {}", s);
+
+    let mut lines = s.lines();
+    let first = lines.next().ok_or_else(|| MagickError::Format)?;
+
+    let mut segments = first.split('|');
+
+    let dimensions = segments.next().ok_or_else(|| MagickError::Format)?.trim();
+    tracing::debug!("dimensions: {}", dimensions);
+    let mut dims = dimensions.split(' ');
+    let width = dims
+        .next()
+        .ok_or_else(|| MagickError::Format)?
+        .trim()
+        .parse()?;
+    let height = dims
+        .next()
+        .ok_or_else(|| MagickError::Format)?
+        .trim()
+        .parse()?;
+
+    let format = segments.next().ok_or_else(|| MagickError::Format)?.trim();
+    tracing::debug!("format: {}", format);
+
+    if !lines.all(|item| item.ends_with(format)) {
+        return Err(MagickError::Format);
+    }
+
+    let mime_type = match format {
+        "MP4" => crate::validate::video_mp4(),
+        "GIF" => mime::IMAGE_GIF,
+        "PNG" => mime::IMAGE_PNG,
+        "JPEG" => mime::IMAGE_JPEG,
+        "WEBP" => crate::validate::image_webp(),
+        _ => return Err(MagickError::Format),
+    };
+
+    Ok(Details {
+        mime_type,
+        width,
+        height,
+    })
 }
 
 pub(crate) async fn input_type<P>(file: &P) -> Result<ValidInputType, MagickError>
@@ -132,5 +197,11 @@ where
 impl From<tokio::sync::AcquireError> for MagickError {
     fn from(_: tokio::sync::AcquireError) -> MagickError {
         MagickError::Closed
+    }
+}
+
+impl From<std::num::ParseIntError> for MagickError {
+    fn from(_: std::num::ParseIntError) -> MagickError {
+        MagickError::Format
     }
 }

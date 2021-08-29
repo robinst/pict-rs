@@ -3,26 +3,11 @@ pub(crate) enum Exvi2Error {
     #[error("Failed to interface with exiv2")]
     IO(#[from] std::io::Error),
 
-    #[error("Mime Parse: {0}")]
-    Mime(#[from] mime::FromStrError),
-
     #[error("Identify semaphore is closed")]
     Closed,
 
-    #[error("Requested information is not present")]
-    Missing,
-
     #[error("Exiv2 command failed")]
     Status,
-
-    #[error("Requested information was present, but not supported")]
-    Unsupported,
-}
-
-pub(crate) struct Details {
-    pub(crate) mime_type: mime::Mime,
-    pub(crate) width: usize,
-    pub(crate) height: usize,
 }
 
 static MAX_READS: once_cell::sync::OnceCell<tokio::sync::Semaphore> =
@@ -54,67 +39,8 @@ where
     Ok(())
 }
 
-pub(crate) async fn details<P>(file: P) -> Result<Details, Exvi2Error>
-where
-    P: AsRef<std::path::Path>,
-{
-    let permit = semaphore().acquire().await?;
-
-    let output = tokio::process::Command::new("exiv2")
-        .arg(&"pr")
-        .arg(&file.as_ref())
-        .output()
-        .await?;
-    drop(permit);
-
-    let s = String::from_utf8_lossy(&output.stdout);
-    parse_output(s)
-}
-
-fn parse_output(s: std::borrow::Cow<'_, str>) -> Result<Details, Exvi2Error> {
-    let mime_line = s
-        .lines()
-        .find(|line| line.starts_with("MIME"))
-        .ok_or_else(|| Exvi2Error::Missing)?;
-
-    let mut segments = mime_line.rsplit(':');
-    let mime_type = segments.next().ok_or_else(|| Exvi2Error::Missing)?.trim();
-
-    let resolution_line = s
-        .lines()
-        .find(|line| line.starts_with("Image size"))
-        .ok_or_else(|| Exvi2Error::Missing)?;
-
-    let mut segments = resolution_line.rsplit(':');
-    let resolution = segments.next().ok_or_else(|| Exvi2Error::Missing)?;
-    let mut resolution_segments = resolution.split('x');
-    let width_str = resolution_segments
-        .next()
-        .ok_or_else(|| Exvi2Error::Missing)?
-        .trim();
-    let height_str = resolution_segments
-        .next()
-        .ok_or_else(|| Exvi2Error::Missing)?
-        .trim();
-
-    let width = width_str.parse()?;
-    let height = height_str.parse()?;
-
-    Ok(Details {
-        mime_type: mime_type.parse()?,
-        width,
-        height,
-    })
-}
-
 impl From<tokio::sync::AcquireError> for Exvi2Error {
     fn from(_: tokio::sync::AcquireError) -> Exvi2Error {
         Exvi2Error::Closed
-    }
-}
-
-impl From<std::num::ParseIntError> for Exvi2Error {
-    fn from(_: std::num::ParseIntError) -> Exvi2Error {
-        Exvi2Error::Unsupported
     }
 }
