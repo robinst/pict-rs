@@ -184,7 +184,7 @@ where
         .arg(&"convert")
         .arg(&input.as_ref())
         .args(args)
-        .arg(&output.as_ref())
+        .arg(output_file)
         .spawn()?
         .wait()
         .await?;
