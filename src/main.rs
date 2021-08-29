@@ -405,7 +405,7 @@ async fn process(
         actix_fs::copy(original_path, orig_file.clone()).await?;
         magick::process_image(&orig_file, &dest_file, thumbnail_args, format).await?;
         actix_fs::remove_file(orig_file).await?;
-        actix_fs::rename(dest_file, thumbnail_path.clone()).await?;
+        safe_move_file(dest_file, thumbnail_path.clone()).await?;
 
         let details = if let Some(details) = details {
             details
