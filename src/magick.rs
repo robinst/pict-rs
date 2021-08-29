@@ -43,9 +43,12 @@ where
     P1: AsRef<std::path::Path>,
     P2: AsRef<std::path::Path>,
 {
-    let mut output_file = std::ffi::OsString::new();
-    output_file.extend([format.to_magick_format().as_ref(), ":".as_ref()]);
-    output_file.extend([to.as_ref().as_ref()]);
+    let format = format!("{}:", format.to_magick_format());
+
+    let mut output_file = std::ffi::OsString::from(format);
+    output_file.push(to.as_ref());
+
+    tracing::debug!("Outfile: {:?}", output_file);
 
     let permit = semaphore().acquire().await?;
 
@@ -81,7 +84,6 @@ where
     drop(permit);
 
     let s = String::from_utf8_lossy(&output.stdout);
-    tracing::debug!("lines: {}", s);
 
     let mut lines = s.lines();
     let first = lines.next().ok_or_else(|| MagickError::Format)?;
@@ -169,9 +171,12 @@ where
     P1: AsRef<std::path::Path>,
     P2: AsRef<std::path::Path>,
 {
-    let mut output_file = std::ffi::OsString::new();
-    output_file.extend([format!("{}:", format.to_magick_format()).as_ref()]);
-    output_file.extend([output.as_ref().as_ref()]);
+    let format = format!("{}:", format.to_magick_format());
+
+    let mut output_file = std::ffi::OsString::from(format);
+    output_file.push(output.as_ref());
+
+    tracing::debug!("Outfile: {:?}", output_file);
 
     let permit = semaphore().acquire().await?;
 
