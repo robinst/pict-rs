@@ -400,7 +400,12 @@ async fn process(
         safe_create_parent(&thumbnail_path).await?;
 
         // apply chain to the provided image
-        magick::process_image(&original_path, &thumbnail_path, thumbnail_args, format).await?;
+        let dest_file = tmp_file();
+        let orig_file = tmp_file();
+        actix_fs::copy(original_path, orig_file.clone()).await?;
+        magick::process_image(&orig_file, &dest_file, thumbnail_args, format).await?;
+        actix_fs::remove_file(orig_file).await?;
+        actix_fs::rename(dest_file, thumbnail_path.clone()).await?;
 
         let details = if let Some(details) = details {
             details
