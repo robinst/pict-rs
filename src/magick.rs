@@ -3,9 +3,6 @@ pub(crate) enum MagickError {
     #[error("{0}")]
     IO(#[from] std::io::Error),
 
-    #[error("Magick command failed")]
-    Status,
-
     #[error("Magick semaphore is closed")]
     Closed,
 
@@ -31,42 +28,73 @@ static MAX_CONVERSIONS: once_cell::sync::OnceCell<tokio::sync::Semaphore> =
     once_cell::sync::OnceCell::new();
 
 fn semaphore() -> &'static tokio::sync::Semaphore {
-    MAX_CONVERSIONS.get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get().max(1) * 5))
+    MAX_CONVERSIONS
+        .get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
 }
 
-pub(crate) async fn convert_file<P1, P2>(
-    from: P1,
-    to: P2,
-    format: crate::config::Format,
-) -> Result<(), MagickError>
+pub(crate) fn clear_metadata_stream<S, E>(
+    input: S,
+) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<actix_web::web::Bytes, E>>>
 where
-    P1: AsRef<std::path::Path>,
-    P2: AsRef<std::path::Path>,
+    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin + 'static,
+    E: From<std::io::Error> + 'static,
 {
-    let format = format!("{}:", format.to_magick_format());
+    let process = crate::stream::Process::spawn(
+        tokio::process::Command::new("magick").args(["convert", "-", "-strip", "-"]),
+    )?;
 
-    let mut output_file = std::ffi::OsString::from(format);
-    output_file.push(to.as_ref());
+    Ok(Box::pin(process.sink_stream(input).unwrap()))
+}
 
-    tracing::debug!("Outfile: {:?}", output_file);
+pub(crate) fn convert_stream<S, E>(
+    input: S,
+    format: crate::config::Format,
+) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<actix_web::web::Bytes, E>>>
+where
+    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin + 'static,
+    E: From<std::io::Error> + 'static,
+{
+    let process = crate::stream::Process::spawn(tokio::process::Command::new("magick").args([
+        "convert",
+        "-",
+        format!("{}:-", format.to_magick_format()).as_str(),
+    ]))?;
 
-    let permit = semaphore().acquire().await?;
+    Ok(Box::pin(process.sink_stream(input).unwrap()))
+}
 
-    let status = tokio::process::Command::new("magick")
-        .arg("convert")
-        .arg(&from.as_ref())
-        .arg(&output_file)
-        .spawn()?
-        .wait()
-        .await?;
+pub(crate) async fn details_stream<S, E1, E2>(input: S) -> Result<Details, E2>
+where
+    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E1>> + Unpin,
+    E1: From<std::io::Error>,
+    E2: From<E1> + From<std::io::Error> + From<MagickError>,
+{
+    use futures::stream::StreamExt;
+
+    let permit = semaphore().acquire().await.map_err(MagickError::from)?;
+
+    let mut process =
+        crate::stream::Process::spawn(tokio::process::Command::new("magick").args([
+            "identify",
+            "-ping",
+            "-format",
+            "%w %h | %m\n",
+            "-",
+        ]))?;
+
+    process.take_sink().unwrap().send(input).await?;
+    let mut stream = process.take_stream().unwrap();
+
+    let mut buf = actix_web::web::BytesMut::new();
+    while let Some(res) = stream.next().await {
+        let bytes = res?;
+        buf.extend_from_slice(&bytes);
+    }
 
     drop(permit);
 
-    if !status.success() {
-        return Err(MagickError::Status);
-    }
-
-    Ok(())
+    let s = String::from_utf8_lossy(&buf);
+    Ok(parse_details(s)?)
 }
 
 pub(crate) async fn details<P>(file: P) -> Result<Details, MagickError>
@@ -85,6 +113,10 @@ where
 
     let s = String::from_utf8_lossy(&output.stdout);
 
+    parse_details(s)
+}
+
+fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, MagickError> {
     let mut lines = s.lines();
     let first = lines.next().ok_or_else(|| MagickError::Format)?;
 
@@ -127,22 +159,37 @@ where
     })
 }
 
-pub(crate) async fn input_type<P>(file: &P) -> Result<ValidInputType, MagickError>
+pub(crate) async fn input_type_stream<S, E1, E2>(input: S) -> Result<ValidInputType, E2>
 where
-    P: AsRef<std::path::Path>,
+    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E1>> + Unpin,
+    E1: From<std::io::Error>,
+    E2: From<E1> + From<std::io::Error> + From<MagickError>,
 {
-    let permit = semaphore().acquire().await?;
+    use futures::stream::StreamExt;
 
-    let output = tokio::process::Command::new("magick")
-        .args([&"identify", &"-ping", &"-format", &"%m\n"])
-        .arg(&file.as_ref())
-        .output()
-        .await?;
+    let permit = semaphore().acquire().await.map_err(MagickError::from)?;
+
+    let mut process = crate::stream::Process::spawn(
+        tokio::process::Command::new("magick").args(["identify", "-ping", "-format", "%m\n", "-"]),
+    )?;
+
+    process.take_sink().unwrap().send(input).await?;
+    let mut stream = process.take_stream().unwrap();
+
+    let mut buf = actix_web::web::BytesMut::new();
+    while let Some(res) = stream.next().await {
+        let bytes = res?;
+        buf.extend_from_slice(&bytes);
+    }
 
     drop(permit);
 
-    let s = String::from_utf8_lossy(&output.stdout);
+    let s = String::from_utf8_lossy(&buf);
 
+    Ok(parse_input_type(s)?)
+}
+
+fn parse_input_type(s: std::borrow::Cow<'_, str>) -> Result<ValidInputType, MagickError> {
     let mut lines = s.lines();
     let first = lines.next();
 
@@ -161,41 +208,23 @@ where
     }
 }
 
-pub(crate) async fn process_image<P1, P2>(
-    input: P1,
-    output: P2,
+pub(crate) fn process_image_stream<S, E>(
+    input: S,
     args: Vec<String>,
     format: crate::config::Format,
-) -> Result<(), MagickError>
+) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<actix_web::web::Bytes, E>>>
 where
-    P1: AsRef<std::path::Path>,
-    P2: AsRef<std::path::Path>,
+    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin + 'static,
+    E: From<std::io::Error> + 'static,
 {
-    let format = format!("{}:", format.to_magick_format());
+    let process = crate::stream::Process::spawn(
+        tokio::process::Command::new("magick")
+            .args([&"convert", &"-"])
+            .args(args)
+            .arg(format!("{}:-", format.to_magick_format())),
+    )?;
 
-    let mut output_file = std::ffi::OsString::from(format);
-    output_file.push(output.as_ref());
-
-    tracing::debug!("Outfile: {:?}", output_file);
-
-    let permit = semaphore().acquire().await?;
-
-    let status = tokio::process::Command::new("magick")
-        .arg(&"convert")
-        .arg(&input.as_ref())
-        .args(args)
-        .arg(output_file)
-        .spawn()?
-        .wait()
-        .await?;
-
-    drop(permit);
-
-    if !status.success() {
-        return Err(MagickError::Status);
-    }
-
-    Ok(())
+    Ok(Box::pin(process.sink_stream(input).unwrap()))
 }
 
 impl From<tokio::sync::AcquireError> for MagickError {

@@ -1,4 +1,4 @@
-use crate::{config::Format, error::UploadError, magick::ValidInputType, tmp_file};
+use crate::{config::Format, error::UploadError, ffmpeg::InputFormat, magick::ValidInputType};
 
 pub(crate) fn image_webp() -> mime::Mime {
     "image/webp".parse().unwrap()
@@ -8,52 +8,49 @@ pub(crate) fn video_mp4() -> mime::Mime {
     "video/mp4".parse().unwrap()
 }
 
-// import & export image using the image crate
-#[tracing::instrument]
-pub(crate) async fn validate_image(
-    tmpfile: std::path::PathBuf,
+pub(crate) async fn validate_image_stream<S>(
+    stream: S,
     prescribed_format: Option<Format>,
-) -> Result<mime::Mime, UploadError> {
-    let input_type = crate::magick::input_type(&tmpfile).await?;
+) -> Result<
+    (
+        mime::Mime,
+        futures::stream::LocalBoxStream<'static, Result<actix_web::web::Bytes, UploadError>>,
+    ),
+    UploadError,
+>
+where
+    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, UploadError>> + Unpin + 'static,
+{
+    let (base_stream, copied_stream) = crate::stream::try_duplicate(stream, 1024);
+
+    let input_type =
+        crate::magick::input_type_stream::<_, UploadError, UploadError>(Box::pin(base_stream))
+            .await?;
 
     match (prescribed_format, input_type) {
-        (_, ValidInputType::Gif) | (_, ValidInputType::Mp4) => {
-            let newfile = tmp_file();
-            crate::safe_create_parent(&newfile).await?;
-            crate::ffmpeg::to_mp4(&tmpfile, &newfile).await?;
-            actix_fs::rename(newfile, tmpfile).await?;
-
-            Ok(video_mp4())
-        }
-        (Some(Format::Jpeg), ValidInputType::Jpeg) | (None, ValidInputType::Jpeg) => {
-            tracing::debug!("Clearing metadata");
-            crate::exiv2::clear_metadata(&tmpfile).await?;
-            tracing::debug!("Validated");
-
-            Ok(mime::IMAGE_JPEG)
-        }
-        (Some(Format::Png), ValidInputType::Png) | (None, ValidInputType::Png) => {
-            tracing::debug!("Clearing metadata");
-            crate::exiv2::clear_metadata(&tmpfile).await?;
-            tracing::debug!("Validated");
-
-            Ok(mime::IMAGE_PNG)
-        }
-        (Some(Format::Webp), ValidInputType::Webp) | (None, ValidInputType::Webp) => {
-            tracing::debug!("Clearing metadata");
-            crate::exiv2::clear_metadata(&tmpfile).await?;
-            tracing::debug!("Validated");
-
-            Ok(image_webp())
-        }
-        (Some(format), _) => {
-            let newfile = tmp_file();
-            crate::safe_create_parent(&newfile).await?;
-            crate::magick::convert_file(&tmpfile, &newfile, format.clone()).await?;
-
-            actix_fs::rename(newfile, tmpfile).await?;
-
-            Ok(format.to_mime())
-        }
+        (_, ValidInputType::Gif) => Ok((
+            video_mp4(),
+            crate::ffmpeg::to_mp4_stream(copied_stream, InputFormat::Gif)?,
+        )),
+        (_, ValidInputType::Mp4) => Ok((
+            video_mp4(),
+            crate::ffmpeg::to_mp4_stream(copied_stream, InputFormat::Mp4)?,
+        )),
+        (Some(Format::Jpeg) | None, ValidInputType::Jpeg) => Ok((
+            mime::IMAGE_JPEG,
+            crate::magick::clear_metadata_stream(copied_stream)?,
+        )),
+        (Some(Format::Png) | None, ValidInputType::Png) => Ok((
+            mime::IMAGE_PNG,
+            crate::magick::clear_metadata_stream(copied_stream)?,
+        )),
+        (Some(Format::Webp) | None, ValidInputType::Webp) => Ok((
+            image_webp(),
+            crate::magick::clear_metadata_stream(copied_stream)?,
+        )),
+        (Some(format), _) => Ok((
+            format.to_mime(),
+            crate::magick::convert_stream(copied_stream, format)?,
+        )),
     }
 }

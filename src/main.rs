@@ -15,13 +15,13 @@ use tracing_subscriber::EnvFilter;
 
 mod config;
 mod error;
-mod exiv2;
 mod ffmpeg;
 mod magick;
 mod middleware;
 mod migrate;
 mod processor;
 mod range;
+mod stream;
 mod upload_manager;
 mod validate;
 
@@ -397,30 +397,81 @@ async fn process(
             }
         }
 
-        safe_create_parent(&thumbnail_path).await?;
+        let stream = Box::pin(async_stream::stream! {
+            use futures::stream::StreamExt;
 
-        // apply chain to the provided image
-        let dest_file = tmp_file();
-        let orig_file = tmp_file();
-        actix_fs::copy(original_path, orig_file.clone()).await?;
-        magick::process_image(&orig_file, &dest_file, thumbnail_args, format).await?;
-        actix_fs::remove_file(orig_file).await?;
-        safe_move_file(dest_file, thumbnail_path.clone()).await?;
+            let mut s = actix_fs::read_to_stream(original_path.clone())
+                .await?
+                .faster();
 
-        let details = if let Some(details) = details {
-            details
+            while let Some(res) = s.next().await {
+                yield res.map_err(UploadError::from);
+            }
+        });
+
+        let processed_stream = crate::magick::process_image_stream(stream, thumbnail_args, format)?;
+
+        let (base_stream, copied_stream) = crate::stream::try_duplicate(processed_stream, 1024);
+
+        let (details, base_stream) = if let Some(details) = details {
+            (
+                details,
+                Box::pin(base_stream)
+                    as Pin<
+                        Box<
+                            dyn futures::stream::Stream<
+                                Item = Result<actix_web::web::Bytes, UploadError>,
+                            >,
+                        >,
+                    >,
+            )
         } else {
-            let details = Details::from_path(&thumbnail_path).await?;
-            manager
-                .store_variant_details(thumbnail_path.clone(), name.clone(), &details)
-                .await?;
-            manager
-                .store_variant(thumbnail_path.clone(), name.clone())
-                .await?;
-            details
+            let (base_stream, copied2) = crate::stream::try_duplicate(Box::pin(base_stream), 1024);
+            let details = Details::from_stream(Box::pin(base_stream)).await?;
+            (
+                details,
+                Box::pin(copied2)
+                    as Pin<
+                        Box<
+                            dyn futures::stream::Stream<
+                                Item = Result<actix_web::web::Bytes, UploadError>,
+                            >,
+                        >,
+                    >,
+            )
         };
 
-        return ranged_file_resp(thumbnail_path, range, details).await;
+        let span = tracing::Span::current();
+        let details2 = details.clone();
+        actix_rt::spawn(async move {
+            let entered = span.enter();
+            if let Err(e) =
+                upload_manager::safe_save_stream(thumbnail_path.clone(), Box::pin(copied_stream))
+                    .await
+            {
+                tracing::warn!("Error saving thumbnail: {}", e);
+                return;
+            }
+            if let Err(e) = manager
+                .store_variant_details(thumbnail_path.clone(), name.clone(), &details2)
+                .await
+            {
+                tracing::warn!("Error saving variant details: {}", e);
+                return;
+            }
+            if let Err(e) = manager.store_variant(thumbnail_path, name.clone()).await {
+                tracing::warn!("Error saving variant info: {}", e);
+            }
+            drop(entered);
+        });
+
+        return Ok(srv_response(
+            HttpResponse::Ok(),
+            base_stream,
+            details.content_type(),
+            7 * DAYS,
+            details.system_time(),
+        ));
     }
 
     let details = if let Some(details) = details {

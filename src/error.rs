@@ -1,4 +1,4 @@
-use crate::{exiv2::Exvi2Error, ffmpeg::VideoError, magick::MagickError};
+use crate::{ffmpeg::VideoError, magick::MagickError};
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 
 #[derive(Debug, thiserror::Error)]
@@ -70,9 +70,6 @@ pub(crate) enum UploadError {
     VideoError(#[from] VideoError),
 
     #[error("{0}")]
-    Exvi2Error(#[from] Exvi2Error),
-
-    #[error("{0}")]
     MagickError(#[from] MagickError),
 }
 
@@ -107,7 +104,6 @@ impl ResponseError for UploadError {
     fn status_code(&self) -> StatusCode {
         match self {
             UploadError::VideoError(_)
-            | UploadError::Exvi2Error(_)
             | UploadError::MagickError(_)
             | UploadError::DuplicateAlias
             | UploadError::NoFiles

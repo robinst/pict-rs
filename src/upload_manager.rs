@@ -3,7 +3,6 @@ use crate::{
     error::UploadError,
     migrate::{alias_id_key, alias_key, alias_key_bounds, variant_key_bounds, LatestDb},
     to_ext,
-    validate::validate_image,
 };
 use actix_web::web;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
@@ -97,6 +96,21 @@ pub(crate) struct Details {
 }
 
 impl Details {
+    pub(crate) async fn from_stream<S, E>(stream: S) -> Result<Self, UploadError>
+    where
+        S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin + 'static,
+        E: From<std::io::Error> + 'static,
+        UploadError: From<E>,
+    {
+        let details = crate::magick::details_stream::<S, E, UploadError>(stream).await?;
+
+        Ok(Details::now(
+            details.width,
+            details.height,
+            details.mime_type,
+        ))
+    }
+
     pub(crate) async fn from_path<P>(path: P) -> Result<Self, UploadError>
     where
         P: AsRef<std::path::Path>,
@@ -480,30 +494,31 @@ impl UploadManager {
         alias: String,
         content_type: mime::Mime,
         validate: bool,
-        stream: UploadStream<E>,
+        mut stream: UploadStream<E>,
     ) -> Result<String, UploadError>
     where
         UploadError: From<E>,
-        E: Unpin,
+        E: Unpin + 'static,
     {
-        // -- READ IN BYTES FROM CLIENT --
-        debug!("Reading stream");
+        let mapped_err_stream = Box::pin(async_stream::stream! {
+            use futures::stream::StreamExt;
+
+            while let Some(res) = stream.next().await {
+                yield res.map_err(UploadError::from);
+            }
+        });
+
+        let (content_type, validated_stream) =
+            crate::validate::validate_image_stream(mapped_err_stream, self.inner.format.clone())
+                .await?;
+
+        let (s1, s2) = crate::stream::try_duplicate(validated_stream, 1024);
+
         let tmpfile = crate::tmp_file();
-        safe_save_stream(tmpfile.clone(), stream).await?;
-
-        let content_type = if validate {
-            debug!("Validating image");
-            let format = self.inner.format.clone();
-            validate_image(tmpfile.clone(), format).await?
-        } else {
-            content_type
-        };
-
-        // -- DUPLICATE CHECKS --
-
-        // Cloning bytes is fine because it's actually a pointer
-        debug!("Hashing bytes");
-        let hash = self.hash(tmpfile.clone()).await?;
+        let (hash, _) = tokio::try_join!(
+            self.hash_stream::<_, UploadError>(Box::pin(s1)),
+            safe_save_stream::<UploadError>(tmpfile.clone(), Box::pin(s2))
+        )?;
 
         debug!("Storing alias");
         self.add_existing_alias(&hash, &alias).await?;
@@ -517,26 +532,30 @@ impl UploadManager {
 
     /// Upload the file, discarding bytes if it's already present, or saving if it's new
     #[instrument(skip(self, stream))]
-    pub(crate) async fn upload<E>(&self, stream: UploadStream<E>) -> Result<String, UploadError>
+    pub(crate) async fn upload<E>(&self, mut stream: UploadStream<E>) -> Result<String, UploadError>
     where
         UploadError: From<E>,
-        E: Unpin,
+        E: Unpin + 'static,
     {
-        // -- READ IN BYTES FROM CLIENT --
-        debug!("Reading stream");
+        let mapped_err_stream = Box::pin(async_stream::stream! {
+            use futures::stream::StreamExt;
+
+            while let Some(res) = stream.next().await {
+                yield res.map_err(UploadError::from);
+            }
+        });
+
+        let (content_type, validated_stream) =
+            crate::validate::validate_image_stream(mapped_err_stream, self.inner.format.clone())
+                .await?;
+
+        let (s1, s2) = crate::stream::try_duplicate(validated_stream, 1024);
+
         let tmpfile = crate::tmp_file();
-        safe_save_stream(tmpfile.clone(), stream).await?;
-
-        // -- VALIDATE IMAGE --
-        debug!("Validating image");
-        let format = self.inner.format.clone();
-        let content_type = validate_image(tmpfile.clone(), format).await?;
-
-        // -- DUPLICATE CHECKS --
-
-        // Cloning bytes is fine because it's actually a pointer
-        debug!("Hashing bytes");
-        let hash = self.hash(tmpfile.clone()).await?;
+        let (hash, _) = tokio::try_join!(
+            self.hash_stream::<_, UploadError>(Box::pin(s1)),
+            safe_save_stream::<UploadError>(tmpfile.clone(), Box::pin(s2))
+        )?;
 
         debug!("Adding alias");
         let alias = self.add_alias(&hash, content_type.clone()).await?;
@@ -648,11 +667,12 @@ impl UploadManager {
     }
 
     // produce a sh256sum of the uploaded file
-    async fn hash(&self, tmpfile: PathBuf) -> Result<Hash, UploadError> {
+    async fn hash_stream<S, E>(&self, mut stream: S) -> Result<Hash, UploadError>
+    where
+        S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin,
+        UploadError: From<E>,
+    {
         let mut hasher = self.inner.hasher.clone();
-
-        let file = actix_fs::file::open(tmpfile).await?;
-        let mut stream = Box::pin(actix_fs::file::read_to_stream(file).await?.faster());
 
         while let Some(res) = stream.next().await {
             let bytes = res?;
@@ -861,7 +881,10 @@ impl UploadManager {
 }
 
 #[instrument(skip(stream))]
-async fn safe_save_stream<E>(to: PathBuf, stream: UploadStream<E>) -> Result<(), UploadError>
+pub(crate) async fn safe_save_stream<E>(
+    to: PathBuf,
+    stream: UploadStream<E>,
+) -> Result<(), UploadError>
 where
     UploadError: From<E>,
     E: Unpin,
