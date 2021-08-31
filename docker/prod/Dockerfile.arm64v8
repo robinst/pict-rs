@@ -75,7 +75,7 @@ COPY --from=builder \
  /usr/local/bin/$BINARY
 
 RUN \
- apk add tini ffmpeg imagemagick exiv2 && \
+ apk add tini ffmpeg imagemagick exiftool && \
  addgroup -g $GID pictrs && \
  adduser -D -G pictrs -u $UID -g "" -h /opt/pict-rs pictrs
 
