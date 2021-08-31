@@ -192,12 +192,16 @@ async fn upload(
             let details = manager.variant_details(path.clone(), name.clone()).await?;
 
             let details = if let Some(details) = details {
+                debug!("details exist");
                 details
             } else {
+                debug!("generating new details from {:?}", path);
                 let new_details = Details::from_path(path.clone()).await?;
+                debug!("storing details for {:?} {}", path, name);
                 manager
                     .store_variant_details(path, name, &new_details)
                     .await?;
+                debug!("stored");
                 new_details
             };
 
