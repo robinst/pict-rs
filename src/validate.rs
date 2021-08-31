@@ -38,11 +38,11 @@ where
         )),
         (Some(Format::Jpeg) | None, ValidInputType::Jpeg) => Ok((
             mime::IMAGE_JPEG,
-            crate::magick::clear_metadata_stream(copied_stream)?,
+            crate::exiftool::clear_metadata_stream(copied_stream)?,
         )),
         (Some(Format::Png) | None, ValidInputType::Png) => Ok((
             mime::IMAGE_PNG,
-            crate::magick::clear_metadata_stream(copied_stream)?,
+            crate::exiftool::clear_metadata_stream(copied_stream)?,
         )),
         (Some(Format::Webp) | None, ValidInputType::Webp) => Ok((
             image_webp(),

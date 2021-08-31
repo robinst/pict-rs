@@ -15,6 +15,7 @@ use tracing_subscriber::EnvFilter;
 
 mod config;
 mod error;
+mod exiftool;
 mod ffmpeg;
 mod magick;
 mod middleware;
