@@ -9,7 +9,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-alpha.8
+pict-rs 0.3.0-alpha.22
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] --path <path>
@@ -60,8 +60,8 @@ $ sudo docker-compose up -d
 ```
 ###### Note
 - pict-rs makes use of the system's temporary folder. This is generally `/tmp` on linux
-- pict-rs makes use of a default imagemagick security policy at
-    `/usr/local/lib/ImageMagick-$VERSION/config-Q16HDRI/policy.xml`
+- pict-rs makes use of an imagemagick security policy at
+    `/usr/lib/ImageMagick-$VERSION/config-Q16HDRI/policy.xml`
 
 #### Docker Development
 The development system loads a rust environment inside a docker container with the neccessary
@@ -72,17 +72,32 @@ $ cd pict-rs/docker/dev
 $ ./dev.sh
 $ check # runs cargo check
 $ build # runs cargo build
-$ run -p data/
 ```
 Development environments are provided for amd64, arm32v7, and arm64v8. By default `dev.sh` will load
 into the contianer targetting amd64, but arch arguments can be passed to change the target.
 ```
 $ ./dev.sh arm32v7
 $ build
-
-# note:
-# This command may not work unless qemu-user-static has been configured for your docker instance
-$ run -p data/
+```
+##### Note
+Since moving to calling out to ffmpeg, imagemagick, and exiftool's binaries instead of binding
+directly, the dev environment now only contains enough to build static binaries, but not run the
+pict-rs program. I have personally been using alpine and arch linux to test the results. Here's how
+I have beend doing it:
+###### With Arch
+```
+$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" archlinux:latest
+# pacman -Syu imagemagick ffmepg perl-image-exiftool
+# ln -s /usr/bin/vendor_perl/exiftool /usr/bin/exiftool
+# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.0.11/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.0/config-Q16HDRI/
+# RUST_LOG=debug /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs -p /mnt/data
+```
+###### With Alpine
+```
+$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt alpine:3.14
+# apk add imagemagick ffmpeg exiftool
+# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.0.11/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.0.11/config-Q16HDRI/
+# RUST_LOG=debug /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs -p /mnt/data
 ```
 
 ### API
