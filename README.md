@@ -83,7 +83,7 @@ $ build
 Since moving to calling out to ffmpeg, imagemagick, and exiftool's binaries instead of binding
 directly, the dev environment now only contains enough to build static binaries, but not run the
 pict-rs program. I have personally been using alpine and arch linux to test the results. Here's how
-I have beend doing it:
+I have been doing it:
 ###### With Arch
 ```
 $ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" archlinux:latest
