@@ -1,10 +1,13 @@
+use crate::stream::LocalBoxFuture;
 use actix_web::{
     dev::{Service, ServiceRequest, Transform},
     http::StatusCode,
     HttpResponse, ResponseError,
 };
-use futures::future::{ok, LocalBoxFuture, Ready};
-use std::task::{Context, Poll};
+use std::{
+    future::{ready, Ready},
+    task::{Context, Poll},
+};
 use tracing_futures::{Instrument, Instrumented};
 use uuid::Uuid;
 
@@ -47,7 +50,7 @@ where
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        ok(TracingMiddleware { inner: service })
+        ready(Ok(TracingMiddleware { inner: service }))
     }
 }
 
@@ -85,7 +88,7 @@ where
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        ok(InternalMiddleware(self.0.clone(), service))
+        ready(Ok(InternalMiddleware(self.0.clone(), service)))
     }
 }
 

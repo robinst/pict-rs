@@ -18,9 +18,6 @@ pub(crate) enum UploadError {
     #[error("Error interacting with filesystem, {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Error in filesyste, {0}")]
-    Fs(#[from] actix_fs::Error),
-
     #[error("Panic in blocking operation")]
     Canceled,
 

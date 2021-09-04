@@ -11,9 +11,6 @@ pub(crate) enum MagickError {
     #[error("{0}")]
     IO(#[from] std::io::Error),
 
-    #[error("Magick semaphore is closed")]
-    Closed,
-
     #[error("Invalid format")]
     Format,
 }
@@ -30,14 +27,6 @@ pub(crate) struct Details {
     pub(crate) mime_type: mime::Mime,
     pub(crate) width: usize,
     pub(crate) height: usize,
-}
-
-static MAX_CONVERSIONS: once_cell::sync::OnceCell<tokio::sync::Semaphore> =
-    once_cell::sync::OnceCell::new();
-
-fn semaphore() -> &'static tokio::sync::Semaphore {
-    MAX_CONVERSIONS
-        .get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
 }
 
 pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> std::io::Result<impl AsyncRead + Unpin> {
@@ -81,15 +70,11 @@ pub(crate) async fn details<P>(file: P) -> Result<Details, MagickError>
 where
     P: AsRef<std::path::Path>,
 {
-    let permit = semaphore().acquire().await?;
-
     let output = Command::new("magick")
         .args([&"identify", &"-ping", &"-format", &"%w %h | %m\n"])
         .arg(&file.as_ref())
         .output()
         .await?;
-
-    drop(permit);
 
     let s = String::from_utf8_lossy(&output.stdout);
 
@@ -140,8 +125,6 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, MagickError> {
 }
 
 pub(crate) async fn input_type_bytes(mut input: Bytes) -> Result<ValidInputType, MagickError> {
-    let permit = semaphore().acquire().await.map_err(MagickError::from)?;
-
     let mut child = Command::new("magick")
         .args(["identify", "-ping", "-format", "%m\n", "-"])
         .stdin(Stdio::piped())
@@ -152,13 +135,13 @@ pub(crate) async fn input_type_bytes(mut input: Bytes) -> Result<ValidInputType,
     let mut stdout = child.stdout.take().unwrap();
 
     stdin.write_all_buf(&mut input).await?;
+    drop(stdin);
 
     let mut vec = Vec::new();
     stdout.read_to_end(&mut vec).await?;
+    drop(stdout);
 
-    drop(stdin);
     child.wait().await?;
-    drop(permit);
 
     let s = String::from_utf8_lossy(&vec);
     parse_input_type(s)
@@ -196,12 +179,6 @@ pub(crate) fn process_image_write_read(
     )?;
 
     Ok(process.write_read(input).unwrap())
-}
-
-impl From<tokio::sync::AcquireError> for MagickError {
-    fn from(_: tokio::sync::AcquireError) -> MagickError {
-        MagickError::Closed
-    }
 }
 
 impl From<std::num::ParseIntError> for MagickError {

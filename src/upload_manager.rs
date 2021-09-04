@@ -2,10 +2,10 @@ use crate::{
     config::Format,
     error::UploadError,
     migrate::{alias_id_key, alias_key, alias_key_bounds, variant_key_bounds, LatestDb},
+    stream::{next, LocalBoxStream},
     to_ext,
 };
 use actix_web::web;
-use futures::stream::{Stream, StreamExt, TryStreamExt};
 use sha2::Digest;
 use std::{
     path::PathBuf,
@@ -13,7 +13,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
 use tracing::{debug, error, info, instrument, warn, Span};
 
 // TREE STRUCTURE
@@ -92,7 +92,7 @@ impl std::fmt::Debug for UploadManager {
     }
 }
 
-type UploadStream<E> = Pin<Box<dyn Stream<Item = Result<web::Bytes, E>>>>;
+type UploadStream<E> = LocalBoxStream<'static, Result<web::Bytes, E>>;
 
 #[derive(Clone)]
 pub(crate) struct Serde<T> {
@@ -247,7 +247,7 @@ impl UploadManager {
         root_dir.push("files");
 
         // Ensure file dir exists
-        actix_fs::create_dir_all(root_dir.clone()).await?;
+        tokio::fs::create_dir_all(&root_dir).await?;
 
         Ok(UploadManager {
             inner: Arc::new(UploadManagerInner {
@@ -547,7 +547,7 @@ impl UploadManager {
         let mut bytes_mut = actix_web::web::BytesMut::new();
 
         debug!("Reading stream to memory");
-        while let Some(res) = stream.next().await {
+        while let Some(res) = next(&mut stream).await {
             let bytes = res?;
             bytes_mut.extend_from_slice(&bytes);
         }
@@ -582,7 +582,7 @@ impl UploadManager {
         let mut bytes_mut = actix_web::web::BytesMut::new();
 
         debug!("Reading stream to memory");
-        while let Some(res) = stream.next().await {
+        while let Some(res) = next(&mut stream).await {
             let bytes = res?;
             bytes_mut.extend_from_slice(&bytes);
         }
@@ -638,7 +638,7 @@ impl UploadManager {
 
         let mut errors = Vec::new();
         debug!("Deleting {:?}", path);
-        if let Err(e) = actix_fs::remove_file(path).await {
+        if let Err(e) = tokio::fs::remove_file(path).await {
             errors.push(e.into());
         }
 
@@ -767,8 +767,8 @@ impl UploadManager {
 
             path.push(filename.clone());
 
-            if let Err(e) = actix_fs::metadata(path).await {
-                if e.kind() == Some(std::io::ErrorKind::NotFound) {
+            if let Err(e) = tokio::fs::metadata(path).await {
+                if e.kind() == std::io::ErrorKind::NotFound {
                     debug!("Generated unused filename {}", filename);
                     return Ok(filename);
                 }
@@ -904,12 +904,12 @@ pub(crate) async fn safe_save_reader(
 ) -> Result<(), UploadError> {
     if let Some(path) = to.parent() {
         debug!("Creating directory {:?}", path);
-        actix_fs::create_dir_all(path.to_owned()).await?;
+        tokio::fs::create_dir_all(path.to_owned()).await?;
     }
 
     debug!("Checking if {:?} already exists", to);
-    if let Err(e) = actix_fs::metadata(to.clone()).await {
-        if e.kind() != Some(std::io::ErrorKind::NotFound) {
+    if let Err(e) = tokio::fs::metadata(to.clone()).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
             return Err(e.into());
         }
     } else {
@@ -928,7 +928,7 @@ pub(crate) async fn safe_save_reader(
 #[instrument(skip(stream))]
 pub(crate) async fn safe_save_stream<E>(
     to: PathBuf,
-    stream: UploadStream<E>,
+    mut stream: UploadStream<E>,
 ) -> Result<(), UploadError>
 where
     UploadError: From<E>,
@@ -936,12 +936,12 @@ where
 {
     if let Some(path) = to.parent() {
         debug!("Creating directory {:?}", path);
-        actix_fs::create_dir_all(path.to_owned()).await?;
+        tokio::fs::create_dir_all(path).await?;
     }
 
     debug!("Checking if {:?} already exists", to);
-    if let Err(e) = actix_fs::metadata(to.clone()).await {
-        if e.kind() != Some(std::io::ErrorKind::NotFound) {
+    if let Err(e) = tokio::fs::metadata(&to).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
             return Err(e.into());
         }
     } else {
@@ -950,16 +950,30 @@ where
 
     debug!("Writing stream to {:?}", to);
 
-    let file = actix_fs::file::create(to).await?;
+    let to1 = to.clone();
+    let fut = async move {
+        let mut file = tokio::fs::File::create(to1).await?;
 
-    actix_fs::file::write_stream_faster(file, stream.map_err(UploadError::from)).await?;
+        while let Some(res) = next(&mut stream).await {
+            let mut bytes = res?;
+            file.write_all_buf(&mut bytes).await?;
+        }
+
+        Ok(())
+    };
+
+    if let Err(e) = fut.await {
+        error!("Failed to save file: {}", e);
+        let _ = tokio::fs::remove_file(to).await;
+        return Err(e);
+    }
 
     Ok(())
 }
 
 async fn remove_path(path: sled::IVec) -> Result<(), UploadError> {
     let path_string = String::from_utf8(path.to_vec())?;
-    actix_fs::remove_file(path_string).await?;
+    tokio::fs::remove_file(path_string).await?;
     Ok(())
 }
 

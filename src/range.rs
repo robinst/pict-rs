@@ -1,4 +1,7 @@
-use crate::UploadError;
+use crate::{
+    stream::{bytes_stream, LocalBoxStream},
+    UploadError,
+};
 use actix_web::{
     dev::Payload,
     http::{
@@ -8,9 +11,8 @@ use actix_web::{
     web::Bytes,
     FromRequest, HttpRequest,
 };
-use futures::stream::{Stream, StreamExt, TryStreamExt};
-use std::{fs, io};
-use std::{future::ready, pin::Pin};
+use std::{future::ready, io};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 #[derive(Debug)]
 pub(crate) enum Range {
@@ -45,32 +47,25 @@ impl Range {
 
     pub(crate) async fn chop_file(
         &self,
-        file: fs::File,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, UploadError>>>>, UploadError> {
+        mut file: tokio::fs::File,
+    ) -> Result<LocalBoxStream<'static, Result<Bytes, UploadError>>, UploadError> {
         match self {
             Range::RangeStart(start) => {
-                let (file, _) = actix_fs::file::seek(file, io::SeekFrom::Start(*start)).await?;
+                file.seek(io::SeekFrom::Start(*start)).await?;
 
-                Ok(Box::pin(
-                    actix_fs::file::read_to_stream(file)
-                        .await?
-                        .faster()
-                        .map_err(UploadError::from),
-                ))
+                Ok(Box::pin(bytes_stream(file)))
             }
             Range::SuffixLength(from_start) => {
-                let (file, _) = actix_fs::file::seek(file, io::SeekFrom::Start(0)).await?;
+                file.seek(io::SeekFrom::Start(0)).await?;
+                let reader = file.take(*from_start);
 
-                Ok(Box::pin(
-                    read_num_bytes_to_stream(file, *from_start as usize).await?,
-                ))
+                Ok(Box::pin(bytes_stream(reader)))
             }
             Range::Segment(start, end) => {
-                let (file, _) = actix_fs::file::seek(file, io::SeekFrom::Start(*start)).await?;
+                file.seek(io::SeekFrom::Start(*start)).await?;
+                let reader = file.take(end.saturating_sub(*start));
 
-                Ok(Box::pin(
-                    read_num_bytes_to_stream(file, end.saturating_sub(*start) as usize).await?,
-                ))
+                Ok(Box::pin(bytes_stream(reader)))
             }
         }
     }
@@ -174,33 +169,4 @@ fn parse_range(s: &str) -> Result<Range, UploadError> {
 
         Ok(Range::Segment(range_start, range_end))
     }
-}
-
-async fn read_num_bytes_to_stream(
-    file: fs::File,
-    mut num_bytes: usize,
-) -> Result<impl Stream<Item = Result<Bytes, UploadError>>, UploadError> {
-    let mut stream = actix_fs::file::read_to_stream(file).await?;
-
-    let stream = async_stream::stream! {
-        while let Some(res) = stream.next().await {
-            let read_bytes = res.as_ref().map(|b| b.len()).unwrap_or(0);
-
-            if read_bytes == 0 {
-                break;
-            }
-
-            yield res.map_err(UploadError::from).map(|bytes| {
-                if bytes.len() > num_bytes {
-                    bytes.slice(0..num_bytes)
-                } else {
-                    bytes
-                }
-            });
-
-            num_bytes = num_bytes.saturating_sub(read_bytes);
-        }
-    };
-
-    Ok(stream)
 }
