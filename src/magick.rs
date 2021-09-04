@@ -1,3 +1,11 @@
+use crate::{config::Format, stream::Process};
+use actix_web::web::Bytes;
+use std::process::Stdio;
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    process::Command,
+};
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum MagickError {
     #[error("{0}")]
@@ -32,29 +40,88 @@ fn semaphore() -> &'static tokio::sync::Semaphore {
         .get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
 }
 
+pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> std::io::Result<impl AsyncRead + Unpin> {
+    let process = Process::spawn(Command::new("magick").args(["convert", "-", "-strip", "-"]))?;
+
+    Ok(process.bytes_read(input).unwrap())
+}
+
+pub(crate) fn clear_metadata_write_read(
+    input: impl AsyncRead + Unpin + 'static,
+) -> std::io::Result<impl AsyncRead + Unpin> {
+    let process = Process::spawn(Command::new("magick").args(["convert", "-", "-strip", "-"]))?;
+
+    Ok(process.write_read(input).unwrap())
+}
+
+pub(crate) async fn details_write_read(
+    input: impl AsyncRead + Unpin + 'static,
+) -> Result<Details, MagickError> {
+    let process = Process::spawn(Command::new("magick").args([
+        "identify",
+        "-ping",
+        "-format",
+        "%w %h | %m\n",
+        "-",
+    ]))?;
+
+    let mut reader = process.write_read(input).unwrap();
+
+    let mut bytes = Vec::new();
+
+    reader.read_to_end(&mut bytes).await?;
+
+    let s = String::from_utf8_lossy(&bytes);
+    parse_details(s)
+}
+
+pub(crate) fn convert_write_read(
+    input: impl AsyncRead + Unpin + 'static,
+    format: Format,
+) -> std::io::Result<impl AsyncRead + Unpin> {
+    let process = Process::spawn(Command::new("magick").args([
+        "convert",
+        "-",
+        format!("{}:-", format.to_magick_format()).as_str(),
+    ]))?;
+
+    Ok(process.write_read(input).unwrap())
+}
+
 pub(crate) fn clear_metadata_stream<S, E>(
     input: S,
-) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<actix_web::web::Bytes, E>>>
+) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<Bytes, E>>>
 where
-    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin + 'static,
+    S: futures::stream::Stream<Item = Result<Bytes, E>> + Unpin + 'static,
     E: From<std::io::Error> + 'static,
 {
-    let process = crate::stream::Process::spawn(
-        tokio::process::Command::new("magick").args(["convert", "-", "-strip", "-"]),
-    )?;
+    let process = Process::spawn(Command::new("magick").args(["convert", "-", "-strip", "-"]))?;
 
     Ok(Box::pin(process.sink_stream(input).unwrap()))
 }
 
+pub(crate) fn convert_bytes_read(
+    input: Bytes,
+    format: Format,
+) -> std::io::Result<impl AsyncRead + Unpin> {
+    let process = Process::spawn(Command::new("magick").args([
+        "convert",
+        "-",
+        format!("{}:-", format.to_magick_format()).as_str(),
+    ]))?;
+
+    Ok(process.bytes_read(input).unwrap())
+}
+
 pub(crate) fn convert_stream<S, E>(
     input: S,
-    format: crate::config::Format,
-) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<actix_web::web::Bytes, E>>>
+    format: Format,
+) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<Bytes, E>>>
 where
-    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin + 'static,
+    S: futures::stream::Stream<Item = Result<Bytes, E>> + Unpin + 'static,
     E: From<std::io::Error> + 'static,
 {
-    let process = crate::stream::Process::spawn(tokio::process::Command::new("magick").args([
+    let process = Process::spawn(Command::new("magick").args([
         "convert",
         "-",
         format!("{}:-", format.to_magick_format()).as_str(),
@@ -65,7 +132,7 @@ where
 
 pub(crate) async fn details_stream<S, E1, E2>(input: S) -> Result<Details, E2>
 where
-    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E1>> + Unpin,
+    S: futures::stream::Stream<Item = Result<Bytes, E1>> + Unpin,
     E1: From<std::io::Error>,
     E2: From<E1> + From<std::io::Error> + From<MagickError>,
 {
@@ -73,14 +140,13 @@ where
 
     let permit = semaphore().acquire().await.map_err(MagickError::from)?;
 
-    let mut process =
-        crate::stream::Process::spawn(tokio::process::Command::new("magick").args([
-            "identify",
-            "-ping",
-            "-format",
-            "%w %h | %m\n",
-            "-",
-        ]))?;
+    let mut process = Process::spawn(Command::new("magick").args([
+        "identify",
+        "-ping",
+        "-format",
+        "%w %h | %m\n",
+        "-",
+    ]))?;
 
     process.take_sink().unwrap().send(input).await?;
     let mut stream = process.take_stream().unwrap();
@@ -103,7 +169,7 @@ where
 {
     let permit = semaphore().acquire().await?;
 
-    let output = tokio::process::Command::new("magick")
+    let output = Command::new("magick")
         .args([&"identify", &"-ping", &"-format", &"%w %h | %m\n"])
         .arg(&file.as_ref())
         .output()
@@ -159,9 +225,34 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, MagickError> {
     })
 }
 
+pub(crate) async fn input_type_bytes(mut input: Bytes) -> Result<ValidInputType, MagickError> {
+    let permit = semaphore().acquire().await.map_err(MagickError::from)?;
+
+    let mut child = Command::new("magick")
+        .args(["identify", "-ping", "-format", "%m\n", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+
+    stdin.write_all_buf(&mut input).await?;
+
+    let mut vec = Vec::new();
+    stdout.read_to_end(&mut vec).await?;
+
+    drop(stdin);
+    child.wait().await?;
+    drop(permit);
+
+    let s = String::from_utf8_lossy(&vec);
+    parse_input_type(s)
+}
+
 pub(crate) async fn input_type_stream<S, E1, E2>(input: S) -> Result<ValidInputType, E2>
 where
-    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E1>> + Unpin,
+    S: futures::stream::Stream<Item = Result<Bytes, E1>> + Unpin,
     E1: From<std::io::Error>,
     E2: From<E1> + From<std::io::Error> + From<MagickError>,
 {
@@ -169,9 +260,8 @@ where
 
     let permit = semaphore().acquire().await.map_err(MagickError::from)?;
 
-    let mut process = crate::stream::Process::spawn(
-        tokio::process::Command::new("magick").args(["identify", "-ping", "-format", "%m\n", "-"]),
-    )?;
+    let mut process =
+        Process::spawn(Command::new("magick").args(["identify", "-ping", "-format", "%m\n", "-"]))?;
 
     process.take_sink().unwrap().send(input).await?;
     let mut stream = process.take_stream().unwrap();
@@ -211,14 +301,14 @@ fn parse_input_type(s: std::borrow::Cow<'_, str>) -> Result<ValidInputType, Magi
 pub(crate) fn process_image_stream<S, E>(
     input: S,
     args: Vec<String>,
-    format: crate::config::Format,
-) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<actix_web::web::Bytes, E>>>
+    format: Format,
+) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<Bytes, E>>>
 where
-    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin + 'static,
+    S: futures::stream::Stream<Item = Result<Bytes, E>> + Unpin + 'static,
     E: From<std::io::Error> + 'static,
 {
-    let process = crate::stream::Process::spawn(
-        tokio::process::Command::new("magick")
+    let process = Process::spawn(
+        Command::new("magick")
             .args([&"convert", &"-"])
             .args(args)
             .arg(format!("{}:-", format.to_magick_format())),

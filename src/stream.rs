@@ -1,13 +1,25 @@
 use actix_web::web::Bytes;
 use futures::stream::{LocalBoxStream, Stream, StreamExt};
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf};
+use tokio_stream::wrappers::ReceiverStream;
+
+pub(crate) struct ReadAdapter<S> {
+    inner: S,
+}
 
 pub(crate) struct Process {
     child: tokio::process::Child,
+}
+
+pub(crate) struct ProcessRead<I> {
+    inner: I,
+    err_recv: tokio::sync::oneshot::Receiver<std::io::Error>,
+    err_closed: bool,
 }
 
 pub(crate) struct ProcessSink {
@@ -23,7 +35,44 @@ pub(crate) struct ProcessSinkStream<E> {
 }
 
 pub(crate) struct TryDuplicateStream<T, E> {
-    inner: tokio_stream::wrappers::ReceiverStream<Result<T, E>>,
+    inner: ReceiverStream<Result<T, E>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct StringError(String);
+
+impl<S> ReadAdapter<S> {
+    pub(crate) fn new_unsync<E>(
+        mut stream: S,
+    ) -> ReadAdapter<ReceiverStream<Result<Bytes, StringError>>>
+    where
+        S: Stream<Item = Result<Bytes, E>> + Unpin + 'static,
+        E: std::fmt::Display,
+    {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+
+        actix_rt::spawn(async move {
+            while let Some(res) = stream.next().await {
+                if tx
+                    .send(res.map_err(|e| StringError(e.to_string())))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        ReadAdapter::new_sync(ReceiverStream::new(rx))
+    }
+
+    fn new_sync<E>(stream: S) -> Self
+    where
+        S: Stream<Item = Result<Bytes, E>> + Unpin,
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        ReadAdapter { inner: stream }
+    }
 }
 
 impl Process {
@@ -44,6 +93,47 @@ impl Process {
 
     pub(crate) fn take_stream(&mut self) -> Option<ProcessStream> {
         self.child.stdout.take().map(ProcessStream::new)
+    }
+
+    pub(crate) fn bytes_read(mut self, mut input: Bytes) -> Option<impl AsyncRead + Unpin> {
+        let mut stdin = self.child.stdin.take()?;
+        let stdout = self.child.stdout.take()?;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        actix_rt::spawn(async move {
+            if let Err(e) = stdin.write_all_buf(&mut input).await {
+                let _ = tx.send(e);
+            }
+        });
+
+        Some(Box::pin(ProcessRead {
+            inner: stdout,
+            err_recv: rx,
+            err_closed: false,
+        }))
+    }
+
+    pub(crate) fn write_read(
+        mut self,
+        mut input_reader: impl AsyncRead + Unpin + 'static,
+    ) -> Option<impl AsyncRead + Unpin> {
+        let mut stdin = self.child.stdin.take()?;
+        let stdout = self.child.stdout.take()?;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        actix_rt::spawn(async move {
+            if let Err(e) = tokio::io::copy(&mut input_reader, &mut stdin).await {
+                let _ = tx.send(e);
+            }
+        });
+
+        Some(Box::pin(ProcessRead {
+            inner: stdout,
+            err_recv: rx,
+            err_closed: false,
+        }))
     }
 
     pub(crate) fn sink_stream<S, E>(mut self, input_stream: S) -> Option<ProcessSinkStream<E>>
@@ -167,9 +257,59 @@ where
     (
         s,
         TryDuplicateStream {
-            inner: tokio_stream::wrappers::ReceiverStream::new(rx),
+            inner: ReceiverStream::new(rx),
         },
     )
+}
+
+impl<S, E> AsyncRead for ReadAdapter<S>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match Pin::new(&mut self.inner).poll_next(cx) {
+            Poll::Ready(Some(Ok(bytes))) => {
+                buf.put_slice(&bytes);
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(None) => Poll::Ready(Ok(())),
+            Poll::Ready(Some(Err(e))) => {
+                Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl<I> AsyncRead for ProcessRead<I>
+where
+    I: AsyncRead + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        if !self.err_closed {
+            if let Poll::Ready(res) = Pin::new(&mut self.err_recv).poll(cx) {
+                self.err_closed = true;
+                if let Ok(err) = res {
+                    return Poll::Ready(Err(err));
+                }
+            }
+        }
+
+        if let Poll::Ready(res) = Pin::new(&mut self.inner).poll_read(cx, buf) {
+            return Poll::Ready(res);
+        }
+
+        Poll::Pending
+    }
 }
 
 impl Stream for ProcessStream {
@@ -195,3 +335,11 @@ impl<T, E> Stream for TryDuplicateStream<T, E> {
         Pin::new(&mut self.inner).poll_next(cx)
     }
 }
+
+impl std::fmt::Display for StringError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for StringError {}

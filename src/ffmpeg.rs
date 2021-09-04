@@ -1,3 +1,7 @@
+use crate::stream::Process;
+use actix_web::web::Bytes;
+use tokio::{io::AsyncRead, process::Command};
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum VideoError {
     #[error("Failed to interface with transcode process")]
@@ -53,15 +57,67 @@ fn semaphore() -> &'static tokio::sync::Semaphore {
         .get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
 }
 
+pub(crate) fn to_mp4_bytes(
+    input: Bytes,
+    input_format: InputFormat,
+) -> std::io::Result<impl AsyncRead + Unpin> {
+    let process = Process::spawn(Command::new("ffmpeg").args([
+        "-f",
+        input_format.as_format(),
+        "-i",
+        "pipe:",
+        "-movflags",
+        "faststart+frag_keyframe+empty_moov",
+        "-pix_fmt",
+        "yuv420p",
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-an",
+        "-codec",
+        "h264",
+        "-f",
+        "mp4",
+        "pipe:",
+    ]))?;
+
+    Ok(process.bytes_read(input).unwrap())
+}
+
+pub(crate) fn to_mp4_write_read(
+    input: impl AsyncRead + Unpin + 'static,
+    input_format: InputFormat,
+) -> std::io::Result<impl AsyncRead + Unpin> {
+    let process = Process::spawn(Command::new("ffmpeg").args([
+        "-f",
+        input_format.as_format(),
+        "-i",
+        "pipe:",
+        "-movflags",
+        "faststart+frag_keyframe+empty_moov",
+        "-pix_fmt",
+        "yuv420p",
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-an",
+        "-codec",
+        "h264",
+        "-f",
+        "mp4",
+        "pipe:",
+    ]))?;
+
+    Ok(process.write_read(input).unwrap())
+}
+
 pub(crate) fn to_mp4_stream<S, E>(
     input: S,
     input_format: InputFormat,
-) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<actix_web::web::Bytes, E>>>
+) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<Bytes, E>>>
 where
-    S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin + 'static,
+    S: futures::stream::Stream<Item = Result<Bytes, E>> + Unpin + 'static,
     E: From<std::io::Error> + 'static,
 {
-    let process = crate::stream::Process::spawn(tokio::process::Command::new("ffmpeg").args([
+    let process = Process::spawn(Command::new("ffmpeg").args([
         "-f",
         input_format.as_format(),
         "-i",
@@ -94,7 +150,7 @@ where
 {
     let permit = semaphore().acquire().await?;
 
-    let mut child = tokio::process::Command::new("ffmpeg")
+    let mut child = Command::new("ffmpeg")
         .arg(&"-i")
         .arg(&from.as_ref())
         .args([

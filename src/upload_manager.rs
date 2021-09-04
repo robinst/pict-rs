@@ -7,7 +7,13 @@ use crate::{
 use actix_web::web;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use sha2::Digest;
-use std::{path::PathBuf, pin::Pin, sync::Arc};
+use std::{
+    path::PathBuf,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use tokio::io::{AsyncRead, ReadBuf};
 use tracing::{debug, error, info, instrument, warn, Span};
 
 // TREE STRUCTURE
@@ -25,6 +31,38 @@ use tracing::{debug, error, info, instrument, warn, Span};
 #[derive(Clone)]
 pub struct UploadManager {
     inner: Arc<UploadManagerInner>,
+}
+
+pub struct Hasher<I> {
+    inner: I,
+    hasher: sha2::Sha256,
+}
+
+impl<I> Hasher<I> {
+    async fn finalize_reset(self) -> Result<Hash, UploadError> {
+        let mut hasher = self.hasher;
+        let hash = web::block(move || Hash::new(hasher.finalize_reset().to_vec())).await?;
+        Ok(hash)
+    }
+}
+
+impl<I> AsyncRead for Hasher<I>
+where
+    I: AsyncRead + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let before_len = buf.filled().len();
+        let poll_res = Pin::new(&mut self.inner).poll_read(cx, buf);
+        let after_len = buf.filled().len();
+        if after_len > before_len {
+            self.hasher.update(&buf.filled()[before_len..after_len]);
+        }
+        poll_res
+    }
 }
 
 struct UploadManagerInner {
@@ -103,6 +141,18 @@ impl Details {
         UploadError: From<E>,
     {
         let details = crate::magick::details_stream::<S, E, UploadError>(stream).await?;
+
+        Ok(Details::now(
+            details.width,
+            details.height,
+            details.mime_type,
+        ))
+    }
+
+    pub(crate) async fn from_async_read(
+        input: impl AsyncRead + Unpin + 'static,
+    ) -> Result<Self, UploadError> {
+        let details = crate::magick::details_write_read(input).await?;
 
         Ok(Details::now(
             details.width,
@@ -535,27 +585,28 @@ impl UploadManager {
     pub(crate) async fn upload<E>(&self, mut stream: UploadStream<E>) -> Result<String, UploadError>
     where
         UploadError: From<E>,
-        E: Unpin + 'static,
     {
-        let mapped_err_stream = Box::pin(async_stream::stream! {
-            use futures::stream::StreamExt;
+        let mut bytes_mut = actix_web::web::BytesMut::new();
 
-            while let Some(res) = stream.next().await {
-                yield res.map_err(UploadError::from);
-            }
-        });
+        debug!("Reading stream to memory");
+        while let Some(res) = stream.next().await {
+            let bytes = res?;
+            bytes_mut.extend_from_slice(&bytes);
+        }
 
-        let (content_type, validated_stream) =
-            crate::validate::validate_image_stream(mapped_err_stream, self.inner.format.clone())
+        debug!("Validating bytes");
+        let (content_type, validated_reader) =
+            crate::validate::validate_image_bytes(bytes_mut.freeze(), self.inner.format.clone())
                 .await?;
 
-        let (s1, s2) = crate::stream::try_duplicate(validated_stream, 1024);
+        let mut hasher_reader = Hasher {
+            inner: validated_reader,
+            hasher: self.inner.hasher.clone(),
+        };
 
         let tmpfile = crate::tmp_file();
-        let (hash, _) = tokio::try_join!(
-            self.hash_stream::<_, UploadError>(Box::pin(s1)),
-            safe_save_stream::<UploadError>(tmpfile.clone(), Box::pin(s2))
-        )?;
+        safe_save_reader(tmpfile.clone(), &mut hasher_reader).await?;
+        let hash = hasher_reader.finalize_reset().await?;
 
         debug!("Adding alias");
         let alias = self.add_alias(&hash, content_type.clone()).await?;
@@ -878,6 +929,34 @@ impl UploadManager {
 
         Ok(Ok(()))
     }
+}
+
+#[instrument(skip(input))]
+pub(crate) async fn safe_save_reader(
+    to: PathBuf,
+    input: &mut (impl AsyncRead + Unpin),
+) -> Result<(), UploadError> {
+    if let Some(path) = to.parent() {
+        debug!("Creating directory {:?}", path);
+        actix_fs::create_dir_all(path.to_owned()).await?;
+    }
+
+    debug!("Checking if {:?} already exists", to);
+    if let Err(e) = actix_fs::metadata(to.clone()).await {
+        if e.kind() != Some(std::io::ErrorKind::NotFound) {
+            return Err(e.into());
+        }
+    } else {
+        return Err(UploadError::FileExists);
+    }
+
+    debug!("Writing stream to {:?}", to);
+
+    let mut file = tokio::fs::File::create(to).await?;
+
+    tokio::io::copy(input, &mut file).await?;
+
+    Ok(())
 }
 
 #[instrument(skip(stream))]
