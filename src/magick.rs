@@ -46,17 +46,7 @@ pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> std::io::Result<impl As
     Ok(process.bytes_read(input).unwrap())
 }
 
-pub(crate) fn clear_metadata_write_read(
-    input: impl AsyncRead + Unpin + 'static,
-) -> std::io::Result<impl AsyncRead + Unpin> {
-    let process = Process::spawn(Command::new("magick").args(["convert", "-", "-strip", "-"]))?;
-
-    Ok(process.write_read(input).unwrap())
-}
-
-pub(crate) async fn details_write_read(
-    input: impl AsyncRead + Unpin + 'static,
-) -> Result<Details, MagickError> {
+pub(crate) async fn details_bytes(input: Bytes) -> Result<Details, MagickError> {
     let process = Process::spawn(Command::new("magick").args([
         "identify",
         "-ping",
@@ -65,39 +55,13 @@ pub(crate) async fn details_write_read(
         "-",
     ]))?;
 
-    let mut reader = process.write_read(input).unwrap();
+    let mut reader = process.bytes_read(input).unwrap();
 
     let mut bytes = Vec::new();
-
     reader.read_to_end(&mut bytes).await?;
-
     let s = String::from_utf8_lossy(&bytes);
+
     parse_details(s)
-}
-
-pub(crate) fn convert_write_read(
-    input: impl AsyncRead + Unpin + 'static,
-    format: Format,
-) -> std::io::Result<impl AsyncRead + Unpin> {
-    let process = Process::spawn(Command::new("magick").args([
-        "convert",
-        "-",
-        format!("{}:-", format.to_magick_format()).as_str(),
-    ]))?;
-
-    Ok(process.write_read(input).unwrap())
-}
-
-pub(crate) fn clear_metadata_stream<S, E>(
-    input: S,
-) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<Bytes, E>>>
-where
-    S: futures::stream::Stream<Item = Result<Bytes, E>> + Unpin + 'static,
-    E: From<std::io::Error> + 'static,
-{
-    let process = Process::spawn(Command::new("magick").args(["convert", "-", "-strip", "-"]))?;
-
-    Ok(Box::pin(process.sink_stream(input).unwrap()))
 }
 
 pub(crate) fn convert_bytes_read(
@@ -111,56 +75,6 @@ pub(crate) fn convert_bytes_read(
     ]))?;
 
     Ok(process.bytes_read(input).unwrap())
-}
-
-pub(crate) fn convert_stream<S, E>(
-    input: S,
-    format: Format,
-) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<Bytes, E>>>
-where
-    S: futures::stream::Stream<Item = Result<Bytes, E>> + Unpin + 'static,
-    E: From<std::io::Error> + 'static,
-{
-    let process = Process::spawn(Command::new("magick").args([
-        "convert",
-        "-",
-        format!("{}:-", format.to_magick_format()).as_str(),
-    ]))?;
-
-    Ok(Box::pin(process.sink_stream(input).unwrap()))
-}
-
-pub(crate) async fn details_stream<S, E1, E2>(input: S) -> Result<Details, E2>
-where
-    S: futures::stream::Stream<Item = Result<Bytes, E1>> + Unpin,
-    E1: From<std::io::Error>,
-    E2: From<E1> + From<std::io::Error> + From<MagickError>,
-{
-    use futures::stream::StreamExt;
-
-    let permit = semaphore().acquire().await.map_err(MagickError::from)?;
-
-    let mut process = Process::spawn(Command::new("magick").args([
-        "identify",
-        "-ping",
-        "-format",
-        "%w %h | %m\n",
-        "-",
-    ]))?;
-
-    process.take_sink().unwrap().send(input).await?;
-    let mut stream = process.take_stream().unwrap();
-
-    let mut buf = actix_web::web::BytesMut::new();
-    while let Some(res) = stream.next().await {
-        let bytes = res?;
-        buf.extend_from_slice(&bytes);
-    }
-
-    drop(permit);
-
-    let s = String::from_utf8_lossy(&buf);
-    Ok(parse_details(s)?)
 }
 
 pub(crate) async fn details<P>(file: P) -> Result<Details, MagickError>
@@ -250,35 +164,6 @@ pub(crate) async fn input_type_bytes(mut input: Bytes) -> Result<ValidInputType,
     parse_input_type(s)
 }
 
-pub(crate) async fn input_type_stream<S, E1, E2>(input: S) -> Result<ValidInputType, E2>
-where
-    S: futures::stream::Stream<Item = Result<Bytes, E1>> + Unpin,
-    E1: From<std::io::Error>,
-    E2: From<E1> + From<std::io::Error> + From<MagickError>,
-{
-    use futures::stream::StreamExt;
-
-    let permit = semaphore().acquire().await.map_err(MagickError::from)?;
-
-    let mut process =
-        Process::spawn(Command::new("magick").args(["identify", "-ping", "-format", "%m\n", "-"]))?;
-
-    process.take_sink().unwrap().send(input).await?;
-    let mut stream = process.take_stream().unwrap();
-
-    let mut buf = actix_web::web::BytesMut::new();
-    while let Some(res) = stream.next().await {
-        let bytes = res?;
-        buf.extend_from_slice(&bytes);
-    }
-
-    drop(permit);
-
-    let s = String::from_utf8_lossy(&buf);
-
-    Ok(parse_input_type(s)?)
-}
-
 fn parse_input_type(s: std::borrow::Cow<'_, str>) -> Result<ValidInputType, MagickError> {
     let mut lines = s.lines();
     let first = lines.next();
@@ -298,15 +183,11 @@ fn parse_input_type(s: std::borrow::Cow<'_, str>) -> Result<ValidInputType, Magi
     }
 }
 
-pub(crate) fn process_image_stream<S, E>(
-    input: S,
+pub(crate) fn process_image_write_read(
+    input: impl AsyncRead + Unpin + 'static,
     args: Vec<String>,
     format: Format,
-) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<Bytes, E>>>
-where
-    S: futures::stream::Stream<Item = Result<Bytes, E>> + Unpin + 'static,
-    E: From<std::io::Error> + 'static,
-{
+) -> std::io::Result<impl AsyncRead + Unpin> {
     let process = Process::spawn(
         Command::new("magick")
             .args([&"convert", &"-"])
@@ -314,7 +195,7 @@ where
             .arg(format!("{}:-", format.to_magick_format())),
     )?;
 
-    Ok(Box::pin(process.sink_stream(input).unwrap()))
+    Ok(process.write_read(input).unwrap())
 }
 
 impl From<tokio::sync::AcquireError> for MagickError {

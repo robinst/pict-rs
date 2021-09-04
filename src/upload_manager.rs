@@ -33,12 +33,22 @@ pub struct UploadManager {
     inner: Arc<UploadManagerInner>,
 }
 
-pub struct Hasher<I> {
+pub struct Hasher<I, D> {
     inner: I,
-    hasher: sha2::Sha256,
+    hasher: D,
 }
 
-impl<I> Hasher<I> {
+impl<I, D> Hasher<I, D>
+where
+    D: Digest + Send + 'static,
+{
+    fn new(reader: I, digest: D) -> Self {
+        Hasher {
+            inner: reader,
+            hasher: digest,
+        }
+    }
+
     async fn finalize_reset(self) -> Result<Hash, UploadError> {
         let mut hasher = self.hasher;
         let hash = web::block(move || Hash::new(hasher.finalize_reset().to_vec())).await?;
@@ -46,9 +56,10 @@ impl<I> Hasher<I> {
     }
 }
 
-impl<I> AsyncRead for Hasher<I>
+impl<I, D> AsyncRead for Hasher<I, D>
 where
     I: AsyncRead + Unpin,
+    D: Digest + Unpin,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -134,25 +145,8 @@ pub(crate) struct Details {
 }
 
 impl Details {
-    pub(crate) async fn from_stream<S, E>(stream: S) -> Result<Self, UploadError>
-    where
-        S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin + 'static,
-        E: From<std::io::Error> + 'static,
-        UploadError: From<E>,
-    {
-        let details = crate::magick::details_stream::<S, E, UploadError>(stream).await?;
-
-        Ok(Details::now(
-            details.width,
-            details.height,
-            details.mime_type,
-        ))
-    }
-
-    pub(crate) async fn from_async_read(
-        input: impl AsyncRead + Unpin + 'static,
-    ) -> Result<Self, UploadError> {
-        let details = crate::magick::details_write_read(input).await?;
+    pub(crate) async fn from_bytes(input: web::Bytes) -> Result<Self, UploadError> {
+        let details = crate::magick::details_bytes(input).await?;
 
         Ok(Details::now(
             details.width,
@@ -550,25 +544,24 @@ impl UploadManager {
         UploadError: From<E>,
         E: Unpin + 'static,
     {
-        let mapped_err_stream = Box::pin(async_stream::stream! {
-            use futures::stream::StreamExt;
+        let mut bytes_mut = actix_web::web::BytesMut::new();
 
-            while let Some(res) = stream.next().await {
-                yield res.map_err(UploadError::from);
-            }
-        });
+        debug!("Reading stream to memory");
+        while let Some(res) = stream.next().await {
+            let bytes = res?;
+            bytes_mut.extend_from_slice(&bytes);
+        }
 
-        let (content_type, validated_stream) =
-            crate::validate::validate_image_stream(mapped_err_stream, self.inner.format.clone())
+        debug!("Validating bytes");
+        let (content_type, validated_reader) =
+            crate::validate::validate_image_bytes(bytes_mut.freeze(), self.inner.format.clone())
                 .await?;
 
-        let (s1, s2) = crate::stream::try_duplicate(validated_stream, 1024);
+        let mut hasher_reader = Hasher::new(validated_reader, self.inner.hasher.clone());
 
         let tmpfile = crate::tmp_file();
-        let (hash, _) = tokio::try_join!(
-            self.hash_stream::<_, UploadError>(Box::pin(s1)),
-            safe_save_stream::<UploadError>(tmpfile.clone(), Box::pin(s2))
-        )?;
+        safe_save_reader(tmpfile.clone(), &mut hasher_reader).await?;
+        let hash = hasher_reader.finalize_reset().await?;
 
         debug!("Storing alias");
         self.add_existing_alias(&hash, &alias).await?;
@@ -599,10 +592,7 @@ impl UploadManager {
             crate::validate::validate_image_bytes(bytes_mut.freeze(), self.inner.format.clone())
                 .await?;
 
-        let mut hasher_reader = Hasher {
-            inner: validated_reader,
-            hasher: self.inner.hasher.clone(),
-        };
+        let mut hasher_reader = Hasher::new(validated_reader, self.inner.hasher.clone());
 
         let tmpfile = crate::tmp_file();
         safe_save_reader(tmpfile.clone(), &mut hasher_reader).await?;
@@ -715,30 +705,6 @@ impl UploadManager {
         crate::safe_move_file(tmpfile, real_path).await?;
 
         Ok(())
-    }
-
-    // produce a sh256sum of the uploaded file
-    async fn hash_stream<S, E>(&self, mut stream: S) -> Result<Hash, UploadError>
-    where
-        S: futures::stream::Stream<Item = Result<actix_web::web::Bytes, E>> + Unpin,
-        UploadError: From<E>,
-    {
-        let mut hasher = self.inner.hasher.clone();
-
-        while let Some(res) = stream.next().await {
-            let bytes = res?;
-            hasher = web::block(move || {
-                hasher.update(&bytes);
-                Ok(hasher) as Result<_, UploadError>
-            })
-            .await??;
-        }
-
-        let hash =
-            web::block(move || Ok(hasher.finalize_reset().to_vec()) as Result<_, UploadError>)
-                .await??;
-
-        Ok(Hash::new(hash))
     }
 
     // check for an already-uploaded image with this hash, returning the path to the target file
@@ -1022,4 +988,35 @@ fn variant_details_key(hash: &[u8], path: &str) -> Vec<u8> {
     key.extend(path.as_bytes());
     key.extend(b"details");
     key
+}
+
+#[cfg(test)]
+mod test {
+    use super::Hasher;
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    #[test]
+    fn hasher_works() {
+        let hash = actix_rt::System::new()
+            .block_on(async move {
+                let file1 = tokio::fs::File::open("./client-examples/earth.gif").await?;
+
+                let mut hasher = Hasher::new(file1, Sha256::new());
+
+                tokio::io::copy(&mut hasher, &mut tokio::io::sink()).await?;
+
+                hasher.finalize_reset().await
+            })
+            .unwrap();
+
+        let mut file = std::fs::File::open("./client-examples/earth.gif").unwrap();
+        let mut vec = Vec::new();
+        file.read_to_end(&mut vec).unwrap();
+        let mut hasher = Sha256::new();
+        hasher.update(vec);
+        let correct_hash = hasher.finalize_reset().to_vec();
+
+        assert_eq!(hash.inner, correct_hash);
+    }
 }

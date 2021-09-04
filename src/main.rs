@@ -10,6 +10,7 @@ use futures::stream::{Stream, TryStreamExt};
 use once_cell::sync::Lazy;
 use std::{collections::HashSet, path::PathBuf, pin::Pin, time::SystemTime};
 use structopt::StructOpt;
+use tokio::io::AsyncReadExt;
 use tracing::{debug, error, info, instrument, Span};
 use tracing_subscriber::EnvFilter;
 
@@ -402,58 +403,27 @@ async fn process(
             }
         }
 
-        let stream = Box::pin(async_stream::stream! {
-            use futures::stream::StreamExt;
+        let file = tokio::fs::File::open(original_path.clone()).await?;
 
-            let mut s = actix_fs::read_to_stream(original_path.clone())
-                .await?
-                .faster();
+        let mut processed_reader =
+            crate::magick::process_image_write_read(file, thumbnail_args, format)?;
 
-            while let Some(res) = s.next().await {
-                yield res.map_err(UploadError::from);
-            }
-        });
+        let mut vec = Vec::new();
+        processed_reader.read_to_end(&mut vec).await?;
+        let bytes = web::Bytes::from(vec);
 
-        let processed_stream = crate::magick::process_image_stream(stream, thumbnail_args, format)?;
-
-        let (base_stream, copied_stream) = crate::stream::try_duplicate(processed_stream, 1024);
-
-        let (details, base_stream) = if let Some(details) = details {
-            (
-                details,
-                Box::pin(base_stream)
-                    as Pin<
-                        Box<
-                            dyn futures::stream::Stream<
-                                Item = Result<actix_web::web::Bytes, UploadError>,
-                            >,
-                        >,
-                    >,
-            )
+        let details = if let Some(details) = details {
+            details
         } else {
-            let (base_stream, copied2) = crate::stream::try_duplicate(Box::pin(base_stream), 1024);
-            let details = Details::from_stream(Box::pin(base_stream)).await?;
-            (
-                details,
-                Box::pin(copied2)
-                    as Pin<
-                        Box<
-                            dyn futures::stream::Stream<
-                                Item = Result<actix_web::web::Bytes, UploadError>,
-                            >,
-                        >,
-                    >,
-            )
+            Details::from_bytes(bytes.clone()).await?
         };
 
         let span = tracing::Span::current();
         let details2 = details.clone();
+        let bytes2 = bytes.clone();
         actix_rt::spawn(async move {
             let entered = span.enter();
-            if let Err(e) =
-                upload_manager::safe_save_stream(thumbnail_path.clone(), Box::pin(copied_stream))
-                    .await
-            {
+            if let Err(e) = safe_save_file(thumbnail_path.clone(), bytes2).await {
                 tracing::warn!("Error saving thumbnail: {}", e);
                 return;
             }
@@ -472,7 +442,7 @@ async fn process(
 
         return Ok(srv_response(
             HttpResponse::Ok(),
-            base_stream,
+            futures::stream::once(futures::future::ready(Ok(bytes) as Result<_, UploadError>)),
             details.content_type(),
             7 * DAYS,
             details.system_time(),

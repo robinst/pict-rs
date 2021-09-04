@@ -83,62 +83,6 @@ pub(crate) fn to_mp4_bytes(
     Ok(process.bytes_read(input).unwrap())
 }
 
-pub(crate) fn to_mp4_write_read(
-    input: impl AsyncRead + Unpin + 'static,
-    input_format: InputFormat,
-) -> std::io::Result<impl AsyncRead + Unpin> {
-    let process = Process::spawn(Command::new("ffmpeg").args([
-        "-f",
-        input_format.as_format(),
-        "-i",
-        "pipe:",
-        "-movflags",
-        "faststart+frag_keyframe+empty_moov",
-        "-pix_fmt",
-        "yuv420p",
-        "-vf",
-        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-        "-an",
-        "-codec",
-        "h264",
-        "-f",
-        "mp4",
-        "pipe:",
-    ]))?;
-
-    Ok(process.write_read(input).unwrap())
-}
-
-pub(crate) fn to_mp4_stream<S, E>(
-    input: S,
-    input_format: InputFormat,
-) -> std::io::Result<futures::stream::LocalBoxStream<'static, Result<Bytes, E>>>
-where
-    S: futures::stream::Stream<Item = Result<Bytes, E>> + Unpin + 'static,
-    E: From<std::io::Error> + 'static,
-{
-    let process = Process::spawn(Command::new("ffmpeg").args([
-        "-f",
-        input_format.as_format(),
-        "-i",
-        "pipe:",
-        "-movflags",
-        "faststart+frag_keyframe+empty_moov",
-        "-pix_fmt",
-        "yuv420p",
-        "-vf",
-        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-        "-an",
-        "-codec",
-        "h264",
-        "-f",
-        "mp4",
-        "pipe:",
-    ]))?;
-
-    Ok(Box::pin(process.sink_stream(input).unwrap()))
-}
-
 pub(crate) async fn thumbnail<P1, P2>(
     from: P1,
     to: P2,
