@@ -80,4 +80,8 @@ build_image $new_tag amd64 $push
 if [ "$push" == "true" ]; then
     ./manifest.sh $new_tag
     ./manifest.sh latest
+
+    pushd ../../
+    cargo publish
+    popd
 fi
