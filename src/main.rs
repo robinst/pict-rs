@@ -7,7 +7,7 @@ use actix_web::{
 };
 use awc::Client;
 use futures_core::stream::Stream;
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use std::{collections::HashSet, future::ready, path::PathBuf, time::SystemTime};
 use structopt::StructOpt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -59,6 +59,12 @@ static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
     path
 });
 static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
+static PROCESS_SEMAPHORE: OnceCell<tokio::sync::Semaphore> = OnceCell::new();
+
+fn process_semaphore() -> &'static tokio::sync::Semaphore {
+    PROCESS_SEMAPHORE
+        .get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
+}
 
 // try moving a file
 #[instrument]
@@ -243,7 +249,9 @@ async fn download(
 
     let stream = Box::pin(once(fut));
 
+    let permit = process_semaphore().acquire().await?;
     let alias = manager.upload(stream).await?;
+    drop(permit);
     let delete_token = manager.delete_token(alias.clone()).await?;
 
     let name = manager.from_alias(alias.to_owned()).await?;
@@ -404,6 +412,7 @@ async fn process(
             }
         }
 
+        let permit = process_semaphore().acquire().await?;
         let file = tokio::fs::File::open(original_path.clone()).await?;
 
         let mut processed_reader =
@@ -411,6 +420,8 @@ async fn process(
 
         let mut vec = Vec::new();
         processed_reader.read_to_end(&mut vec).await?;
+        drop(permit);
+
         let bytes = web::Bytes::from(vec);
 
         let details = if let Some(details) = details {
@@ -673,11 +684,15 @@ async fn main() -> Result<(), anyhow::Error> {
                     let span = tracing::info_span!("file-upload", ?filename);
                     let entered = span.enter();
 
+                    let permit = process_semaphore().acquire().await?;
+
                     let res = manager.upload(stream).await.map(|alias| {
                         let mut path = PathBuf::new();
                         path.push(alias);
                         Some(path)
                     });
+
+                    drop(permit);
                     drop(entered);
                     res
                 }
@@ -702,6 +717,8 @@ async fn main() -> Result<(), anyhow::Error> {
                     let span = tracing::info_span!("file-import", ?filename);
                     let entered = span.enter();
 
+                    let permit = process_semaphore().acquire().await?;
+
                     let res = manager
                         .import(filename, content_type, validate_imports, stream)
                         .await
@@ -710,6 +727,8 @@ async fn main() -> Result<(), anyhow::Error> {
                             path.push(alias);
                             Some(path)
                         });
+
+                    drop(permit);
                     drop(entered);
                     res
                 }

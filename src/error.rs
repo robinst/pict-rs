@@ -18,6 +18,9 @@ pub(crate) enum UploadError {
     #[error("Error interacting with filesystem, {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Failed to acquire the semaphore")]
+    Semaphore,
+
     #[error("Panic in blocking operation")]
     Canceled,
 
@@ -94,6 +97,12 @@ impl From<actix_form_data::Error> for UploadError {
 impl From<actix_web::error::BlockingError> for UploadError {
     fn from(_: actix_web::error::BlockingError) -> Self {
         UploadError::Canceled
+    }
+}
+
+impl From<tokio::sync::AcquireError> for UploadError {
+    fn from(_: tokio::sync::AcquireError) -> Self {
+        UploadError::Semaphore
     }
 }
 
