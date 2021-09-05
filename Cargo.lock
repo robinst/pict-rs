@@ -462,6 +462,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "4.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e77a43b28d0668df09411cb0bc9a8c2adc40f9a048afe863e05fd43251e8e39c"
+dependencies = [
+ "cfg-if",
+ "num_cpus",
+]
+
+[[package]]
 name = "derive_more"
 version = "0.99.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -960,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "pict-rs"
-version = "0.3.0-alpha.24"
+version = "0.3.0-alpha.25"
 dependencies = [
  "actix-form-data",
  "actix-rt",
@@ -968,6 +978,7 @@ dependencies = [
  "anyhow",
  "awc",
  "base64",
+ "dashmap",
  "futures-core",
  "mime",
  "num_cpus",

@@ -6,11 +6,15 @@ use actix_web::{
     web, App, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::Client;
+use dashmap::{mapref::entry::Entry, DashMap};
 use futures_core::stream::Stream;
 use once_cell::sync::{Lazy, OnceCell};
-use std::{collections::HashSet, future::ready, path::PathBuf, time::SystemTime};
+use std::{collections::HashSet, future::{Future, ready}, path::PathBuf, time::SystemTime, task::{Context, Poll}, pin::Pin};
 use structopt::StructOpt;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::oneshot::{Sender, Receiver},
+};
 use tracing::{debug, error, info, instrument, Span};
 use tracing_subscriber::EnvFilter;
 
@@ -60,10 +64,80 @@ static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
 });
 static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
 static PROCESS_SEMAPHORE: OnceCell<tokio::sync::Semaphore> = OnceCell::new();
+static PROCESS_MAP: Lazy<DashMap<PathBuf, Vec<Sender<(Details, web::Bytes)>>>> =
+    Lazy::new(DashMap::new);
 
 fn process_semaphore() -> &'static tokio::sync::Semaphore {
     PROCESS_SEMAPHORE
         .get_or_init(|| tokio::sync::Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
+}
+
+struct CancelSafeProcessor<F> {
+    path: PathBuf,
+    receiver: Option<Receiver<(Details, web::Bytes)>>,
+    fut: F,
+}
+
+impl<F> CancelSafeProcessor<F>
+where
+    F: Future<Output = Result<(Details, web::Bytes), UploadError>> + Unpin,
+{
+    pub(crate) fn new(path: PathBuf, fut: F) -> Self {
+        let entry = PROCESS_MAP.entry(path.clone());
+
+        let receiver = match entry {
+            Entry::Vacant(vacant) => {
+                vacant.insert(Vec::new());
+                None
+            }
+            Entry::Occupied(mut occupied) => {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                occupied.get_mut().push(tx);
+                Some(rx)
+            }
+        };
+
+        CancelSafeProcessor { path, receiver, fut }
+    }
+}
+
+impl<F> Future for CancelSafeProcessor<F>
+where
+    F: Future<Output = Result<(Details, web::Bytes), UploadError>> + Unpin,
+{
+    type Output = Result<(Details, web::Bytes), UploadError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if let Some(ref mut rx) = self.receiver {
+            Pin::new(rx).poll(cx).map(|res| res.map_err(|_| UploadError::Canceled))
+        } else {
+            match Pin::new(&mut self.fut).poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(res) => {
+                    let opt = PROCESS_MAP.remove(&self.path);
+                    match res {
+                        Err(e) => Poll::Ready(Err(e)),
+                        Ok(tup) => {
+                            if let Some((_, vec)) = opt {
+                                for sender in vec {
+                                    let _ = sender.send(tup.clone());
+                                }
+                            }
+                            Poll::Ready(Ok(tup))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<F> Drop for CancelSafeProcessor<F> {
+    fn drop(&mut self) {
+        if self.receiver.is_none() {
+            PROCESS_MAP.remove(&self.path);
+        }
+    }
 }
 
 // try moving a file
@@ -389,68 +463,78 @@ async fn process(
         let mut original_path = manager.image_dir();
         original_path.push(name.clone());
 
-        // Create and save a JPG for motion images (gif, mp4)
-        if let Some((updated_path, exists)) =
-            self::processor::prepare_image(original_path.clone()).await?
-        {
-            original_path = updated_path.clone();
+        let thumbnail_path2 = thumbnail_path.clone();
+        let process_fut = async {
+            let thumbnail_path = thumbnail_path2;
+            // Create and save a JPG for motion images (gif, mp4)
+            if let Some((updated_path, exists)) =
+                self::processor::prepare_image(original_path.clone()).await?
+            {
+                original_path = updated_path.clone();
 
-            if exists.is_new() {
-                // Save the transcoded file in another task
-                debug!("Spawning storage task");
-                let span = Span::current();
-                let manager2 = manager.clone();
-                let name = name.clone();
-                actix_rt::spawn(async move {
-                    let entered = span.enter();
-                    if let Err(e) = manager2.store_variant(updated_path, name).await {
-                        error!("Error storing variant, {}", e);
-                        return;
-                    }
-                    drop(entered);
-                });
+                if exists.is_new() {
+                    // Save the transcoded file in another task
+                    debug!("Spawning storage task");
+                    let span = Span::current();
+                    let manager2 = manager.clone();
+                    let name = name.clone();
+                    actix_rt::spawn(async move {
+                        let entered = span.enter();
+                        if let Err(e) = manager2.store_variant(updated_path, name).await {
+                            error!("Error storing variant, {}", e);
+                            return;
+                        }
+                        drop(entered);
+                    });
+                }
             }
-        }
 
-        let permit = process_semaphore().acquire().await?;
-        let file = tokio::fs::File::open(original_path.clone()).await?;
+            let permit = process_semaphore().acquire().await?;
 
-        let mut processed_reader =
-            crate::magick::process_image_write_read(file, thumbnail_args, format)?;
+            let file = tokio::fs::File::open(original_path.clone()).await?;
 
-        let mut vec = Vec::new();
-        processed_reader.read_to_end(&mut vec).await?;
-        drop(permit);
+            let mut processed_reader =
+                crate::magick::process_image_write_read(file, thumbnail_args, format)?;
 
-        let bytes = web::Bytes::from(vec);
+            let mut vec = Vec::new();
+            processed_reader.read_to_end(&mut vec).await?;
+            let bytes = web::Bytes::from(vec);
 
-        let details = if let Some(details) = details {
-            details
-        } else {
-            Details::from_bytes(bytes.clone()).await?
+            drop(permit);
+
+            let details = if let Some(details) = details {
+                details
+            } else {
+                Details::from_bytes(bytes.clone()).await?
+            };
+
+            let span = tracing::Span::current();
+            let details2 = details.clone();
+            let bytes2 = bytes.clone();
+            actix_rt::spawn(async move {
+                let entered = span.enter();
+                if let Err(e) = safe_save_file(thumbnail_path.clone(), bytes2).await {
+                    tracing::warn!("Error saving thumbnail: {}", e);
+                    return;
+                }
+                if let Err(e) = manager
+                    .store_variant_details(thumbnail_path.clone(), name.clone(), &details2)
+                    .await
+                {
+                    tracing::warn!("Error saving variant details: {}", e);
+                    return;
+                }
+                if let Err(e) = manager.store_variant(thumbnail_path, name.clone()).await {
+                    tracing::warn!("Error saving variant info: {}", e);
+                }
+                drop(entered);
+            });
+
+            Ok((details, bytes)) as Result<(Details, web::Bytes), UploadError>
         };
 
-        let span = tracing::Span::current();
-        let details2 = details.clone();
-        let bytes2 = bytes.clone();
-        actix_rt::spawn(async move {
-            let entered = span.enter();
-            if let Err(e) = safe_save_file(thumbnail_path.clone(), bytes2).await {
-                tracing::warn!("Error saving thumbnail: {}", e);
-                return;
-            }
-            if let Err(e) = manager
-                .store_variant_details(thumbnail_path.clone(), name.clone(), &details2)
-                .await
-            {
-                tracing::warn!("Error saving variant details: {}", e);
-                return;
-            }
-            if let Err(e) = manager.store_variant(thumbnail_path, name.clone()).await {
-                tracing::warn!("Error saving variant info: {}", e);
-            }
-            drop(entered);
-        });
+        let (details, bytes) = CancelSafeProcessor::new(thumbnail_path.clone(), Box::pin(process_fut)).await?;
+
 
         return Ok(srv_response(
             HttpResponse::Ok(),
