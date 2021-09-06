@@ -31,6 +31,7 @@ require "$ARCH" arch
 sudo docker build \
     --pull \
     --build-arg TAG=$TAG \
+    --build-arg REPO_ARCH=$ARCH \
     -t $REPO:$ARCH-$TAG \
-    -f Dockerfile.$ARCH \
+    -f Dockerfile \
     .
