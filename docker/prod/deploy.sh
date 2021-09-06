@@ -78,8 +78,8 @@ build_image $new_tag amd64 $push
 # TODO
 
 if [ "$push" == "true" ]; then
-    ./manifest.sh $new_tag
-    ./manifest.sh latest
+    ./manifest.sh pictrs $new_tag
+    ./manifest.sh pictrs latest
 
     pushd ../../
     cargo publish
