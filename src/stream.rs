@@ -1,15 +1,12 @@
 use crate::error::UploadError;
 use actix_web::web::{Bytes, BytesMut};
-use futures_core::stream::Stream;
+use futures_util::Stream;
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
-
-pub(crate) type LocalBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + 'a>>;
-pub(crate) type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
 pub(crate) struct Process {
     child: tokio::process::Child,
@@ -22,12 +19,6 @@ pub(crate) struct ProcessRead<I> {
 }
 
 struct BytesFreezer<S>(S);
-
-pub(crate) struct Once<T> {
-    inner: Option<T>,
-}
-
-pub(crate) struct Next<'a, S>(&'a mut S);
 
 impl Process {
     fn new(child: tokio::process::Child) -> Self {
@@ -92,14 +83,6 @@ pub(crate) fn bytes_stream(
     ))
 }
 
-pub(crate) fn once<T>(input: T) -> Once<T> {
-    Once { inner: Some(input) }
-}
-
-pub(crate) fn next<'a, S>(stream: &'a mut S) -> Next<'a, S> {
-    Next(stream)
-}
-
 impl<I> AsyncRead for ProcessRead<I>
 where
     I: AsyncRead + Unpin,
@@ -137,37 +120,5 @@ where
             .poll_next(cx)
             .map(|opt| opt.map(|res| res.map(|bytes_mut| bytes_mut.freeze())))
             .map_err(UploadError::from)
-    }
-}
-
-impl<T> Stream for Once<T>
-where
-    T: Future + Unpin,
-{
-    type Item = <T as Future>::Output;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(mut fut) = self.inner.take() {
-            match Pin::new(&mut fut).poll(cx) {
-                Poll::Ready(item) => Poll::Ready(Some(item)),
-                Poll::Pending => {
-                    self.inner = Some(fut);
-                    Poll::Pending
-                }
-            }
-        } else {
-            Poll::Ready(None)
-        }
-    }
-}
-
-impl<'a, S> Future for Next<'a, S>
-where
-    S: Stream + Unpin,
-{
-    type Output = Option<<S as Stream>::Item>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.0).poll_next(cx)
     }
 }

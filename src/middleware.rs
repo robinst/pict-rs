@@ -1,9 +1,9 @@
-use crate::stream::LocalBoxFuture;
 use actix_web::{
     dev::{Service, ServiceRequest, Transform},
     http::StatusCode,
     HttpResponse, ResponseError,
 };
+use futures_util::future::LocalBoxFuture;
 use std::{
     future::{ready, Ready},
     task::{Context, Poll},

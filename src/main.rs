@@ -7,7 +7,7 @@ use actix_web::{
 };
 use awc::Client;
 use dashmap::{mapref::entry::Entry, DashMap};
-use futures_core::stream::Stream;
+use futures_util::{stream::{LocalBoxStream, once}, Stream};
 use once_cell::sync::{Lazy, OnceCell};
 use std::{
     collections::HashSet,
@@ -42,7 +42,6 @@ use self::{
     config::{Config, Format},
     error::UploadError,
     middleware::{Internal, Tracing},
-    stream::{once, LocalBoxStream},
     upload_manager::{Details, UploadManager},
     validate::{image_webp, video_mp4},
 };

@@ -2,10 +2,10 @@ use crate::{
     config::Format,
     error::UploadError,
     migrate::{alias_id_key, alias_key, alias_key_bounds, variant_key_bounds, LatestDb},
-    stream::{next, LocalBoxStream},
     to_ext,
 };
 use actix_web::web;
+use futures_util::stream::{LocalBoxStream, StreamExt};
 use sha2::Digest;
 use std::{
     path::PathBuf,
@@ -547,7 +547,7 @@ impl UploadManager {
         let mut bytes_mut = actix_web::web::BytesMut::new();
 
         debug!("Reading stream to memory");
-        while let Some(res) = next(&mut stream).await {
+        while let Some(res) = stream.next().await {
             let bytes = res?;
             bytes_mut.extend_from_slice(&bytes);
         }
@@ -582,7 +582,7 @@ impl UploadManager {
         let mut bytes_mut = actix_web::web::BytesMut::new();
 
         debug!("Reading stream to memory");
-        while let Some(res) = next(&mut stream).await {
+        while let Some(res) = stream.next().await {
             let bytes = res?;
             bytes_mut.extend_from_slice(&bytes);
         }
@@ -954,7 +954,7 @@ where
     let fut = async move {
         let mut file = tokio::fs::File::create(to1).await?;
 
-        while let Some(res) = next(&mut stream).await {
+        while let Some(res) = stream.next().await {
             let mut bytes = res?;
             file.write_all_buf(&mut bytes).await?;
         }

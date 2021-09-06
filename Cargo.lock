@@ -934,7 +934,7 @@ dependencies = [
  "awc",
  "base64",
  "dashmap",
- "futures-core",
+ "futures-util",
  "mime",
  "num_cpus",
  "once_cell",

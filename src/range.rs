@@ -1,7 +1,4 @@
-use crate::{
-    stream::{bytes_stream, LocalBoxStream},
-    UploadError,
-};
+use crate::{stream::bytes_stream, UploadError};
 use actix_web::{
     dev::Payload,
     http::{
@@ -11,6 +8,7 @@ use actix_web::{
     web::Bytes,
     FromRequest, HttpRequest,
 };
+use futures_util::stream::LocalBoxStream;
 use std::{future::ready, io};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
