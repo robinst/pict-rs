@@ -1,7 +1,7 @@
 ARG REPO_ARCH=amd64
 
 # cross-build environment
-FROM asonix/$REPO_ARCH-latest AS builder
+FROM asonix/rust-builder:$REPO_ARCH-latest AS builder
 
 ARG TAG=main
 ARG BINARY=pict-rs
