@@ -72,9 +72,8 @@ static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
     path
 });
 static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
-static PROCESS_SEMAPHORE: Lazy<tokio::sync::Semaphore> = Lazy::new(|| tokio::sync::Semaphore::new(
-    num_cpus::get().saturating_sub(1).max(1),
-));
+static PROCESS_SEMAPHORE: Lazy<tokio::sync::Semaphore> =
+    Lazy::new(|| tokio::sync::Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
 static PROCESS_MAP: Lazy<DashMap<PathBuf, Vec<Sender<(Details, web::Bytes)>>>> =
     Lazy::new(DashMap::new);
 
