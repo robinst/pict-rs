@@ -55,7 +55,7 @@ $ mkdir ./pict-rs
 $ cd ./pict-rs
 $ mkdir -p volumes/pictrs
 $ sudo chown -R 991:991 volumes/pictrs
-$ wget https://git.asonix.dog/asonix/pict-rs/raw/branch/master/docker/prod/docker-compose.yml
+$ wget https://git.asonix.dog/asonix/pict-rs/raw/branch/main/docker/prod/docker-compose.yml
 $ sudo docker-compose up -d
 ```
 ###### Note
