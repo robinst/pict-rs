@@ -8,6 +8,9 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
 
+#[derive(Debug)]
+struct StatusError;
+
 pub(crate) struct Process {
     child: tokio::process::Child,
 }
@@ -38,9 +41,25 @@ impl Process {
 
         let (tx, rx) = tokio::sync::oneshot::channel();
 
+        let mut child = self.child;
+
         actix_rt::spawn(async move {
             if let Err(e) = stdin.write_all_buf(&mut input).await {
                 let _ = tx.send(e);
+                return;
+            }
+            drop(stdin);
+
+            match child.wait().await {
+                Ok(status) => {
+                    if !status.success() {
+                        let _ =
+                            tx.send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(e);
+                }
             }
         });
 
@@ -60,9 +79,25 @@ impl Process {
 
         let (tx, rx) = tokio::sync::oneshot::channel();
 
+        let mut child = self.child;
+
         actix_rt::spawn(async move {
             if let Err(e) = tokio::io::copy(&mut input_reader, &mut stdin).await {
                 let _ = tx.send(e);
+                return;
+            }
+            drop(stdin);
+
+            match child.wait().await {
+                Ok(status) => {
+                    if !status.success() {
+                        let _ =
+                            tx.send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(e);
+                }
             }
         });
 
@@ -122,3 +157,11 @@ where
             .map_err(UploadError::from)
     }
 }
+
+impl std::fmt::Display for StatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Command failed with bad status")
+    }
+}
+
+impl std::error::Error for StatusError {}

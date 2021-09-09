@@ -53,6 +53,22 @@ pub(crate) struct Config {
 
     #[structopt(
         long,
+        env = "PICTRS_MAX_IMAGE_WIDTH",
+        help = "Specify the maximum width in pixels allowed on an image",
+        default_value = "10000"
+    )]
+    max_image_width: usize,
+
+    #[structopt(
+        long,
+        env = "PICTRS_MAX_IMAGE_HEIGHT",
+        help = "Specify the maximum width in pixels allowed on an image",
+        default_value = "10000"
+    )]
+    max_image_height: usize,
+
+    #[structopt(
+        long,
         env = "PICTRS_API_KEY",
         help = "An optional string to be checked on requests to privileged endpoints"
     )]
@@ -84,6 +100,14 @@ impl Config {
 
     pub(crate) fn max_file_size(&self) -> usize {
         self.max_file_size
+    }
+
+    pub(crate) fn max_width(&self) -> usize {
+        self.max_image_width
+    }
+
+    pub(crate) fn max_height(&self) -> usize {
+        self.max_image_height
     }
 
     pub(crate) fn api_key(&self) -> Option<&str> {
