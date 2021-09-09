@@ -4,7 +4,7 @@
     <policy domain="resource" name="width" value="10KP" />
     <policy domain="resource" name="height" value="10KP" />
     <policy domain="resource" name="map" value="512MiB" />
-    <policy domain="resource" name="area" value="16KP" />
+    <policy domain="resource" name="area" value="40MP" />
     <policy domain="resource" name="disk" value="1GiB" />
     <policy domain="resource" name="file" value="768" />
     <policy domain="resource" name="thread" value="2" />
