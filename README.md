@@ -9,7 +9,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-alpha.22
+pict-rs 0.3.0-alpha.27
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] --path <path>
@@ -20,17 +20,28 @@ FLAGS:
     -V, --version                  Prints version information
 
 OPTIONS:
-    -a, --addr <addr>                      The address and port the server binds to. [env: PICTRS_ADDR=]  [default:
-                                           0.0.0.0:8080]
-        --api-key <api-key>                An optional string to be checked on requests to privileged endpoints [env:
-                                           PICTRS_API_KEY=]
-    -f, --format <format>                  An optional image format to convert all uploaded files into, supports 'jpg',
-                                           'png', and 'webp' [env: PICTRS_FORMAT=]
-    -m, --max-file-size <max-file-size>    Specify the maximum allowed uploaded file size (in Megabytes) [env:
-                                           PICTRS_MAX_FILE_SIZE=]  [default: 40]
-    -p, --path <path>                      The path to the data directory, e.g. data/ [env: PICTRS_PATH=]
-    -w, --whitelist <whitelist>...         An optional list of filters to whitelist, supports 'identity', 'thumbnail',
-                                           and 'blur' [env: PICTRS_FILTER_WHITELIST=]
+    -a, --addr <addr>
+            The address and port the server binds to. [env: PICTRS_ADDR=]  [default: 0.0.0.0:8080]
+
+        --api-key <api-key>
+            An optional string to be checked on requests to privileged endpoints [env: PICTRS_API_KEY=]
+
+    -f, --format <format>
+            An optional image format to convert all uploaded files into, supports 'jpg', 'png', and 'webp' [env:
+            PICTRS_FORMAT=]
+    -m, --max-file-size <max-file-size>
+            Specify the maximum allowed uploaded file size (in Megabytes) [env: PICTRS_MAX_FILE_SIZE=]  [default: 40]
+
+        --max-image-height <max-image-height>
+            Specify the maximum width in pixels allowed on an image [env: PICTRS_MAX_IMAGE_HEIGHT=]  [default: 10000]
+
+        --max-image-width <max-image-width>
+            Specify the maximum width in pixels allowed on an image [env: PICTRS_MAX_IMAGE_WIDTH=]  [default: 10000]
+
+    -p, --path <path>                            The path to the data directory, e.g. data/ [env: PICTRS_PATH=]
+    -w, --whitelist <whitelist>...
+            An optional list of filters to whitelist, supports 'identity', 'thumbnail', and 'blur' [env:
+            PICTRS_FILTER_WHITELIST=]
 ```
 
 #### Example:
