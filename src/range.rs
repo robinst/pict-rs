@@ -8,7 +8,7 @@ use actix_web::{
     web::Bytes,
     FromRequest, HttpRequest,
 };
-use futures_util::stream::LocalBoxStream;
+use futures_util::stream::{once, LocalBoxStream, Stream};
 use std::{future::ready, io};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
@@ -40,6 +40,21 @@ impl Range {
                 range: Some((*start, *end)),
                 instance_length: Some(instance_length),
             }),
+        }
+    }
+
+    pub(crate) fn chop_bytes(
+        &self,
+        bytes: Bytes,
+    ) -> impl Stream<Item = Result<Bytes, UploadError>> + Unpin {
+        match self {
+            Range::RangeStart(start) => once(ready(Ok(bytes.slice(*start as usize..)))),
+            Range::SuffixLength(from_start) => {
+                once(ready(Ok(bytes.slice(..*from_start as usize))))
+            }
+            Range::Segment(start, end) => {
+                once(ready(Ok(bytes.slice(*start as usize..*end as usize))))
+            }
         }
     }
 

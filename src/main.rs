@@ -541,13 +541,40 @@ async fn process(
         let (details, bytes) =
             CancelSafeProcessor::new(thumbnail_path.clone(), Box::pin(process_fut)).await?;
 
-        return Ok(srv_response(
-            HttpResponse::Ok(),
-            once(ready(Ok(bytes) as Result<_, UploadError>)),
-            details.content_type(),
-            7 * DAYS,
-            details.system_time(),
-        ));
+        return match range {
+            Some(range_header) => {
+                if !range_header.is_bytes() {
+                    return Err(UploadError::Range);
+                }
+
+                if range_header.is_empty() {
+                    Err(UploadError::Range)
+                } else if range_header.len() == 1 {
+                    let range = range_header.ranges().next().unwrap();
+                    let content_range = range.to_content_range(bytes.len() as u64);
+                    let stream = range.chop_bytes(bytes);
+                    let mut builder = HttpResponse::PartialContent();
+                    builder.insert_header(content_range);
+
+                    Ok(srv_response(
+                        builder,
+                        stream,
+                        details.content_type(),
+                        7 * DAYS,
+                        details.system_time(),
+                    ))
+                } else {
+                    Err(UploadError::Range)
+                }
+            }
+            None => Ok(srv_response(
+                HttpResponse::Ok(),
+                once(ready(Ok(bytes) as Result<_, UploadError>)),
+                details.content_type(),
+                7 * DAYS,
+                details.system_time(),
+            )),
+        };
     }
 
     let details = if let Some(details) = details {
