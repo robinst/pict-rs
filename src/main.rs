@@ -44,7 +44,7 @@ mod validate;
 use self::{
     config::{Config, Format},
     error::UploadError,
-    middleware::{Internal, Tracing},
+    middleware::{Deadline, Internal, Tracing},
     upload_manager::{Details, UploadManager},
     validate::{image_webp, video_mp4},
 };
@@ -859,6 +859,7 @@ async fn main() -> Result<(), anyhow::Error> {
         App::new()
             .wrap(Logger::default())
             .wrap(Tracing)
+            .wrap(Deadline)
             .app_data(web::Data::new(manager.clone()))
             .app_data(web::Data::new(client))
             .app_data(web::Data::new(CONFIG.filter_whitelist()))

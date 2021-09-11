@@ -5,11 +5,29 @@ use actix_web::{
 };
 use futures_util::future::LocalBoxFuture;
 use std::{
-    future::{ready, Ready},
+    future::{ready, Future, Ready},
+    pin::Pin,
     task::{Context, Poll},
 };
+use actix_rt::time::Timeout;
 use tracing_futures::{Instrument, Instrumented};
 use uuid::Uuid;
+
+pub(crate) struct Deadline;
+pub(crate) struct DeadlineMiddleware<S> {
+    inner: S,
+}
+
+#[derive(Debug)]
+struct DeadlineExceeded;
+
+enum DeadlineFutureInner<F> {
+    Timed(Pin<Box<Timeout<F>>>),
+    Untimed(Pin<Box<F>>),
+}
+pub(crate) struct DeadlineFuture<F> {
+    inner: DeadlineFutureInner<F>,
+}
 
 pub(crate) struct Tracing;
 
@@ -35,6 +53,121 @@ impl ResponseError for ApiError {
                 serde_json::to_string(&serde_json::json!({ "msg": self.to_string() }))
                     .unwrap_or(r#"{"msg":"unauthorized"}"#.to_string()),
             )
+    }
+}
+
+impl<S> Transform<S, ServiceRequest> for Deadline
+where
+    S: Service<ServiceRequest>,
+    S::Future: 'static,
+    actix_web::Error: From<S::Error>,
+{
+    type Response = S::Response;
+    type Error = actix_web::Error;
+    type InitError = ();
+    type Transform = DeadlineMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(DeadlineMiddleware { inner: service }))
+    }
+}
+
+impl<S> Service<ServiceRequest> for DeadlineMiddleware<S>
+where
+    S: Service<ServiceRequest>,
+    S::Future: 'static,
+    actix_web::Error: From<S::Error>,
+{
+    type Response = S::Response;
+    type Error = actix_web::Error;
+    type Future = DeadlineFuture<S::Future>;
+
+    fn poll_ready(&self, cx: &mut core::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner
+            .poll_ready(cx)
+            .map(|res| res.map_err(actix_web::Error::from))
+    }
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let duration = req
+            .headers()
+            .get("X-Request-Deadline")
+            .and_then(|deadline| {
+                use std::convert::TryInto;
+                let deadline = time::OffsetDateTime::from_unix_timestamp_nanos(
+                    deadline.to_str().ok()?.parse().ok()?,
+                )
+                .ok()?;
+                let now = time::OffsetDateTime::now_utc();
+
+                if now < deadline {
+                    Some((deadline - now).try_into().ok()?)
+                } else {
+                    None
+                }
+            });
+        DeadlineFuture::new(self.inner.call(req), duration)
+    }
+}
+
+impl std::fmt::Display for DeadlineExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Deadline exceeded")
+    }
+}
+
+impl std::error::Error for DeadlineExceeded {}
+impl actix_web::error::ResponseError for DeadlineExceeded {
+    fn status_code(&self) -> StatusCode {
+        StatusCode::REQUEST_TIMEOUT
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code())
+            .content_type("application/json")
+            .body(
+                serde_json::to_string(&serde_json::json!({ "msg": self.to_string() }))
+                    .unwrap_or(r#"{"msg":"request timeout"}"#.to_string()),
+            )
+    }
+}
+
+impl<F> DeadlineFuture<F>
+where
+    F: Future,
+{
+    fn new(inner: F, timeout: Option<std::time::Duration>) -> Self {
+        DeadlineFuture {
+            inner: match timeout {
+                Some(duration) => {
+                    DeadlineFutureInner::Timed(Box::pin(actix_rt::time::timeout(duration, inner)))
+                }
+                None => DeadlineFutureInner::Untimed(Box::pin(inner)),
+            },
+        }
+    }
+}
+
+impl<F, R, E> Future for DeadlineFuture<F>
+where
+    F: Future<Output = Result<R, E>>,
+    actix_web::Error: From<E>,
+{
+    type Output = Result<R, actix_web::Error>;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.inner {
+            DeadlineFutureInner::Timed(ref mut fut) => {
+                Pin::new(fut).poll(cx).map(|res| match res {
+                    Ok(res) => res.map_err(actix_web::Error::from),
+                    Err(_) => Err(DeadlineExceeded.into()),
+                })
+            }
+            DeadlineFutureInner::Untimed(ref mut fut) => Pin::new(fut)
+                .poll(cx)
+                .map(|res| res.map_err(actix_web::Error::from)),
+        }
     }
 }
 
