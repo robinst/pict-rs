@@ -49,9 +49,7 @@ impl Range {
     ) -> impl Stream<Item = Result<Bytes, UploadError>> + Unpin {
         match self {
             Range::RangeStart(start) => once(ready(Ok(bytes.slice(*start as usize..)))),
-            Range::SuffixLength(from_start) => {
-                once(ready(Ok(bytes.slice(..*from_start as usize))))
-            }
+            Range::SuffixLength(from_start) => once(ready(Ok(bytes.slice(..*from_start as usize)))),
             Range::Segment(start, end) => {
                 once(ready(Ok(bytes.slice(*start as usize..*end as usize))))
             }

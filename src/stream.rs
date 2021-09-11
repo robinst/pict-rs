@@ -19,6 +19,7 @@ pub(crate) struct ProcessRead<I> {
     inner: I,
     err_recv: tokio::sync::oneshot::Receiver<std::io::Error>,
     err_closed: bool,
+    handle: actix_rt::task::JoinHandle<()>,
 }
 
 struct BytesFreezer<S>(S);
@@ -43,7 +44,7 @@ impl Process {
 
         let mut child = self.child;
 
-        actix_rt::spawn(async move {
+        let handle = actix_rt::spawn(async move {
             if let Err(e) = stdin.write_all_buf(&mut input).await {
                 let _ = tx.send(e);
                 return;
@@ -67,6 +68,7 @@ impl Process {
             inner: stdout,
             err_recv: rx,
             err_closed: false,
+            handle,
         }))
     }
 
@@ -81,7 +83,7 @@ impl Process {
 
         let mut child = self.child;
 
-        actix_rt::spawn(async move {
+        let handle = actix_rt::spawn(async move {
             if let Err(e) = tokio::io::copy(&mut input_reader, &mut stdin).await {
                 let _ = tx.send(e);
                 return;
@@ -105,6 +107,7 @@ impl Process {
             inner: stdout,
             err_recv: rx,
             err_closed: false,
+            handle,
         }))
     }
 }
@@ -141,6 +144,12 @@ where
         }
 
         Poll::Pending
+    }
+}
+
+impl<I> Drop for ProcessRead<I> {
+    fn drop(&mut self) {
+        self.handle.abort();
     }
 }
 

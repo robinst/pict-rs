@@ -1,3 +1,4 @@
+use actix_rt::time::Timeout;
 use actix_web::{
     dev::{Service, ServiceRequest, Transform},
     http::StatusCode,
@@ -9,7 +10,6 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use actix_rt::time::Timeout;
 use tracing_futures::{Instrument, Instrumented};
 use uuid::Uuid;
 
