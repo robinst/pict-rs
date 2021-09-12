@@ -45,7 +45,7 @@ use self::{
     config::{Config, Format},
     error::UploadError,
     middleware::{Deadline, Internal, Tracing},
-    upload_manager::{Details, UploadManager},
+    upload_manager::{Details, UploadManager, UploadManagerSession},
     validate::{image_webp, video_mp4},
 };
 
@@ -252,7 +252,7 @@ fn to_ext(mime: mime::Mime) -> Result<&'static str, UploadError> {
 /// Handle responding to succesful uploads
 #[instrument(skip(value, manager))]
 async fn upload(
-    value: Value,
+    value: Value<UploadManagerSession>,
     manager: web::Data<UploadManager>,
 ) -> Result<HttpResponse, UploadError> {
     let images = value
@@ -262,15 +262,14 @@ async fn upload(
         .ok_or(UploadError::NoFiles)?;
 
     let mut files = Vec::new();
-    for image in images.into_iter().filter_map(|i| i.file()) {
-        if let Some(alias) = image
-            .saved_as
-            .as_ref()
-            .and_then(|s| s.file_name())
-            .and_then(|s| s.to_str())
-        {
+    let images = images
+        .into_iter()
+        .filter_map(|i| i.file())
+        .collect::<Vec<_>>();
+    for image in &images {
+        if let Some(alias) = image.result.alias() {
             info!("Uploaded {} as {:?}", image.filename, alias);
-            let delete_token = manager.delete_token(alias.to_owned()).await?;
+            let delete_token = image.result.delete_token().await?;
 
             let name = manager.from_alias(alias.to_owned()).await?;
             let mut path = manager.image_dir();
@@ -300,6 +299,9 @@ async fn upload(
         }
     }
 
+    for image in images {
+        image.result.succeed();
+    }
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
         "files": files
@@ -329,9 +331,10 @@ async fn download(
     let stream = Box::pin(once(fut));
 
     let permit = PROCESS_SEMAPHORE.acquire().await?;
-    let alias = manager.upload(stream).await?;
+    let session = manager.session().upload(stream).await?;
+    let alias = session.alias().unwrap().to_owned();
     drop(permit);
-    let delete_token = manager.delete_token(alias.clone()).await?;
+    let delete_token = session.delete_token().await?;
 
     let name = manager.from_alias(alias.to_owned()).await?;
     let mut path = manager.image_dir();
@@ -349,6 +352,7 @@ async fn download(
         new_details
     };
 
+    session.succeed();
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
         "files": [{
@@ -802,11 +806,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
                     let permit = PROCESS_SEMAPHORE.acquire().await?;
 
-                    let res = manager.upload(stream).await.map(|alias| {
-                        let mut path = PathBuf::new();
-                        path.push(alias);
-                        Some(path)
-                    });
+                    let res = manager.session().upload(stream).await;
 
                     drop(permit);
                     drop(entered);
@@ -836,13 +836,9 @@ async fn main() -> Result<(), anyhow::Error> {
                     let permit = PROCESS_SEMAPHORE.acquire().await?;
 
                     let res = manager
+                        .session()
                         .import(filename, content_type, validate_imports, stream)
-                        .await
-                        .map(|alias| {
-                            let mut path = PathBuf::new();
-                            path.push(alias);
-                            Some(path)
-                        });
+                        .await;
 
                     drop(permit);
                     drop(entered);
