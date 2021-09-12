@@ -51,7 +51,7 @@ impl ResponseError for ApiError {
             .content_type("application/json")
             .body(
                 serde_json::to_string(&serde_json::json!({ "msg": self.to_string() }))
-                    .unwrap_or(r#"{"msg":"unauthorized"}"#.to_string()),
+                    .unwrap_or_else(|_| r#"{"msg":"unauthorized"}"#.to_string()),
             )
     }
 }
@@ -128,7 +128,7 @@ impl actix_web::error::ResponseError for DeadlineExceeded {
             .content_type("application/json")
             .body(
                 serde_json::to_string(&serde_json::json!({ "msg": self.to_string() }))
-                    .unwrap_or(r#"{"msg":"request timeout"}"#.to_string()),
+                    .unwrap_or_else(|_| r#"{"msg":"request timeout"}"#.to_string()),
             )
     }
 }

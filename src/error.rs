@@ -127,7 +127,7 @@ impl ResponseError for UploadError {
             .content_type("application/json")
             .body(
                 serde_json::to_string(&serde_json::json!({ "msg": self.to_string() }))
-                    .unwrap_or(r#"{"msg":"Internal Server Error"}"#.to_string()),
+                    .unwrap_or_else(|_| r#"{"msg":"Internal Server Error"}"#.to_string()),
             )
     }
 }

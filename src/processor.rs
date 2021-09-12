@@ -1,8 +1,8 @@
 use crate::{error::UploadError, ffmpeg::ThumbnailFormat};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{debug, error, instrument};
 
-fn ptos(path: &PathBuf) -> Result<String, UploadError> {
+fn ptos(path: &Path) -> Result<String, UploadError> {
     Ok(path.to_str().ok_or(UploadError::Path)?.to_owned())
 }
 

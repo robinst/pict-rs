@@ -85,25 +85,17 @@ where
 
 fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, MagickError> {
     let mut lines = s.lines();
-    let first = lines.next().ok_or_else(|| MagickError::Format)?;
+    let first = lines.next().ok_or(MagickError::Format)?;
 
     let mut segments = first.split('|');
 
-    let dimensions = segments.next().ok_or_else(|| MagickError::Format)?.trim();
+    let dimensions = segments.next().ok_or(MagickError::Format)?.trim();
     tracing::debug!("dimensions: {}", dimensions);
     let mut dims = dimensions.split(' ');
-    let width = dims
-        .next()
-        .ok_or_else(|| MagickError::Format)?
-        .trim()
-        .parse()?;
-    let height = dims
-        .next()
-        .ok_or_else(|| MagickError::Format)?
-        .trim()
-        .parse()?;
+    let width = dims.next().ok_or(MagickError::Format)?.trim().parse()?;
+    let height = dims.next().ok_or(MagickError::Format)?.trim().parse()?;
 
-    let format = segments.next().ok_or_else(|| MagickError::Format)?.trim();
+    let format = segments.next().ok_or(MagickError::Format)?.trim();
     tracing::debug!("format: {}", format);
 
     if !lines.all(|item| item.ends_with(format)) {

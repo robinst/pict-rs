@@ -14,7 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 #[derive(Debug)]
 pub(crate) enum Range {
-    RangeStart(u64),
+    Start(u64),
     SuffixLength(u64),
     Segment(u64, u64),
 }
@@ -28,7 +28,7 @@ pub(crate) struct RangeHeader {
 impl Range {
     pub(crate) fn to_content_range(&self, instance_length: u64) -> ContentRange {
         match self {
-            Range::RangeStart(start) => ContentRange(ContentRangeSpec::Bytes {
+            Range::Start(start) => ContentRange(ContentRangeSpec::Bytes {
                 range: Some((*start, instance_length)),
                 instance_length: Some(instance_length),
             }),
@@ -48,7 +48,7 @@ impl Range {
         bytes: Bytes,
     ) -> impl Stream<Item = Result<Bytes, UploadError>> + Unpin {
         match self {
-            Range::RangeStart(start) => once(ready(Ok(bytes.slice(*start as usize..)))),
+            Range::Start(start) => once(ready(Ok(bytes.slice(*start as usize..)))),
             Range::SuffixLength(from_start) => once(ready(Ok(bytes.slice(..*from_start as usize)))),
             Range::Segment(start, end) => {
                 once(ready(Ok(bytes.slice(*start as usize..*end as usize))))
@@ -61,7 +61,7 @@ impl Range {
         mut file: tokio::fs::File,
     ) -> Result<LocalBoxStream<'static, Result<Bytes, UploadError>>, UploadError> {
         match self {
-            Range::RangeStart(start) => {
+            Range::Start(start) => {
                 file.seek(io::SeekFrom::Start(*start)).await?;
 
                 Ok(Box::pin(bytes_stream(file)))
@@ -87,7 +87,7 @@ impl RangeHeader {
         self.unit == "bytes"
     }
 
-    pub(crate) fn ranges<'a>(&'a self) -> impl Iterator<Item = &'a Range> + 'a {
+    pub(crate) fn ranges(&self) -> impl Iterator<Item = &'_ Range> + '_ {
         self.ranges.iter()
     }
 
@@ -165,7 +165,7 @@ fn parse_range(s: &str) -> Result<Range, UploadError> {
             UploadError::ParseReq("Cannot parse range start for range header".to_string())
         })?;
 
-        Ok(Range::RangeStart(range_start))
+        Ok(Range::Start(range_start))
     } else {
         let range_start = start.parse().map_err(|_| {
             UploadError::ParseReq("Cannot parse range start for range header".to_string())

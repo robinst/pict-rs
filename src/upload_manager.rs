@@ -632,10 +632,7 @@ impl UploadManagerSession {
     /// Generate a delete token for an alias
     #[instrument(skip(self))]
     pub(crate) async fn delete_token(&self) -> Result<String, UploadError> {
-        let alias = self
-            .alias
-            .clone()
-            .ok_or_else(|| UploadError::MissingAlias)?;
+        let alias = self.alias.clone().ok_or(UploadError::MissingAlias)?;
 
         debug!("Generating delete token");
         use rand::distributions::{Alphanumeric, Distribution};

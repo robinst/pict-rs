@@ -23,7 +23,10 @@ use std::{
 use structopt::StructOpt;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::oneshot::{Receiver, Sender},
+    sync::{
+        oneshot::{Receiver, Sender},
+        Semaphore,
+    },
 };
 use tracing::{debug, error, info, instrument, Span};
 use tracing_subscriber::EnvFilter;
@@ -72,10 +75,12 @@ static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
     path
 });
 static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
-static PROCESS_SEMAPHORE: Lazy<tokio::sync::Semaphore> =
-    Lazy::new(|| tokio::sync::Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
-static PROCESS_MAP: Lazy<DashMap<PathBuf, Vec<Sender<(Details, web::Bytes)>>>> =
-    Lazy::new(DashMap::new);
+static PROCESS_SEMAPHORE: Lazy<Semaphore> =
+    Lazy::new(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
+static PROCESS_MAP: Lazy<ProcessMap> = Lazy::new(DashMap::new);
+
+type OutcomeSender = Sender<(Details, web::Bytes)>;
+type ProcessMap = DashMap<PathBuf, Vec<OutcomeSender>>;
 
 struct CancelSafeProcessor<F> {
     path: PathBuf,
@@ -397,7 +402,7 @@ async fn prepare_process(
                 }
             });
 
-    if alias == "" {
+    if alias.is_empty() {
         return Err(UploadError::MissingFilename);
     }
 
