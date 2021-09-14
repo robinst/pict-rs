@@ -20,9 +20,9 @@ dependencies = [
 
 [[package]]
 name = "actix-form-data"
-version = "0.6.0-beta.8"
+version = "0.6.0-beta.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "304d237617d707993b9210dfaa2c5243ac8bcda5ed1b7a5b6f3b404a4f31a2f3"
+checksum = "ac713cbe809a8627fd8af30292b2881080d8d008559330f4e49f039800a963ed"
 dependencies = [
  "actix-multipart",
  "actix-rt",
@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "pict-rs"
-version = "0.3.0-alpha.31"
+version = "0.3.0-alpha.32"
 dependencies = [
  "actix-form-data",
  "actix-rt",

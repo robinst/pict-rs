@@ -55,7 +55,7 @@ impl From<sled::transaction::TransactionError<Error>> for Error {
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum UploadError {
     #[error("Couln't upload file, {0}")]
-    Upload(String),
+    Upload(#[from] actix_form_data::Error),
 
     #[error("Error in DB, {0}")]
     Db(#[from] sled::Error),
@@ -127,16 +127,6 @@ pub(crate) enum UploadError {
 impl From<awc::error::SendRequestError> for UploadError {
     fn from(e: awc::error::SendRequestError) -> Self {
         UploadError::SendRequest(e.to_string())
-    }
-}
-
-impl From<actix_form_data::Error<Error>> for Error {
-    fn from(e: actix_form_data::Error<Error>) -> Self {
-        if let actix_form_data::Error::FileFn(e) = e {
-            return e;
-        }
-
-        UploadError::Upload(e.to_string()).into()
     }
 }
 
