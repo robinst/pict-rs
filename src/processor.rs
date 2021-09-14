@@ -1,8 +1,11 @@
-use crate::{error::UploadError, ffmpeg::ThumbnailFormat};
+use crate::{
+    error::{Error, UploadError},
+    ffmpeg::ThumbnailFormat,
+};
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, instrument};
 
-fn ptos(path: &Path) -> Result<String, UploadError> {
+fn ptos(path: &Path) -> Result<String, Error> {
     Ok(path.to_str().ok_or(UploadError::Path)?.to_owned())
 }
 
@@ -297,7 +300,7 @@ impl Exists {
 
 pub(crate) async fn prepare_image(
     original_file: PathBuf,
-) -> Result<Option<(PathBuf, Exists)>, UploadError> {
+) -> Result<Option<(PathBuf, Exists)>, Error> {
     let original_path_str = ptos(&original_file)?;
     let jpg_path = format!("{}.jpg", original_path_str);
     let jpg_path = PathBuf::from(jpg_path);
@@ -317,11 +320,13 @@ pub(crate) async fn prepare_image(
         if let Err(e) = res {
             error!("transcode error: {:?}", e);
             tokio::fs::remove_file(&tmpfile).await?;
-            return Err(e.into());
+            return Err(e);
         }
 
         return match crate::safe_move_file(tmpfile, jpg_path.clone()).await {
-            Err(UploadError::FileExists) => Ok(Some((jpg_path, Exists::Exists))),
+            Err(e) if matches!(e.kind(), UploadError::FileExists) => {
+                Ok(Some((jpg_path, Exists::Exists)))
+            }
             Err(e) => Err(e),
             _ => Ok(Some((jpg_path, Exists::New))),
         };

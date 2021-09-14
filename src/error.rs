@@ -1,5 +1,56 @@
-use crate::{ffmpeg::VideoError, magick::MagickError};
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
+use tracing_error::SpanTrace;
+
+pub(crate) struct Error {
+    context: SpanTrace,
+    kind: UploadError,
+}
+
+impl Error {
+    pub(crate) fn kind(&self) -> &UploadError {
+        &self.kind
+    }
+}
+
+impl std::fmt::Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}\n", self.kind)
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}\n", self.kind)?;
+        std::fmt::Display::fmt(&self.context, f)
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.kind.source()
+    }
+}
+
+impl<T> From<T> for Error
+where
+    UploadError: From<T>,
+{
+    fn from(error: T) -> Self {
+        Error {
+            kind: UploadError::from(error),
+            context: SpanTrace::capture(),
+        }
+    }
+}
+
+impl From<sled::transaction::TransactionError<Error>> for Error {
+    fn from(e: sled::transaction::TransactionError<Error>) -> Self {
+        match e {
+            sled::transaction::TransactionError::Abort(t) => t,
+            sled::transaction::TransactionError::Storage(e) => e.into(),
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum UploadError {
@@ -39,6 +90,9 @@ pub(crate) enum UploadError {
     #[error("Unsupported image format")]
     UnsupportedFormat,
 
+    #[error("Invalid media dimensions")]
+    Dimensions,
+
     #[error("Unable to download image, bad response {0}")]
     Download(actix_web::http::StatusCode),
 
@@ -66,11 +120,8 @@ pub(crate) enum UploadError {
     #[error("Range header not satisfiable")]
     Range,
 
-    #[error("{0}")]
-    VideoError(#[from] VideoError),
-
-    #[error("{0}")]
-    MagickError(#[from] MagickError),
+    #[error("Command failed")]
+    Status,
 }
 
 impl From<awc::error::SendRequestError> for UploadError {
@@ -79,18 +130,13 @@ impl From<awc::error::SendRequestError> for UploadError {
     }
 }
 
-impl From<sled::transaction::TransactionError<UploadError>> for UploadError {
-    fn from(e: sled::transaction::TransactionError<UploadError>) -> Self {
-        match e {
-            sled::transaction::TransactionError::Abort(t) => t,
-            sled::transaction::TransactionError::Storage(e) => e.into(),
+impl From<actix_form_data::Error<Error>> for Error {
+    fn from(e: actix_form_data::Error<Error>) -> Self {
+        if let actix_form_data::Error::FileFn(e) = e {
+            return e;
         }
-    }
-}
 
-impl From<actix_form_data::Error> for UploadError {
-    fn from(e: actix_form_data::Error) -> Self {
-        UploadError::Upload(e.to_string())
+        UploadError::Upload(e.to_string()).into()
     }
 }
 
@@ -106,12 +152,10 @@ impl From<tokio::sync::AcquireError> for UploadError {
     }
 }
 
-impl ResponseError for UploadError {
+impl ResponseError for Error {
     fn status_code(&self) -> StatusCode {
-        match self {
-            UploadError::VideoError(_)
-            | UploadError::MagickError(_)
-            | UploadError::DuplicateAlias
+        match self.kind {
+            UploadError::DuplicateAlias
             | UploadError::NoFiles
             | UploadError::Upload(_)
             | UploadError::ParseReq(_) => StatusCode::BAD_REQUEST,
@@ -126,8 +170,8 @@ impl ResponseError for UploadError {
         HttpResponse::build(self.status_code())
             .content_type("application/json")
             .body(
-                serde_json::to_string(&serde_json::json!({ "msg": self.to_string() }))
-                    .unwrap_or_else(|_| r#"{"msg":"Internal Server Error"}"#.to_string()),
+                serde_json::to_string(&serde_json::json!({ "msg": self.kind.to_string() }))
+                    .unwrap_or_else(|_| r#"{"msg":"Request failed"}"#.to_string()),
             )
     }
 }

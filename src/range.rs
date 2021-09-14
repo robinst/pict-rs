@@ -1,4 +1,7 @@
-use crate::{stream::bytes_stream, UploadError};
+use crate::{
+    error::{Error, UploadError},
+    stream::bytes_stream,
+};
 use actix_web::{
     dev::Payload,
     http::{
@@ -46,7 +49,7 @@ impl Range {
     pub(crate) fn chop_bytes(
         &self,
         bytes: Bytes,
-    ) -> impl Stream<Item = Result<Bytes, UploadError>> + Unpin {
+    ) -> impl Stream<Item = Result<Bytes, Error>> + Unpin {
         match self {
             Range::Start(start) => once(ready(Ok(bytes.slice(*start as usize..)))),
             Range::SuffixLength(from_start) => once(ready(Ok(bytes.slice(..*from_start as usize)))),
@@ -59,7 +62,7 @@ impl Range {
     pub(crate) async fn chop_file(
         &self,
         mut file: tokio::fs::File,
-    ) -> Result<LocalBoxStream<'static, Result<Bytes, UploadError>>, UploadError> {
+    ) -> Result<LocalBoxStream<'static, Result<Bytes, Error>>, Error> {
         match self {
             Range::Start(start) => {
                 file.seek(io::SeekFrom::Start(*start)).await?;
@@ -102,14 +105,14 @@ impl RangeHeader {
 
 impl FromRequest for RangeHeader {
     type Config = ();
-    type Error = actix_web::Error;
+    type Error = Error;
     type Future = std::future::Ready<Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
         if let Some(range_head) = req.headers().get("Range") {
             ready(parse_range_header(range_head).map_err(|e| {
                 tracing::warn!("Failed to parse range header: {}", e);
-                e.into()
+                e
             }))
         } else {
             ready(Err(UploadError::ParseReq(
@@ -120,7 +123,7 @@ impl FromRequest for RangeHeader {
     }
 }
 
-fn parse_range_header(range_head: &HeaderValue) -> Result<RangeHeader, UploadError> {
+fn parse_range_header(range_head: &HeaderValue) -> Result<RangeHeader, Error> {
     let range_head_str = range_head.to_str().map_err(|_| {
         UploadError::ParseReq("Range header contains non-utf8 characters".to_string())
     })?;
@@ -135,7 +138,7 @@ fn parse_range_header(range_head: &HeaderValue) -> Result<RangeHeader, UploadErr
     let ranges = ranges
         .split(',')
         .map(parse_range)
-        .collect::<Result<Vec<Range>, UploadError>>()?;
+        .collect::<Result<Vec<Range>, Error>>()?;
 
     Ok(RangeHeader {
         unit: unit.to_owned(),
@@ -143,7 +146,7 @@ fn parse_range_header(range_head: &HeaderValue) -> Result<RangeHeader, UploadErr
     })
 }
 
-fn parse_range(s: &str) -> Result<Range, UploadError> {
+fn parse_range(s: &str) -> Result<Range, Error> {
     let dash_pos = s
         .find('-')
         .ok_or_else(|| UploadError::ParseReq("Mailformed Range Bound".to_string()))?;
@@ -153,7 +156,7 @@ fn parse_range(s: &str) -> Result<Range, UploadError> {
     let end = end.trim_start_matches('-').trim();
 
     if start.is_empty() && end.is_empty() {
-        Err(UploadError::ParseReq("Malformed content range".to_string()))
+        Err(UploadError::ParseReq("Malformed content range".to_string()).into())
     } else if start.is_empty() {
         let suffix_length = end.parse().map_err(|_| {
             UploadError::ParseReq("Cannot parse suffix length for range header".to_string())
@@ -175,7 +178,7 @@ fn parse_range(s: &str) -> Result<Range, UploadError> {
         })?;
 
         if range_start > range_end {
-            return Err(UploadError::Range);
+            return Err(UploadError::Range.into());
         }
 
         Ok(Range::Segment(range_start, range_end))

@@ -2,7 +2,6 @@ use actix_form_data::{Field, Form, Value};
 use actix_web::{
     guard,
     http::header::{CacheControl, CacheDirective, LastModified, ACCEPT_RANGES},
-    middleware::Logger,
     web, App, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::Client;
@@ -28,8 +27,12 @@ use tokio::{
         Semaphore,
     },
 };
-use tracing::{debug, error, info, instrument, Span};
-use tracing_subscriber::EnvFilter;
+use tracing::{debug, error, info, instrument, subscriber::set_global_default, Span};
+use tracing_actix_web::TracingLogger;
+use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
+use tracing_error::ErrorLayer;
+use tracing_log::LogTracer;
+use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Registry};
 
 mod config;
 mod error;
@@ -40,14 +43,16 @@ mod middleware;
 mod migrate;
 mod processor;
 mod range;
+mod root_span_builder;
 mod stream;
 mod upload_manager;
 mod validate;
 
 use self::{
     config::{Config, Format},
-    error::UploadError,
-    middleware::{Deadline, Internal, Tracing},
+    error::{Error, UploadError},
+    middleware::{Deadline, Internal},
+    root_span_builder::RootSpanBuilder,
     upload_manager::{Details, UploadManager, UploadManagerSession},
     validate::{image_webp, video_mp4},
 };
@@ -90,7 +95,7 @@ struct CancelSafeProcessor<F> {
 
 impl<F> CancelSafeProcessor<F>
 where
-    F: Future<Output = Result<(Details, web::Bytes), UploadError>> + Unpin,
+    F: Future<Output = Result<(Details, web::Bytes), Error>> + Unpin,
 {
     pub(crate) fn new(path: PathBuf, fut: F) -> Self {
         let entry = PROCESS_MAP.entry(path.clone());
@@ -117,15 +122,15 @@ where
 
 impl<F> Future for CancelSafeProcessor<F>
 where
-    F: Future<Output = Result<(Details, web::Bytes), UploadError>> + Unpin,
+    F: Future<Output = Result<(Details, web::Bytes), Error>> + Unpin,
 {
-    type Output = Result<(Details, web::Bytes), UploadError>;
+    type Output = Result<(Details, web::Bytes), Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Some(ref mut rx) = self.receiver {
             Pin::new(rx)
                 .poll(cx)
-                .map(|res| res.map_err(|_| UploadError::Canceled))
+                .map(|res| res.map_err(|_| UploadError::Canceled.into()))
         } else {
             Pin::new(&mut self.fut).poll(cx).map(|res| {
                 let opt = PROCESS_MAP.remove(&self.path);
@@ -151,8 +156,8 @@ impl<F> Drop for CancelSafeProcessor<F> {
 }
 
 // try moving a file
-#[instrument]
-async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
+#[instrument(name = "Moving file")]
+async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), Error> {
     if let Some(path) = to.parent() {
         debug!("Creating directory {:?}", path);
         tokio::fs::create_dir_all(path).await?;
@@ -164,7 +169,7 @@ async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
             return Err(e.into());
         }
     } else {
-        return Err(UploadError::FileExists);
+        return Err(UploadError::FileExists.into());
     }
 
     debug!("Moving {:?} to {:?}", from, to);
@@ -173,7 +178,7 @@ async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), UploadError> {
     Ok(())
 }
 
-async fn safe_create_parent<P>(path: P) -> Result<(), UploadError>
+async fn safe_create_parent<P>(path: P) -> Result<(), Error>
 where
     P: AsRef<std::path::Path>,
 {
@@ -186,8 +191,8 @@ where
 }
 
 // Try writing to a file
-#[instrument(skip(bytes))]
-async fn safe_save_file(path: PathBuf, mut bytes: web::Bytes) -> Result<(), UploadError> {
+#[instrument(name = "Saving file", skip(bytes))]
+async fn safe_save_file(path: PathBuf, mut bytes: web::Bytes) -> Result<(), Error> {
     if let Some(path) = path.parent() {
         // create the directory for the file
         debug!("Creating directory {:?}", path);
@@ -240,7 +245,7 @@ pub(crate) fn tmp_file() -> PathBuf {
     path
 }
 
-fn to_ext(mime: mime::Mime) -> Result<&'static str, UploadError> {
+fn to_ext(mime: mime::Mime) -> Result<&'static str, Error> {
     if mime == mime::IMAGE_PNG {
         Ok(".png")
     } else if mime == mime::IMAGE_JPEG {
@@ -250,16 +255,16 @@ fn to_ext(mime: mime::Mime) -> Result<&'static str, UploadError> {
     } else if mime == image_webp() {
         Ok(".webp")
     } else {
-        Err(UploadError::UnsupportedFormat)
+        Err(UploadError::UnsupportedFormat.into())
     }
 }
 
 /// Handle responding to succesful uploads
-#[instrument(skip(value, manager))]
+#[instrument(name = "Uploaded files", skip(value, manager))]
 async fn upload(
     value: Value<UploadManagerSession>,
     manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let images = value
         .map()
         .and_then(|mut m| m.remove("images"))
@@ -319,16 +324,16 @@ struct UrlQuery {
 }
 
 /// download an image from a URL
-#[instrument(skip(client, manager))]
+#[instrument(name = "Downloading file", skip(client, manager))]
 async fn download(
     client: web::Data<Client>,
     manager: web::Data<UploadManager>,
     query: web::Query<UrlQuery>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let mut res = client.get(&query.url).send().await?;
 
     if !res.status().is_success() {
-        return Err(UploadError::Download(res.status()));
+        return Err(UploadError::Download(res.status()).into());
     }
 
     let fut = res.body().limit(CONFIG.max_file_size() * MEGABYTES);
@@ -369,11 +374,11 @@ async fn download(
 }
 
 /// Delete aliases and files
-#[instrument(skip(manager))]
+#[instrument(name = "Deleting file", skip(manager))]
 async fn delete(
     manager: web::Data<UploadManager>,
     path_entries: web::Path<(String, String)>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let (alias, token) = path_entries.into_inner();
 
     manager.delete(token, alias).await?;
@@ -388,7 +393,7 @@ async fn prepare_process(
     ext: &str,
     manager: &UploadManager,
     whitelist: &Option<HashSet<String>>,
-) -> Result<(Format, String, PathBuf, Vec<String>), UploadError> {
+) -> Result<(Format, String, PathBuf, Vec<String>), Error> {
     let (alias, operations) =
         query
             .into_inner()
@@ -403,7 +408,7 @@ async fn prepare_process(
             });
 
     if alias.is_empty() {
-        return Err(UploadError::MissingFilename);
+        return Err(UploadError::MissingFilename.into());
     }
 
     let name = manager.from_alias(alias).await?;
@@ -430,12 +435,13 @@ async fn prepare_process(
     Ok((format, name, thumbnail_path, thumbnail_args))
 }
 
+#[instrument(name = "Fetching derived details", skip(manager, whitelist))]
 async fn process_details(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
     whitelist: web::Data<Option<HashSet<String>>>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let (_, name, thumbnail_path, _) =
         prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
@@ -447,14 +453,14 @@ async fn process_details(
 }
 
 /// Process files
-#[instrument(skip(manager, whitelist))]
+#[instrument(name = "Processing image", skip(manager, whitelist))]
 async fn process(
     range: Option<range::RangeHeader>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
     whitelist: web::Data<Option<HashSet<String>>>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let (format, name, thumbnail_path, thumbnail_args) =
         prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
@@ -544,7 +550,7 @@ async fn process(
                 drop(entered);
             });
 
-            Ok((details, bytes)) as Result<(Details, web::Bytes), UploadError>
+            Ok((details, bytes)) as Result<(Details, web::Bytes), Error>
         };
 
         let (details, bytes) =
@@ -553,11 +559,11 @@ async fn process(
         return match range {
             Some(range_header) => {
                 if !range_header.is_bytes() {
-                    return Err(UploadError::Range);
+                    return Err(UploadError::Range.into());
                 }
 
                 if range_header.is_empty() {
-                    Err(UploadError::Range)
+                    Err(UploadError::Range.into())
                 } else if range_header.len() == 1 {
                     let range = range_header.ranges().next().unwrap();
                     let content_range = range.to_content_range(bytes.len() as u64);
@@ -573,12 +579,12 @@ async fn process(
                         details.system_time(),
                     ))
                 } else {
-                    Err(UploadError::Range)
+                    Err(UploadError::Range.into())
                 }
             }
             None => Ok(srv_response(
                 HttpResponse::Ok(),
-                once(ready(Ok(bytes) as Result<_, UploadError>)),
+                once(ready(Ok(bytes) as Result<_, Error>)),
                 details.content_type(),
                 7 * DAYS,
                 details.system_time(),
@@ -600,10 +606,11 @@ async fn process(
 }
 
 /// Fetch file details
+#[instrument(name = "Fetching details", skip(manager))]
 async fn details(
     alias: web::Path<String>,
     manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let name = manager.from_alias(alias.into_inner()).await?;
     let mut path = manager.image_dir();
     path.push(name.clone());
@@ -624,12 +631,12 @@ async fn details(
 }
 
 /// Serve files
-#[instrument(skip(manager))]
+#[instrument(name = "Serving file", skip(manager))]
 async fn serve(
     range: Option<range::RangeHeader>,
     alias: web::Path<String>,
     manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let name = manager.from_alias(alias.into_inner()).await?;
     let mut path = manager.image_dir();
     path.push(name.clone());
@@ -653,16 +660,16 @@ async fn ranged_file_resp(
     path: PathBuf,
     range: Option<range::RangeHeader>,
     details: Details,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let (builder, stream) = match range {
         //Range header exists - return as ranged
         Some(range_header) => {
             if !range_header.is_bytes() {
-                return Err(UploadError::Range);
+                return Err(UploadError::Range.into());
             }
 
             if range_header.is_empty() {
-                return Err(UploadError::Range);
+                return Err(UploadError::Range.into());
             } else if range_header.len() == 1 {
                 let file = tokio::fs::File::open(path).await?;
 
@@ -675,7 +682,7 @@ async fn ranged_file_resp(
 
                 (builder, range.chop_file(file).await?)
             } else {
-                return Err(UploadError::Range);
+                return Err(UploadError::Range.into());
             }
         }
         //No Range header in the request - return the entire document
@@ -727,10 +734,11 @@ enum FileOrAlias {
     Alias { alias: String },
 }
 
+#[instrument(name = "Purging file", skip(upload_manager))]
 async fn purge(
     query: web::Query<FileOrAlias>,
     upload_manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let aliases = match query.into_inner() {
         FileOrAlias::File { file } => upload_manager.aliases_by_filename(file).await?,
         FileOrAlias::Alias { alias } => upload_manager.aliases_by_alias(alias).await?,
@@ -748,10 +756,11 @@ async fn purge(
     })))
 }
 
+#[instrument(name = "Fetching aliases", skip(upload_manager))]
 async fn aliases(
     query: web::Query<FileOrAlias>,
     upload_manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let aliases = match query.into_inner() {
         FileOrAlias::File { file } => upload_manager.aliases_by_filename(file).await?,
         FileOrAlias::Alias { alias } => upload_manager.aliases_by_alias(alias).await?,
@@ -768,10 +777,11 @@ struct ByAlias {
     alias: String,
 }
 
+#[instrument(name = "Fetching filename", skip(upload_manager))]
 async fn filename_by_alias(
     query: web::Query<ByAlias>,
     upload_manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, UploadError> {
+) -> Result<HttpResponse, Error> {
     let filename = upload_manager.from_alias(query.into_inner().alias).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
@@ -782,13 +792,23 @@ async fn filename_by_alias(
 
 #[actix_rt::main]
 async fn main() -> Result<(), anyhow::Error> {
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info");
-    }
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    LogTracer::init()?;
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    let subscriber = Registry::default()
+        .with(env_filter)
+        .with(ErrorLayer::default());
+
+    if CONFIG.json_logging() {
+        let formatting_layer = BunyanFormattingLayer::new("pict-rs".into(), std::io::stdout);
+
+        let subscriber = subscriber.with(JsonStorageLayer).with(formatting_layer);
+
+        set_global_default(subscriber)?;
+    } else {
+        let subscriber = subscriber.with(tracing_subscriber::fmt::layer());
+        set_global_default(subscriber)?;
+    };
 
     let manager = UploadManager::new(CONFIG.data_dir(), CONFIG.format()).await?;
 
@@ -799,7 +819,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let form = Form::new()
         .max_files(10)
         .max_file_size(CONFIG.max_file_size() * MEGABYTES)
-        .transform_error(|e| UploadError::from(e).into())
+        .transform_error(|e| Error::from(e).into())
         .field(
             "images",
             Field::array(Field::file(move |filename, _, stream| {
@@ -828,7 +848,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let import_form = Form::new()
         .max_files(10)
         .max_file_size(CONFIG.max_file_size() * MEGABYTES)
-        .transform_error(|e| UploadError::from(e).into())
+        .transform_error(|e| Error::from(e).into())
         .field(
             "images",
             Field::array(Field::file(move |filename, content_type, stream| {
@@ -858,8 +878,7 @@ async fn main() -> Result<(), anyhow::Error> {
             .finish();
 
         App::new()
-            .wrap(Logger::default())
-            .wrap(Tracing)
+            .wrap(TracingLogger::<RootSpanBuilder>::new())
             .wrap(Deadline)
             .app_data(web::Data::new(manager.clone()))
             .app_data(web::Data::new(client))

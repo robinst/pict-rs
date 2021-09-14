@@ -73,6 +73,9 @@ pub(crate) struct Config {
         help = "An optional string to be checked on requests to privileged endpoints"
     )]
     api_key: Option<String>,
+
+    #[structopt(short, long, help = "Enable json logging for the pict-rs server")]
+    json_logging: bool,
 }
 
 impl Config {
@@ -112,6 +115,10 @@ impl Config {
 
     pub(crate) fn api_key(&self) -> Option<&str> {
         self.api_key.as_deref()
+    }
+
+    pub(crate) fn json_logging(&self) -> bool {
+        self.json_logging
     }
 }
 

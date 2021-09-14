@@ -1,37 +1,51 @@
-use crate::error::UploadError;
+use crate::error::Error;
+use actix_rt::task::JoinHandle;
 use actix_web::web::{Bytes, BytesMut};
 use futures_util::Stream;
 use std::{
     future::Future,
     pin::Pin,
+    process::Stdio,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
+use tokio::{
+    io::{AsyncRead, AsyncWriteExt, ReadBuf},
+    process::{Child, Command},
+    sync::oneshot::{channel, Receiver},
+};
+use tokio_util::codec::{BytesCodec, FramedRead};
+use tracing::instrument;
 
 #[derive(Debug)]
 struct StatusError;
 
 pub(crate) struct Process {
-    child: tokio::process::Child,
+    child: Child,
 }
 
 pub(crate) struct ProcessRead<I> {
     inner: I,
-    err_recv: tokio::sync::oneshot::Receiver<std::io::Error>,
+    err_recv: Receiver<std::io::Error>,
     err_closed: bool,
-    handle: actix_rt::task::JoinHandle<()>,
+    handle: JoinHandle<()>,
 }
 
 struct BytesFreezer<S>(S);
 
 impl Process {
-    fn new(child: tokio::process::Child) -> Self {
+    fn new(child: Child) -> Self {
         Process { child }
     }
 
-    pub(crate) fn spawn(cmd: &mut tokio::process::Command) -> std::io::Result<Self> {
-        cmd.stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
+    #[instrument(name = "Spawning command")]
+    pub(crate) fn run(command: &str, args: &[&str]) -> std::io::Result<Self> {
+        tracing::info!("Spawning");
+        Self::spawn(Command::new(command).args(args))
+    }
+
+    pub(crate) fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
             .spawn()
             .map(Process::new)
     }
@@ -40,7 +54,7 @@ impl Process {
         let mut stdin = self.child.stdin.take()?;
         let stdout = self.child.stdout.take()?;
 
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = channel();
 
         let mut child = self.child;
 
@@ -79,7 +93,7 @@ impl Process {
         let mut stdin = self.child.stdin.take()?;
         let stdout = self.child.stdout.take()?;
 
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = channel();
 
         let mut child = self.child;
 
@@ -114,11 +128,8 @@ impl Process {
 
 pub(crate) fn bytes_stream(
     input: impl AsyncRead + Unpin,
-) -> impl Stream<Item = Result<Bytes, UploadError>> + Unpin {
-    BytesFreezer(tokio_util::codec::FramedRead::new(
-        input,
-        tokio_util::codec::BytesCodec::new(),
-    ))
+) -> impl Stream<Item = Result<Bytes, Error>> + Unpin {
+    BytesFreezer(FramedRead::new(input, BytesCodec::new()))
 }
 
 impl<I> AsyncRead for ProcessRead<I>
@@ -157,13 +168,13 @@ impl<S> Stream for BytesFreezer<S>
 where
     S: Stream<Item = std::io::Result<BytesMut>> + Unpin,
 {
-    type Item = Result<Bytes, UploadError>;
+    type Item = Result<Bytes, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.0)
             .poll_next(cx)
             .map(|opt| opt.map(|res| res.map(|bytes_mut| bytes_mut.freeze())))
-            .map_err(UploadError::from)
+            .map_err(Error::from)
     }
 }
 

@@ -10,8 +10,6 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tracing_futures::{Instrument, Instrumented};
-use uuid::Uuid;
 
 pub(crate) struct Deadline;
 pub(crate) struct DeadlineMiddleware<S> {
@@ -27,12 +25,6 @@ enum DeadlineFutureInner<F> {
 }
 pub(crate) struct DeadlineFuture<F> {
     inner: DeadlineFutureInner<F>,
-}
-
-pub(crate) struct Tracing;
-
-pub(crate) struct TracingMiddleware<S> {
-    inner: S,
 }
 
 pub(crate) struct Internal(pub(crate) Option<String>);
@@ -168,44 +160,6 @@ where
                 .poll(cx)
                 .map(|res| res.map_err(actix_web::Error::from)),
         }
-    }
-}
-
-impl<S, Request> Transform<S, Request> for Tracing
-where
-    S: Service<Request>,
-    S::Future: 'static,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type InitError = ();
-    type Transform = TracingMiddleware<S>;
-    type Future = Ready<Result<Self::Transform, Self::InitError>>;
-
-    fn new_transform(&self, service: S) -> Self::Future {
-        ready(Ok(TracingMiddleware { inner: service }))
-    }
-}
-
-impl<S, Request> Service<Request> for TracingMiddleware<S>
-where
-    S: Service<Request>,
-    S::Future: 'static,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = Instrumented<S::Future>;
-
-    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&self, req: Request) -> Self::Future {
-        let uuid = Uuid::new_v4();
-
-        self.inner
-            .call(req)
-            .instrument(tracing::info_span!("request", ?uuid))
     }
 }
 
