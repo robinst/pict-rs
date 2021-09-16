@@ -15,6 +15,7 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
 use tracing::{debug, error, info, instrument, warn, Span};
+use tracing_futures::Instrument;
 
 // TREE STRUCTURE
 // - Alias Tree
@@ -57,27 +58,27 @@ impl Drop for UploadManagerSession {
 
         if let Some(alias) = self.alias.take() {
             let manager = self.manager.clone();
-            let span = Span::current();
-            actix_rt::spawn(async move {
-                let entered = span.entered();
-                // undo alias -> hash mapping
-                debug!("Remove alias -> hash mapping");
-                if let Ok(Some(hash)) = manager.inner.alias_tree.remove(&alias) {
-                    // undo alias -> id mapping
-                    debug!("Remove alias -> id mapping");
-                    let key = alias_id_key(&alias);
-                    if let Ok(Some(id)) = manager.inner.alias_tree.remove(&key) {
-                        // undo hash/id -> alias mapping
-                        debug!("Remove hash/id -> alias mapping");
-                        let id = String::from_utf8_lossy(&id);
-                        let key = alias_key(&hash, &id);
-                        let _ = manager.inner.main_tree.remove(&key);
-                    }
+            actix_rt::spawn(
+                async move {
+                    // undo alias -> hash mapping
+                    debug!("Remove alias -> hash mapping");
+                    if let Ok(Some(hash)) = manager.inner.alias_tree.remove(&alias) {
+                        // undo alias -> id mapping
+                        debug!("Remove alias -> id mapping");
+                        let key = alias_id_key(&alias);
+                        if let Ok(Some(id)) = manager.inner.alias_tree.remove(&key) {
+                            // undo hash/id -> alias mapping
+                            debug!("Remove hash/id -> alias mapping");
+                            let id = String::from_utf8_lossy(&id);
+                            let key = alias_key(&hash, &id);
+                            let _ = manager.inner.main_tree.remove(&key);
+                        }
 
-                    let _ = manager.check_delete_files(hash).await;
+                        let _ = manager.check_delete_files(hash).await;
+                    }
                 }
-                drop(entered);
-            });
+                .instrument(Span::current()),
+            );
         }
     }
 }
@@ -515,21 +516,21 @@ impl UploadManager {
         // -- DELETE FILES --
         let this = self.clone();
         debug!("Spawning cleanup task");
-        let span = Span::current();
-        actix_rt::spawn(async move {
-            let entered = span.enter();
-            if let Err(e) = this
-                .cleanup_files(FilenameIVec::new(filename.clone()))
-                .await
-            {
-                error!("Error removing files from fs, {}", e);
+        actix_rt::spawn(
+            async move {
+                if let Err(e) = this
+                    .cleanup_files(FilenameIVec::new(filename.clone()))
+                    .await
+                {
+                    error!("Error removing files from fs, {}", e);
+                }
+                info!(
+                    "Files deleted for {:?}",
+                    String::from_utf8(filename.to_vec())
+                );
             }
-            info!(
-                "Files deleted for {:?}",
-                String::from_utf8(filename.to_vec())
-            );
-            drop(entered);
-        });
+            .instrument(Span::current()),
+        );
 
         Ok(())
     }

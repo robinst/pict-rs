@@ -31,6 +31,7 @@ use tracing::{debug, error, info, instrument, subscriber::set_global_default, Sp
 use tracing_actix_web::TracingLogger;
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_error::ErrorLayer;
+use tracing_futures::Instrument;
 use tracing_log::LogTracer;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Registry};
 
@@ -495,17 +496,17 @@ async fn process(
                 if exists.is_new() {
                     // Save the transcoded file in another task
                     debug!("Spawning storage task");
-                    let span = Span::current();
                     let manager2 = manager.clone();
                     let name = name.clone();
-                    actix_rt::spawn(async move {
-                        let entered = span.enter();
-                        if let Err(e) = manager2.store_variant(updated_path, name).await {
-                            error!("Error storing variant, {}", e);
-                            return;
+                    actix_rt::spawn(
+                        async move {
+                            if let Err(e) = manager2.store_variant(updated_path, name).await {
+                                error!("Error storing variant, {}", e);
+                                return;
+                            }
                         }
-                        drop(entered);
-                    });
+                        .instrument(Span::current()),
+                    );
                 }
             }
 
@@ -528,27 +529,27 @@ async fn process(
                 Details::from_bytes(bytes.clone()).await?
             };
 
-            let span = tracing::Span::current();
             let details2 = details.clone();
             let bytes2 = bytes.clone();
-            actix_rt::spawn(async move {
-                let entered = span.enter();
-                if let Err(e) = safe_save_file(thumbnail_path.clone(), bytes2).await {
-                    tracing::warn!("Error saving thumbnail: {}", e);
-                    return;
+            actix_rt::spawn(
+                async move {
+                    if let Err(e) = safe_save_file(thumbnail_path.clone(), bytes2).await {
+                        tracing::warn!("Error saving thumbnail: {}", e);
+                        return;
+                    }
+                    if let Err(e) = manager
+                        .store_variant_details(thumbnail_path.clone(), name.clone(), &details2)
+                        .await
+                    {
+                        tracing::warn!("Error saving variant details: {}", e);
+                        return;
+                    }
+                    if let Err(e) = manager.store_variant(thumbnail_path, name.clone()).await {
+                        tracing::warn!("Error saving variant info: {}", e);
+                    }
                 }
-                if let Err(e) = manager
-                    .store_variant_details(thumbnail_path.clone(), name.clone(), &details2)
-                    .await
-                {
-                    tracing::warn!("Error saving variant details: {}", e);
-                    return;
-                }
-                if let Err(e) = manager.store_variant(thumbnail_path, name.clone()).await {
-                    tracing::warn!("Error saving variant info: {}", e);
-                }
-                drop(entered);
-            });
+                .instrument(Span::current()),
+            );
 
             Ok((details, bytes)) as Result<(Details, web::Bytes), Error>
         };
@@ -825,18 +826,17 @@ async fn main() -> Result<(), anyhow::Error> {
             Field::array(Field::file(move |filename, _, stream| {
                 let manager = manager2.clone();
 
-                async move {
-                    let span = tracing::info_span!("file-upload", ?filename);
-                    let entered = span.enter();
+                let span = tracing::info_span!("file-upload", ?filename);
 
+                async move {
                     let permit = PROCESS_SEMAPHORE.acquire().await?;
 
                     let res = manager.session().upload(stream).await;
 
                     drop(permit);
-                    drop(entered);
                     res
                 }
+                .instrument(span)
             })),
         );
 
@@ -854,10 +854,9 @@ async fn main() -> Result<(), anyhow::Error> {
             Field::array(Field::file(move |filename, content_type, stream| {
                 let manager = manager2.clone();
 
-                async move {
-                    let span = tracing::info_span!("file-import", ?filename);
-                    let entered = span.enter();
+                let span = tracing::info_span!("file-import", ?filename);
 
+                async move {
                     let permit = PROCESS_SEMAPHORE.acquire().await?;
 
                     let res = manager
@@ -866,9 +865,9 @@ async fn main() -> Result<(), anyhow::Error> {
                         .await;
 
                     drop(permit);
-                    drop(entered);
                     res
                 }
+                .instrument(span)
             })),
         );
 
