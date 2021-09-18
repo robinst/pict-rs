@@ -1,4 +1,5 @@
 use std::{collections::HashSet, net::SocketAddr, path::PathBuf};
+use url::Url;
 
 #[derive(Clone, Debug, structopt::StructOpt)]
 pub(crate) struct Config {
@@ -74,8 +75,13 @@ pub(crate) struct Config {
     )]
     api_key: Option<String>,
 
-    #[structopt(short, long, help = "Enable json logging for the pict-rs server")]
-    json_logging: bool,
+    #[structopt(
+        short,
+        long,
+        env = "PICTRS_OPENTELEMETRY_URL",
+        help = "Enable json logging for the pict-rs server"
+    )]
+    opentelemetry_url: Option<Url>,
 }
 
 impl Config {
@@ -117,8 +123,8 @@ impl Config {
         self.api_key.as_deref()
     }
 
-    pub(crate) fn json_logging(&self) -> bool {
-        self.json_logging
+    pub(crate) fn opentelemetry_url(&self) -> Option<&Url> {
+        self.opentelemetry_url.as_ref()
     }
 }
 

@@ -11,6 +11,8 @@ use futures_util::{
     Stream,
 };
 use once_cell::sync::Lazy;
+use opentelemetry::{sdk::Resource, KeyValue};
+use opentelemetry_otlp::WithExportConfig;
 use std::{
     collections::HashSet,
     future::{ready, Future},
@@ -29,11 +31,10 @@ use tokio::{
 };
 use tracing::{debug, error, info, instrument, subscriber::set_global_default, Span};
 use tracing_actix_web::TracingLogger;
-use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_error::ErrorLayer;
 use tracing_futures::Instrument;
 use tracing_log::LogTracer;
-use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Registry};
+use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, EnvFilter, Registry};
 
 mod config;
 mod error;
@@ -793,17 +794,35 @@ async fn filename_by_alias(
 
 #[actix_rt::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     LogTracer::init()?;
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let format_layer = tracing_subscriber::fmt::layer()
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .pretty();
 
     let subscriber = Registry::default()
         .with(env_filter)
+        .with(format_layer)
         .with(ErrorLayer::default());
 
-    if CONFIG.json_logging() {
-        let formatting_layer = BunyanFormattingLayer::new("pict-rs".into(), std::io::stdout);
+    if let Some(url) = CONFIG.opentelemetry_url() {
+        let tracer =
+            opentelemetry_otlp::new_pipeline()
+                .tracing()
+                .with_trace_config(opentelemetry::sdk::trace::config().with_resource(
+                    Resource::new(vec![KeyValue::new("service.name", "pict-rs")]),
+                ))
+                .with_exporter(
+                    opentelemetry_otlp::new_exporter()
+                        .tonic()
+                        .with_endpoint(url.as_str()),
+                )
+                .install_batch(opentelemetry::runtime::Tokio)?;
 
-        let subscriber = subscriber.with(JsonStorageLayer).with(formatting_layer);
+        let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+        let subscriber = subscriber.with(otel_layer);
 
         set_global_default(subscriber)?;
     } else {
