@@ -45,7 +45,6 @@ mod middleware;
 mod migrate;
 mod processor;
 mod range;
-mod root_span_builder;
 mod stream;
 mod upload_manager;
 mod validate;
@@ -54,7 +53,6 @@ use self::{
     config::{Config, Format},
     error::{Error, UploadError},
     middleware::{Deadline, Internal},
-    root_span_builder::RootSpanBuilder,
     upload_manager::{Details, UploadManager, UploadManagerSession},
     validate::{image_webp, video_mp4},
 };
@@ -892,11 +890,11 @@ async fn main() -> Result<(), anyhow::Error> {
 
     HttpServer::new(move || {
         let client = Client::builder()
-            .header("User-Agent", "pict-rs v0.1.0-master")
+            .header("User-Agent", "pict-rs v0.3.0-main")
             .finish();
 
         App::new()
-            .wrap(TracingLogger::<RootSpanBuilder>::new())
+            .wrap(TracingLogger::default())
             .wrap(Deadline)
             .app_data(web::Data::new(manager.clone()))
             .app_data(web::Data::new(client))

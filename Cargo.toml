@@ -35,7 +35,7 @@ time = { version = "0.3.0", features = ["serde"] }
 tokio = { version = "1", default-features = false, features = ["fs", "io-util", "process", "sync"] }
 tokio-util = { version = "0.6", default-features = false, features = ["codec"] }
 tracing = "0.1.15"
-tracing-actix-web = { version = "0.4.0-beta.8" }
+tracing-actix-web = { version = "0.4.0-beta.8", git = "https://github.com/asonix/tracing-actix-web", branch = "asonix/tracing-error-work-around" }
 tracing-error = "0.1.2"
 tracing-futures = "0.2.4"
 tracing-log = "0.1.2"
