@@ -2043,8 +2043,10 @@ version = "0.4.0-beta.12"
 source = "git+https://github.com/asonix/tracing-actix-web?branch=asonix/tracing-error-work-around#51e7911af7d1dd6a9c8265fa19b94224ddff56e2"
 dependencies = [
  "actix-web",
+ "opentelemetry",
  "tracing",
  "tracing-futures",
+ "tracing-opentelemetry",
  "uuid",
 ]
 

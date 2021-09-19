@@ -11,7 +11,7 @@ use futures_util::{
     Stream,
 };
 use once_cell::sync::Lazy;
-use opentelemetry::{sdk::Resource, KeyValue};
+use opentelemetry::{sdk::{Resource, propagation::TraceContextPropagator}, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use std::{
     collections::HashSet,
@@ -793,6 +793,8 @@ async fn filename_by_alias(
 #[actix_rt::main]
 async fn main() -> Result<(), anyhow::Error> {
     LogTracer::init()?;
+
+    opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let format_layer = tracing_subscriber::fmt::layer()
