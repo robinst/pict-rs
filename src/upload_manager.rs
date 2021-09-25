@@ -58,6 +58,12 @@ impl Drop for UploadManagerSession {
 
         if let Some(alias) = self.alias.take() {
             let manager = self.manager.clone();
+            let cleanup_span = tracing::info_span!(
+                parent: None,
+                "Upload cleanup",
+                alias = &tracing::field::display(&alias),
+            );
+            cleanup_span.follows_from(Span::current());
             actix_rt::spawn(
                 async move {
                     // undo alias -> hash mapping
@@ -77,7 +83,7 @@ impl Drop for UploadManagerSession {
                         let _ = manager.check_delete_files(hash).await;
                     }
                 }
-                .instrument(Span::current()),
+                .instrument(cleanup_span),
             );
         }
     }
@@ -195,6 +201,7 @@ pub(crate) struct Details {
 }
 
 impl Details {
+    #[tracing::instrument("Details from bytes", skip(input))]
     pub(crate) async fn from_bytes(input: web::Bytes) -> Result<Self, Error> {
         let details = crate::magick::details_bytes(input).await?;
 
@@ -205,6 +212,7 @@ impl Details {
         ))
     }
 
+    #[tracing::instrument("Details from path", fields(path = &tracing::field::debug(&path.as_ref())))]
     pub(crate) async fn from_path<P>(path: P) -> Result<Self, Error>
     where
         P: AsRef<std::path::Path>,
@@ -515,6 +523,12 @@ impl UploadManager {
 
         // -- DELETE FILES --
         let this = self.clone();
+        let cleanup_span = tracing::info_span!(
+            parent: None,
+            "Cleanup",
+            filename = &tracing::field::display(String::from_utf8_lossy(&filename)),
+        );
+        cleanup_span.follows_from(Span::current());
         debug!("Spawning cleanup task");
         actix_rt::spawn(
             async move {
@@ -529,7 +543,7 @@ impl UploadManager {
                     String::from_utf8(filename.to_vec())
                 );
             }
-            .instrument(Span::current()),
+            .instrument(cleanup_span),
         );
 
         Ok(())

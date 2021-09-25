@@ -11,7 +11,10 @@ use futures_util::{
     Stream,
 };
 use once_cell::sync::Lazy;
-use opentelemetry::{sdk::{Resource, propagation::TraceContextPropagator}, KeyValue};
+use opentelemetry::{
+    sdk::{propagation::TraceContextPropagator, Resource},
+    KeyValue,
+};
 use opentelemetry_otlp::WithExportConfig;
 use std::{
     collections::HashSet,
@@ -22,6 +25,7 @@ use std::{
     time::SystemTime,
 };
 use structopt::StructOpt;
+use tracing_awc::Propagate;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{
@@ -88,6 +92,7 @@ type OutcomeSender = Sender<(Details, web::Bytes)>;
 type ProcessMap = DashMap<PathBuf, Vec<OutcomeSender>>;
 
 struct CancelSafeProcessor<F> {
+    span: Span,
     path: PathBuf,
     receiver: Option<Receiver<(Details, web::Bytes)>>,
     fut: F,
@@ -100,19 +105,29 @@ where
     pub(crate) fn new(path: PathBuf, fut: F) -> Self {
         let entry = PROCESS_MAP.entry(path.clone());
 
-        let receiver = match entry {
+        let (receiver, span) = match entry {
             Entry::Vacant(vacant) => {
                 vacant.insert(Vec::new());
-                None
+                let span = tracing::info_span!(
+                    "Processing image",
+                    path = &tracing::field::debug(&path),
+                    completed = &tracing::field::Empty,
+                );
+                (None, span)
             }
             Entry::Occupied(mut occupied) => {
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 occupied.get_mut().push(tx);
-                Some(rx)
+                let span = tracing::info_span!(
+                    "Waiting for processed image",
+                    path = &tracing::field::debug(&path),
+                );
+                (Some(rx), span)
             }
         };
 
         CancelSafeProcessor {
+            span,
             path,
             receiver,
             fut,
@@ -127,30 +142,35 @@ where
     type Output = Result<(Details, web::Bytes), Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Some(ref mut rx) = self.receiver {
-            Pin::new(rx)
-                .poll(cx)
-                .map(|res| res.map_err(|_| UploadError::Canceled.into()))
-        } else {
-            Pin::new(&mut self.fut).poll(cx).map(|res| {
-                let opt = PROCESS_MAP.remove(&self.path);
-                res.map(|tup| {
-                    if let Some((_, vec)) = opt {
-                        for sender in vec {
-                            let _ = sender.send(tup.clone());
+        let span = self.span.clone();
+
+        span.in_scope(|| {
+            if let Some(ref mut rx) = self.receiver {
+                Pin::new(rx)
+                    .poll(cx)
+                    .map(|res| res.map_err(|_| UploadError::Canceled.into()))
+            } else {
+                Pin::new(&mut self.fut).poll(cx).map(|res| {
+                    let opt = PROCESS_MAP.remove(&self.path);
+                    res.map(|tup| {
+                        if let Some((_, vec)) = opt {
+                            for sender in vec {
+                                let _ = sender.send(tup.clone());
+                            }
                         }
-                    }
-                    tup
+                        tup
+                    })
                 })
-            })
-        }
+            }
+        })
     }
 }
 
 impl<F> Drop for CancelSafeProcessor<F> {
     fn drop(&mut self) {
         if self.receiver.is_none() {
-            PROCESS_MAP.remove(&self.path);
+            let completed = PROCESS_MAP.remove(&self.path).is_none();
+            self.span.record("completed", &completed);
         }
     }
 }
@@ -330,7 +350,7 @@ async fn download(
     manager: web::Data<UploadManager>,
     query: web::Query<UrlQuery>,
 ) -> Result<HttpResponse, Error> {
-    let mut res = client.get(&query.url).send().await?;
+    let mut res = client.get(&query.url).propagate().send().await?;
 
     if !res.status().is_success() {
         return Err(UploadError::Download(res.status()).into());
@@ -453,7 +473,7 @@ async fn process_details(
 }
 
 /// Process files
-#[instrument(name = "Processing image", skip(manager, whitelist))]
+#[instrument(name = "Serving processed image", skip(manager, whitelist))]
 async fn process(
     range: Option<range::RangeHeader>,
     query: web::Query<ProcessQuery>,
@@ -497,6 +517,13 @@ async fn process(
                     debug!("Spawning storage task");
                     let manager2 = manager.clone();
                     let name = name.clone();
+                    let span = tracing::info_span!(
+                        parent: None,
+                        "Storing variant info",
+                        path = &tracing::field::debug(&updated_path),
+                        name = &tracing::field::display(&name),
+                    );
+                    span.follows_from(Span::current());
                     actix_rt::spawn(
                         async move {
                             if let Err(e) = manager2.store_variant(updated_path, name).await {
@@ -504,7 +531,7 @@ async fn process(
                                 return;
                             }
                         }
-                        .instrument(Span::current()),
+                        .instrument(span),
                     );
                 }
             }
@@ -528,6 +555,13 @@ async fn process(
                 Details::from_bytes(bytes.clone()).await?
             };
 
+            let save_span = tracing::info_span!(
+                parent: None,
+                "Saving variant information",
+                path = tracing::field::debug(&thumbnail_path),
+                name = tracing::field::display(&name),
+            );
+            save_span.follows_from(Span::current());
             let details2 = details.clone();
             let bytes2 = bytes.clone();
             actix_rt::spawn(
@@ -547,7 +581,7 @@ async fn process(
                         tracing::warn!("Error saving variant info: {}", e);
                     }
                 }
-                .instrument(Span::current()),
+                .instrument(save_span),
             );
 
             Ok((details, bytes)) as Result<(Details, web::Bytes), Error>

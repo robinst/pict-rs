@@ -1185,6 +1185,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-actix-web",
+ "tracing-awc",
  "tracing-error",
  "tracing-futures",
  "tracing-log",
@@ -2059,6 +2060,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tracing-awc"
+version = "0.1.0-beta.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d97e7ee4c4b5414ec091e5d6be8194f87c680332f549dd2a73e4c506d0a9b84a"
+dependencies = [
+ "actix-http",
+ "awc",
+ "bytes",
+ "futures-core",
+ "serde",
+ "tracing",
+ "tracing-futures",
 ]
 
 [[package]]

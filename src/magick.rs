@@ -146,13 +146,6 @@ pub(crate) fn process_image_write_read(
     let convert_args = ["convert", "-"];
     let last_arg = format!("{}:-", format.to_magick_format());
 
-    tracing::info!(
-        "Spawning command: {} {:?} {:?} {}",
-        command,
-        convert_args,
-        args,
-        last_arg
-    );
     let process = Process::spawn(
         Command::new(command)
             .args(convert_args)

@@ -35,6 +35,7 @@ time = { version = "0.3.0", features = ["serde"] }
 tokio = { version = "1", default-features = false, features = ["fs", "io-util", "process", "sync"] }
 tokio-util = { version = "0.6", default-features = false, features = ["codec"] }
 tracing = "0.1.15"
+tracing-awc = "0.1.0-beta.4"
 tracing-error = "0.1.2"
 tracing-futures = "0.2.4"
 tracing-log = "0.1.2"
