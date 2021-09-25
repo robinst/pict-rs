@@ -81,7 +81,7 @@ if [ "$push" == "true" ]; then
     ./manifest.sh pictrs $new_tag
     ./manifest.sh pictrs latest
 
-    # pushd ../../
-    # cargo publish
-    # popd
+    pushd ../../
+    cargo publish
+    popd
 fi
