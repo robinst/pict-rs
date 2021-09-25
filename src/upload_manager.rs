@@ -150,7 +150,7 @@ impl std::fmt::Debug for UploadManager {
 
 type UploadStream<E> = LocalBoxStream<'static, Result<web::Bytes, E>>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Serde<T> {
     inner: T,
 }
@@ -192,7 +192,7 @@ where
     }
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub(crate) struct Details {
     width: usize,
     height: usize,
@@ -338,6 +338,7 @@ impl UploadManager {
     }
 
     /// Get the image details for a given variant
+    #[instrument(skip(self))]
     pub(crate) async fn variant_details(
         &self,
         path: PathBuf,
@@ -366,6 +367,7 @@ impl UploadManager {
         Ok(opt)
     }
 
+    #[instrument(skip(self))]
     pub(crate) async fn store_variant_details(
         &self,
         path: PathBuf,

@@ -25,7 +25,6 @@ use std::{
     time::SystemTime,
 };
 use structopt::StructOpt;
-use tracing_awc::Propagate;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{
@@ -35,6 +34,7 @@ use tokio::{
 };
 use tracing::{debug, error, info, instrument, subscriber::set_global_default, Span};
 use tracing_actix_web::TracingLogger;
+use tracing_awc::Propagate;
 use tracing_error::ErrorLayer;
 use tracing_futures::Instrument;
 use tracing_log::LogTracer;
@@ -485,7 +485,10 @@ async fn process(
         prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
     // If the thumbnail doesn't exist, we need to create it
-    let thumbnail_exists = if let Err(e) = tokio::fs::metadata(&thumbnail_path).await {
+    let thumbnail_exists = if let Err(e) = tokio::fs::metadata(&thumbnail_path)
+        .instrument(tracing::info_span!("Get thumbnail metadata"))
+        .await
+    {
         if e.kind() != std::io::ErrorKind::NotFound {
             error!("Error looking up processed image, {}", e);
             return Err(e.into());
