@@ -33,7 +33,7 @@ pub(crate) struct ProcessRead<I> {
     handle: JoinHandle<()>,
 }
 
-struct BytesFreezer<S>(S);
+struct BytesFreezer<S>(S, Span);
 
 impl Process {
     pub(crate) fn run(command: &str, args: &[&str]) -> std::io::Result<Self> {
@@ -147,7 +147,10 @@ impl Process {
 pub(crate) fn bytes_stream(
     input: impl AsyncRead + Unpin,
 ) -> impl Stream<Item = Result<Bytes, Error>> + Unpin {
-    BytesFreezer(FramedRead::new(input, BytesCodec::new()))
+    BytesFreezer(
+        FramedRead::new(input, BytesCodec::new()),
+        tracing::info_span!("Serving bytes from AsyncRead"),
+    )
 }
 
 impl<I> AsyncRead for ProcessRead<I>
@@ -202,10 +205,13 @@ where
     type Item = Result<Bytes, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.0)
-            .poll_next(cx)
-            .map(|opt| opt.map(|res| res.map(|bytes_mut| bytes_mut.freeze())))
-            .map_err(Error::from)
+        let span = self.1.clone();
+        span.in_scope(|| {
+            Pin::new(&mut self.0)
+                .poll_next(cx)
+                .map(|opt| opt.map(|res| res.map(|bytes_mut| bytes_mut.freeze())))
+                .map_err(Error::from)
+        })
     }
 }
 
