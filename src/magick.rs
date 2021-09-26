@@ -54,6 +54,7 @@ pub(crate) fn convert_bytes_read(
         &[
             "convert",
             "-",
+            "-strip",
             format!("{}:-", format.to_magick_format()).as_str(),
         ],
     )?;

@@ -703,6 +703,7 @@ impl UploadManagerSession {
         let (content_type, validated_reader) = crate::validate::validate_image_bytes(
             bytes_mut.freeze(),
             self.manager.inner.format.clone(),
+            validate,
         )
         .await?;
 
@@ -741,6 +742,7 @@ impl UploadManagerSession {
         let (content_type, validated_reader) = crate::validate::validate_image_bytes(
             bytes_mut.freeze(),
             self.manager.inner.format.clone(),
+            true,
         )
         .await?;
 
