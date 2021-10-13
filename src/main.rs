@@ -44,6 +44,7 @@ mod config;
 mod error;
 mod exiftool;
 mod ffmpeg;
+mod file;
 mod magick;
 mod middleware;
 mod migrate;
@@ -231,7 +232,7 @@ async fn safe_save_file(path: PathBuf, mut bytes: web::Bytes) -> Result<(), Erro
 
     // Open the file for writing
     debug!("Creating {:?}", path);
-    let mut file = tokio::fs::File::create(&path).await?;
+    let mut file = crate::file::File::create(&path).await?;
 
     // try writing
     debug!("Writing to {:?}", path);
@@ -541,7 +542,7 @@ async fn process(
 
             let permit = PROCESS_SEMAPHORE.acquire().await?;
 
-            let file = tokio::fs::File::open(original_path.clone()).await?;
+            let file = crate::file::File::open(original_path.clone()).await?;
 
             let mut processed_reader =
                 crate::magick::process_image_write_read(file, thumbnail_args, format)?;
@@ -708,7 +709,7 @@ async fn ranged_file_resp(
             if range_header.is_empty() {
                 return Err(UploadError::Range.into());
             } else if range_header.len() == 1 {
-                let file = tokio::fs::File::open(path).await?;
+                let file = crate::file::File::open(path).await?;
 
                 let meta = file.metadata().await?;
 
@@ -724,7 +725,7 @@ async fn ranged_file_resp(
         }
         //No Range header in the request - return the entire document
         None => {
-            let file = tokio::fs::File::open(path).await?;
+            let file = crate::file::File::open(path).await?;
             let stream = Box::pin(crate::stream::bytes_stream(file)) as LocalBoxStream<'_, _>;
             (HttpResponse::Ok(), stream)
         }

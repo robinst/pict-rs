@@ -61,7 +61,7 @@ impl Range {
 
     pub(crate) async fn chop_file(
         &self,
-        mut file: tokio::fs::File,
+        mut file: crate::file::File,
     ) -> Result<LocalBoxStream<'static, Result<Bytes, Error>>, Error> {
         match self {
             Range::Start(start) => {

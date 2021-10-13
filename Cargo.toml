@@ -9,10 +9,14 @@ repository = "https://git.asonix.dog/asonix/pict-rs"
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+io-uring = ["actix-rt/io-uring", "actix-server/io-uring", "tokio-uring"]
 
 [dependencies]
 actix-form-data = "0.6.0-beta.1"
 actix-rt = "2.2.0"
+actix-server = "2.0.0-beta.6"
 actix-web = { version = "4.0.0-beta.8", default-features = false }
 anyhow = "1.0"
 awc = { version = "3.0.0-beta.7", default-features = false, features = ["rustls"] }
@@ -33,6 +37,7 @@ structopt = "0.3.14"
 thiserror = "1.0"
 time = { version = "0.3.0", features = ["serde"] }
 tokio = { version = "1", default-features = false, features = ["fs", "io-util", "process", "sync"] }
+tokio-uring = { version = "0.1", optional = true }
 tokio-util = { version = "0.6", default-features = false, features = ["codec"] }
 tracing = "0.1.15"
 tracing-error = "0.1.2"

@@ -991,7 +991,7 @@ pub(crate) async fn safe_save_reader(
 
     debug!("Writing stream to {:?}", to);
 
-    let mut file = tokio::fs::File::create(to).await?;
+    let mut file = crate::file::File::create(to).await?;
 
     tokio::io::copy(input, &mut file).await?;
 
@@ -1025,7 +1025,7 @@ where
 
     let to1 = to.clone();
     let fut = async move {
-        let mut file = tokio::fs::File::create(to1).await?;
+        let mut file = crate::file::File::create(to1).await?;
 
         while let Some(res) = stream.next().await {
             let mut bytes = res?;
@@ -1086,19 +1086,36 @@ mod test {
     use sha2::{Digest, Sha256};
     use std::io::Read;
 
+    macro_rules! test_on_arbiter {
+        ($fut:expr) => {
+            actix_rt::System::new().block_on(async move {
+                let arbiter = actix_rt::Arbiter::new();
+
+                let (tx, rx) = tokio::sync::oneshot::channel();
+
+                arbiter.spawn(async move {
+                    let handle = actix_rt::spawn($fut);
+
+                    let _ = tx.send(handle.await.unwrap());
+                });
+
+                rx.await.unwrap()
+            })
+        };
+    }
+
     #[test]
     fn hasher_works() {
-        let hash = actix_rt::System::new()
-            .block_on(async move {
-                let file1 = tokio::fs::File::open("./client-examples/earth.gif").await?;
+        let hash = test_on_arbiter!(async move {
+            let file1 = crate::file::File::open("./client-examples/earth.gif").await?;
 
-                let mut hasher = Hasher::new(file1, Sha256::new());
+            let mut hasher = Hasher::new(file1, Sha256::new());
 
-                tokio::io::copy(&mut hasher, &mut tokio::io::sink()).await?;
+            tokio::io::copy(&mut hasher, &mut tokio::io::sink()).await?;
 
-                hasher.finalize_reset().await
-            })
-            .unwrap();
+            hasher.finalize_reset().await
+        })
+        .unwrap();
 
         let mut file = std::fs::File::open("./client-examples/earth.gif").unwrap();
         let mut vec = Vec::new();
