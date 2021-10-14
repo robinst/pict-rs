@@ -18,6 +18,7 @@ pub(crate) enum ValidInputType {
     Webp,
 }
 
+#[derive(Debug)]
 pub(crate) struct Details {
     pub(crate) mime_type: mime::Mime,
     pub(crate) width: usize,
@@ -30,6 +31,7 @@ pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> std::io::Result<impl As
     Ok(process.bytes_read(input).unwrap())
 }
 
+#[instrument(name = "Getting details from input bytes", skip(input))]
 pub(crate) async fn details_bytes(input: Bytes) -> Result<Details, Error> {
     let process = Process::run(
         "magick",
@@ -133,6 +135,7 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
     })
 }
 
+#[instrument(name = "Getting input type from bytes", skip(input))]
 pub(crate) async fn input_type_bytes(input: Bytes) -> Result<ValidInputType, Error> {
     details_bytes(input).await?.validate_input()
 }
@@ -158,6 +161,7 @@ pub(crate) fn process_image_file_read(
 }
 
 impl Details {
+    #[instrument(name = "Validating input type")]
     fn validate_input(&self) -> Result<ValidInputType, Error> {
         if self.width > crate::CONFIG.max_width() || self.height > crate::CONFIG.max_height() {
             return Err(UploadError::Dimensions.into());
