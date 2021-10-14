@@ -11,7 +11,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = []
-io-uring = ["actix-rt/io-uring", "actix-server/io-uring", "tokio-uring"]
+io-uring = ["actix-rt/io-uring", "actix-server/io-uring", "tokio-uring", "sled/io_uring"]
 
 [dependencies]
 actix-form-data = "0.6.0-beta.1"

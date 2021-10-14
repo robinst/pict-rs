@@ -1,7 +1,5 @@
-use crate::error::Error;
 use actix_rt::task::JoinHandle;
-use actix_web::web::{Bytes, BytesMut};
-use futures_util::Stream;
+use actix_web::web::Bytes;
 use std::{
     future::Future,
     pin::Pin,
@@ -13,7 +11,6 @@ use tokio::{
     process::{Child, Command},
     sync::oneshot::{channel, Receiver},
 };
-use tokio_util::codec::{BytesCodec, FramedRead};
 use tracing::Instrument;
 use tracing::Span;
 
@@ -32,8 +29,6 @@ pub(crate) struct ProcessRead<I> {
     err_closed: bool,
     handle: JoinHandle<()>,
 }
-
-struct BytesFreezer<S>(S, Span);
 
 impl Process {
     pub(crate) fn run(command: &str, args: &[&str]) -> std::io::Result<Self> {
@@ -100,9 +95,9 @@ impl Process {
         }))
     }
 
-    pub(crate) fn write_read(
+    pub(crate) fn file_read(
         mut self,
-        mut input_reader: impl AsyncRead + Unpin + 'static,
+        mut input_file: crate::file::File,
     ) -> Option<impl AsyncRead + Unpin> {
         let mut stdin = self.child.stdin.take()?;
         let stdout = self.child.stdout.take()?;
@@ -113,7 +108,7 @@ impl Process {
         let mut child = self.child;
         let handle = actix_rt::spawn(
             async move {
-                if let Err(e) = tokio::io::copy(&mut input_reader, &mut stdin).await {
+                if let Err(e) = input_file.read_to_async_write(&mut stdin).await {
                     let _ = tx.send(e);
                     return;
                 }
@@ -142,15 +137,6 @@ impl Process {
             handle,
         }))
     }
-}
-
-pub(crate) fn bytes_stream(
-    input: impl AsyncRead + Unpin,
-) -> impl Stream<Item = Result<Bytes, Error>> + Unpin {
-    BytesFreezer(
-        FramedRead::new(input, BytesCodec::new()),
-        tracing::info_span!("Serving bytes from AsyncRead"),
-    )
 }
 
 impl<I> AsyncRead for ProcessRead<I>
@@ -195,23 +181,6 @@ where
 impl<I> Drop for ProcessRead<I> {
     fn drop(&mut self) {
         self.handle.abort();
-    }
-}
-
-impl<S> Stream for BytesFreezer<S>
-where
-    S: Stream<Item = std::io::Result<BytesMut>> + Unpin,
-{
-    type Item = Result<Bytes, Error>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let span = self.1.clone();
-        span.in_scope(|| {
-            Pin::new(&mut self.0)
-                .poll_next(cx)
-                .map(|opt| opt.map(|res| res.map(|bytes_mut| bytes_mut.freeze())))
-                .map_err(Error::from)
-        })
     }
 }
 

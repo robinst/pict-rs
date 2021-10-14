@@ -1,7 +1,4 @@
-use crate::{
-    error::{Error, UploadError},
-    stream::bytes_stream,
-};
+use crate::error::{Error, UploadError};
 use actix_web::{
     dev::Payload,
     http::{
@@ -11,9 +8,8 @@ use actix_web::{
     web::Bytes,
     FromRequest, HttpRequest,
 };
-use futures_util::stream::{once, LocalBoxStream, Stream};
-use std::{future::ready, io};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use futures_util::stream::{once, Stream};
+use std::future::ready;
 
 #[derive(Debug)]
 pub(crate) enum Range {
@@ -61,25 +57,14 @@ impl Range {
 
     pub(crate) async fn chop_file(
         &self,
-        mut file: crate::file::File,
-    ) -> Result<LocalBoxStream<'static, Result<Bytes, Error>>, Error> {
+        file: crate::file::File,
+    ) -> Result<impl Stream<Item = Result<Bytes, Error>> + Unpin, Error> {
         match self {
-            Range::Start(start) => {
-                file.seek(io::SeekFrom::Start(*start)).await?;
-
-                Ok(Box::pin(bytes_stream(file)))
-            }
-            Range::SuffixLength(from_start) => {
-                file.seek(io::SeekFrom::Start(0)).await?;
-                let reader = file.take(*from_start);
-
-                Ok(Box::pin(bytes_stream(reader)))
-            }
+            Range::Start(start) => file.read_to_stream(Some(*start), None).await,
+            Range::SuffixLength(from_start) => file.read_to_stream(None, Some(*from_start)).await,
             Range::Segment(start, end) => {
-                file.seek(io::SeekFrom::Start(*start)).await?;
-                let reader = file.take(end.saturating_sub(*start));
-
-                Ok(Box::pin(bytes_stream(reader)))
+                file.read_to_stream(Some(*start), Some(end.saturating_sub(*start)))
+                    .await
             }
         }
     }

@@ -6,10 +6,7 @@ use actix_web::{
 };
 use awc::Client;
 use dashmap::{mapref::entry::Entry, DashMap};
-use futures_util::{
-    stream::{once, LocalBoxStream},
-    Stream,
-};
+use futures_util::{stream::once, Stream};
 use once_cell::sync::Lazy;
 use opentelemetry::{
     sdk::{propagation::TraceContextPropagator, Resource},
@@ -26,7 +23,7 @@ use std::{
 };
 use structopt::StructOpt;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncReadExt,
     sync::{
         oneshot::{Receiver, Sender},
         Semaphore,
@@ -41,6 +38,7 @@ use tracing_log::LogTracer;
 use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, EnvFilter, Registry};
 
 mod config;
+mod either;
 mod error;
 mod exiftool;
 mod ffmpeg;
@@ -56,6 +54,7 @@ mod validate;
 
 use self::{
     config::{Config, Format},
+    either::Either,
     error::{Error, UploadError},
     middleware::{Deadline, Internal},
     upload_manager::{Details, UploadManager, UploadManagerSession},
@@ -213,7 +212,7 @@ where
 
 // Try writing to a file
 #[instrument(name = "Saving file", skip(bytes))]
-async fn safe_save_file(path: PathBuf, mut bytes: web::Bytes) -> Result<(), Error> {
+async fn safe_save_file(path: PathBuf, bytes: web::Bytes) -> Result<(), Error> {
     if let Some(path) = path.parent() {
         // create the directory for the file
         debug!("Creating directory {:?}", path);
@@ -236,7 +235,7 @@ async fn safe_save_file(path: PathBuf, mut bytes: web::Bytes) -> Result<(), Erro
 
     // try writing
     debug!("Writing to {:?}", path);
-    if let Err(e) = file.write_all_buf(&mut bytes).await {
+    if let Err(e) = file.write_from_bytes(bytes).await {
         error!("Error writing {:?}, {}", path, e);
         // remove file if writing failed before completion
         tokio::fs::remove_file(path).await?;
@@ -545,7 +544,7 @@ async fn process(
             let file = crate::file::File::open(original_path.clone()).await?;
 
             let mut processed_reader =
-                crate::magick::process_image_write_read(file, thumbnail_args, format)?;
+                crate::magick::process_image_file_read(file, thumbnail_args, format)?;
 
             let mut vec = Vec::new();
             processed_reader.read_to_end(&mut vec).await?;
@@ -718,7 +717,7 @@ async fn ranged_file_resp(
                 let mut builder = HttpResponse::PartialContent();
                 builder.insert_header(range.to_content_range(meta.len()));
 
-                (builder, range.chop_file(file).await?)
+                (builder, Either::Left(range.chop_file(file).await?))
             } else {
                 return Err(UploadError::Range.into());
             }
@@ -726,8 +725,8 @@ async fn ranged_file_resp(
         //No Range header in the request - return the entire document
         None => {
             let file = crate::file::File::open(path).await?;
-            let stream = Box::pin(crate::stream::bytes_stream(file)) as LocalBoxStream<'_, _>;
-            (HttpResponse::Ok(), stream)
+            let stream = file.read_to_stream(None, None).await?;
+            (HttpResponse::Ok(), Either::Right(stream))
         }
     };
 

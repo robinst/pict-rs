@@ -138,8 +138,8 @@ pub(crate) async fn input_type_bytes(input: Bytes) -> Result<ValidInputType, Err
 }
 
 #[instrument(name = "Spawning process command", skip(input))]
-pub(crate) fn process_image_write_read(
-    input: impl AsyncRead + Unpin + 'static,
+pub(crate) fn process_image_file_read(
+    input: crate::file::File,
     args: Vec<String>,
     format: Format,
 ) -> std::io::Result<impl AsyncRead + Unpin> {
@@ -154,7 +154,7 @@ pub(crate) fn process_image_write_read(
             .arg(last_arg),
     )?;
 
-    Ok(process.write_read(input).unwrap())
+    Ok(process.file_read(input).unwrap())
 }
 
 impl Details {

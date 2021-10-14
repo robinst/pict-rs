@@ -13,7 +13,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncRead, ReadBuf};
 use tracing::{debug, error, info, instrument, warn, Span};
 use tracing_futures::Instrument;
 
@@ -993,53 +993,7 @@ pub(crate) async fn safe_save_reader(
 
     let mut file = crate::file::File::create(to).await?;
 
-    tokio::io::copy(input, &mut file).await?;
-
-    Ok(())
-}
-
-#[instrument(skip(stream))]
-pub(crate) async fn safe_save_stream<E>(
-    to: PathBuf,
-    mut stream: UploadStream<E>,
-) -> Result<(), Error>
-where
-    Error: From<E>,
-    E: Unpin,
-{
-    if let Some(path) = to.parent() {
-        debug!("Creating directory {:?}", path);
-        tokio::fs::create_dir_all(path).await?;
-    }
-
-    debug!("Checking if {:?} already exists", to);
-    if let Err(e) = tokio::fs::metadata(&to).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    } else {
-        return Err(UploadError::FileExists.into());
-    }
-
-    debug!("Writing stream to {:?}", to);
-
-    let to1 = to.clone();
-    let fut = async move {
-        let mut file = crate::file::File::create(to1).await?;
-
-        while let Some(res) = stream.next().await {
-            let mut bytes = res?;
-            file.write_all_buf(&mut bytes).await?;
-        }
-
-        Ok(())
-    };
-
-    if let Err(e) = fut.await {
-        error!("Failed to save file: {}", e);
-        let _ = tokio::fs::remove_file(to).await;
-        return Err(e);
-    }
+    file.write_from_async_read(input).await?;
 
     Ok(())
 }
@@ -1107,7 +1061,7 @@ mod test {
     #[test]
     fn hasher_works() {
         let hash = test_on_arbiter!(async move {
-            let file1 = crate::file::File::open("./client-examples/earth.gif").await?;
+            let file1 = tokio::fs::File::open("./client-examples/earth.gif").await?;
 
             let mut hasher = Hasher::new(file1, Sha256::new());
 
