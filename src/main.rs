@@ -91,16 +91,24 @@ static PROCESS_MAP: Lazy<ProcessMap> = Lazy::new(DashMap::new);
 type OutcomeSender = Sender<(Details, web::Bytes)>;
 type ProcessMap = DashMap<PathBuf, Vec<OutcomeSender>>;
 
-struct CancelSafeProcessor<F> {
+struct CancelToken {
     span: Span,
     path: PathBuf,
     receiver: Option<Receiver<(Details, web::Bytes)>>,
-    fut: F,
+}
+
+pin_project_lite::pin_project! {
+    struct CancelSafeProcessor<F> {
+        cancel_token: CancelToken,
+
+        #[pin]
+        fut: F,
+    }
 }
 
 impl<F> CancelSafeProcessor<F>
 where
-    F: Future<Output = Result<(Details, web::Bytes), Error>> + Unpin,
+    F: Future<Output = Result<(Details, web::Bytes), Error>>,
 {
     pub(crate) fn new(path: PathBuf, fut: F) -> Self {
         let entry = PROCESS_MAP.entry(path.clone());
@@ -127,9 +135,11 @@ where
         };
 
         CancelSafeProcessor {
-            span,
-            path,
-            receiver,
+            cancel_token: CancelToken {
+                span,
+                path,
+                receiver,
+            },
             fut,
         }
     }
@@ -137,21 +147,26 @@ where
 
 impl<F> Future for CancelSafeProcessor<F>
 where
-    F: Future<Output = Result<(Details, web::Bytes), Error>> + Unpin,
+    F: Future<Output = Result<(Details, web::Bytes), Error>>,
 {
     type Output = Result<(Details, web::Bytes), Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let span = self.span.clone();
+        let this = self.as_mut().project();
+
+        let span = &this.cancel_token.span;
+        let receiver = &mut this.cancel_token.receiver;
+        let path = &this.cancel_token.path;
+        let fut = this.fut;
 
         span.in_scope(|| {
-            if let Some(ref mut rx) = self.receiver {
+            if let Some(ref mut rx) = receiver {
                 Pin::new(rx)
                     .poll(cx)
                     .map(|res| res.map_err(|_| UploadError::Canceled.into()))
             } else {
-                Pin::new(&mut self.fut).poll(cx).map(|res| {
-                    let opt = PROCESS_MAP.remove(&self.path);
+                fut.poll(cx).map(|res| {
+                    let opt = PROCESS_MAP.remove(path);
                     res.map(|tup| {
                         if let Some((_, vec)) = opt {
                             for sender in vec {
@@ -166,7 +181,7 @@ where
     }
 }
 
-impl<F> Drop for CancelSafeProcessor<F> {
+impl Drop for CancelToken {
     fn drop(&mut self) {
         if self.receiver.is_none() {
             let completed = PROCESS_MAP.remove(&self.path).is_none();
@@ -591,7 +606,7 @@ async fn process(
         };
 
         let (details, bytes) =
-            CancelSafeProcessor::new(thumbnail_path.clone(), Box::pin(process_fut)).await?;
+            CancelSafeProcessor::new(thumbnail_path.clone(), process_fut).await?;
 
         return match range {
             Some(range_header) => {
@@ -717,7 +732,7 @@ async fn ranged_file_resp(
                 let mut builder = HttpResponse::PartialContent();
                 builder.insert_header(range.to_content_range(meta.len()));
 
-                (builder, Either::Left(range.chop_file(file).await?))
+                (builder, Either::left(range.chop_file(file).await?))
             } else {
                 return Err(UploadError::Range.into());
             }
@@ -726,13 +741,13 @@ async fn ranged_file_resp(
         None => {
             let file = crate::file::File::open(path).await?;
             let stream = file.read_to_stream(None, None).await?;
-            (HttpResponse::Ok(), Either::Right(stream))
+            (HttpResponse::Ok(), Either::right(stream))
         }
     };
 
     Ok(srv_response(
         builder,
-        stream,
+        Box::pin(stream),
         details.content_type(),
         7 * DAYS,
         details.system_time(),

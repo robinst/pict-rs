@@ -5,39 +5,63 @@ use std::{
 };
 use tokio::io::{AsyncRead, ReadBuf};
 
-pub(crate) enum Either<Left, Right> {
-    Left(Left),
-    Right(Right),
+pin_project_lite::pin_project! {
+    #[project = EitherProj]
+    #[project_replace = EitherProjReplace]
+    pub(crate) enum Either<Left, Right> {
+        Left {
+            #[pin]
+            left: Left,
+        },
+        Right {
+            #[pin]
+            right: Right,
+        },
+    }
+}
+
+impl<L, R> Either<L, R> {
+    pub(crate) fn left(left: L) -> Self {
+        Either::Left { left }
+    }
+
+    pub(crate) fn right(right: R) -> Self {
+        Either::Right { right }
+    }
 }
 
 impl<Left, Right> AsyncRead for Either<Left, Right>
 where
-    Left: AsyncRead + Unpin,
-    Right: AsyncRead + Unpin,
+    Left: AsyncRead,
+    Right: AsyncRead,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        match *self {
-            Self::Left(ref mut left) => Pin::new(left).poll_read(cx, buf),
-            Self::Right(ref mut right) => Pin::new(right).poll_read(cx, buf),
+        let this = self.as_mut().project();
+
+        match this {
+            EitherProj::Left { left } => left.poll_read(cx, buf),
+            EitherProj::Right { right } => right.poll_read(cx, buf),
         }
     }
 }
 
 impl<Left, Right> Stream for Either<Left, Right>
 where
-    Left: Stream<Item = <Right as Stream>::Item> + Unpin,
-    Right: Stream + Unpin,
+    Left: Stream<Item = <Right as Stream>::Item>,
+    Right: Stream,
 {
     type Item = <Left as Stream>::Item;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match *self {
-            Self::Left(ref mut left) => Pin::new(left).poll_next(cx),
-            Self::Right(ref mut right) => Pin::new(right).poll_next(cx),
+        let this = self.as_mut().project();
+
+        match this {
+            EitherProj::Left { left } => left.poll_next(cx),
+            EitherProj::Right { right } => right.poll_next(cx),
         }
     }
 }

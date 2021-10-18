@@ -10,17 +10,24 @@ pub(crate) use io_uring::File;
 #[cfg(not(feature = "io-uring"))]
 pub(crate) use tokio_file::File;
 
-struct CrateError<S>(S);
+pin_project_lite::pin_project! {
+    struct CrateError<S> {
+        #[pin]
+        inner: S
+    }
+}
 
 impl<T, E, S> Stream for CrateError<S>
 where
-    S: Stream<Item = Result<T, E>> + Unpin,
+    S: Stream<Item = Result<T, E>>,
     crate::error::Error: From<E>,
 {
     type Item = Result<T, crate::error::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.0)
+        let this = self.as_mut().project();
+
+        this.inner
             .poll_next(cx)
             .map(|opt| opt.map(|res| res.map_err(Into::into)))
     }
@@ -90,31 +97,35 @@ mod tokio_file {
             mut self,
             from_start: Option<u64>,
             len: Option<u64>,
-        ) -> Result<
-            impl Stream<Item = Result<Bytes, crate::error::Error>> + Unpin,
-            crate::error::Error,
-        > {
+        ) -> Result<impl Stream<Item = Result<Bytes, crate::error::Error>>, crate::error::Error>
+        {
             let obj = match (from_start, len) {
                 (Some(lower), Some(upper)) => {
                     self.inner.seek(SeekFrom::Start(lower)).await?;
-                    Either::Left(self.inner.take(upper))
+                    Either::left(self.inner.take(upper))
                 }
-                (None, Some(upper)) => Either::Left(self.inner.take(upper)),
+                (None, Some(upper)) => Either::left(self.inner.take(upper)),
                 (Some(lower), None) => {
                     self.inner.seek(SeekFrom::Start(lower)).await?;
-                    Either::Right(self.inner)
+                    Either::right(self.inner)
                 }
-                (None, None) => Either::Right(self.inner),
+                (None, None) => Either::right(self.inner),
             };
 
-            Ok(super::CrateError(BytesFreezer(FramedRead::new(
-                obj,
-                BytesCodec::new(),
-            ))))
+            Ok(super::CrateError {
+                inner: BytesFreezer {
+                    inner: FramedRead::new(obj, BytesCodec::new()),
+                },
+            })
         }
     }
 
-    struct BytesFreezer<S>(S);
+    pin_project_lite::pin_project! {
+        struct BytesFreezer<S> {
+            #[pin]
+            inner: S,
+        }
+    }
 
     impl<S, E> Stream for BytesFreezer<S>
     where
@@ -126,7 +137,9 @@ mod tokio_file {
             mut self: std::pin::Pin<&mut Self>,
             cx: &mut std::task::Context<'_>,
         ) -> std::task::Poll<Option<Self::Item>> {
-            std::pin::Pin::new(&mut self.0)
+            let this = self.as_mut().project();
+
+            this.inner
                 .poll_next(cx)
                 .map(|opt| opt.map(|res| res.map(BytesMut::freeze)))
         }
@@ -299,21 +312,21 @@ mod io_uring {
             self,
             from_start: Option<u64>,
             len: Option<u64>,
-        ) -> Result<
-            impl Stream<Item = Result<Bytes, crate::error::Error>> + Unpin,
-            crate::error::Error,
-        > {
+        ) -> Result<impl Stream<Item = Result<Bytes, crate::error::Error>>, crate::error::Error>
+        {
             let size = self.metadata().await?.len();
 
             let cursor = from_start.unwrap_or(0);
             let size = len.unwrap_or(size - cursor) + cursor;
 
-            Ok(super::CrateError(BytesStream {
-                file: Some(self),
-                size,
-                cursor,
-                fut: None,
-            }))
+            Ok(super::CrateError {
+                inner: BytesStream {
+                    state: ReadFileState::File { file: Some(self) },
+                    size,
+                    cursor,
+                    callback: read_file,
+                },
+            })
         }
 
         async fn read_at<T: IoBufMut>(&self, buf: T, pos: u64) -> BufResult<usize, T> {
@@ -325,55 +338,89 @@ mod io_uring {
         }
     }
 
-    struct BytesStream {
-        file: Option<File>,
-        size: u64,
-        cursor: u64,
-        fut: Option<Pin<Box<dyn Future<Output = (File, BufResult<usize, Vec<u8>>)>>>>,
+    pin_project_lite::pin_project! {
+        struct BytesStream<F, Fut> {
+            #[pin]
+            state: ReadFileState<Fut>,
+            size: u64,
+            cursor: u64,
+            #[pin]
+            callback: F,
+        }
     }
 
-    impl Stream for BytesStream {
+    pin_project_lite::pin_project! {
+        #[project = ReadFileStateProj]
+        #[project_replace = ReadFileStateProjReplace]
+        enum ReadFileState<Fut> {
+            File {
+                file: Option<File>,
+            },
+            Future {
+                #[pin]
+                fut: Fut,
+            },
+        }
+    }
+
+    async fn read_file(
+        file: File,
+        capacity: usize,
+        cursor: u64,
+    ) -> (File, BufResult<usize, Vec<u8>>) {
+        let buf = Vec::with_capacity(capacity);
+
+        let buf_res = file.read_at(buf, cursor).await;
+
+        (file, buf_res)
+    }
+
+    impl<F, Fut> Stream for BytesStream<F, Fut>
+    where
+        F: Fn(File, usize, u64) -> Fut,
+        Fut: Future<Output = (File, BufResult<usize, Vec<u8>>)> + 'static,
+    {
         type Item = std::io::Result<Bytes>;
 
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            let mut fut = if let Some(fut) = self.fut.take() {
-                fut
-            } else {
-                let file = self.file.take().unwrap();
+            let mut this = self.as_mut().project();
 
-                if self.cursor == self.size {
-                    return Poll::Ready(None);
+            match this.state.as_mut().project() {
+                ReadFileStateProj::File { file } => {
+                    let cursor = *this.cursor;
+                    let max_size = *this.size - *this.cursor;
+
+                    if max_size == 0 {
+                        return Poll::Ready(None);
+                    }
+
+                    let capacity = max_size.min(65_356) as usize;
+                    let file = file.take().unwrap();
+
+                    let fut = (this.callback)(file, capacity, cursor);
+
+                    this.state.project_replace(ReadFileState::Future { fut });
+                    self.poll_next(cx)
                 }
+                ReadFileStateProj::Future { fut } => match fut.poll(cx) {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready((file, (Ok(n), mut buf))) => {
+                        this.state
+                            .project_replace(ReadFileState::File { file: Some(file) });
 
-                let cursor = self.cursor;
-                let max_size = self.size - self.cursor;
+                        let _ = buf.split_off(n);
+                        let n: u64 = match n.try_into() {
+                            Ok(n) => n,
+                            Err(_) => {
+                                return Poll::Ready(Some(Err(std::io::ErrorKind::Other.into())))
+                            }
+                        };
+                        *this.cursor += n;
 
-                Box::pin(async move {
-                    let buf = Vec::with_capacity(max_size.try_into().unwrap());
-
-                    let buf_res = file.read_at(buf, cursor).await;
-
-                    (file, buf_res)
-                })
-            };
-
-            match Pin::new(&mut fut).poll(cx) {
-                Poll::Pending => {
-                    self.fut = Some(fut);
-                    Poll::Pending
-                }
-                Poll::Ready((file, (Ok(n), mut buf))) => {
-                    self.file = Some(file);
-                    let _ = buf.split_off(n);
-                    let n: u64 = match n.try_into() {
-                        Ok(n) => n,
-                        Err(_) => return Poll::Ready(Some(Err(std::io::ErrorKind::Other.into()))),
-                    };
-                    self.cursor += n;
-
-                    Poll::Ready(Some(Ok(Bytes::from(buf))))
-                }
-                Poll::Ready((_, (Err(e), _))) => Poll::Ready(Some(Err(e))),
+                        Poll::Ready(Some(Ok(buf.into())))
+                    }
+                    Poll::Ready((_, (Err(e), _))) => Poll::Ready(Some(Err(e))),
+                },
             }
         }
     }

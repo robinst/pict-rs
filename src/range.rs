@@ -42,10 +42,7 @@ impl Range {
         }
     }
 
-    pub(crate) fn chop_bytes(
-        &self,
-        bytes: Bytes,
-    ) -> impl Stream<Item = Result<Bytes, Error>> + Unpin {
+    pub(crate) fn chop_bytes(&self, bytes: Bytes) -> impl Stream<Item = Result<Bytes, Error>> {
         match self {
             Range::Start(start) => once(ready(Ok(bytes.slice(*start as usize..)))),
             Range::SuffixLength(from_start) => once(ready(Ok(bytes.slice(..*from_start as usize)))),
@@ -58,7 +55,7 @@ impl Range {
     pub(crate) async fn chop_file(
         &self,
         file: crate::file::File,
-    ) -> Result<impl Stream<Item = Result<Bytes, Error>> + Unpin, Error> {
+    ) -> Result<impl Stream<Item = Result<Bytes, Error>>, Error> {
         match self {
             Range::Start(start) => file.read_to_stream(Some(*start), None).await,
             Range::SuffixLength(from_start) => file.read_to_stream(None, Some(*from_start)).await,
