@@ -47,6 +47,7 @@ tracing-log = "0.1.2"
 tracing-opentelemetry = "0.15"
 tracing-subscriber = { version = "0.2.5", features = ["fmt", "tracing-log"] }
 url = "2.2"
+uuid = { version = "0.8.2", features = ["v4", "serde"]}
 
 [dependencies.tracing-actix-web]
 version = "0.4.0-beta.14"
