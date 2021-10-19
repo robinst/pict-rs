@@ -9,7 +9,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-alpha.29
+pict-rs 0.3.0-alpha.39
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] --path <path>
@@ -38,7 +38,10 @@ OPTIONS:
         --max-image-width <max-image-width>
             Specify the maximum width in pixels allowed on an image [env: PICTRS_MAX_IMAGE_WIDTH=]  [default: 10000]
 
-    -p, --path <path>                            The path to the data directory, e.g. data/ [env: PICTRS_PATH=]
+    -o, --opentelemetry-url <opentelemetry-url>
+            Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector [env: PICTRS_OPENTELEMETRY_URL=]
+
+    -p, --path <path>                              The path to the data directory, e.g. data/ [env: PICTRS_PATH=]
     -w, --whitelist <whitelist>...
             An optional list of filters to whitelist, supports 'identity', 'thumbnail', and 'blur' [env:
             PICTRS_FILTER_WHITELIST=]

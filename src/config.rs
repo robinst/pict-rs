@@ -79,7 +79,7 @@ pub(crate) struct Config {
         short,
         long,
         env = "PICTRS_OPENTELEMETRY_URL",
-        help = "Enable json logging for the pict-rs server"
+        help = "Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector"
     )]
     opentelemetry_url: Option<Url>,
 }
