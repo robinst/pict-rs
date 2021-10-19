@@ -1750,7 +1750,8 @@ checksum = "213701ba3370744dcd1a12960caa4843b3d68b4d1c0a5d575e0d65b2ee9d16c0"
 [[package]]
 name = "storage-path-generator"
 version = "0.1.0"
-source = "git+https://git.asonix.dog/asonix/storage-path-generator?branch=main#68f70707b0d04e5429f0c16d71ca329a9d4a9557"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f7830bbf78d82746dd784b14ac3a5be3a0c0e9f63bf195d7356fe37ac114eed"
 dependencies = [
  "parking_lot",
 ]
