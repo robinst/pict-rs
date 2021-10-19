@@ -300,8 +300,7 @@ async fn upload(
             let delete_token = image.result.delete_token().await?;
 
             let name = manager.from_alias(alias.to_owned()).await?;
-            let mut path = manager.image_dir();
-            path.push(name.clone());
+            let path = manager.path_from_filename(name.clone()).await?;
 
             let details = manager.variant_details(path.clone(), name.clone()).await?;
 
@@ -365,8 +364,7 @@ async fn download(
     let delete_token = session.delete_token().await?;
 
     let name = manager.from_alias(alias.to_owned()).await?;
-    let mut path = manager.image_dir();
-    path.push(name.clone());
+    let path = manager.path_from_filename(name.clone()).await?;
 
     let details = manager.variant_details(path.clone(), name.clone()).await?;
 
@@ -446,8 +444,7 @@ async fn prepare_process(
         .parse::<Format>()
         .map_err(|_| UploadError::UnsupportedFormat)?;
     let processed_name = format!("{}.{}", name, ext);
-    let base = manager.image_dir();
-    let thumbnail_path = self::processor::build_path(base, &chain, processed_name);
+    let thumbnail_path = self::processor::build_path(&chain, processed_name);
     let thumbnail_args = self::processor::build_args(&chain);
 
     Ok((format, name, thumbnail_path, thumbnail_args))
@@ -463,7 +460,12 @@ async fn process_details(
     let (_, name, thumbnail_path, _) =
         prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
-    let details = manager.variant_details(thumbnail_path, name).await?;
+    let real_path = manager
+        .variant_path(&thumbnail_path, &name)
+        .await?
+        .ok_or(UploadError::MissingAlias)?;
+
+    let details = manager.variant_details(real_path, name).await?;
 
     let details = details.ok_or(UploadError::NoFiles)?;
 
@@ -482,162 +484,175 @@ async fn process(
     let (format, name, thumbnail_path, thumbnail_args) =
         prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
 
+    let real_path_opt = manager.variant_path(&thumbnail_path, &name).await?;
+
     // If the thumbnail doesn't exist, we need to create it
-    let thumbnail_exists = if let Err(e) = tokio::fs::metadata(&thumbnail_path)
-        .instrument(tracing::info_span!("Get thumbnail metadata"))
-        .await
-    {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            error!("Error looking up processed image, {}", e);
-            return Err(e.into());
+    let thumbnail_exists = if let Some(real_path) = &real_path_opt {
+        if let Err(e) = tokio::fs::metadata(real_path)
+            .instrument(tracing::info_span!("Get thumbnail metadata"))
+            .await
+        {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                error!("Error looking up processed image, {}", e);
+                return Err(e.into());
+            }
+            false
+        } else {
+            true
         }
-        false
     } else {
-        true
+        false
     };
 
-    let details = manager
-        .variant_details(thumbnail_path.clone(), name.clone())
-        .await?;
+    if thumbnail_exists {
+        if let Some(real_path) = real_path_opt {
+            let details_opt = manager
+                .variant_details(real_path.clone(), name.clone())
+                .await?;
 
-    if !thumbnail_exists || details.is_none() {
-        let mut original_path = manager.image_dir();
-        original_path.push(name.clone());
-
-        let thumbnail_path2 = thumbnail_path.clone();
-        let process_fut = async {
-            let thumbnail_path = thumbnail_path2;
-            // Create and save a JPG for motion images (gif, mp4)
-            if let Some((updated_path, exists)) =
-                self::processor::prepare_image(original_path.clone()).await?
-            {
-                original_path = updated_path.clone();
-
-                if exists.is_new() {
-                    // Save the transcoded file in another task
-                    debug!("Spawning storage task");
-                    let manager2 = manager.clone();
-                    let name = name.clone();
-                    let span = tracing::info_span!(
-                        parent: None,
-                        "Storing variant info",
-                        path = &tracing::field::debug(&updated_path),
-                        name = &tracing::field::display(&name),
-                    );
-                    span.follows_from(Span::current());
-                    actix_rt::spawn(
-                        async move {
-                            if let Err(e) = manager2.store_variant(updated_path, name).await {
-                                error!("Error storing variant, {}", e);
-                                return;
-                            }
-                        }
-                        .instrument(span),
-                    );
-                }
-            }
-
-            let permit = PROCESS_SEMAPHORE.acquire().await?;
-
-            let file = crate::file::File::open(original_path.clone()).await?;
-
-            let mut processed_reader =
-                crate::magick::process_image_file_read(file, thumbnail_args, format)?;
-
-            let mut vec = Vec::new();
-            processed_reader.read_to_end(&mut vec).await?;
-            let bytes = web::Bytes::from(vec);
-
-            drop(permit);
-
-            let details = if let Some(details) = details {
+            let details = if let Some(details) = details_opt {
                 details
             } else {
-                Details::from_bytes(bytes.clone()).await?
+                let details = Details::from_path(real_path.clone()).await?;
+                manager
+                    .store_variant_details(real_path.clone(), name, &details)
+                    .await?;
+                details
             };
 
-            let save_span = tracing::info_span!(
-                parent: None,
-                "Saving variant information",
-                path = tracing::field::debug(&thumbnail_path),
-                name = tracing::field::display(&name),
-            );
-            save_span.follows_from(Span::current());
-            let details2 = details.clone();
-            let bytes2 = bytes.clone();
-            actix_rt::spawn(
-                async move {
-                    if let Err(e) = safe_save_file(thumbnail_path.clone(), bytes2).await {
-                        tracing::warn!("Error saving thumbnail: {}", e);
-                        return;
-                    }
-                    if let Err(e) = manager
-                        .store_variant_details(thumbnail_path.clone(), name.clone(), &details2)
-                        .await
-                    {
-                        tracing::warn!("Error saving variant details: {}", e);
-                        return;
-                    }
-                    if let Err(e) = manager.store_variant(thumbnail_path, name.clone()).await {
-                        tracing::warn!("Error saving variant info: {}", e);
-                    }
-                }
-                .instrument(save_span),
-            );
-
-            Ok((details, bytes)) as Result<(Details, web::Bytes), Error>
-        };
-
-        let (details, bytes) =
-            CancelSafeProcessor::new(thumbnail_path.clone(), process_fut).await?;
-
-        return match range {
-            Some(range_header) => {
-                if !range_header.is_bytes() {
-                    return Err(UploadError::Range.into());
-                }
-
-                if range_header.is_empty() {
-                    Err(UploadError::Range.into())
-                } else if range_header.len() == 1 {
-                    let range = range_header.ranges().next().unwrap();
-                    let content_range = range.to_content_range(bytes.len() as u64);
-                    let stream = range.chop_bytes(bytes);
-                    let mut builder = HttpResponse::PartialContent();
-                    builder.insert_header(content_range);
-
-                    Ok(srv_response(
-                        builder,
-                        stream,
-                        details.content_type(),
-                        7 * DAYS,
-                        details.system_time(),
-                    ))
-                } else {
-                    Err(UploadError::Range.into())
-                }
-            }
-            None => Ok(srv_response(
-                HttpResponse::Ok(),
-                once(ready(Ok(bytes) as Result<_, Error>)),
-                details.content_type(),
-                7 * DAYS,
-                details.system_time(),
-            )),
-        };
+            return ranged_file_resp(real_path, range, details).await;
+        }
     }
 
-    let details = if let Some(details) = details {
-        details
-    } else {
-        let details = Details::from_path(thumbnail_path.clone()).await?;
-        manager
-            .store_variant_details(thumbnail_path.clone(), name, &details)
-            .await?;
-        details
+    let mut original_path = manager.path_from_filename(name.clone()).await?;
+
+    let thumbnail_path2 = thumbnail_path.clone();
+    let process_fut = async {
+        let thumbnail_path = thumbnail_path2;
+        // Create and save a JPG for motion images (gif, mp4)
+        if let Some((updated_path, exists)) =
+            self::processor::prepare_image(original_path.clone()).await?
+        {
+            original_path = updated_path.clone();
+
+            if exists.is_new() {
+                // Save the transcoded file in another task
+                debug!("Spawning storage task");
+                let manager2 = manager.clone();
+                let name = name.clone();
+                let span = tracing::info_span!(
+                    parent: None,
+                    "Storing variant info",
+                    path = &tracing::field::debug(&updated_path),
+                    name = &tracing::field::display(&name),
+                );
+                span.follows_from(Span::current());
+                actix_rt::spawn(
+                    async move {
+                        if let Err(e) = manager2.store_variant(None, &updated_path, &name).await {
+                            error!("Error storing variant, {}", e);
+                            return;
+                        }
+                    }
+                    .instrument(span),
+                );
+            }
+        }
+
+        let permit = PROCESS_SEMAPHORE.acquire().await?;
+
+        let file = crate::file::File::open(original_path.clone()).await?;
+
+        let mut processed_reader =
+            crate::magick::process_image_file_read(file, thumbnail_args, format)?;
+
+        let mut vec = Vec::new();
+        processed_reader.read_to_end(&mut vec).await?;
+        let bytes = web::Bytes::from(vec);
+
+        drop(permit);
+
+        let details = Details::from_bytes(bytes.clone()).await?;
+
+        let save_span = tracing::info_span!(
+            parent: None,
+            "Saving variant information",
+            path = tracing::field::debug(&thumbnail_path),
+            name = tracing::field::display(&name),
+        );
+        save_span.follows_from(Span::current());
+        let details2 = details.clone();
+        let bytes2 = bytes.clone();
+        actix_rt::spawn(
+            async move {
+                let real_path = match manager.next_directory() {
+                    Ok(real_path) => real_path.join(&name),
+                    Err(e) => {
+                        tracing::warn!("Failed to generate directory path: {}", e);
+                        return;
+                    }
+                };
+
+                if let Err(e) = safe_save_file(real_path.clone(), bytes2).await {
+                    tracing::warn!("Error saving thumbnail: {}", e);
+                    return;
+                }
+                if let Err(e) = manager
+                    .store_variant_details(real_path.clone(), name.clone(), &details2)
+                    .await
+                {
+                    tracing::warn!("Error saving variant details: {}", e);
+                    return;
+                }
+                if let Err(e) = manager
+                    .store_variant(Some(&thumbnail_path), &real_path, &name)
+                    .await
+                {
+                    tracing::warn!("Error saving variant info: {}", e);
+                }
+            }
+            .instrument(save_span),
+        );
+
+        Ok((details, bytes)) as Result<(Details, web::Bytes), Error>
     };
 
-    ranged_file_resp(thumbnail_path, range, details).await
+    let (details, bytes) = CancelSafeProcessor::new(thumbnail_path.clone(), process_fut).await?;
+
+    match range {
+        Some(range_header) => {
+            if !range_header.is_bytes() {
+                return Err(UploadError::Range.into());
+            }
+
+            if range_header.is_empty() {
+                Err(UploadError::Range.into())
+            } else if range_header.len() == 1 {
+                let range = range_header.ranges().next().unwrap();
+                let content_range = range.to_content_range(bytes.len() as u64);
+                let stream = range.chop_bytes(bytes);
+                let mut builder = HttpResponse::PartialContent();
+                builder.insert_header(content_range);
+
+                Ok(srv_response(
+                    builder,
+                    stream,
+                    details.content_type(),
+                    7 * DAYS,
+                    details.system_time(),
+                ))
+            } else {
+                Err(UploadError::Range.into())
+            }
+        }
+        None => Ok(srv_response(
+            HttpResponse::Ok(),
+            once(ready(Ok(bytes) as Result<_, Error>)),
+            details.content_type(),
+            7 * DAYS,
+            details.system_time(),
+        )),
+    }
 }
 
 /// Fetch file details
@@ -647,8 +662,7 @@ async fn details(
     manager: web::Data<UploadManager>,
 ) -> Result<HttpResponse, Error> {
     let name = manager.from_alias(alias.into_inner()).await?;
-    let mut path = manager.image_dir();
-    path.push(name.clone());
+    let path = manager.path_from_filename(name.clone()).await?;
 
     let details = manager.variant_details(path.clone(), name.clone()).await?;
 
@@ -673,8 +687,7 @@ async fn serve(
     manager: web::Data<UploadManager>,
 ) -> Result<HttpResponse, Error> {
     let name = manager.from_alias(alias.into_inner()).await?;
-    let mut path = manager.image_dir();
-    path.push(name.clone());
+    let path = manager.path_from_filename(name.clone()).await?;
 
     let details = manager.variant_details(path.clone(), name.clone()).await?;
 

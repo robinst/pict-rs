@@ -229,9 +229,9 @@ impl UploadManagerSession {
         }
 
         // -- WRITE NEW FILE --
-        let mut real_path = self.manager.image_dir();
-        real_path.push(name);
+        let real_path = self.manager.next_directory()?.join(&name);
 
+        self.manager.store_path(name, &real_path).await?;
         crate::safe_move_file(tmpfile, real_path).await?;
 
         Ok(())
@@ -280,22 +280,20 @@ impl UploadManagerSession {
     // generate a short filename that isn't already in-use
     #[instrument(skip(self, content_type))]
     async fn next_file(&self, content_type: mime::Mime) -> Result<String, Error> {
-        let image_dir = self.manager.image_dir();
         loop {
             debug!("Filename generation loop");
-            let mut path = image_dir.clone();
             let s: String = Uuid::new_v4().to_string();
 
             let filename = file_name(s, content_type.clone())?;
 
-            path.push(filename.clone());
+            let path_tree = self.manager.inner.path_tree.clone();
+            let filename2 = filename.clone();
+            let filename_exists = web::block(move || path_tree.get(filename2.as_bytes()))
+                .await??
+                .is_some();
 
-            if let Err(e) = tokio::fs::metadata(path).await {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    debug!("Generated unused filename {}", filename);
-                    return Ok(filename);
-                }
-                return Err(e.into());
+            if !filename_exists {
+                return Ok(filename);
             }
 
             debug!("Filename exists, trying again");

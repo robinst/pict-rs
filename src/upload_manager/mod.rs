@@ -48,7 +48,7 @@ pub struct UploadManager {
 struct UploadManagerInner {
     format: Option<Format>,
     hasher: sha2::Sha256,
-    image_dir: PathBuf,
+    root_dir: PathBuf,
     alias_tree: sled::Tree,
     filename_tree: sled::Tree,
     main_tree: sled::Tree,
@@ -77,18 +77,11 @@ struct FilenameIVec {
 }
 
 impl UploadManager {
-    /// Get the image directory
-    pub(crate) fn image_dir(&self) -> PathBuf {
-        self.inner.image_dir.clone()
-    }
-
     /// Create a new UploadManager
-    pub(crate) async fn new(mut root_dir: PathBuf, format: Option<Format>) -> Result<Self, Error> {
+    pub(crate) async fn new(root_dir: PathBuf, format: Option<Format>) -> Result<Self, Error> {
         let root_clone = root_dir.clone();
         // sled automatically creates it's own directories
         let db = web::block(move || LatestDb::exists(root_clone).migrate()).await??;
-
-        root_dir.push("files");
 
         // Ensure file dir exists
         tokio::fs::create_dir_all(&root_dir).await?;
@@ -101,7 +94,7 @@ impl UploadManager {
             inner: Arc::new(UploadManagerInner {
                 format,
                 hasher: sha2::Sha256::new(),
-                image_dir: root_dir,
+                root_dir,
                 alias_tree: db.open_tree("alias")?,
                 filename_tree: db.open_tree("filename")?,
                 details_tree: db.open_tree("details")?,
@@ -118,17 +111,61 @@ impl UploadManager {
         Ok(manager)
     }
 
+    #[instrument(skip(self))]
+    pub(crate) async fn path_from_filename(&self, filename: String) -> Result<PathBuf, Error> {
+        let path_tree = self.inner.path_tree.clone();
+        let path_ivec = web::block(move || path_tree.get(filename.as_bytes()))
+            .await??
+            .ok_or(UploadError::MissingFile)?;
+
+        let relative = PathBuf::from(String::from_utf8(path_ivec.to_vec())?);
+
+        Ok(self.inner.root_dir.join(relative))
+    }
+
+    #[instrument(skip(self))]
+    async fn store_path(&self, filename: String, path: &std::path::Path) -> Result<(), Error> {
+        let path_bytes = path.to_str().ok_or(UploadError::Path)?.as_bytes().to_vec();
+        let path_tree = self.inner.path_tree.clone();
+        web::block(move || path_tree.insert(filename.as_bytes(), path_bytes)).await??;
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub(crate) async fn variant_path(
+        &self,
+        process_path: &std::path::Path,
+        filename: &str,
+    ) -> Result<Option<PathBuf>, Error> {
+        let key = self.variant_key(process_path, filename)?;
+        let path_tree = self.inner.path_tree.clone();
+        let path_opt = web::block(move || path_tree.get(key)).await??;
+
+        if let Some(path_ivec) = path_opt {
+            let relative = PathBuf::from(String::from_utf8(path_ivec.to_vec())?);
+            Ok(Some(self.inner.root_dir.join(relative)))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Store the path to a generated image variant so we can easily clean it up later
     #[instrument(skip(self))]
-    pub(crate) async fn store_variant(&self, path: PathBuf, filename: String) -> Result<(), Error> {
+    pub(crate) async fn store_variant(
+        &self,
+        variant_process_path: Option<&std::path::Path>,
+        real_path: &std::path::Path,
+        filename: &str,
+    ) -> Result<(), Error> {
         let path_bytes = self
-            .generalize_path(&path)?
+            .generalize_path(real_path)?
             .to_str()
             .ok_or(UploadError::Path)?
             .as_bytes()
             .to_vec();
 
-        let key = self.variant_key(&path, &filename)?;
+        let variant_path = variant_process_path.unwrap_or(real_path);
+        let key = self.variant_key(variant_path, filename)?;
         let path_tree = self.inner.path_tree.clone();
 
         debug!("Storing variant");
@@ -199,14 +236,14 @@ impl UploadManager {
         self.aliases_by_hash(&hash).await
     }
 
-    fn next_directory(&self) -> Result<PathBuf, Error> {
+    pub(crate) fn next_directory(&self) -> Result<PathBuf, Error> {
         let path = self.inner.path_gen.next();
 
         self.inner
             .settings_tree
             .insert(GENERATOR_KEY, path.to_be_bytes())?;
 
-        let mut target_path = self.image_dir();
+        let mut target_path = self.inner.root_dir.join("files");
         for dir in path.to_strings() {
             target_path.push(dir)
         }
@@ -381,14 +418,18 @@ impl UploadManager {
     #[instrument(skip(self))]
     async fn cleanup_files(&self, filename: FilenameIVec) -> Result<(), Error> {
         let filename = filename.inner;
-        let mut path = self.image_dir();
-        let fname = String::from_utf8(filename.to_vec())?;
-        path.push(fname);
+
+        let filename2 = filename.clone();
+        let path_tree = self.inner.path_tree.clone();
+        let path = web::block(move || path_tree.remove(filename2)).await??;
 
         let mut errors = Vec::new();
-        debug!("Deleting {:?}", path);
-        if let Err(e) = tokio::fs::remove_file(path).await {
-            errors.push(e.into());
+        if let Some(path) = path {
+            let path = self.inner.root_dir.join(String::from_utf8(path.to_vec())?);
+            debug!("Deleting {:?}", path);
+            if let Err(e) = self.remove_path(&path).await {
+                errors.push(e.into());
+            }
         }
 
         let filename2 = filename.clone();
@@ -410,9 +451,12 @@ impl UploadManager {
         debug!("{} files prepared for deletion", paths.len());
 
         for path in paths {
-            let s = String::from_utf8_lossy(&path);
-            debug!("Deleting {}", s);
-            if let Err(e) = remove_path(path).await {
+            let path = self
+                .inner
+                .root_dir
+                .join(String::from_utf8_lossy(&path).as_ref());
+            debug!("Deleting {:?}", path);
+            if let Err(e) = self.remove_path(&path).await {
                 errors.push(e);
             }
         }
@@ -433,6 +477,55 @@ impl UploadManager {
             error!("Error deleting files, {}", error);
         }
         Ok(())
+    }
+
+    async fn try_remove_parents(&self, mut path: &std::path::Path) -> Result<(), Error> {
+        let root = self.inner.root_dir.join("files");
+
+        while let Some(parent) = path.parent() {
+            if parent.ends_with(&root) {
+                break;
+            }
+
+            if tokio::fs::remove_dir(parent).await.is_err() {
+                break;
+            }
+
+            path = parent;
+        }
+
+        Ok(())
+    }
+
+    async fn remove_path(&self, path: &std::path::Path) -> Result<(), Error> {
+        tokio::fs::remove_file(path).await?;
+        self.try_remove_parents(path).await
+    }
+
+    fn variant_key(
+        &self,
+        variant_process_path: &std::path::Path,
+        filename: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let path_string = variant_process_path
+            .to_str()
+            .ok_or(UploadError::Path)?
+            .to_string();
+
+        let vec = format!("{}/{}", filename, path_string).as_bytes().to_vec();
+        Ok(vec)
+    }
+
+    fn details_key(
+        &self,
+        variant_path: &std::path::Path,
+        filename: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let path = self.generalize_path(variant_path)?;
+        let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
+
+        let vec = format!("{}/{}", filename, path_string).as_bytes().to_vec();
+        Ok(vec)
     }
 }
 
@@ -500,12 +593,6 @@ fn init_generator(settings: &sled::Tree) -> Result<Generator, Error> {
     } else {
         Ok(Generator::new())
     }
-}
-
-async fn remove_path(path: sled::IVec) -> Result<(), Error> {
-    let path_string = String::from_utf8(path.to_vec())?;
-    tokio::fs::remove_file(path_string).await?;
-    Ok(())
 }
 
 fn trans_err<E>(e: E) -> sled::transaction::ConflictableTransactionError<Error>

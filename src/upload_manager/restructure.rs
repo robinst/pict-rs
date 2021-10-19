@@ -20,7 +20,7 @@ impl UploadManager {
             let filename = String::from_utf8(filename.to_vec())?;
             tracing::info!("Migrating {}", filename);
 
-            let mut file_path = self.image_dir();
+            let mut file_path = self.inner.root_dir.join("files");
             file_path.push(filename.clone());
 
             if tokio::fs::metadata(&file_path).await.is_ok() {
@@ -46,18 +46,7 @@ impl UploadManager {
             for res in self.inner.main_tree.range(start..end) {
                 let (hash_variant_key, variant_path_or_details) = res?;
 
-                if hash_variant_key.ends_with(DETAILS) {
-                    let details = variant_path_or_details;
-
-                    let start_index = hash.len() + 1;
-                    let end_index = hash_variant_key.len() - DETAILS.len();
-                    let path_bytes = &hash_variant_key[start_index..end_index];
-
-                    let variant_path = PathBuf::from(String::from_utf8(path_bytes.to_vec())?);
-                    let key = self.details_key(&variant_path, &filename)?;
-
-                    self.inner.details_tree.insert(key, details)?;
-                } else {
+                if !hash_variant_key.ends_with(DETAILS) {
                     let variant_path =
                         PathBuf::from(String::from_utf8(variant_path_or_details.to_vec())?);
                     if tokio::fs::metadata(&variant_path).await.is_ok() {
@@ -71,13 +60,14 @@ impl UploadManager {
                             .as_bytes()
                             .to_vec();
 
-                        let variant_key = self.variant_key(&target_path, &filename)?;
+                        let variant_key = self.migrate_variant_key(&variant_path, &filename)?;
 
                         self.inner
                             .path_tree
                             .insert(variant_key, relative_target_path_bytes)?;
 
-                        safe_move_file(variant_path, target_path).await?;
+                        safe_move_file(variant_path.clone(), target_path).await?;
+                        self.try_remove_parents(&variant_path).await?;
                     }
                 }
 
@@ -90,7 +80,7 @@ impl UploadManager {
     }
 
     fn restructure_complete(&self) -> Result<bool, Error> {
-        Ok(!self
+        Ok(self
             .inner
             .settings_tree
             .get(RESTRUCTURE_COMPLETE)?
@@ -106,31 +96,19 @@ impl UploadManager {
     }
 
     pub(super) fn generalize_path<'a>(&self, path: &'a Path) -> Result<&'a Path, Error> {
-        Ok(path.strip_prefix(&self.inner.image_dir)?)
+        Ok(path.strip_prefix(&self.inner.root_dir)?)
     }
 
-    pub(super) fn details_key(
+    fn migrate_variant_key(
         &self,
-        variant_path: &Path,
+        variant_process_path: &Path,
         filename: &str,
     ) -> Result<Vec<u8>, Error> {
-        let path = self.generalize_path(variant_path)?;
-        let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
+        let path = self
+            .generalize_path(variant_process_path)?
+            .strip_prefix("files")?;
 
-        let vec = format!("{}/{}", filename, path_string).as_bytes().to_vec();
-        Ok(vec)
-    }
-
-    pub(super) fn variant_key(
-        &self,
-        variant_path: &Path,
-        filename: &str,
-    ) -> Result<Vec<u8>, Error> {
-        let path = self.generalize_path(variant_path)?;
-        let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
-
-        let vec = format!("{}/{}", filename, path_string).as_bytes().to_vec();
-        Ok(vec)
+        self.variant_key(path, filename)
     }
 }
 

@@ -266,11 +266,11 @@ pub(crate) fn build_chain(args: &[(String, String)]) -> ProcessChain {
     ProcessChain { inner }
 }
 
-pub(crate) fn build_path(base: PathBuf, chain: &ProcessChain, filename: String) -> PathBuf {
+pub(crate) fn build_path(chain: &ProcessChain, filename: String) -> PathBuf {
     let mut path = chain
         .inner
         .iter()
-        .fold(base, |acc, processor| processor.path(acc));
+        .fold(PathBuf::default(), |acc, processor| processor.path(acc));
 
     path.push(filename);
     path
