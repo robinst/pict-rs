@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use tokio::io::AsyncRead;
 use tracing::{debug, instrument, warn, Span};
 use tracing_futures::Instrument;
+use uuid::Uuid;
 
 type UploadStream<E> = LocalBoxStream<'static, Result<web::Bytes, E>>;
 
@@ -98,13 +99,7 @@ impl UploadManagerSession {
         let alias = self.alias.clone().ok_or(UploadError::MissingAlias)?;
 
         debug!("Generating delete token");
-        use rand::distributions::{Alphanumeric, Distribution};
-        let rng = rand::thread_rng();
-        let s: String = Alphanumeric
-            .sample_iter(rng)
-            .take(10)
-            .map(char::from)
-            .collect();
+        let s: String = Uuid::new_v4().to_string();
         let delete_token = s.clone();
 
         debug!("Saving delete token");
@@ -286,17 +281,10 @@ impl UploadManagerSession {
     #[instrument(skip(self, content_type))]
     async fn next_file(&self, content_type: mime::Mime) -> Result<String, Error> {
         let image_dir = self.manager.image_dir();
-        use rand::distributions::{Alphanumeric, Distribution};
-        let mut limit: usize = 10;
-        let mut rng = rand::thread_rng();
         loop {
             debug!("Filename generation loop");
             let mut path = image_dir.clone();
-            let s: String = Alphanumeric
-                .sample_iter(&mut rng)
-                .take(limit)
-                .map(char::from)
-                .collect();
+            let s: String = Uuid::new_v4().to_string();
 
             let filename = file_name(s, content_type.clone())?;
 
@@ -311,8 +299,6 @@ impl UploadManagerSession {
             }
 
             debug!("Filename exists, trying again");
-
-            limit += 1;
         }
     }
 
@@ -376,16 +362,9 @@ impl UploadManagerSession {
     // Generate an alias to the file
     #[instrument(skip(self, hash, content_type))]
     async fn next_alias(&mut self, hash: &Hash, content_type: mime::Mime) -> Result<String, Error> {
-        use rand::distributions::{Alphanumeric, Distribution};
-        let mut limit: usize = 10;
-        let mut rng = rand::thread_rng();
         loop {
             debug!("Alias gen loop");
-            let s: String = Alphanumeric
-                .sample_iter(&mut rng)
-                .take(limit)
-                .map(char::from)
-                .collect();
+            let s: String = Uuid::new_v4().to_string();
             let alias = file_name(s, content_type.clone())?;
             self.alias = Some(alias.clone());
 
@@ -395,8 +374,6 @@ impl UploadManagerSession {
                 return Ok(alias);
             }
             debug!("Alias exists, regenning");
-
-            limit += 1;
         }
     }
 

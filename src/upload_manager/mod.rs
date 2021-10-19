@@ -1,15 +1,17 @@
 use crate::{
     config::Format,
     error::{Error, UploadError},
-    migrate::{alias_id_key, alias_key, alias_key_bounds, variant_key_bounds, LatestDb},
+    migrate::{alias_id_key, alias_key, alias_key_bounds, LatestDb},
 };
 use actix_web::web;
 use sha2::Digest;
 use std::{path::PathBuf, sync::Arc};
+use storage_path_generator::{Generator, Path};
 use tracing::{debug, error, info, instrument, warn, Span};
 use tracing_futures::Instrument;
 
 mod hasher;
+mod restructure;
 mod session;
 
 pub(super) use session::UploadManagerSession;
@@ -22,16 +24,21 @@ pub(super) use session::UploadManagerSession;
 // - Main Tree
 //   - hash -> filename
 //   - hash 0 u64(id) -> alias
-//   - hash 2 variant path -> variant path
+//   - DEPRECATED:
+//     - hash 2 variant path -> variant path
+//     - hash 2 vairant path details -> details
 // - Filename Tree
 //   - filename -> hash
+// - Details Tree
+//   - filename / relative path -> details
 // - Path Tree
 //   - filename -> relative path
-//   - filename / variant operation path -> relative path
+//   - filename / relative variant path -> relative variant path
 // - Settings Tree
 //   - last-path -> last generated path
-//   - fs-restructure-01-started -> bool
 //   - fs-restructure-01-complete -> bool
+
+const GENERATOR_KEY: &'static [u8] = b"last-path";
 
 #[derive(Clone)]
 pub struct UploadManager {
@@ -45,8 +52,10 @@ struct UploadManagerInner {
     alias_tree: sled::Tree,
     filename_tree: sled::Tree,
     main_tree: sled::Tree,
+    details_tree: sled::Tree,
     path_tree: sled::Tree,
     settings_tree: sled::Tree,
+    path_gen: Generator,
     db: sled::Db,
 }
 
@@ -86,6 +95,8 @@ impl UploadManager {
 
         let settings_tree = db.open_tree("settings")?;
 
+        let path_gen = init_generator(&settings_tree)?;
+
         let manager = UploadManager {
             inner: Arc::new(UploadManagerInner {
                 format,
@@ -93,12 +104,16 @@ impl UploadManager {
                 image_dir: root_dir,
                 alias_tree: db.open_tree("alias")?,
                 filename_tree: db.open_tree("filename")?,
+                details_tree: db.open_tree("details")?,
                 main_tree: db.open_tree("main")?,
                 path_tree: db.open_tree("path")?,
                 settings_tree,
+                path_gen,
                 db,
             }),
         };
+
+        manager.restructure().await?;
 
         Ok(manager)
     }
@@ -106,18 +121,18 @@ impl UploadManager {
     /// Store the path to a generated image variant so we can easily clean it up later
     #[instrument(skip(self))]
     pub(crate) async fn store_variant(&self, path: PathBuf, filename: String) -> Result<(), Error> {
-        let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
+        let path_bytes = self
+            .generalize_path(&path)?
+            .to_str()
+            .ok_or(UploadError::Path)?
+            .as_bytes()
+            .to_vec();
 
-        let fname_tree = self.inner.filename_tree.clone();
-        debug!("Getting hash");
-        let hash: sled::IVec = web::block(move || fname_tree.get(filename.as_bytes()))
-            .await??
-            .ok_or(UploadError::MissingFilename)?;
+        let key = self.variant_key(&path, &filename)?;
+        let path_tree = self.inner.path_tree.clone();
 
-        let key = variant_key(&hash, &path_string);
-        let main_tree = self.inner.main_tree.clone();
         debug!("Storing variant");
-        web::block(move || main_tree.insert(key, path_string.as_bytes())).await??;
+        web::block(move || path_tree.insert(key, path_bytes)).await??;
         debug!("Stored variant");
 
         Ok(())
@@ -130,18 +145,11 @@ impl UploadManager {
         path: PathBuf,
         filename: String,
     ) -> Result<Option<Details>, Error> {
-        let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
+        let key = self.details_key(&path, &filename)?;
+        let details_tree = self.inner.details_tree.clone();
 
-        let fname_tree = self.inner.filename_tree.clone();
-        debug!("Getting hash");
-        let hash: sled::IVec = web::block(move || fname_tree.get(filename.as_bytes()))
-            .await??
-            .ok_or(UploadError::MissingFilename)?;
-
-        let key = variant_details_key(&hash, &path_string);
-        let main_tree = self.inner.main_tree.clone();
         debug!("Getting details");
-        let opt = match web::block(move || main_tree.get(key)).await?? {
+        let opt = match web::block(move || details_tree.get(key)).await?? {
             Some(ivec) => match serde_json::from_slice(&ivec) {
                 Ok(details) => Some(details),
                 Err(_) => None,
@@ -160,19 +168,12 @@ impl UploadManager {
         filename: String,
         details: &Details,
     ) -> Result<(), Error> {
-        let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
+        let key = self.details_key(&path, &filename)?;
+        let details_tree = self.inner.details_tree.clone();
+        let details_value = serde_json::to_vec(details)?;
 
-        let fname_tree = self.inner.filename_tree.clone();
-        debug!("Getting hash");
-        let hash: sled::IVec = web::block(move || fname_tree.get(filename.as_bytes()))
-            .await??
-            .ok_or(UploadError::MissingFilename)?;
-
-        let key = variant_details_key(&hash, &path_string);
-        let main_tree = self.inner.main_tree.clone();
-        let details_value = serde_json::to_string(details)?;
         debug!("Storing details");
-        web::block(move || main_tree.insert(key, details_value.as_bytes())).await??;
+        web::block(move || details_tree.insert(key, details_value)).await??;
         debug!("Stored details");
 
         Ok(())
@@ -196,6 +197,21 @@ impl UploadManager {
             .ok_or(UploadError::MissingFilename)?;
 
         self.aliases_by_hash(&hash).await
+    }
+
+    fn next_directory(&self) -> Result<PathBuf, Error> {
+        let path = self.inner.path_gen.next();
+
+        self.inner
+            .settings_tree
+            .insert(GENERATOR_KEY, path.to_be_bytes())?;
+
+        let mut target_path = self.image_dir();
+        for dir in path.to_strings() {
+            target_path.push(dir)
+        }
+
+        Ok(target_path)
     }
 
     async fn aliases_by_hash(&self, hash: &sled::IVec) -> Result<Vec<String>, Error> {
@@ -375,40 +391,43 @@ impl UploadManager {
             errors.push(e.into());
         }
 
+        let filename2 = filename.clone();
         let fname_tree = self.inner.filename_tree.clone();
         debug!("Deleting filename -> hash mapping");
-        let hash = web::block(move || fname_tree.remove(filename))
-            .await??
-            .ok_or(UploadError::MissingFile)?;
+        web::block(move || fname_tree.remove(filename2)).await??;
 
-        let (start, end) = variant_key_bounds(&hash);
-        let main_tree = self.inner.main_tree.clone();
+        let path_prefix = filename.clone();
+        let path_tree = self.inner.path_tree.clone();
         debug!("Fetching file variants");
-        let keys = web::block(move || {
-            let mut keys = Vec::new();
-            for key in main_tree.range(start..end).keys() {
-                keys.push(key?.to_owned());
-            }
-
-            Ok(keys) as Result<Vec<sled::IVec>, Error>
+        let paths = web::block(move || {
+            path_tree
+                .scan_prefix(path_prefix)
+                .values()
+                .collect::<Result<Vec<sled::IVec>, sled::Error>>()
         })
         .await??;
 
-        debug!("{} files prepared for deletion", keys.len());
+        debug!("{} files prepared for deletion", paths.len());
 
-        for key in keys {
-            let main_tree = self.inner.main_tree.clone();
-            if let Some(path) = web::block(move || main_tree.remove(key)).await?? {
-                let s = String::from_utf8_lossy(&path);
-                debug!("Deleting {}", s);
-                // ignore json objects
-                if !s.starts_with('{') {
-                    if let Err(e) = remove_path(path).await {
-                        errors.push(e);
-                    }
-                }
+        for path in paths {
+            let s = String::from_utf8_lossy(&path);
+            debug!("Deleting {}", s);
+            if let Err(e) = remove_path(path).await {
+                errors.push(e);
             }
         }
+
+        let path_prefix = filename.clone();
+        let path_tree = self.inner.path_tree.clone();
+        debug!("Deleting path info");
+        web::block(move || {
+            for res in path_tree.scan_prefix(path_prefix).keys() {
+                let key = res?;
+                path_tree.remove(key)?;
+            }
+            Ok(()) as Result<(), Error>
+        })
+        .await??;
 
         for error in errors {
             error!("Error deleting files, {}", error);
@@ -473,6 +492,16 @@ impl FilenameIVec {
     }
 }
 
+fn init_generator(settings: &sled::Tree) -> Result<Generator, Error> {
+    if let Some(ivec) = settings.get(GENERATOR_KEY)? {
+        Ok(Generator::from_existing(Path::from_be_bytes(
+            ivec.to_vec(),
+        )?))
+    } else {
+        Ok(Generator::new())
+    }
+}
+
 async fn remove_path(path: sled::IVec) -> Result<(), Error> {
     let path_string = String::from_utf8(path.to_vec())?;
     tokio::fs::remove_file(path_string).await?;
@@ -488,21 +517,6 @@ where
 
 fn delete_key(alias: &str) -> String {
     format!("{}/delete", alias)
-}
-
-fn variant_key(hash: &[u8], path: &str) -> Vec<u8> {
-    let mut key = hash.to_vec();
-    key.extend(&[2]);
-    key.extend(path.as_bytes());
-    key
-}
-
-fn variant_details_key(hash: &[u8], path: &str) -> Vec<u8> {
-    let mut key = hash.to_vec();
-    key.extend(&[2]);
-    key.extend(path.as_bytes());
-    key.extend(b"details");
-    key
 }
 
 impl std::fmt::Debug for UploadManager {

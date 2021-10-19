@@ -36,6 +36,7 @@ use tracing_error::ErrorLayer;
 use tracing_futures::Instrument;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, EnvFilter, Registry};
+use uuid::Uuid;
 
 mod config;
 mod either;
@@ -67,17 +68,7 @@ const HOURS: u32 = 60 * MINUTES;
 const DAYS: u32 = 24 * HOURS;
 
 static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
-    use rand::{
-        distributions::{Alphanumeric, Distribution},
-        thread_rng,
-    };
-
-    let mut rng = thread_rng();
-    let tmp_nonce = Alphanumeric
-        .sample_iter(&mut rng)
-        .take(7)
-        .map(char::from)
-        .collect::<String>();
+    let tmp_nonce = Uuid::new_v4();
 
     let mut path = std::env::temp_dir();
     path.push(format!("pict-rs-{}", tmp_nonce));
@@ -262,15 +253,7 @@ async fn safe_save_file(path: PathBuf, bytes: web::Bytes) -> Result<(), Error> {
 }
 
 pub(crate) fn tmp_file() -> PathBuf {
-    use rand::distributions::{Alphanumeric, Distribution};
-    let limit: usize = 10;
-    let rng = rand::thread_rng();
-
-    let s: String = Alphanumeric
-        .sample_iter(rng)
-        .take(limit)
-        .map(char::from)
-        .collect();
+    let s: String = Uuid::new_v4().to_string();
 
     let name = format!("{}.tmp", s);
 

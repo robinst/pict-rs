@@ -69,6 +69,12 @@ pub(crate) enum UploadError {
     #[error("Error interacting with filesystem, {0}")]
     Io(#[from] std::io::Error),
 
+    #[error(transparent)]
+    PathGenerator(#[from] storage_path_generator::PathError),
+
+    #[error(transparent)]
+    StripPrefix(#[from] std::path::StripPrefixError),
+
     #[error("Failed to acquire the semaphore")]
     Semaphore,
 

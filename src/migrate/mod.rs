@@ -106,16 +106,6 @@ pub(crate) fn alias_key_bounds(hash: &[u8]) -> (Vec<u8>, Vec<u8>) {
     (start, end)
 }
 
-pub(crate) fn variant_key_bounds(hash: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let mut start = hash.to_vec();
-    start.extend(&[2]);
-
-    let mut end = hash.to_vec();
-    end.extend(&[3]);
-
-    (start, end)
-}
-
 pub(crate) fn alias_id_key(alias: &str) -> String {
     format!("{}/id", alias)
 }

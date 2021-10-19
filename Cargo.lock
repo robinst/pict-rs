@@ -1185,11 +1185,11 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "pin-project-lite",
- "rand",
  "serde",
  "serde_json",
  "sha2",
  "sled",
+ "storage-path-generator",
  "structopt",
  "thiserror",
  "time 0.3.3",
@@ -1746,6 +1746,14 @@ name = "stdweb-internal-runtime"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213701ba3370744dcd1a12960caa4843b3d68b4d1c0a5d575e0d65b2ee9d16c0"
+
+[[package]]
+name = "storage-path-generator"
+version = "0.1.0"
+source = "git+https://git.asonix.dog/asonix/storage-path-generator?branch=main#68f70707b0d04e5429f0c16d71ca329a9d4a9557"
+dependencies = [
+ "parking_lot",
+]
 
 [[package]]
 name = "strsim"
