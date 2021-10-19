@@ -26,7 +26,10 @@ OPTIONS:
         --api-key <api-key>
             An optional string to be checked on requests to privileged endpoints [env: PICTRS_API_KEY=]
 
-    -f, --format <format>
+    -f, --filters <filters>...
+            An optional list of filters to permit, supports 'identity', 'thumbnail', 'resize', 'crop', and 'blur' [env:
+            PICTRS_ALLOWED_FILTERS=]
+    -i, --image-format <image-format>
             An optional image format to convert all uploaded files into, supports 'jpg', 'png', and 'webp' [env:
             PICTRS_FORMAT=]
     -m, --max-file-size <max-file-size>
@@ -42,9 +45,6 @@ OPTIONS:
             Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector [env: PICTRS_OPENTELEMETRY_URL=]
 
     -p, --path <path>                              The path to the data directory, e.g. data/ [env: PICTRS_PATH=]
-    -w, --whitelist <whitelist>...
-            An optional list of filters to whitelist, supports 'identity', 'thumbnail', and 'blur' [env:
-            PICTRS_FILTER_WHITELIST=]
 ```
 
 #### Example:

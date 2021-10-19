@@ -408,7 +408,7 @@ async fn prepare_process(
     query: web::Query<ProcessQuery>,
     ext: &str,
     manager: &UploadManager,
-    whitelist: &Option<HashSet<String>>,
+    filters: &Option<HashSet<String>>,
 ) -> Result<(Format, String, PathBuf, Vec<String>), Error> {
     let (alias, operations) =
         query
@@ -429,10 +429,10 @@ async fn prepare_process(
 
     let name = manager.from_alias(alias).await?;
 
-    let operations = if let Some(whitelist) = whitelist.as_ref() {
+    let operations = if let Some(filters) = filters.as_ref() {
         operations
             .into_iter()
-            .filter(|(k, _)| whitelist.contains(&k.to_lowercase()))
+            .filter(|(k, _)| filters.contains(&k.to_lowercase()))
             .collect()
     } else {
         operations
@@ -450,15 +450,15 @@ async fn prepare_process(
     Ok((format, name, thumbnail_path, thumbnail_args))
 }
 
-#[instrument(name = "Fetching derived details", skip(manager, whitelist))]
+#[instrument(name = "Fetching derived details", skip(manager, filters))]
 async fn process_details(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
-    whitelist: web::Data<Option<HashSet<String>>>,
+    filters: web::Data<Option<HashSet<String>>>,
 ) -> Result<HttpResponse, Error> {
     let (_, name, thumbnail_path, _) =
-        prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
+        prepare_process(query, ext.as_str(), &manager, &filters).await?;
 
     let real_path = manager
         .variant_path(&thumbnail_path, &name)
@@ -473,16 +473,16 @@ async fn process_details(
 }
 
 /// Process files
-#[instrument(name = "Serving processed image", skip(manager, whitelist))]
+#[instrument(name = "Serving processed image", skip(manager, filters))]
 async fn process(
     range: Option<range::RangeHeader>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
-    whitelist: web::Data<Option<HashSet<String>>>,
+    filters: web::Data<Option<HashSet<String>>>,
 ) -> Result<HttpResponse, Error> {
     let (format, name, thumbnail_path, thumbnail_args) =
-        prepare_process(query, ext.as_str(), &manager, &whitelist).await?;
+        prepare_process(query, ext.as_str(), &manager, &filters).await?;
 
     let real_path_opt = manager.variant_path(&thumbnail_path, &name).await?;
 
@@ -948,7 +948,7 @@ async fn main() -> Result<(), anyhow::Error> {
             .wrap(Deadline)
             .app_data(web::Data::new(manager.clone()))
             .app_data(web::Data::new(client))
-            .app_data(web::Data::new(CONFIG.filter_whitelist()))
+            .app_data(web::Data::new(CONFIG.allowed_filters()))
             .service(
                 web::scope("/image")
                     .service(

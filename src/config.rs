@@ -33,15 +33,15 @@ pub(crate) struct Config {
         env = "PICTRS_FORMAT",
         help = "An optional image format to convert all uploaded files into, supports 'jpg', 'png', and 'webp'"
     )]
-    format: Option<Format>,
+    image_format: Option<Format>,
 
     #[structopt(
         short,
         long,
-        env = "PICTRS_FILTER_WHITELIST",
-        help = "An optional list of filters to whitelist, supports 'identity', 'thumbnail', and 'blur'"
+        env = "PICTRS_ALLOWED_FILTERS",
+        help = "An optional list of filters to permit, supports 'identity', 'thumbnail', 'resize', 'crop', and 'blur'"
     )]
-    whitelist: Option<Vec<String>>,
+    filters: Option<Vec<String>>,
 
     #[structopt(
         short,
@@ -94,13 +94,11 @@ impl Config {
     }
 
     pub(crate) fn format(&self) -> Option<Format> {
-        self.format.clone()
+        self.image_format.clone()
     }
 
-    pub(crate) fn filter_whitelist(&self) -> Option<HashSet<String>> {
-        self.whitelist
-            .as_ref()
-            .map(|wl| wl.iter().cloned().collect())
+    pub(crate) fn allowed_filters(&self) -> Option<HashSet<String>> {
+        self.filters.as_ref().map(|wl| wl.iter().cloned().collect())
     }
 
     pub(crate) fn validate_imports(&self) -> bool {
