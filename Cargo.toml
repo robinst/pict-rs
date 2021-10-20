@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.3.0-alpha.39"
+version = "0.3.0-alpha.40"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -17,9 +17,9 @@ io-uring = ["actix-rt/io-uring", "actix-server/io-uring", "tokio-uring", "sled/i
 actix-form-data = "0.6.0-beta.1"
 actix-rt = "2.2.0"
 actix-server = "2.0.0-beta.6"
-actix-web = { version = "4.0.0-beta.8", default-features = false }
+actix-web = { version = "4.0.0-beta.10", default-features = false }
 anyhow = "1.0"
-awc = { version = "3.0.0-beta.7", default-features = false, features = ["rustls"] }
+awc = { version = "3.0.0-beta.9", default-features = false, features = ["rustls"] }
 base64 = "0.13.0"
 dashmap = "4.0.2"
 futures-util = "0.3.17"
@@ -53,8 +53,12 @@ uuid = { version = "0.8.2", features = ["v4", "serde"]}
 version = "0.4.0-beta.14"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_16"]
+git = "https://github.com/asonix/tracing-actix-web"
+branch = "asonix/update-deps"
 
 [dependencies.tracing-awc]
 version = "0.1.0-beta.4"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_16"]
+git = "https://git.asonix.dog/asonix/tracing-awc"
+branch = "main"

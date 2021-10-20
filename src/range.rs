@@ -86,7 +86,6 @@ impl RangeHeader {
 }
 
 impl FromRequest for RangeHeader {
-    type Config = ();
     type Error = Error;
     type Future = std::future::Ready<Result<Self, Self::Error>>;
 
