@@ -22,12 +22,19 @@ pub(crate) struct Process {
     span: Span,
 }
 
-pub(crate) struct ProcessRead<I> {
-    inner: I,
-    span: Span,
-    err_recv: Receiver<std::io::Error>,
-    err_closed: bool,
-    handle: JoinHandle<()>,
+struct DropHandle {
+    inner: JoinHandle<()>,
+}
+
+pin_project_lite::pin_project! {
+    struct ProcessRead<I> {
+        #[pin]
+        inner: I,
+        span: Span,
+        err_recv: Receiver<std::io::Error>,
+        err_closed: bool,
+        handle: DropHandle,
+    }
 }
 
 impl Process {
@@ -86,13 +93,13 @@ impl Process {
             .instrument(span),
         );
 
-        Some(Box::pin(ProcessRead {
+        Some(ProcessRead {
             inner: stdout,
             span: self.span,
             err_recv: rx,
             err_closed: false,
-            handle,
-        }))
+            handle: DropHandle { inner: handle },
+        })
     }
 
     pub(crate) fn file_read(
@@ -129,30 +136,36 @@ impl Process {
             .instrument(span),
         );
 
-        Some(Box::pin(ProcessRead {
+        Some(ProcessRead {
             inner: stdout,
             span: self.span,
             err_recv: rx,
             err_closed: false,
-            handle,
-        }))
+            handle: DropHandle { inner: handle },
+        })
     }
 }
 
 impl<I> AsyncRead for ProcessRead<I>
 where
-    I: AsyncRead + Unpin,
+    I: AsyncRead,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        let span = self.span.clone();
+        let this = self.as_mut().project();
+
+        let span = this.span;
+        let err_recv = this.err_recv;
+        let err_closed = this.err_closed;
+        let inner = this.inner;
+
         span.in_scope(|| {
-            if !self.err_closed {
-                if let Poll::Ready(res) = Pin::new(&mut self.err_recv).poll(cx) {
-                    self.err_closed = true;
+            if !*err_closed {
+                if let Poll::Ready(res) = Pin::new(err_recv).poll(cx) {
+                    *err_closed = true;
                     if let Ok(err) = res {
                         let display = format!("{}", err);
                         let debug = format!("{:?}", err);
@@ -163,7 +176,7 @@ where
                 }
             }
 
-            if let Poll::Ready(res) = Pin::new(&mut self.inner).poll_read(cx, buf) {
+            if let Poll::Ready(res) = inner.poll_read(cx, buf) {
                 if let Err(err) = &res {
                     let display = format!("{}", err);
                     let debug = format!("{:?}", err);
@@ -178,9 +191,9 @@ where
     }
 }
 
-impl<I> Drop for ProcessRead<I> {
+impl Drop for DropHandle {
     fn drop(&mut self) {
-        self.handle.abort();
+        self.inner.abort();
     }
 }
 

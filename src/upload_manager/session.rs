@@ -9,14 +9,12 @@ use crate::{
     },
 };
 use actix_web::web;
-use futures_util::stream::{LocalBoxStream, StreamExt};
+use futures_util::stream::{Stream, StreamExt};
 use std::path::PathBuf;
 use tokio::io::AsyncRead;
 use tracing::{debug, instrument, warn, Span};
 use tracing_futures::Instrument;
 use uuid::Uuid;
-
-type UploadStream<E> = LocalBoxStream<'static, Result<web::Bytes, E>>;
 
 pub(crate) struct UploadManagerSession {
     manager: UploadManager,
@@ -136,7 +134,7 @@ impl UploadManagerSession {
         alias: String,
         content_type: mime::Mime,
         validate: bool,
-        mut stream: UploadStream<E>,
+        mut stream: impl Stream<Item = Result<web::Bytes, E>> + Unpin,
     ) -> Result<Self, Error>
     where
         Error: From<E>,
@@ -177,7 +175,10 @@ impl UploadManagerSession {
 
     /// Upload the file, discarding bytes if it's already present, or saving if it's new
     #[instrument(skip(self, stream))]
-    pub(crate) async fn upload<E>(mut self, mut stream: UploadStream<E>) -> Result<Self, Error>
+    pub(crate) async fn upload<E>(
+        mut self,
+        mut stream: impl Stream<Item = Result<web::Bytes, E>> + Unpin,
+    ) -> Result<Self, Error>
     where
         Error: From<E>,
     {

@@ -57,6 +57,7 @@ use self::{
     config::{Config, Format},
     either::Either,
     error::{Error, UploadError},
+    file::CrateError,
     middleware::{Deadline, Internal},
     upload_manager::{Details, UploadManager, UploadManagerSession},
     validate::{image_webp, video_mp4},
@@ -340,6 +341,59 @@ struct UrlQuery {
     url: String,
 }
 
+pin_project_lite::pin_project! {
+    struct Limit<S> {
+        #[pin]
+        inner: S,
+
+        count: u64,
+        limit: u64,
+    }
+}
+
+impl<S> Limit<S> {
+    fn new(inner: S, limit: u64) -> Self {
+        Limit {
+            inner,
+            count: 0,
+            limit,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Resonse body larger than size limit")]
+struct LimitError;
+
+impl<S, E> Stream for Limit<S>
+where
+    S: Stream<Item = Result<web::Bytes, E>>,
+    E: From<LimitError>,
+{
+    type Item = Result<web::Bytes, E>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.as_mut().project();
+
+        let limit = this.limit;
+        let count = this.count;
+        let inner = this.inner;
+
+        inner.poll_next(cx).map(|opt| {
+            opt.map(|res| match res {
+                Ok(bytes) => {
+                    *count += bytes.len() as u64;
+                    if *count > *limit {
+                        return Err(LimitError.into());
+                    }
+                    Ok(bytes)
+                }
+                Err(e) => Err(e),
+            })
+        })
+    }
+}
+
 /// download an image from a URL
 #[instrument(name = "Downloading file", skip(client, manager))]
 async fn download(
@@ -347,15 +401,19 @@ async fn download(
     manager: web::Data<UploadManager>,
     query: web::Query<UrlQuery>,
 ) -> Result<HttpResponse, Error> {
-    let mut res = client.get(&query.url).propagate().send().await?;
+    let res = client.get(&query.url).propagate().send().await?;
 
     if !res.status().is_success() {
         return Err(UploadError::Download(res.status()).into());
     }
 
-    let fut = res.body().limit(CONFIG.max_file_size() * MEGABYTES);
+    let mut stream = Limit::new(
+        CrateError::new(res),
+        (CONFIG.max_file_size() * MEGABYTES) as u64,
+    );
 
-    let stream = Box::pin(once(fut));
+    // SAFETY: stream is shadowed, so original cannot not be moved
+    let stream = unsafe { Pin::new_unchecked(&mut stream) };
 
     let permit = PROCESS_SEMAPHORE.acquire().await?;
     let session = manager.session().upload(stream).await?;
@@ -743,7 +801,7 @@ async fn ranged_file_resp(
 
     Ok(srv_response(
         builder,
-        Box::pin(stream),
+        stream,
         details.content_type(),
         7 * DAYS,
         details.system_time(),
@@ -759,7 +817,7 @@ fn srv_response<S, E>(
     modified: SystemTime,
 ) -> HttpResponse
 where
-    S: Stream<Item = Result<web::Bytes, E>> + Unpin + 'static,
+    S: Stream<Item = Result<web::Bytes, E>> + 'static,
     E: std::error::Error + 'static,
     actix_web::Error: From<E>,
 {
@@ -772,7 +830,8 @@ where
         ]))
         .insert_header((ACCEPT_RANGES, "bytes"))
         .content_type(ext.to_string())
-        .streaming(stream)
+        // TODO: remove pin when actix-web drops Unpin requirement
+        .streaming(Box::pin(stream))
 }
 
 #[derive(Debug, serde::Deserialize)]

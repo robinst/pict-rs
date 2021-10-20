@@ -128,6 +128,9 @@ pub(crate) enum UploadError {
 
     #[error("Command failed")]
     Status,
+
+    #[error(transparent)]
+    Limit(#[from] super::LimitError),
 }
 
 impl From<awc::error::SendRequestError> for UploadError {
@@ -152,6 +155,7 @@ impl ResponseError for Error {
     fn status_code(&self) -> StatusCode {
         match self.kind {
             UploadError::DuplicateAlias
+            | UploadError::Limit(_)
             | UploadError::NoFiles
             | UploadError::Upload(_)
             | UploadError::ParseReq(_) => StatusCode::BAD_REQUEST,

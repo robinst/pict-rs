@@ -11,9 +11,15 @@ pub(crate) use io_uring::File;
 pub(crate) use tokio_file::File;
 
 pin_project_lite::pin_project! {
-    struct CrateError<S> {
+    pub(super) struct CrateError<S> {
         #[pin]
         inner: S
+    }
+}
+
+impl<S> CrateError<S> {
+    pub(super) fn new(inner: S) -> Self {
+        CrateError { inner }
     }
 }
 
@@ -112,11 +118,10 @@ mod tokio_file {
                 (None, None) => Either::right(self.inner),
             };
 
-            Ok(super::CrateError {
-                inner: BytesFreezer {
-                    inner: FramedRead::new(obj, BytesCodec::new()),
-                },
-            })
+            Ok(super::CrateError::new(BytesFreezer::new(FramedRead::new(
+                obj,
+                BytesCodec::new(),
+            ))))
         }
     }
 
@@ -124,6 +129,12 @@ mod tokio_file {
         struct BytesFreezer<S> {
             #[pin]
             inner: S,
+        }
+    }
+
+    impl<S> BytesFreezer<S> {
+        fn new(inner: S) -> Self {
+            BytesFreezer { inner }
         }
     }
 
