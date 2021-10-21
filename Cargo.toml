@@ -50,15 +50,11 @@ url = "2.2"
 uuid = { version = "0.8.2", features = ["v4", "serde"]}
 
 [dependencies.tracing-actix-web]
-version = "0.4.0-beta.14"
+version = "0.4.0-beta.15"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_16"]
-git = "https://github.com/asonix/tracing-actix-web"
-branch = "asonix/update-deps"
 
 [dependencies.tracing-awc]
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_16"]
-git = "https://git.asonix.dog/asonix/tracing-awc"
-branch = "main"
