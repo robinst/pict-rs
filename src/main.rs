@@ -5,59 +5,48 @@ use actix_web::{
     web, App, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::Client;
-use dashmap::{mapref::entry::Entry, DashMap};
 use futures_util::{stream::once, Stream};
 use once_cell::sync::Lazy;
-use opentelemetry::{
-    sdk::{propagation::TraceContextPropagator, Resource},
-    KeyValue,
-};
-use opentelemetry_otlp::WithExportConfig;
 use std::{
     collections::HashSet,
-    future::{ready, Future},
+    future::ready,
     path::PathBuf,
     pin::Pin,
     task::{Context, Poll},
     time::SystemTime,
 };
 use structopt::StructOpt;
-use tokio::{
-    io::AsyncReadExt,
-    sync::{
-        oneshot::{Receiver, Sender},
-        Semaphore,
-    },
-};
-use tracing::{debug, error, info, instrument, subscriber::set_global_default, Span};
+use tokio::{io::AsyncReadExt, sync::Semaphore};
+use tracing::{debug, error, info, instrument, Span};
 use tracing_actix_web::TracingLogger;
 use tracing_awc::Propagate;
-use tracing_error::ErrorLayer;
 use tracing_futures::Instrument;
-use tracing_log::LogTracer;
-use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, EnvFilter, Registry};
 use uuid::Uuid;
 
+mod concurrent_processor;
 mod config;
 mod either;
 mod error;
 mod exiftool;
 mod ffmpeg;
 mod file;
+mod init_tracing;
 mod magick;
 mod middleware;
 mod migrate;
+mod process;
 mod processor;
 mod range;
-mod process;
 mod upload_manager;
 mod validate;
 
 use self::{
+    concurrent_processor::CancelSafeProcessor,
     config::{Config, Format},
     either::Either,
     error::{Error, UploadError},
     file::CrateError,
+    init_tracing::init_tracing,
     middleware::{Deadline, Internal},
     upload_manager::{Details, UploadManager, UploadManagerSession},
     validate::{image_webp, video_mp4},
@@ -78,109 +67,6 @@ static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
 static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
 static PROCESS_SEMAPHORE: Lazy<Semaphore> =
     Lazy::new(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
-static PROCESS_MAP: Lazy<ProcessMap> = Lazy::new(DashMap::new);
-
-type OutcomeSender = Sender<(Details, web::Bytes)>;
-type ProcessMap = DashMap<PathBuf, Vec<OutcomeSender>>;
-
-struct CancelToken {
-    span: Span,
-    path: PathBuf,
-    receiver: Option<Receiver<(Details, web::Bytes)>>,
-}
-
-pin_project_lite::pin_project! {
-    struct CancelSafeProcessor<F> {
-        cancel_token: CancelToken,
-
-        #[pin]
-        fut: F,
-    }
-}
-
-impl<F> CancelSafeProcessor<F>
-where
-    F: Future<Output = Result<(Details, web::Bytes), Error>>,
-{
-    pub(crate) fn new(path: PathBuf, fut: F) -> Self {
-        let entry = PROCESS_MAP.entry(path.clone());
-
-        let (receiver, span) = match entry {
-            Entry::Vacant(vacant) => {
-                vacant.insert(Vec::new());
-                let span = tracing::info_span!(
-                    "Processing image",
-                    path = &tracing::field::debug(&path),
-                    completed = &tracing::field::Empty,
-                );
-                (None, span)
-            }
-            Entry::Occupied(mut occupied) => {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                occupied.get_mut().push(tx);
-                let span = tracing::info_span!(
-                    "Waiting for processed image",
-                    path = &tracing::field::debug(&path),
-                );
-                (Some(rx), span)
-            }
-        };
-
-        CancelSafeProcessor {
-            cancel_token: CancelToken {
-                span,
-                path,
-                receiver,
-            },
-            fut,
-        }
-    }
-}
-
-impl<F> Future for CancelSafeProcessor<F>
-where
-    F: Future<Output = Result<(Details, web::Bytes), Error>>,
-{
-    type Output = Result<(Details, web::Bytes), Error>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.as_mut().project();
-
-        let span = &this.cancel_token.span;
-        let receiver = &mut this.cancel_token.receiver;
-        let path = &this.cancel_token.path;
-        let fut = this.fut;
-
-        span.in_scope(|| {
-            if let Some(ref mut rx) = receiver {
-                Pin::new(rx)
-                    .poll(cx)
-                    .map(|res| res.map_err(|_| UploadError::Canceled.into()))
-            } else {
-                fut.poll(cx).map(|res| {
-                    let opt = PROCESS_MAP.remove(path);
-                    res.map(|tup| {
-                        if let Some((_, vec)) = opt {
-                            for sender in vec {
-                                let _ = sender.send(tup.clone());
-                            }
-                        }
-                        tup
-                    })
-                })
-            }
-        })
-    }
-}
-
-impl Drop for CancelToken {
-    fn drop(&mut self) {
-        if self.receiver.is_none() {
-            let completed = PROCESS_MAP.remove(&self.path).is_none();
-            self.span.record("completed", &completed);
-        }
-    }
-}
 
 // try moving a file
 #[instrument(name = "Moving file")]
@@ -545,8 +431,8 @@ async fn process(
     let real_path_opt = manager.variant_path(&thumbnail_path, &name).await?;
 
     // If the thumbnail doesn't exist, we need to create it
-    let thumbnail_exists = if let Some(real_path) = &real_path_opt {
-        if let Err(e) = tokio::fs::metadata(real_path)
+    let real_path_opt = if let Some(real_path) = real_path_opt {
+        if let Err(e) = tokio::fs::metadata(&real_path)
             .instrument(tracing::info_span!("Get thumbnail metadata"))
             .await
         {
@@ -554,32 +440,30 @@ async fn process(
                 error!("Error looking up processed image, {}", e);
                 return Err(e.into());
             }
-            false
+            None
         } else {
-            true
+            Some(real_path)
         }
     } else {
-        false
+        None
     };
 
-    if thumbnail_exists {
-        if let Some(real_path) = real_path_opt {
-            let details_opt = manager
-                .variant_details(real_path.clone(), name.clone())
+    if let Some(real_path) = real_path_opt {
+        let details_opt = manager
+            .variant_details(real_path.clone(), name.clone())
+            .await?;
+
+        let details = if let Some(details) = details_opt {
+            details
+        } else {
+            let details = Details::from_path(real_path.clone()).await?;
+            manager
+                .store_variant_details(real_path.clone(), name, &details)
                 .await?;
+            details
+        };
 
-            let details = if let Some(details) = details_opt {
-                details
-            } else {
-                let details = Details::from_path(real_path.clone()).await?;
-                manager
-                    .store_variant_details(real_path.clone(), name, &details)
-                    .await?;
-                details
-            };
-
-            return ranged_file_resp(real_path, range, details).await;
-        }
+        return ranged_file_resp(real_path, range, details).await;
     }
 
     let mut original_path = manager.path_from_filename(name.clone()).await?;
@@ -898,46 +782,10 @@ async fn filename_by_alias(
 }
 
 #[actix_rt::main]
-async fn main() -> Result<(), anyhow::Error> {
-    LogTracer::init()?;
-
-    opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
-
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let format_layer = tracing_subscriber::fmt::layer()
-        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-        .pretty();
-
-    let subscriber = Registry::default()
-        .with(env_filter)
-        .with(format_layer)
-        .with(ErrorLayer::default());
-
-    if let Some(url) = CONFIG.opentelemetry_url() {
-        let tracer =
-            opentelemetry_otlp::new_pipeline()
-                .tracing()
-                .with_trace_config(opentelemetry::sdk::trace::config().with_resource(
-                    Resource::new(vec![KeyValue::new("service.name", "pict-rs")]),
-                ))
-                .with_exporter(
-                    opentelemetry_otlp::new_exporter()
-                        .tonic()
-                        .with_endpoint(url.as_str()),
-                )
-                .install_batch(opentelemetry::runtime::Tokio)?;
-
-        let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-
-        let subscriber = subscriber.with(otel_layer);
-
-        set_global_default(subscriber)?;
-    } else {
-        let subscriber = subscriber.with(tracing_subscriber::fmt::layer());
-        set_global_default(subscriber)?;
-    };
-
+async fn main() -> anyhow::Result<()> {
     let manager = UploadManager::new(CONFIG.data_dir(), CONFIG.format()).await?;
+
+    init_tracing("pict-rs", CONFIG.opentelemetry_url())?;
 
     // Create a new Multipart Form validator
     //

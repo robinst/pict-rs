@@ -4,7 +4,6 @@ use actix_web::{
     http::StatusCode,
     HttpResponse, ResponseError,
 };
-use futures_util::future::LocalBoxFuture;
 use std::{
     future::{ready, Future, Ready},
     pin::Pin,
@@ -19,19 +18,47 @@ pub(crate) struct DeadlineMiddleware<S> {
 #[derive(Debug)]
 struct DeadlineExceeded;
 
-enum DeadlineFutureInner<F> {
-    Timed(Pin<Box<Timeout<F>>>),
-    Untimed(Pin<Box<F>>),
+pin_project_lite::pin_project! {
+    pub(crate) struct DeadlineFuture<F> {
+        #[pin]
+        inner: DeadlineFutureInner<F>,
+    }
 }
-pub(crate) struct DeadlineFuture<F> {
-    inner: DeadlineFutureInner<F>,
+
+pin_project_lite::pin_project! {
+    #[project = DeadlineFutureInnerProj]
+    #[project_replace = DeadlineFutureInnerProjReplace]
+    enum DeadlineFutureInner<F> {
+        Timed {
+            #[pin]
+            timeout: Timeout<F>,
+        },
+        Untimed {
+            #[pin]
+            future: F,
+        },
+    }
 }
 
 pub(crate) struct Internal(pub(crate) Option<String>);
 pub(crate) struct InternalMiddleware<S>(Option<String>, S);
 #[derive(Clone, Debug, thiserror::Error)]
 #[error("Invalid API Key")]
-struct ApiError;
+pub(crate) struct ApiError;
+
+pin_project_lite::pin_project! {
+    #[project = InternalFutureProj]
+    #[project_replace = InternalFutureProjReplace]
+    pub(crate) enum InternalFuture<F> {
+        Internal {
+            #[pin]
+            future: F,
+        },
+        Error {
+            error: Option<ApiError>,
+        },
+    }
+}
 
 impl ResponseError for ApiError {
     fn status_code(&self) -> StatusCode {
@@ -129,13 +156,13 @@ impl<F> DeadlineFuture<F>
 where
     F: Future,
 {
-    fn new(inner: F, timeout: Option<std::time::Duration>) -> Self {
+    fn new(future: F, timeout: Option<std::time::Duration>) -> Self {
         DeadlineFuture {
             inner: match timeout {
-                Some(duration) => {
-                    DeadlineFutureInner::Timed(Box::pin(actix_rt::time::timeout(duration, inner)))
-                }
-                None => DeadlineFutureInner::Untimed(Box::pin(inner)),
+                Some(duration) => DeadlineFutureInner::Timed {
+                    timeout: actix_rt::time::timeout(duration, future),
+                },
+                None => DeadlineFutureInner::Untimed { future },
             },
         }
     }
@@ -148,15 +175,15 @@ where
 {
     type Output = Result<R, actix_web::Error>;
 
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.inner {
-            DeadlineFutureInner::Timed(ref mut fut) => {
-                Pin::new(fut).poll(cx).map(|res| match res {
-                    Ok(res) => res.map_err(actix_web::Error::from),
-                    Err(_) => Err(DeadlineExceeded.into()),
-                })
-            }
-            DeadlineFutureInner::Untimed(ref mut fut) => Pin::new(fut)
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.as_mut().project();
+
+        match this.inner.project() {
+            DeadlineFutureInnerProj::Timed { timeout } => timeout.poll(cx).map(|res| match res {
+                Ok(res) => res.map_err(actix_web::Error::from),
+                Err(_) => Err(DeadlineExceeded.into()),
+            }),
+            DeadlineFutureInnerProj::Untimed { future } => future
                 .poll(cx)
                 .map(|res| res.map_err(actix_web::Error::from)),
         }
@@ -186,7 +213,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = LocalBoxFuture<'static, Result<S::Response, S::Error>>;
+    type Future = InternalFuture<S::Future>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.1.poll_ready(cx)
@@ -195,11 +222,29 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         if let Some(value) = req.headers().get("x-api-token") {
             if value.to_str().is_ok() && value.to_str().ok() == self.0.as_deref() {
-                let fut = self.1.call(req);
-                return Box::pin(async move { fut.await });
+                return InternalFuture::Internal {
+                    future: self.1.call(req),
+                };
             }
         }
 
-        Box::pin(async move { Err(ApiError.into()) })
+        InternalFuture::Error {
+            error: Some(ApiError),
+        }
+    }
+}
+
+impl<F, T, E> Future for InternalFuture<F>
+where
+    F: Future<Output = Result<T, E>>,
+    E: From<ApiError>,
+{
+    type Output = F::Output;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.as_mut().project() {
+            InternalFutureProj::Internal { future } => future.poll(cx),
+            InternalFutureProj::Error { error } => Poll::Ready(Err(error.take().unwrap().into())),
+        }
     }
 }
