@@ -49,7 +49,7 @@ mod middleware;
 mod migrate;
 mod processor;
 mod range;
-mod stream;
+mod process;
 mod upload_manager;
 mod validate;
 

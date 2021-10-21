@@ -1,7 +1,7 @@
 use crate::{
     config::Format,
     error::{Error, UploadError},
-    stream::Process,
+    process::Process,
 };
 use actix_web::web::Bytes;
 use tokio::{
