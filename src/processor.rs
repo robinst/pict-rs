@@ -174,40 +174,28 @@ pub(crate) fn build_chain(args: &[(String, String)], filename: String) -> (PathB
     }
 
     macro_rules! parse {
-        ($inner:expr, $args:expr, $filename:expr, $x:ident, $k:expr, $v:expr) => {{
+        ($inner:expr, $x:ident, $k:expr, $v:expr) => {{
             if let Some(processor) = parse::<$x>($k, $v) {
-                return build(
-                    (processor.path($inner.0), processor.command($inner.1)),
-                    &$args[1..],
-                    $filename,
-                );
-            }
+                return (processor.path($inner.0), processor.command($inner.1));
+            };
         }};
     }
 
-    fn build(
-        inner: (PathBuf, Vec<String>),
-        args: &[(String, String)],
-        filename: String,
-    ) -> (PathBuf, Vec<String>) {
-        if args.len() == 0 {
-            return inner;
-        }
+    let (path, args) =
+        args.into_iter()
+            .fold((PathBuf::default(), vec![]), |inner, (name, value)| {
+                parse!(inner, Identity, name, value);
+                parse!(inner, Thumbnail, name, value);
+                parse!(inner, Resize, name, value);
+                parse!(inner, Crop, name, value);
+                parse!(inner, Blur, name, value);
 
-        let (name, value) = &args[0];
+                debug!("Skipping {}: {}, invalid", name, value);
 
-        parse!(inner, args, filename, Identity, name, value);
-        parse!(inner, args, filename, Thumbnail, name, value);
-        parse!(inner, args, filename, Resize, name, value);
-        parse!(inner, args, filename, Crop, name, value);
-        parse!(inner, args, filename, Blur, name, value);
+                inner
+            });
 
-        debug!("Skipping {}: {}, invalid", name, value);
-
-        build(inner, &args[1..], filename)
-    }
-
-    build((PathBuf::default(), vec![]), args, filename)
+    (path.join(filename), args)
 }
 
 fn is_motion(s: &str) -> bool {
