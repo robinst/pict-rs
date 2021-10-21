@@ -163,98 +163,6 @@ impl Processor for Blur {
     }
 }
 
-trait Process {
-    fn path(&self, path: PathBuf) -> PathBuf;
-
-    fn command(&self, args: Vec<String>) -> Vec<String>;
-
-    fn len(&self, len: u64) -> u64;
-}
-
-#[derive(Debug)]
-struct Base;
-
-#[derive(Debug)]
-struct ProcessorNode<Inner, P> {
-    inner: Inner,
-    processor: P,
-}
-
-impl<Inner, P> ProcessorNode<Inner, P>
-where
-    P: Processor,
-{
-    fn new(inner: Inner, processor: P) -> Self {
-        ProcessorNode { inner, processor }
-    }
-}
-
-impl Process for Base {
-    fn path(&self, path: PathBuf) -> PathBuf {
-        path
-    }
-
-    fn command(&self, args: Vec<String>) -> Vec<String> {
-        args
-    }
-
-    fn len(&self, len: u64) -> u64 {
-        len
-    }
-}
-
-impl<Inner, P> Process for ProcessorNode<Inner, P>
-where
-    Inner: Process,
-    P: Processor,
-{
-    fn path(&self, path: PathBuf) -> PathBuf {
-        self.processor.path(self.inner.path(path))
-    }
-
-    fn command(&self, args: Vec<String>) -> Vec<String> {
-        self.processor.command(self.inner.command(args))
-    }
-
-    fn len(&self, len: u64) -> u64 {
-        self.inner.len(len + 1)
-    }
-}
-
-struct ProcessChain<P> {
-    inner: P,
-}
-
-impl<P> ProcessChain<P>
-where
-    P: Process,
-{
-    fn len(&self) -> u64 {
-        self.inner.len(0)
-    }
-
-    fn command(&self) -> Vec<String> {
-        self.inner.command(vec![])
-    }
-
-    fn path(&self) -> PathBuf {
-        self.inner.path(PathBuf::new())
-    }
-}
-
-impl<P> std::fmt::Debug for ProcessChain<P>
-where
-    P: Process,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_struct("ProcessChain")
-            .field("path", &self.path())
-            .field("command", &self.command())
-            .field("steps", &self.len())
-            .finish()
-    }
-}
-
 #[instrument]
 pub(crate) fn build_chain(args: &[(String, String)], filename: String) -> (PathBuf, Vec<String>) {
     fn parse<P: Processor>(key: &str, value: &str) -> Option<P> {
@@ -269,7 +177,7 @@ pub(crate) fn build_chain(args: &[(String, String)], filename: String) -> (PathB
         ($inner:expr, $args:expr, $filename:expr, $x:ident, $k:expr, $v:expr) => {{
             if let Some(processor) = parse::<$x>($k, $v) {
                 return build(
-                    ProcessorNode::new($inner, processor),
+                    (processor.path($inner.0), processor.command($inner.1)),
                     &$args[1..],
                     $filename,
                 );
@@ -278,16 +186,12 @@ pub(crate) fn build_chain(args: &[(String, String)], filename: String) -> (PathB
     }
 
     fn build(
-        inner: impl Process,
+        inner: (PathBuf, Vec<String>),
         args: &[(String, String)],
         filename: String,
     ) -> (PathBuf, Vec<String>) {
         if args.len() == 0 {
-            let chain = ProcessChain { inner };
-
-            debug!("built: {:?}", chain);
-
-            return (chain.path().join(filename), chain.command());
+            return inner;
         }
 
         let (name, value) = &args[0];
@@ -303,7 +207,7 @@ pub(crate) fn build_chain(args: &[(String, String)], filename: String) -> (PathB
         build(inner, &args[1..], filename)
     }
 
-    build(Base, args, filename)
+    build((PathBuf::default(), vec![]), args, filename)
 }
 
 fn is_motion(s: &str) -> bool {
