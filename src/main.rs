@@ -388,7 +388,7 @@ async fn prepare_process(
     let processed_name = format!("{}.{}", name, ext);
 
     let (thumbnail_path, thumbnail_args) =
-        self::processor::build_chain(&operations, processed_name);
+        self::processor::build_chain(&operations, processed_name)?;
 
     Ok((format, name, thumbnail_path, thumbnail_args))
 }
@@ -465,40 +465,11 @@ async fn process(
         return ranged_file_resp(real_path, range, details).await;
     }
 
-    let mut original_path = manager.path_from_filename(name.clone()).await?;
+    let original_path = manager.still_path_from_filename(name.clone()).await?;
 
     let thumbnail_path2 = thumbnail_path.clone();
     let process_fut = async {
         let thumbnail_path = thumbnail_path2;
-        // Create and save a JPG for motion images (gif, mp4)
-        if let Some((updated_path, exists)) =
-            self::processor::prepare_image(original_path.clone()).await?
-        {
-            original_path = updated_path.clone();
-
-            if exists.is_new() {
-                // Save the transcoded file in another task
-                debug!("Spawning storage task");
-                let manager2 = manager.clone();
-                let name = name.clone();
-                let span = tracing::info_span!(
-                    parent: None,
-                    "Storing variant info",
-                    path = &tracing::field::debug(&updated_path),
-                    name = &tracing::field::display(&name),
-                );
-                span.follows_from(Span::current());
-                actix_rt::spawn(
-                    async move {
-                        if let Err(e) = manager2.store_variant(None, &updated_path, &name).await {
-                            error!("Error storing variant, {}", e);
-                            return;
-                        }
-                    }
-                    .instrument(span),
-                );
-            }
-        }
 
         let permit = PROCESS_SEMAPHORE.acquire().await?;
 

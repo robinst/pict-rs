@@ -1,11 +1,16 @@
 use crate::{
     config::Format,
     error::{Error, UploadError},
+    ffmpeg::ThumbnailFormat,
     migrate::{alias_id_key, alias_key, alias_key_bounds, LatestDb},
 };
 use actix_web::web;
 use sha2::Digest;
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    sync::Arc,
+};
 use storage_path_generator::{Generator, Path};
 use tracing::{debug, error, info, instrument, warn, Span};
 use tracing_futures::Instrument;
@@ -34,6 +39,7 @@ pub(super) use session::UploadManagerSession;
 // - Path Tree
 //   - filename -> relative path
 //   - filename / relative variant path -> relative variant path
+//   - filename / motion -> relative motion path
 // - Settings Tree
 //   - last-path -> last generated path
 //   - fs-restructure-01-complete -> bool
@@ -111,6 +117,76 @@ impl UploadManager {
         Ok(manager)
     }
 
+    pub(crate) async fn still_path_from_filename(
+        &self,
+        filename: String,
+    ) -> Result<PathBuf, Error> {
+        let path = self.path_from_filename(filename.clone()).await?;
+        let details =
+            if let Some(details) = self.variant_details(path.clone(), filename.clone()).await? {
+                details
+            } else {
+                Details::from_path(&path).await?
+            };
+
+        if !details.is_motion() {
+            return Ok(path);
+        }
+
+        if let Some(motion_path) = self.motion_path(&filename).await? {
+            return Ok(motion_path);
+        }
+
+        let jpeg_path = self.next_directory()?.join(&filename);
+        crate::safe_create_parent(&jpeg_path).await?;
+
+        let permit = crate::PROCESS_SEMAPHORE.acquire().await;
+        let res = crate::ffmpeg::thumbnail(&path, &jpeg_path, ThumbnailFormat::Jpeg).await;
+        drop(permit);
+
+        if let Err(e) = res {
+            error!("transcode error: {:?}", e);
+            self.remove_path(&jpeg_path).await?;
+            return Err(e);
+        }
+
+        self.store_motion_path(&filename, &jpeg_path).await?;
+        Ok(jpeg_path)
+    }
+
+    async fn motion_path(&self, filename: &str) -> Result<Option<PathBuf>, Error> {
+        let path_tree = self.inner.path_tree.clone();
+        let motion_key = format!("{}/motion", filename);
+
+        let opt = web::block(move || path_tree.get(motion_key.as_bytes())).await??;
+
+        if let Some(ivec) = opt {
+            return Ok(Some(
+                self.inner.root_dir.join(String::from_utf8(ivec.to_vec())?),
+            ));
+        }
+
+        Ok(None)
+    }
+
+    async fn store_motion_path(
+        &self,
+        filename: &str,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<(), Error> {
+        let path_bytes = self
+            .generalize_path(path.as_ref())?
+            .to_str()
+            .ok_or(UploadError::Path)?
+            .as_bytes()
+            .to_vec();
+        let motion_key = format!("{}/motion", filename);
+        let path_tree = self.inner.path_tree.clone();
+
+        web::block(move || path_tree.insert(motion_key.as_bytes(), path_bytes)).await??;
+        Ok(())
+    }
+
     #[instrument(skip(self))]
     pub(crate) async fn path_from_filename(&self, filename: String) -> Result<PathBuf, Error> {
         let path_tree = self.inner.path_tree.clone();
@@ -125,7 +201,12 @@ impl UploadManager {
 
     #[instrument(skip(self))]
     async fn store_path(&self, filename: String, path: &std::path::Path) -> Result<(), Error> {
-        let path_bytes = path.to_str().ok_or(UploadError::Path)?.as_bytes().to_vec();
+        let path_bytes = self
+            .generalize_path(path)?
+            .to_str()
+            .ok_or(UploadError::Path)?
+            .as_bytes()
+            .to_vec();
         let path_tree = self.inner.path_tree.clone();
         web::block(move || path_tree.insert(filename.as_bytes(), path_bytes)).await??;
         Ok(())
@@ -536,6 +617,11 @@ impl<T> Serde<T> {
 }
 
 impl Details {
+    fn is_motion(&self) -> bool {
+        self.content_type.type_() == "video"
+            || self.content_type.type_() == "image" && self.content_type.subtype() == "gif"
+    }
+
     #[tracing::instrument("Details from bytes", skip(input))]
     pub(crate) async fn from_bytes(input: web::Bytes) -> Result<Self, Error> {
         let details = crate::magick::details_bytes(input).await?;
@@ -604,6 +690,20 @@ where
 
 fn delete_key(alias: &str) -> String {
     format!("{}/delete", alias)
+}
+
+impl<T> Deref for Serde<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for Serde<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 impl std::fmt::Debug for UploadManager {

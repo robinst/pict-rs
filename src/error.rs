@@ -6,12 +6,6 @@ pub(crate) struct Error {
     kind: UploadError,
 }
 
-impl Error {
-    pub(crate) fn kind(&self) -> &UploadError {
-        &self.kind
-    }
-}
-
 impl std::fmt::Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}\n", self.kind)
@@ -74,6 +68,9 @@ pub(crate) enum UploadError {
 
     #[error(transparent)]
     StripPrefix(#[from] std::path::StripPrefixError),
+
+    #[error("Provided process path is invalid")]
+    ParsePath,
 
     #[error("Failed to acquire the semaphore")]
     Semaphore,

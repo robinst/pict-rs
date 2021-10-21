@@ -1,13 +1,6 @@
-use crate::{
-    error::{Error, UploadError},
-    ffmpeg::ThumbnailFormat,
-};
-use std::path::{Path, PathBuf};
-use tracing::{debug, error, instrument};
-
-fn ptos(path: &Path) -> Result<String, Error> {
-    Ok(path.to_str().ok_or(UploadError::Path)?.to_owned())
-}
+use crate::error::{Error, UploadError};
+use std::path::PathBuf;
+use tracing::instrument;
 
 pub(crate) trait Processor {
     const NAME: &'static str;
@@ -164,88 +157,41 @@ impl Processor for Blur {
 }
 
 #[instrument]
-pub(crate) fn build_chain(args: &[(String, String)], filename: String) -> (PathBuf, Vec<String>) {
-    fn parse<P: Processor>(key: &str, value: &str) -> Option<P> {
+pub(crate) fn build_chain(
+    args: &[(String, String)],
+    filename: String,
+) -> Result<(PathBuf, Vec<String>), Error> {
+    fn parse<P: Processor>(key: &str, value: &str) -> Result<Option<P>, UploadError> {
         if key == P::NAME {
-            return P::parse(key, value);
+            return Ok(Some(P::parse(key, value).ok_or(UploadError::ParsePath)?));
         }
 
-        None
+        Ok(None)
     }
 
     macro_rules! parse {
         ($inner:expr, $x:ident, $k:expr, $v:expr) => {{
-            if let Some(processor) = parse::<$x>($k, $v) {
-                return (processor.path($inner.0), processor.command($inner.1));
+            if let Some(processor) = parse::<$x>($k, $v)? {
+                return Ok((processor.path($inner.0), processor.command($inner.1)));
             };
         }};
     }
 
     let (path, args) =
         args.into_iter()
-            .fold((PathBuf::default(), vec![]), |inner, (name, value)| {
-                parse!(inner, Identity, name, value);
-                parse!(inner, Thumbnail, name, value);
-                parse!(inner, Resize, name, value);
-                parse!(inner, Crop, name, value);
-                parse!(inner, Blur, name, value);
+            .fold(Ok((PathBuf::default(), vec![])), |inner, (name, value)| {
+                if let Ok(inner) = inner {
+                    parse!(inner, Identity, name, value);
+                    parse!(inner, Thumbnail, name, value);
+                    parse!(inner, Resize, name, value);
+                    parse!(inner, Crop, name, value);
+                    parse!(inner, Blur, name, value);
 
-                debug!("Skipping {}: {}, invalid", name, value);
+                    Err(Error::from(UploadError::ParsePath))
+                } else {
+                    inner
+                }
+            })?;
 
-                inner
-            });
-
-    (path.join(filename), args)
-}
-
-fn is_motion(s: &str) -> bool {
-    s.ends_with(".gif") || s.ends_with(".mp4")
-}
-
-pub(crate) enum Exists {
-    Exists,
-    New,
-}
-
-impl Exists {
-    pub(crate) fn is_new(&self) -> bool {
-        matches!(self, Exists::New)
-    }
-}
-
-pub(crate) async fn prepare_image(
-    original_file: PathBuf,
-) -> Result<Option<(PathBuf, Exists)>, Error> {
-    let original_path_str = ptos(&original_file)?;
-    let jpg_path = format!("{}.jpg", original_path_str);
-    let jpg_path = PathBuf::from(jpg_path);
-
-    if tokio::fs::metadata(&jpg_path).await.is_ok() {
-        return Ok(Some((jpg_path, Exists::Exists)));
-    }
-
-    if is_motion(&original_path_str) {
-        let orig_path = original_path_str.clone();
-
-        let tmpfile = crate::tmp_file();
-        crate::safe_create_parent(&tmpfile).await?;
-
-        let res = crate::ffmpeg::thumbnail(orig_path, &tmpfile, ThumbnailFormat::Jpeg).await;
-
-        if let Err(e) = res {
-            error!("transcode error: {:?}", e);
-            tokio::fs::remove_file(&tmpfile).await?;
-            return Err(e);
-        }
-
-        return match crate::safe_move_file(tmpfile, jpg_path.clone()).await {
-            Err(e) if matches!(e.kind(), UploadError::FileExists) => {
-                Ok(Some((jpg_path, Exists::Exists)))
-            }
-            Err(e) => Err(e),
-            _ => Ok(Some((jpg_path, Exists::New))),
-        };
-    }
-
-    Ok(None)
+    Ok((path.join(filename), args))
 }
