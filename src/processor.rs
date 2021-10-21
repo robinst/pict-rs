@@ -10,15 +10,9 @@ fn ptos(path: &Path) -> Result<String, Error> {
 }
 
 pub(crate) trait Processor {
-    fn name() -> &'static str
-    where
-        Self: Sized;
+    const NAME: &'static str;
 
-    fn is_processor(s: &str) -> bool
-    where
-        Self: Sized;
-
-    fn parse(k: &str, v: &str) -> Option<Box<dyn Processor + Send>>
+    fn parse(k: &str, v: &str) -> Option<Self>
     where
         Self: Sized;
 
@@ -29,25 +23,13 @@ pub(crate) trait Processor {
 pub(crate) struct Identity;
 
 impl Processor for Identity {
-    fn name() -> &'static str
-    where
-        Self: Sized,
-    {
-        "identity"
-    }
+    const NAME: &'static str = "identity";
 
-    fn is_processor(s: &str) -> bool
+    fn parse(_: &str, _: &str) -> Option<Self>
     where
         Self: Sized,
     {
-        s == Self::name()
-    }
-
-    fn parse(_: &str, _: &str) -> Option<Box<dyn Processor + Send>>
-    where
-        Self: Sized,
-    {
-        Some(Box::new(Identity))
+        Some(Identity)
     }
 
     fn path(&self, path: PathBuf) -> PathBuf {
@@ -62,30 +44,18 @@ impl Processor for Identity {
 pub(crate) struct Thumbnail(usize);
 
 impl Processor for Thumbnail {
-    fn name() -> &'static str
-    where
-        Self: Sized,
-    {
-        "thumbnail"
-    }
+    const NAME: &'static str = "thumbnail";
 
-    fn is_processor(s: &str) -> bool
-    where
-        Self: Sized,
-    {
-        s == Self::name()
-    }
-
-    fn parse(_: &str, v: &str) -> Option<Box<dyn Processor + Send>>
+    fn parse(_: &str, v: &str) -> Option<Self>
     where
         Self: Sized,
     {
         let size = v.parse().ok()?;
-        Some(Box::new(Thumbnail(size)))
+        Some(Thumbnail(size))
     }
 
     fn path(&self, mut path: PathBuf) -> PathBuf {
-        path.push(Self::name());
+        path.push(Self::NAME);
         path.push(self.0.to_string());
         path
     }
@@ -100,30 +70,18 @@ impl Processor for Thumbnail {
 pub(crate) struct Resize(usize);
 
 impl Processor for Resize {
-    fn name() -> &'static str
-    where
-        Self: Sized,
-    {
-        "resize"
-    }
+    const NAME: &'static str = "resize";
 
-    fn is_processor(s: &str) -> bool
-    where
-        Self: Sized,
-    {
-        s == Self::name()
-    }
-
-    fn parse(_: &str, v: &str) -> Option<Box<dyn Processor + Send>>
+    fn parse(_: &str, v: &str) -> Option<Self>
     where
         Self: Sized,
     {
         let size = v.parse().ok()?;
-        Some(Box::new(Resize(size)))
+        Some(Resize(size))
     }
 
     fn path(&self, mut path: PathBuf) -> PathBuf {
-        path.push(Self::name());
+        path.push(Self::NAME);
         path.push(self.0.to_string());
         path
     }
@@ -143,18 +101,9 @@ impl Processor for Resize {
 pub(crate) struct Crop(usize, usize);
 
 impl Processor for Crop {
-    fn name() -> &'static str
-    where
-        Self: Sized,
-    {
-        "crop"
-    }
+    const NAME: &'static str = "crop";
 
-    fn is_processor(s: &str) -> bool {
-        s == Self::name()
-    }
-
-    fn parse(_: &str, v: &str) -> Option<Box<dyn Processor + Send>> {
+    fn parse(_: &str, v: &str) -> Option<Self> {
         let mut iter = v.split('x');
         let first = iter.next()?;
         let second = iter.next()?;
@@ -170,11 +119,11 @@ impl Processor for Crop {
             return None;
         }
 
-        Some(Box::new(Crop(width, height)))
+        Some(Crop(width, height))
     }
 
     fn path(&self, mut path: PathBuf) -> PathBuf {
-        path.push(Self::name());
+        path.push(Self::NAME);
         path.push(format!("{}x{}", self.0, self.1));
         path
     }
@@ -194,24 +143,15 @@ impl Processor for Crop {
 pub(crate) struct Blur(f64);
 
 impl Processor for Blur {
-    fn name() -> &'static str
-    where
-        Self: Sized,
-    {
-        "blur"
-    }
+    const NAME: &'static str = "blur";
 
-    fn is_processor(s: &str) -> bool {
-        s == Self::name()
-    }
-
-    fn parse(_: &str, v: &str) -> Option<Box<dyn Processor + Send>> {
+    fn parse(_: &str, v: &str) -> Option<Self> {
         let sigma = v.parse().ok()?;
-        Some(Box::new(Blur(sigma)))
+        Some(Blur(sigma))
     }
 
     fn path(&self, mut path: PathBuf) -> PathBuf {
-        path.push(Self::name());
+        path.push(Self::NAME);
         path.push(self.0.to_string());
         path
     }
@@ -223,64 +163,147 @@ impl Processor for Blur {
     }
 }
 
-macro_rules! parse {
-    ($x:ident, $k:expr, $v:expr) => {{
-        if $x::is_processor($k) {
-            return $x::parse($k, $v);
-        }
-    }};
+trait Process {
+    fn path(&self, path: PathBuf) -> PathBuf;
+
+    fn command(&self, args: Vec<String>) -> Vec<String>;
+
+    fn len(&self, len: u64) -> u64;
 }
 
-pub(crate) struct ProcessChain {
-    inner: Vec<Box<dyn Processor + Send>>,
+#[derive(Debug)]
+struct Base;
+
+#[derive(Debug)]
+struct ProcessorNode<Inner, P> {
+    inner: Inner,
+    processor: P,
 }
 
-impl std::fmt::Debug for ProcessChain {
+impl<Inner, P> ProcessorNode<Inner, P>
+where
+    P: Processor,
+{
+    fn new(inner: Inner, processor: P) -> Self {
+        ProcessorNode { inner, processor }
+    }
+}
+
+impl Process for Base {
+    fn path(&self, path: PathBuf) -> PathBuf {
+        path
+    }
+
+    fn command(&self, args: Vec<String>) -> Vec<String> {
+        args
+    }
+
+    fn len(&self, len: u64) -> u64 {
+        len
+    }
+}
+
+impl<Inner, P> Process for ProcessorNode<Inner, P>
+where
+    Inner: Process,
+    P: Processor,
+{
+    fn path(&self, path: PathBuf) -> PathBuf {
+        self.processor.path(self.inner.path(path))
+    }
+
+    fn command(&self, args: Vec<String>) -> Vec<String> {
+        self.processor.command(self.inner.command(args))
+    }
+
+    fn len(&self, len: u64) -> u64 {
+        self.inner.len(len + 1)
+    }
+}
+
+struct ProcessChain<P> {
+    inner: P,
+}
+
+impl<P> ProcessChain<P>
+where
+    P: Process,
+{
+    fn len(&self) -> u64 {
+        self.inner.len(0)
+    }
+
+    fn command(&self) -> Vec<String> {
+        self.inner.command(vec![])
+    }
+
+    fn path(&self) -> PathBuf {
+        self.inner.path(PathBuf::new())
+    }
+}
+
+impl<P> std::fmt::Debug for ProcessChain<P>
+where
+    P: Process,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("ProcessChain")
-            .field("steps", &self.inner.len())
+            .field("path", &self.path())
+            .field("command", &self.command())
+            .field("steps", &self.len())
             .finish()
     }
 }
 
 #[instrument]
-pub(crate) fn build_chain(args: &[(String, String)]) -> ProcessChain {
-    let inner = args
-        .iter()
-        .filter_map(|(k, v)| {
-            let k = k.as_str();
-            let v = v.as_str();
+pub(crate) fn build_chain(args: &[(String, String)], filename: String) -> (PathBuf, Vec<String>) {
+    fn parse<P: Processor>(key: &str, value: &str) -> Option<P> {
+        if key == P::NAME {
+            return P::parse(key, value);
+        }
 
-            parse!(Identity, k, v);
-            parse!(Thumbnail, k, v);
-            parse!(Resize, k, v);
-            parse!(Crop, k, v);
-            parse!(Blur, k, v);
+        None
+    }
 
-            debug!("Skipping {}: {}, invalid", k, v);
+    macro_rules! parse {
+        ($inner:expr, $args:expr, $filename:expr, $x:ident, $k:expr, $v:expr) => {{
+            if let Some(processor) = parse::<$x>($k, $v) {
+                return build(
+                    ProcessorNode::new($inner, processor),
+                    &$args[1..],
+                    $filename,
+                );
+            }
+        }};
+    }
 
-            None
-        })
-        .collect();
+    fn build(
+        inner: impl Process,
+        args: &[(String, String)],
+        filename: String,
+    ) -> (PathBuf, Vec<String>) {
+        if args.len() == 0 {
+            let chain = ProcessChain { inner };
 
-    ProcessChain { inner }
-}
+            debug!("built: {:?}", chain);
 
-pub(crate) fn build_path(chain: &ProcessChain, filename: String) -> PathBuf {
-    let mut path = chain
-        .inner
-        .iter()
-        .fold(PathBuf::default(), |acc, processor| processor.path(acc));
+            return (chain.path().join(filename), chain.command());
+        }
 
-    path.push(filename);
-    path
-}
+        let (name, value) = &args[0];
 
-pub(crate) fn build_args(chain: &ProcessChain) -> Vec<String> {
-    chain
-        .inner
-        .iter()
-        .fold(Vec::new(), |acc, processor| processor.command(acc))
+        parse!(inner, args, filename, Identity, name, value);
+        parse!(inner, args, filename, Thumbnail, name, value);
+        parse!(inner, args, filename, Resize, name, value);
+        parse!(inner, args, filename, Crop, name, value);
+        parse!(inner, args, filename, Blur, name, value);
+
+        debug!("Skipping {}: {}, invalid", name, value);
+
+        build(inner, &args[1..], filename)
+    }
+
+    build(Base, args, filename)
 }
 
 fn is_motion(s: &str) -> bool {

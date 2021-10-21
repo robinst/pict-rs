@@ -1,4 +1,6 @@
-use crate::{config::Format, error::Error, ffmpeg::InputFormat, magick::ValidInputType};
+use crate::{
+    config::Format, either::Either, error::Error, ffmpeg::InputFormat, magick::ValidInputType,
+};
 use actix_web::web::Bytes;
 use tokio::io::AsyncRead;
 use tracing::instrument;
@@ -19,10 +21,6 @@ struct UnvalidatedBytes {
 impl UnvalidatedBytes {
     fn new(bytes: Bytes) -> Self {
         UnvalidatedBytes { bytes, written: 0 }
-    }
-
-    fn boxed(self) -> Box<dyn AsyncRead + Unpin> {
-        Box::new(self)
     }
 }
 
@@ -47,7 +45,7 @@ pub(crate) async fn validate_image_bytes(
     bytes: Bytes,
     prescribed_format: Option<Format>,
     validate: bool,
-) -> Result<(mime::Mime, Box<dyn AsyncRead + Unpin>), Error> {
+) -> Result<(mime::Mime, impl AsyncRead + Unpin), Error> {
     let input_type = crate::magick::input_type_bytes(bytes.clone()).await?;
 
     if !validate {
@@ -59,39 +57,47 @@ pub(crate) async fn validate_image_bytes(
             ValidInputType::Webp => image_webp(),
         };
 
-        return Ok((mime_type, UnvalidatedBytes::new(bytes).boxed()));
+        return Ok((mime_type, Either::left(UnvalidatedBytes::new(bytes))));
     }
 
     match (prescribed_format, input_type) {
         (_, ValidInputType::Gif) => Ok((
             video_mp4(),
-            Box::new(crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Gif)?)
-                as Box<dyn AsyncRead + Unpin>,
+            Either::right(Either::left(crate::ffmpeg::to_mp4_bytes(
+                bytes,
+                InputFormat::Gif,
+            )?)),
         )),
         (_, ValidInputType::Mp4) => Ok((
             video_mp4(),
-            Box::new(crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Mp4)?)
-                as Box<dyn AsyncRead + Unpin>,
+            Either::right(Either::left(crate::ffmpeg::to_mp4_bytes(
+                bytes,
+                InputFormat::Mp4,
+            )?)),
         )),
         (Some(Format::Jpeg) | None, ValidInputType::Jpeg) => Ok((
             mime::IMAGE_JPEG,
-            Box::new(crate::exiftool::clear_metadata_bytes_read(bytes)?)
-                as Box<dyn AsyncRead + Unpin>,
+            Either::right(Either::right(Either::left(
+                crate::exiftool::clear_metadata_bytes_read(bytes)?,
+            ))),
         )),
         (Some(Format::Png) | None, ValidInputType::Png) => Ok((
             mime::IMAGE_PNG,
-            Box::new(crate::exiftool::clear_metadata_bytes_read(bytes)?)
-                as Box<dyn AsyncRead + Unpin>,
+            Either::right(Either::right(Either::left(
+                crate::exiftool::clear_metadata_bytes_read(bytes)?,
+            ))),
         )),
         (Some(Format::Webp) | None, ValidInputType::Webp) => Ok((
             image_webp(),
-            Box::new(crate::magick::clear_metadata_bytes_read(bytes)?)
-                as Box<dyn AsyncRead + Unpin>,
+            Either::right(Either::right(Either::right(Either::left(
+                crate::magick::clear_metadata_bytes_read(bytes)?,
+            )))),
         )),
         (Some(format), _) => Ok((
             format.to_mime(),
-            Box::new(crate::magick::convert_bytes_read(bytes, format)?)
-                as Box<dyn AsyncRead + Unpin>,
+            Either::right(Either::right(Either::right(Either::right(
+                crate::magick::convert_bytes_read(bytes, format)?,
+            )))),
         )),
     }
 }

@@ -382,14 +382,13 @@ async fn prepare_process(
         operations
     };
 
-    let chain = self::processor::build_chain(&operations);
-
     let format = ext
         .parse::<Format>()
         .map_err(|_| UploadError::UnsupportedFormat)?;
     let processed_name = format!("{}.{}", name, ext);
-    let thumbnail_path = self::processor::build_path(&chain, processed_name);
-    let thumbnail_args = self::processor::build_args(&chain);
+
+    let (thumbnail_path, thumbnail_args) =
+        self::processor::build_chain(&operations, processed_name);
 
     Ok((format, name, thumbnail_path, thumbnail_args))
 }
