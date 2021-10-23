@@ -5,14 +5,6 @@ use actix_web::web::Bytes;
 use tokio::io::AsyncRead;
 use tracing::instrument;
 
-pub(crate) fn image_webp() -> mime::Mime {
-    "image/webp".parse().unwrap()
-}
-
-pub(crate) fn video_mp4() -> mime::Mime {
-    "video/mp4".parse().unwrap()
-}
-
 struct UnvalidatedBytes {
     bytes: Bytes,
     written: usize,
@@ -45,56 +37,48 @@ pub(crate) async fn validate_image_bytes(
     bytes: Bytes,
     prescribed_format: Option<Format>,
     validate: bool,
-) -> Result<(mime::Mime, impl AsyncRead + Unpin), Error> {
+) -> Result<(ValidInputType, impl AsyncRead + Unpin), Error> {
     let input_type = crate::magick::input_type_bytes(bytes.clone()).await?;
 
     if !validate {
-        let mime_type = match input_type {
-            ValidInputType::Gif => video_mp4(),
-            ValidInputType::Mp4 => mime::IMAGE_GIF,
-            ValidInputType::Jpeg => mime::IMAGE_JPEG,
-            ValidInputType::Png => mime::IMAGE_PNG,
-            ValidInputType::Webp => image_webp(),
-        };
-
-        return Ok((mime_type, Either::left(UnvalidatedBytes::new(bytes))));
+        return Ok((input_type, Either::left(UnvalidatedBytes::new(bytes))));
     }
 
     match (prescribed_format, input_type) {
         (_, ValidInputType::Gif) => Ok((
-            video_mp4(),
+            ValidInputType::Mp4,
             Either::right(Either::left(crate::ffmpeg::to_mp4_bytes(
                 bytes,
                 InputFormat::Gif,
             )?)),
         )),
         (_, ValidInputType::Mp4) => Ok((
-            video_mp4(),
+            ValidInputType::Mp4,
             Either::right(Either::left(crate::ffmpeg::to_mp4_bytes(
                 bytes,
                 InputFormat::Mp4,
             )?)),
         )),
         (Some(Format::Jpeg) | None, ValidInputType::Jpeg) => Ok((
-            mime::IMAGE_JPEG,
+            ValidInputType::Jpeg,
             Either::right(Either::right(Either::left(
                 crate::exiftool::clear_metadata_bytes_read(bytes)?,
             ))),
         )),
         (Some(Format::Png) | None, ValidInputType::Png) => Ok((
-            mime::IMAGE_PNG,
+            ValidInputType::Png,
             Either::right(Either::right(Either::left(
                 crate::exiftool::clear_metadata_bytes_read(bytes)?,
             ))),
         )),
         (Some(Format::Webp) | None, ValidInputType::Webp) => Ok((
-            image_webp(),
+            ValidInputType::Webp,
             Either::right(Either::right(Either::right(Either::left(
                 crate::magick::clear_metadata_bytes_read(bytes)?,
             )))),
         )),
         (Some(format), _) => Ok((
-            format.to_mime(),
+            ValidInputType::from_format(format),
             Either::right(Either::right(Either::right(Either::right(
                 crate::magick::convert_bytes_read(bytes, format)?,
             )))),

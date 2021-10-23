@@ -52,7 +52,6 @@ use self::{
     migrate::LatestDb,
     store::Store,
     upload_manager::{Details, UploadManager, UploadManagerSession},
-    validate::{image_webp, video_mp4},
 };
 
 const MEGABYTES: usize = 1024 * 1024;
@@ -740,7 +739,7 @@ where
         .transform_error(transform_error)
         .field(
             "images",
-            Field::array(Field::file(move |filename, content_type, stream| {
+            Field::array(Field::file(move |filename, _, stream| {
                 let manager = manager2.clone();
 
                 let span = tracing::info_span!("file-import", ?filename);
@@ -752,7 +751,6 @@ where
                         .session()
                         .import(
                             filename,
-                            content_type,
                             validate_imports,
                             map_error::map_crate_error(stream),
                         )
@@ -837,7 +835,6 @@ async fn main() -> anyhow::Result<()> {
 
     let manager = UploadManager::new(store, db, CONFIG.format()).await?;
 
-    // TODO: move restructure to FileStore
     manager.restructure().await?;
     launch(manager).await
 }

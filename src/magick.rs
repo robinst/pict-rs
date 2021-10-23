@@ -19,7 +19,15 @@ pub(crate) fn details_hint(filename: &str) -> Option<ValidInputType> {
     }
 }
 
-#[derive(Debug)]
+pub(crate) fn image_webp() -> mime::Mime {
+    "image/webp".parse().unwrap()
+}
+
+pub(crate) fn video_mp4() -> mime::Mime {
+    "video/mp4".parse().unwrap()
+}
+
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum ValidInputType {
     Mp4,
     Gif,
@@ -36,6 +44,24 @@ impl ValidInputType {
             Self::Png => "PNG",
             Self::Jpeg => "JPEG",
             Self::Webp => "WEBP",
+        }
+    }
+
+    pub(crate) fn to_ext(&self) -> &'static str {
+        match self {
+            Self::Mp4 => ".mp4",
+            Self::Gif => ".gif",
+            Self::Png => ".png",
+            Self::Jpeg => ".jpeg",
+            Self::Webp => ".webp",
+        }
+    }
+
+    pub(crate) fn from_format(format: Format) -> Self {
+        match format {
+            Format::Jpeg => ValidInputType::Jpeg,
+            Format::Png => ValidInputType::Png,
+            Format::Webp => ValidInputType::Webp,
         }
     }
 }
@@ -157,11 +183,11 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
     }
 
     let mime_type = match format {
-        "MP4" => crate::validate::video_mp4(),
+        "MP4" => video_mp4(),
         "GIF" => mime::IMAGE_GIF,
         "PNG" => mime::IMAGE_PNG,
         "JPEG" => mime::IMAGE_JPEG,
-        "WEBP" => crate::validate::image_webp(),
+        "WEBP" => image_webp(),
         _ => return Err(UploadError::UnsupportedFormat.into()),
     };
 

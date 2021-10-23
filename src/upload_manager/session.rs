@@ -1,5 +1,6 @@
 use crate::{
     error::{Error, UploadError},
+    magick::ValidInputType,
     migrate::{alias_id_key, alias_key},
     store::Store,
     upload_manager::{
@@ -142,7 +143,6 @@ where
     pub(crate) async fn import(
         mut self,
         alias: String,
-        content_type: mime::Mime,
         validate: bool,
         mut stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin,
     ) -> Result<Self, Error> {
@@ -197,7 +197,7 @@ where
         }
 
         debug!("Validating bytes");
-        let (content_type, validated_reader) = crate::validate::validate_image_bytes(
+        let (input_type, validated_reader) = crate::validate::validate_image_bytes(
             bytes_mut.freeze(),
             self.manager.inner.format.clone(),
             true,
@@ -214,10 +214,10 @@ where
         let hash = hasher_reader.finalize_reset().await?;
 
         debug!("Adding alias");
-        self.add_alias(&hash, content_type.clone()).await?;
+        self.add_alias(&hash, input_type).await?;
 
         debug!("Saving file");
-        self.save_upload(&identifier, hash, content_type).await?;
+        self.save_upload(&identifier, hash, input_type).await?;
 
         // Return alias to file
         Ok(self)
@@ -228,9 +228,9 @@ where
         &self,
         identifier: &S::Identifier,
         hash: Hash,
-        content_type: mime::Mime,
+        input_type: ValidInputType,
     ) -> Result<(), Error> {
-        let (dup, name) = self.check_duplicate(hash, content_type).await?;
+        let (dup, name) = self.check_duplicate(hash, input_type).await?;
 
         // bail early with alias to existing file if this is a duplicate
         if dup.exists() {
@@ -246,15 +246,15 @@ where
     }
 
     // check for an already-uploaded image with this hash, returning the path to the target file
-    #[instrument(skip(self, hash, content_type))]
+    #[instrument(skip(self, hash, input_type))]
     async fn check_duplicate(
         &self,
         hash: Hash,
-        content_type: mime::Mime,
+        input_type: ValidInputType,
     ) -> Result<(Dup, String), Error> {
         let main_tree = self.manager.inner.main_tree.clone();
 
-        let filename = self.next_file(content_type).await?;
+        let filename = self.next_file(input_type).await?;
 
         let filename2 = filename.clone();
         let hash2 = hash.as_slice().to_vec();
@@ -287,11 +287,11 @@ where
     }
 
     // generate a short filename that isn't already in-use
-    #[instrument(skip(self, content_type))]
-    async fn next_file(&self, content_type: mime::Mime) -> Result<String, Error> {
+    #[instrument(skip(self, input_type))]
+    async fn next_file(&self, input_type: ValidInputType) -> Result<String, Error> {
         loop {
             debug!("Filename generation loop");
-            let filename = file_name(Uuid::new_v4(), content_type.clone())?;
+            let filename = file_name(Uuid::new_v4(), input_type);
 
             let identifier_tree = self.manager.inner.identifier_tree.clone();
             let filename2 = filename.clone();
@@ -319,9 +319,9 @@ where
     // Add an alias to an existing file
     //
     // This will help if multiple 'users' upload the same file, and one of them wants to delete it
-    #[instrument(skip(self, hash, content_type))]
-    async fn add_alias(&mut self, hash: &Hash, content_type: mime::Mime) -> Result<(), Error> {
-        let alias = self.next_alias(hash, content_type).await?;
+    #[instrument(skip(self, hash, input_type))]
+    async fn add_alias(&mut self, hash: &Hash, input_type: ValidInputType) -> Result<(), Error> {
+        let alias = self.next_alias(hash, input_type).await?;
 
         self.store_hash_id_alias_mapping(hash, &alias).await?;
 
@@ -365,11 +365,15 @@ where
     }
 
     // Generate an alias to the file
-    #[instrument(skip(self, hash, content_type))]
-    async fn next_alias(&mut self, hash: &Hash, content_type: mime::Mime) -> Result<String, Error> {
+    #[instrument(skip(self, hash, input_type))]
+    async fn next_alias(
+        &mut self,
+        hash: &Hash,
+        input_type: ValidInputType,
+    ) -> Result<String, Error> {
         loop {
             debug!("Alias gen loop");
-            let alias = file_name(Uuid::new_v4(), content_type.clone())?;
+            let alias = file_name(Uuid::new_v4(), input_type);
             self.alias = Some(alias.clone());
 
             let res = self.save_alias_hash_mapping(hash, &alias).await?;
@@ -407,20 +411,6 @@ where
     }
 }
 
-fn file_name(name: Uuid, content_type: mime::Mime) -> Result<String, Error> {
-    Ok(format!("{}{}", name, to_ext(content_type)?))
-}
-
-fn to_ext(mime: mime::Mime) -> Result<&'static str, Error> {
-    if mime == mime::IMAGE_PNG {
-        Ok(".png")
-    } else if mime == mime::IMAGE_JPEG {
-        Ok(".jpg")
-    } else if mime == crate::video_mp4() {
-        Ok(".mp4")
-    } else if mime == crate::image_webp() {
-        Ok(".webp")
-    } else {
-        Err(UploadError::UnsupportedFormat.into())
-    }
+fn file_name(name: Uuid, input_type: ValidInputType) -> String {
+    format!("{}{}", name, input_type.to_ext())
 }
