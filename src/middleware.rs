@@ -113,7 +113,6 @@ where
             .headers()
             .get("X-Request-Deadline")
             .and_then(|deadline| {
-                use std::convert::TryInto;
                 let deadline = time::OffsetDateTime::from_unix_timestamp_nanos(
                     deadline.to_str().ok()?.parse().ok()?,
                 )
