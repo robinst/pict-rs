@@ -1,3 +1,4 @@
+use crate::store::Store;
 use actix_rt::task::JoinHandle;
 use actix_web::web::Bytes;
 use std::{
@@ -66,7 +67,7 @@ impl Process {
         let mut stdin = self.child.stdin.take()?;
         let stdout = self.child.stdout.take()?;
 
-        let (tx, rx) = channel();
+        let (tx, rx) = channel::<std::io::Error>();
 
         let span = self.spawn_span();
         let mut child = self.child;
@@ -102,9 +103,10 @@ impl Process {
         })
     }
 
-    pub(crate) fn file_read(
+    pub(crate) fn store_read<S: Store>(
         mut self,
-        mut input_file: crate::file::File,
+        store: S,
+        identifier: S::Identifier,
     ) -> Option<impl AsyncRead + Unpin> {
         let mut stdin = self.child.stdin.take()?;
         let stdout = self.child.stdout.take()?;
@@ -115,7 +117,7 @@ impl Process {
         let mut child = self.child;
         let handle = actix_rt::spawn(
             async move {
-                if let Err(e) = input_file.read_to_async_write(&mut stdin).await {
+                if let Err(e) = store.read_into(&identifier, &mut stdin).await {
                     let _ = tx.send(e);
                     return;
                 }

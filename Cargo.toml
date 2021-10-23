@@ -19,6 +19,7 @@ actix-rt = "2.2.0"
 actix-server = "2.0.0-beta.6"
 actix-web = { version = "4.0.0-beta.10", default-features = false }
 anyhow = "1.0"
+async-trait = "0.1.51"
 awc = { version = "3.0.0-beta.9", default-features = false, features = ["rustls"] }
 base64 = "0.13.0"
 dashmap = "4.0.2"

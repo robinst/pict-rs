@@ -1,4 +1,7 @@
-use crate::error::{Error, UploadError};
+use crate::{
+    error::{Error, UploadError},
+    store::Store,
+};
 use actix_web::{
     dev::Payload,
     http::{
@@ -52,17 +55,22 @@ impl Range {
         }
     }
 
-    pub(crate) async fn chop_file(
+    pub(crate) async fn chop_store<S: Store>(
         &self,
-        file: crate::file::File,
-    ) -> Result<impl Stream<Item = Result<Bytes, Error>>, Error> {
+        store: S,
+        identifier: S::Identifier,
+    ) -> Result<impl Stream<Item = std::io::Result<Bytes>>, Error>
+    where
+        Error: From<S::Error>,
+    {
         match self {
-            Range::Start(start) => file.read_to_stream(Some(*start), None).await,
-            Range::SuffixLength(from_start) => file.read_to_stream(None, Some(*from_start)).await,
-            Range::Segment(start, end) => {
-                file.read_to_stream(Some(*start), Some(end.saturating_sub(*start)))
-                    .await
-            }
+            Range::Start(start) => Ok(store.to_stream(&identifier, Some(*start), None).await?),
+            Range::SuffixLength(from_start) => Ok(store
+                .to_stream(&identifier, None, Some(*from_start))
+                .await?),
+            Range::Segment(start, end) => Ok(store
+                .to_stream(&identifier, Some(*start), Some(end.saturating_sub(*start)))
+                .await?),
         }
     }
 }

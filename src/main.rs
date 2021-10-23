@@ -21,7 +21,6 @@ use tracing::{debug, error, info, instrument, Span};
 use tracing_actix_web::TracingLogger;
 use tracing_awc::Propagate;
 use tracing_futures::Instrument;
-use uuid::Uuid;
 
 mod concurrent_processor;
 mod config;
@@ -29,25 +28,29 @@ mod either;
 mod error;
 mod exiftool;
 mod ffmpeg;
-mod file;
 mod init_tracing;
 mod magick;
+mod map_error;
 mod middleware;
 mod migrate;
 mod process;
 mod processor;
 mod range;
+mod store;
 mod upload_manager;
 mod validate;
+
+use crate::{magick::details_hint, store::file_store::FileStore};
 
 use self::{
     concurrent_processor::CancelSafeProcessor,
     config::{Config, Format},
     either::Either,
     error::{Error, UploadError},
-    file::CrateError,
     init_tracing::init_tracing,
     middleware::{Deadline, Internal},
+    migrate::LatestDb,
+    store::Store,
     upload_manager::{Details, UploadManager, UploadManagerSession},
     validate::{image_webp, video_mp4},
 };
@@ -57,119 +60,19 @@ const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
 const DAYS: u32 = 24 * HOURS;
 
-static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
-    let tmp_nonce = Uuid::new_v4();
-
-    let mut path = std::env::temp_dir();
-    path.push(format!("pict-rs-{}", tmp_nonce));
-    path
-});
 static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
 static PROCESS_SEMAPHORE: Lazy<Semaphore> =
     Lazy::new(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
 
-// try moving a file
-#[instrument(name = "Moving file")]
-async fn safe_move_file(from: PathBuf, to: PathBuf) -> Result<(), Error> {
-    if let Some(path) = to.parent() {
-        debug!("Creating directory {:?}", path);
-        tokio::fs::create_dir_all(path).await?;
-    }
-
-    debug!("Checking if {:?} already exists", to);
-    if let Err(e) = tokio::fs::metadata(&to).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    } else {
-        return Err(UploadError::FileExists.into());
-    }
-
-    debug!("Moving {:?} to {:?}", from, to);
-    tokio::fs::copy(&from, to).await?;
-    tokio::fs::remove_file(from).await?;
-    Ok(())
-}
-
-async fn safe_create_parent<P>(path: P) -> Result<(), Error>
-where
-    P: AsRef<std::path::Path>,
-{
-    if let Some(path) = path.as_ref().parent() {
-        debug!("Creating directory {:?}", path);
-        tokio::fs::create_dir_all(path).await?;
-    }
-
-    Ok(())
-}
-
-// Try writing to a file
-#[instrument(name = "Saving file", skip(bytes))]
-async fn safe_save_file(path: PathBuf, bytes: web::Bytes) -> Result<(), Error> {
-    if let Some(path) = path.parent() {
-        // create the directory for the file
-        debug!("Creating directory {:?}", path);
-        tokio::fs::create_dir_all(path).await?;
-    }
-
-    // Only write the file if it doesn't already exist
-    debug!("Checking if {:?} already exists", path);
-    if let Err(e) = tokio::fs::metadata(&path).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
-    } else {
-        return Ok(());
-    }
-
-    // Open the file for writing
-    debug!("Creating {:?}", path);
-    let mut file = crate::file::File::create(&path).await?;
-
-    // try writing
-    debug!("Writing to {:?}", path);
-    if let Err(e) = file.write_from_bytes(bytes).await {
-        error!("Error writing {:?}, {}", path, e);
-        // remove file if writing failed before completion
-        tokio::fs::remove_file(path).await?;
-        return Err(e.into());
-    }
-    debug!("{:?} written", path);
-
-    Ok(())
-}
-
-pub(crate) fn tmp_file() -> PathBuf {
-    let s: String = Uuid::new_v4().to_string();
-
-    let name = format!("{}.tmp", s);
-
-    let mut path = TMP_DIR.clone();
-    path.push(&name);
-
-    path
-}
-
-fn to_ext(mime: mime::Mime) -> Result<&'static str, Error> {
-    if mime == mime::IMAGE_PNG {
-        Ok(".png")
-    } else if mime == mime::IMAGE_JPEG {
-        Ok(".jpg")
-    } else if mime == video_mp4() {
-        Ok(".mp4")
-    } else if mime == image_webp() {
-        Ok(".webp")
-    } else {
-        Err(UploadError::UnsupportedFormat.into())
-    }
-}
-
 /// Handle responding to succesful uploads
 #[instrument(name = "Uploaded files", skip(value, manager))]
-async fn upload(
-    value: Value<UploadManagerSession>,
-    manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, Error> {
+async fn upload<S: Store>(
+    value: Value<UploadManagerSession<S>>,
+    manager: web::Data<UploadManager<S>>,
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let images = value
         .map()
         .and_then(|mut m| m.remove("images"))
@@ -187,19 +90,23 @@ async fn upload(
             let delete_token = image.result.delete_token().await?;
 
             let name = manager.from_alias(alias.to_owned()).await?;
-            let path = manager.path_from_filename(name.clone()).await?;
+            let identifier = manager.identifier_from_filename(name.clone()).await?;
 
-            let details = manager.variant_details(path.clone(), name.clone()).await?;
+            let details = manager
+                .variant_details(identifier.clone(), name.clone())
+                .await?;
 
             let details = if let Some(details) = details {
                 debug!("details exist");
                 details
             } else {
-                debug!("generating new details from {:?}", path);
-                let new_details = Details::from_path(path.clone()).await?;
-                debug!("storing details for {:?} {}", path, name);
+                debug!("generating new details from {:?}", identifier);
+                let hint = details_hint(&name);
+                let new_details =
+                    Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
+                debug!("storing details for {:?} {}", identifier, name);
                 manager
-                    .store_variant_details(path, name, &new_details)
+                    .store_variant_details(identifier, name, &new_details)
                     .await?;
                 debug!("stored");
                 new_details
@@ -282,11 +189,14 @@ where
 
 /// download an image from a URL
 #[instrument(name = "Downloading file", skip(client, manager))]
-async fn download(
+async fn download<S: Store>(
     client: web::Data<Client>,
-    manager: web::Data<UploadManager>,
+    manager: web::Data<UploadManager<S>>,
     query: web::Query<UrlQuery>,
-) -> Result<HttpResponse, Error> {
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let res = client.get(&query.url).propagate().send().await?;
 
     if !res.status().is_success() {
@@ -294,7 +204,7 @@ async fn download(
     }
 
     let mut stream = Limit::new(
-        CrateError::new(res),
+        map_error::map_crate_error(res),
         (CONFIG.max_file_size() * MEGABYTES) as u64,
     );
 
@@ -308,16 +218,20 @@ async fn download(
     let delete_token = session.delete_token().await?;
 
     let name = manager.from_alias(alias.to_owned()).await?;
-    let path = manager.path_from_filename(name.clone()).await?;
+    let identifier = manager.identifier_from_filename(name.clone()).await?;
 
-    let details = manager.variant_details(path.clone(), name.clone()).await?;
+    let details = manager
+        .variant_details(identifier.clone(), name.clone())
+        .await?;
 
     let details = if let Some(details) = details {
         details
     } else {
-        let new_details = Details::from_path(path.clone()).await?;
+        let hint = details_hint(&name);
+        let new_details =
+            Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
         manager
-            .store_variant_details(path, name, &new_details)
+            .store_variant_details(identifier, name, &new_details)
             .await?;
         new_details
     };
@@ -335,10 +249,13 @@ async fn download(
 
 /// Delete aliases and files
 #[instrument(name = "Deleting file", skip(manager))]
-async fn delete(
-    manager: web::Data<UploadManager>,
+async fn delete<S: Store>(
+    manager: web::Data<UploadManager<S>>,
     path_entries: web::Path<(String, String)>,
-) -> Result<HttpResponse, Error> {
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let (alias, token) = path_entries.into_inner();
 
     manager.delete(token, alias).await?;
@@ -348,12 +265,15 @@ async fn delete(
 
 type ProcessQuery = Vec<(String, String)>;
 
-async fn prepare_process(
+async fn prepare_process<S: Store>(
     query: web::Query<ProcessQuery>,
     ext: &str,
-    manager: &UploadManager,
+    manager: &UploadManager<S>,
     filters: &Option<HashSet<String>>,
-) -> Result<(Format, String, PathBuf, Vec<String>), Error> {
+) -> Result<(Format, String, PathBuf, Vec<String>), Error>
+where
+    Error: From<S::Error>,
+{
     let (alias, operations) =
         query
             .into_inner()
@@ -394,21 +314,24 @@ async fn prepare_process(
 }
 
 #[instrument(name = "Fetching derived details", skip(manager, filters))]
-async fn process_details(
+async fn process_details<S: Store>(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    manager: web::Data<UploadManager>,
+    manager: web::Data<UploadManager<S>>,
     filters: web::Data<Option<HashSet<String>>>,
-) -> Result<HttpResponse, Error> {
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let (_, name, thumbnail_path, _) =
         prepare_process(query, ext.as_str(), &manager, &filters).await?;
 
-    let real_path = manager
-        .variant_path(&thumbnail_path, &name)
+    let identifier = manager
+        .variant_identifier(&thumbnail_path, &name)
         .await?
         .ok_or(UploadError::MissingAlias)?;
 
-    let details = manager.variant_details(real_path, name).await?;
+    let details = manager.variant_details(identifier, name).await?;
 
     let details = details.ok_or(UploadError::NoFiles)?;
 
@@ -417,55 +340,42 @@ async fn process_details(
 
 /// Process files
 #[instrument(name = "Serving processed image", skip(manager, filters))]
-async fn process(
+async fn process<S: Store + 'static>(
     range: Option<range::RangeHeader>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    manager: web::Data<UploadManager>,
+    manager: web::Data<UploadManager<S>>,
     filters: web::Data<Option<HashSet<String>>>,
-) -> Result<HttpResponse, Error> {
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let (format, name, thumbnail_path, thumbnail_args) =
         prepare_process(query, ext.as_str(), &manager, &filters).await?;
 
-    let real_path_opt = manager.variant_path(&thumbnail_path, &name).await?;
+    let identifier_opt = manager.variant_identifier(&thumbnail_path, &name).await?;
 
-    // If the thumbnail doesn't exist, we need to create it
-    let real_path_opt = if let Some(real_path) = real_path_opt {
-        if let Err(e) = tokio::fs::metadata(&real_path)
-            .instrument(tracing::info_span!("Get thumbnail metadata"))
-            .await
-        {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                error!("Error looking up processed image, {}", e);
-                return Err(e.into());
-            }
-            None
-        } else {
-            Some(real_path)
-        }
-    } else {
-        None
-    };
-
-    if let Some(real_path) = real_path_opt {
+    if let Some(identifier) = identifier_opt {
         let details_opt = manager
-            .variant_details(real_path.clone(), name.clone())
+            .variant_details(identifier.clone(), name.clone())
             .await?;
 
         let details = if let Some(details) = details_opt {
             details
         } else {
-            let details = Details::from_path(real_path.clone()).await?;
+            let hint = details_hint(&name);
+            let details =
+                Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
             manager
-                .store_variant_details(real_path.clone(), name, &details)
+                .store_variant_details(identifier.clone(), name, &details)
                 .await?;
             details
         };
 
-        return ranged_file_resp(real_path, range, details).await;
+        return ranged_file_resp(manager.store().clone(), identifier, range, details).await;
     }
 
-    let original_path = manager.still_path_from_filename(name.clone()).await?;
+    let identifier = manager.still_identifier_from_filename(name.clone()).await?;
 
     let thumbnail_path2 = thumbnail_path.clone();
     let process_fut = async {
@@ -473,10 +383,12 @@ async fn process(
 
         let permit = PROCESS_SEMAPHORE.acquire().await?;
 
-        let file = crate::file::File::open(original_path.clone()).await?;
-
-        let mut processed_reader =
-            crate::magick::process_image_file_read(file, thumbnail_args, format)?;
+        let mut processed_reader = crate::magick::process_image_store_read(
+            manager.store().clone(),
+            identifier,
+            thumbnail_args,
+            format,
+        )?;
 
         let mut vec = Vec::new();
         processed_reader.read_to_end(&mut vec).await?;
@@ -484,7 +396,7 @@ async fn process(
 
         drop(permit);
 
-        let details = Details::from_bytes(bytes.clone()).await?;
+        let details = Details::from_bytes(bytes.clone(), format.to_hint()).await?;
 
         let save_span = tracing::info_span!(
             parent: None,
@@ -497,27 +409,22 @@ async fn process(
         let bytes2 = bytes.clone();
         actix_rt::spawn(
             async move {
-                let real_path = match manager.next_directory() {
-                    Ok(real_path) => real_path.join(&name),
+                let identifier = match manager.store().save_bytes(bytes2).await {
+                    Ok(identifier) => identifier,
                     Err(e) => {
                         tracing::warn!("Failed to generate directory path: {}", e);
                         return;
                     }
                 };
-
-                if let Err(e) = safe_save_file(real_path.clone(), bytes2).await {
-                    tracing::warn!("Error saving thumbnail: {}", e);
-                    return;
-                }
                 if let Err(e) = manager
-                    .store_variant_details(real_path.clone(), name.clone(), &details2)
+                    .store_variant_details(identifier.clone(), name.clone(), &details2)
                     .await
                 {
                     tracing::warn!("Error saving variant details: {}", e);
                     return;
                 }
                 if let Err(e) = manager
-                    .store_variant(Some(&thumbnail_path), &real_path, &name)
+                    .store_variant(Some(&thumbnail_path), &identifier, &name)
                     .await
                 {
                     tracing::warn!("Error saving variant info: {}", e);
@@ -569,21 +476,28 @@ async fn process(
 
 /// Fetch file details
 #[instrument(name = "Fetching details", skip(manager))]
-async fn details(
+async fn details<S: Store>(
     alias: web::Path<String>,
-    manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, Error> {
+    manager: web::Data<UploadManager<S>>,
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let name = manager.from_alias(alias.into_inner()).await?;
-    let path = manager.path_from_filename(name.clone()).await?;
+    let identifier = manager.identifier_from_filename(name.clone()).await?;
 
-    let details = manager.variant_details(path.clone(), name.clone()).await?;
+    let details = manager
+        .variant_details(identifier.clone(), name.clone())
+        .await?;
 
     let details = if let Some(details) = details {
         details
     } else {
-        let new_details = Details::from_path(path.clone()).await?;
+        let hint = details_hint(&name);
+        let new_details =
+            Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
         manager
-            .store_variant_details(path.clone(), name, &new_details)
+            .store_variant_details(identifier, name, &new_details)
             .await?;
         new_details
     };
@@ -593,34 +507,45 @@ async fn details(
 
 /// Serve files
 #[instrument(name = "Serving file", skip(manager))]
-async fn serve(
+async fn serve<S: Store>(
     range: Option<range::RangeHeader>,
     alias: web::Path<String>,
-    manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, Error> {
+    manager: web::Data<UploadManager<S>>,
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let name = manager.from_alias(alias.into_inner()).await?;
-    let path = manager.path_from_filename(name.clone()).await?;
+    let identifier = manager.identifier_from_filename(name.clone()).await?;
 
-    let details = manager.variant_details(path.clone(), name.clone()).await?;
+    let details = manager
+        .variant_details(identifier.clone(), name.clone())
+        .await?;
 
     let details = if let Some(details) = details {
         details
     } else {
-        let details = Details::from_path(path.clone()).await?;
+        let hint = details_hint(&name);
+        let details =
+            Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
         manager
-            .store_variant_details(path.clone(), name, &details)
+            .store_variant_details(identifier.clone(), name, &details)
             .await?;
         details
     };
 
-    ranged_file_resp(path, range, details).await
+    ranged_file_resp(manager.store().clone(), identifier, range, details).await
 }
 
-async fn ranged_file_resp(
-    path: PathBuf,
+async fn ranged_file_resp<S: Store>(
+    store: S,
+    identifier: S::Identifier,
     range: Option<range::RangeHeader>,
     details: Details,
-) -> Result<HttpResponse, Error> {
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let (builder, stream) = match range {
         //Range header exists - return as ranged
         Some(range_header) => {
@@ -631,24 +556,27 @@ async fn ranged_file_resp(
             if range_header.is_empty() {
                 return Err(UploadError::Range.into());
             } else if range_header.len() == 1 {
-                let file = crate::file::File::open(path).await?;
-
-                let meta = file.metadata().await?;
+                let len = store.len(&identifier).await?;
 
                 let range = range_header.ranges().next().unwrap();
 
                 let mut builder = HttpResponse::PartialContent();
-                builder.insert_header(range.to_content_range(meta.len()));
+                builder.insert_header(range.to_content_range(len));
 
-                (builder, Either::left(range.chop_file(file).await?))
+                (
+                    builder,
+                    Either::left(map_error::map_crate_error(
+                        range.chop_store(store, identifier).await?,
+                    )),
+                )
             } else {
                 return Err(UploadError::Range.into());
             }
         }
         //No Range header in the request - return the entire document
         None => {
-            let file = crate::file::File::open(path).await?;
-            let stream = file.read_to_stream(None, None).await?;
+            let stream =
+                map_error::map_crate_error(store.to_stream(&identifier, None, None).await?);
             (HttpResponse::Ok(), Either::right(stream))
         }
     };
@@ -696,10 +624,13 @@ enum FileOrAlias {
 }
 
 #[instrument(name = "Purging file", skip(upload_manager))]
-async fn purge(
+async fn purge<S: Store>(
     query: web::Query<FileOrAlias>,
-    upload_manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, Error> {
+    upload_manager: web::Data<UploadManager<S>>,
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let aliases = match query.into_inner() {
         FileOrAlias::File { file } => upload_manager.aliases_by_filename(file).await?,
         FileOrAlias::Alias { alias } => upload_manager.aliases_by_alias(alias).await?,
@@ -718,10 +649,13 @@ async fn purge(
 }
 
 #[instrument(name = "Fetching aliases", skip(upload_manager))]
-async fn aliases(
+async fn aliases<S: Store>(
     query: web::Query<FileOrAlias>,
-    upload_manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, Error> {
+    upload_manager: web::Data<UploadManager<S>>,
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let aliases = match query.into_inner() {
         FileOrAlias::File { file } => upload_manager.aliases_by_filename(file).await?,
         FileOrAlias::Alias { alias } => upload_manager.aliases_by_alias(alias).await?,
@@ -739,10 +673,13 @@ struct ByAlias {
 }
 
 #[instrument(name = "Fetching filename", skip(upload_manager))]
-async fn filename_by_alias(
+async fn filename_by_alias<S: Store>(
     query: web::Query<ByAlias>,
-    upload_manager: web::Data<UploadManager>,
-) -> Result<HttpResponse, Error> {
+    upload_manager: web::Data<UploadManager<S>>,
+) -> Result<HttpResponse, Error>
+where
+    Error: From<S::Error>,
+{
     let filename = upload_manager.from_alias(query.into_inner().alias).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
@@ -751,12 +688,17 @@ async fn filename_by_alias(
     })))
 }
 
-#[actix_rt::main]
-async fn main() -> anyhow::Result<()> {
-    let manager = UploadManager::new(CONFIG.data_dir(), CONFIG.format()).await?;
+fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
+    let error: Error = error.into();
+    let error: actix_web::Error = error.into();
+    error
+}
 
-    init_tracing("pict-rs", CONFIG.opentelemetry_url())?;
-
+async fn launch<S: Store>(manager: UploadManager<S>) -> anyhow::Result<()>
+where
+    S::Error: Unpin,
+    Error: From<S::Error>,
+{
     // Create a new Multipart Form validator
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
@@ -764,7 +706,7 @@ async fn main() -> anyhow::Result<()> {
     let form = Form::new()
         .max_files(10)
         .max_file_size(CONFIG.max_file_size() * MEGABYTES)
-        .transform_error(|e| Error::from(e).into())
+        .transform_error(transform_error)
         .field(
             "images",
             Field::array(Field::file(move |filename, _, stream| {
@@ -775,7 +717,10 @@ async fn main() -> anyhow::Result<()> {
                 async move {
                     let permit = PROCESS_SEMAPHORE.acquire().await?;
 
-                    let res = manager.session().upload(stream).await;
+                    let res = manager
+                        .session()
+                        .upload(map_error::map_crate_error(stream))
+                        .await;
 
                     drop(permit);
                     res
@@ -792,7 +737,7 @@ async fn main() -> anyhow::Result<()> {
     let import_form = Form::new()
         .max_files(10)
         .max_file_size(CONFIG.max_file_size() * MEGABYTES)
-        .transform_error(|e| Error::from(e).into())
+        .transform_error(transform_error)
         .field(
             "images",
             Field::array(Field::file(move |filename, content_type, stream| {
@@ -805,7 +750,12 @@ async fn main() -> anyhow::Result<()> {
 
                     let res = manager
                         .session()
-                        .import(filename, content_type, validate_imports, stream)
+                        .import(
+                            filename,
+                            content_type,
+                            validate_imports,
+                            map_error::map_crate_error(stream),
+                        )
                         .await;
 
                     drop(permit);
@@ -832,24 +782,25 @@ async fn main() -> anyhow::Result<()> {
                         web::resource("")
                             .guard(guard::Post())
                             .wrap(form.clone())
-                            .route(web::post().to(upload)),
+                            .route(web::post().to(upload::<S>)),
                     )
-                    .service(web::resource("/download").route(web::get().to(download)))
+                    .service(web::resource("/download").route(web::get().to(download::<S>)))
                     .service(
                         web::resource("/delete/{delete_token}/{filename}")
-                            .route(web::delete().to(delete))
-                            .route(web::get().to(delete)),
+                            .route(web::delete().to(delete::<S>))
+                            .route(web::get().to(delete::<S>)),
                     )
-                    .service(web::resource("/original/{filename}").route(web::get().to(serve)))
-                    .service(web::resource("/process.{ext}").route(web::get().to(process)))
+                    .service(web::resource("/original/{filename}").route(web::get().to(serve::<S>)))
+                    .service(web::resource("/process.{ext}").route(web::get().to(process::<S>)))
                     .service(
                         web::scope("/details")
                             .service(
-                                web::resource("/original/{filename}").route(web::get().to(details)),
+                                web::resource("/original/{filename}")
+                                    .route(web::get().to(details::<S>)),
                             )
                             .service(
                                 web::resource("/process.{ext}")
-                                    .route(web::get().to(process_details)),
+                                    .route(web::get().to(process_details::<S>)),
                             ),
                     ),
             )
@@ -859,20 +810,34 @@ async fn main() -> anyhow::Result<()> {
                     .service(
                         web::resource("/import")
                             .wrap(import_form.clone())
-                            .route(web::post().to(upload)),
+                            .route(web::post().to(upload::<S>)),
                     )
-                    .service(web::resource("/purge").route(web::post().to(purge)))
-                    .service(web::resource("/aliases").route(web::get().to(aliases)))
-                    .service(web::resource("/filename").route(web::get().to(filename_by_alias))),
+                    .service(web::resource("/purge").route(web::post().to(purge::<S>)))
+                    .service(web::resource("/aliases").route(web::get().to(aliases::<S>)))
+                    .service(
+                        web::resource("/filename").route(web::get().to(filename_by_alias::<S>)),
+                    ),
             )
     })
     .bind(CONFIG.bind_address())?
     .run()
     .await?;
 
-    if tokio::fs::metadata(&*TMP_DIR).await.is_ok() {
-        tokio::fs::remove_dir_all(&*TMP_DIR).await?;
-    }
-
     Ok(())
+}
+
+#[actix_rt::main]
+async fn main() -> anyhow::Result<()> {
+    init_tracing("pict-rs", CONFIG.opentelemetry_url())?;
+
+    let root_dir = CONFIG.data_dir();
+    let db = LatestDb::exists(root_dir.clone()).migrate()?;
+
+    let store = FileStore::build(root_dir, &db)?;
+
+    let manager = UploadManager::new(store, db, CONFIG.format()).await?;
+
+    // TODO: move restructure to FileStore
+    manager.restructure().await?;
+    launch(manager).await
 }

@@ -1,7 +1,7 @@
 use crate::{
     error::{Error, UploadError},
     migrate::{alias_id_key, alias_key},
-    to_ext,
+    store::Store,
     upload_manager::{
         delete_key,
         hasher::{Hash, Hasher},
@@ -10,20 +10,24 @@ use crate::{
 };
 use actix_web::web;
 use futures_util::stream::{Stream, StreamExt};
-use std::path::PathBuf;
-use tokio::io::AsyncRead;
 use tracing::{debug, instrument, warn, Span};
 use tracing_futures::Instrument;
 use uuid::Uuid;
 
-pub(crate) struct UploadManagerSession {
-    manager: UploadManager,
+pub(crate) struct UploadManagerSession<S: Store>
+where
+    Error: From<S::Error>,
+{
+    manager: UploadManager<S>,
     alias: Option<String>,
     finished: bool,
 }
 
-impl UploadManagerSession {
-    pub(super) fn new(manager: UploadManager) -> Self {
+impl<S: Store> UploadManagerSession<S>
+where
+    Error: From<S::Error>,
+{
+    pub(super) fn new(manager: UploadManager<S>) -> Self {
         UploadManagerSession {
             manager,
             alias: None,
@@ -51,7 +55,10 @@ impl Dup {
     }
 }
 
-impl Drop for UploadManagerSession {
+impl<S: Store> Drop for UploadManagerSession<S>
+where
+    Error: From<S::Error>,
+{
     fn drop(&mut self) {
         if self.finished {
             return;
@@ -90,7 +97,10 @@ impl Drop for UploadManagerSession {
     }
 }
 
-impl UploadManagerSession {
+impl<S: Store> UploadManagerSession<S>
+where
+    Error: From<S::Error>,
+{
     /// Generate a delete token for an alias
     #[instrument(skip(self))]
     pub(crate) async fn delete_token(&self) -> Result<String, Error> {
@@ -129,17 +139,13 @@ impl UploadManagerSession {
 
     /// Upload the file while preserving the filename, optionally validating the uploaded image
     #[instrument(skip(self, stream))]
-    pub(crate) async fn import<E>(
+    pub(crate) async fn import(
         mut self,
         alias: String,
         content_type: mime::Mime,
         validate: bool,
-        mut stream: impl Stream<Item = Result<web::Bytes, E>> + Unpin,
-    ) -> Result<Self, Error>
-    where
-        Error: From<E>,
-        E: Unpin + 'static,
-    {
+        mut stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin,
+    ) -> Result<Self, Error> {
         let mut bytes_mut = actix_web::web::BytesMut::new();
 
         debug!("Reading stream to memory");
@@ -158,8 +164,11 @@ impl UploadManagerSession {
 
         let mut hasher_reader = Hasher::new(validated_reader, self.manager.inner.hasher.clone());
 
-        let tmpfile = crate::tmp_file();
-        safe_save_reader(tmpfile.clone(), &mut hasher_reader).await?;
+        let identifier = self
+            .manager
+            .store
+            .save_async_read(&mut hasher_reader)
+            .await?;
         let hash = hasher_reader.finalize_reset().await?;
 
         debug!("Storing alias");
@@ -167,7 +176,7 @@ impl UploadManagerSession {
         self.add_existing_alias(&hash, &alias).await?;
 
         debug!("Saving file");
-        self.save_upload(tmpfile, hash, content_type).await?;
+        self.save_upload(&identifier, hash, content_type).await?;
 
         // Return alias to file
         Ok(self)
@@ -175,13 +184,10 @@ impl UploadManagerSession {
 
     /// Upload the file, discarding bytes if it's already present, or saving if it's new
     #[instrument(skip(self, stream))]
-    pub(crate) async fn upload<E>(
+    pub(crate) async fn upload(
         mut self,
-        mut stream: impl Stream<Item = Result<web::Bytes, E>> + Unpin,
-    ) -> Result<Self, Error>
-    where
-        Error: From<E>,
-    {
+        mut stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin,
+    ) -> Result<Self, Error> {
         let mut bytes_mut = actix_web::web::BytesMut::new();
 
         debug!("Reading stream to memory");
@@ -200,15 +206,18 @@ impl UploadManagerSession {
 
         let mut hasher_reader = Hasher::new(validated_reader, self.manager.inner.hasher.clone());
 
-        let tmpfile = crate::tmp_file();
-        safe_save_reader(tmpfile.clone(), &mut hasher_reader).await?;
+        let identifier = self
+            .manager
+            .store
+            .save_async_read(&mut hasher_reader)
+            .await?;
         let hash = hasher_reader.finalize_reset().await?;
 
         debug!("Adding alias");
         self.add_alias(&hash, content_type.clone()).await?;
 
         debug!("Saving file");
-        self.save_upload(tmpfile, hash, content_type).await?;
+        self.save_upload(&identifier, hash, content_type).await?;
 
         // Return alias to file
         Ok(self)
@@ -217,7 +226,7 @@ impl UploadManagerSession {
     // check duplicates & store image if new
     async fn save_upload(
         &self,
-        tmpfile: PathBuf,
+        identifier: &S::Identifier,
         hash: Hash,
         content_type: mime::Mime,
     ) -> Result<(), Error> {
@@ -225,15 +234,13 @@ impl UploadManagerSession {
 
         // bail early with alias to existing file if this is a duplicate
         if dup.exists() {
-            debug!("Duplicate exists, not saving file");
+            debug!("Duplicate exists, removing file");
+
+            self.manager.store.remove(&identifier).await?;
             return Ok(());
         }
 
-        // -- WRITE NEW FILE --
-        let real_path = self.manager.next_directory()?.join(&name);
-
-        self.manager.store_path(name, &real_path).await?;
-        crate::safe_move_file(tmpfile, real_path).await?;
+        self.manager.store_identifier(name, &identifier).await?;
 
         Ok(())
     }
@@ -248,6 +255,7 @@ impl UploadManagerSession {
         let main_tree = self.manager.inner.main_tree.clone();
 
         let filename = self.next_file(content_type).await?;
+
         let filename2 = filename.clone();
         let hash2 = hash.as_slice().to_vec();
         debug!("Inserting filename for hash");
@@ -283,13 +291,11 @@ impl UploadManagerSession {
     async fn next_file(&self, content_type: mime::Mime) -> Result<String, Error> {
         loop {
             debug!("Filename generation loop");
-            let s: String = Uuid::new_v4().to_string();
+            let filename = file_name(Uuid::new_v4(), content_type.clone())?;
 
-            let filename = file_name(s, content_type.clone())?;
-
-            let path_tree = self.manager.inner.path_tree.clone();
+            let identifier_tree = self.manager.inner.identifier_tree.clone();
             let filename2 = filename.clone();
-            let filename_exists = web::block(move || path_tree.get(filename2.as_bytes()))
+            let filename_exists = web::block(move || identifier_tree.get(filename2.as_bytes()))
                 .await??
                 .is_some();
 
@@ -363,8 +369,7 @@ impl UploadManagerSession {
     async fn next_alias(&mut self, hash: &Hash, content_type: mime::Mime) -> Result<String, Error> {
         loop {
             debug!("Alias gen loop");
-            let s: String = Uuid::new_v4().to_string();
-            let alias = file_name(s, content_type.clone())?;
+            let alias = file_name(Uuid::new_v4(), content_type.clone())?;
             self.alias = Some(alias.clone());
 
             let res = self.save_alias_hash_mapping(hash, &alias).await?;
@@ -402,31 +407,20 @@ impl UploadManagerSession {
     }
 }
 
-fn file_name(name: String, content_type: mime::Mime) -> Result<String, Error> {
+fn file_name(name: Uuid, content_type: mime::Mime) -> Result<String, Error> {
     Ok(format!("{}{}", name, to_ext(content_type)?))
 }
 
-#[instrument(skip(input))]
-async fn safe_save_reader(to: PathBuf, input: &mut (impl AsyncRead + Unpin)) -> Result<(), Error> {
-    if let Some(path) = to.parent() {
-        debug!("Creating directory {:?}", path);
-        tokio::fs::create_dir_all(path.to_owned()).await?;
-    }
-
-    debug!("Checking if {:?} already exists", to);
-    if let Err(e) = tokio::fs::metadata(to.clone()).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
+fn to_ext(mime: mime::Mime) -> Result<&'static str, Error> {
+    if mime == mime::IMAGE_PNG {
+        Ok(".png")
+    } else if mime == mime::IMAGE_JPEG {
+        Ok(".jpg")
+    } else if mime == crate::video_mp4() {
+        Ok(".mp4")
+    } else if mime == crate::image_webp() {
+        Ok(".webp")
     } else {
-        return Err(UploadError::FileExists.into());
+        Err(UploadError::UnsupportedFormat.into())
     }
-
-    debug!("Writing stream to {:?}", to);
-
-    let mut file = crate::file::File::create(to).await?;
-
-    file.write_from_async_read(input).await?;
-
-    Ok(())
 }

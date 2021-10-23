@@ -1,50 +1,15 @@
-use futures_util::stream::Stream;
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
-
 #[cfg(feature = "io-uring")]
 pub(crate) use io_uring::File;
 
 #[cfg(not(feature = "io-uring"))]
 pub(crate) use tokio_file::File;
 
-pin_project_lite::pin_project! {
-    pub(super) struct CrateError<S> {
-        #[pin]
-        inner: S
-    }
-}
-
-impl<S> CrateError<S> {
-    pub(super) fn new(inner: S) -> Self {
-        CrateError { inner }
-    }
-}
-
-impl<T, E, S> Stream for CrateError<S>
-where
-    S: Stream<Item = Result<T, E>>,
-    crate::error::Error: From<E>,
-{
-    type Item = Result<T, crate::error::Error>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.as_mut().project();
-
-        this.inner
-            .poll_next(cx)
-            .map(|opt| opt.map(|res| res.map_err(Into::into)))
-    }
-}
-
 #[cfg(not(feature = "io-uring"))]
 mod tokio_file {
-    use crate::Either;
+    use crate::{store::file_store::FileError, Either};
     use actix_web::web::{Bytes, BytesMut};
     use futures_util::stream::Stream;
-    use std::{fs::Metadata, io::SeekFrom, path::Path};
+    use std::{io::SeekFrom, path::Path};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
     use tokio_util::codec::{BytesCodec, FramedRead};
 
@@ -65,20 +30,13 @@ mod tokio_file {
             })
         }
 
-        pub(crate) async fn metadata(&self) -> std::io::Result<Metadata> {
-            self.inner.metadata().await
-        }
-
-        pub(crate) async fn write_from_bytes<'a>(
-            &'a mut self,
-            mut bytes: Bytes,
-        ) -> std::io::Result<()> {
+        pub(crate) async fn write_from_bytes(&mut self, mut bytes: Bytes) -> std::io::Result<()> {
             self.inner.write_all_buf(&mut bytes).await?;
             Ok(())
         }
 
-        pub(crate) async fn write_from_async_read<'a, R>(
-            &'a mut self,
+        pub(crate) async fn write_from_async_read<R>(
+            &mut self,
             mut reader: R,
         ) -> std::io::Result<()>
         where
@@ -88,12 +46,9 @@ mod tokio_file {
             Ok(())
         }
 
-        pub(crate) async fn read_to_async_write<'a, W>(
-            &'a mut self,
-            writer: &'a mut W,
-        ) -> std::io::Result<()>
+        pub(crate) async fn read_to_async_write<W>(&mut self, writer: &mut W) -> std::io::Result<()>
         where
-            W: AsyncWrite + Unpin,
+            W: AsyncWrite + Unpin + ?Sized,
         {
             tokio::io::copy(&mut self.inner, writer).await?;
             Ok(())
@@ -103,8 +58,7 @@ mod tokio_file {
             mut self,
             from_start: Option<u64>,
             len: Option<u64>,
-        ) -> Result<impl Stream<Item = Result<Bytes, crate::error::Error>>, crate::error::Error>
-        {
+        ) -> Result<impl Stream<Item = std::io::Result<Bytes>>, FileError> {
             let obj = match (from_start, len) {
                 (Some(lower), Some(upper)) => {
                     self.inner.seek(SeekFrom::Start(lower)).await?;
@@ -118,10 +72,7 @@ mod tokio_file {
                 (None, None) => Either::right(self.inner),
             };
 
-            Ok(super::CrateError::new(BytesFreezer::new(FramedRead::new(
-                obj,
-                BytesCodec::new(),
-            ))))
+            Ok(BytesFreezer::new(FramedRead::new(obj, BytesCodec::new())))
         }
     }
 
@@ -159,6 +110,7 @@ mod tokio_file {
 
 #[cfg(feature = "io-uring")]
 mod io_uring {
+    use crate::store::file_store::FileError;
     use actix_web::web::Bytes;
     use futures_util::stream::Stream;
     use std::{
@@ -182,7 +134,7 @@ mod io_uring {
 
     impl File {
         pub(crate) async fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
-            tracing::info!("Opening io-uring file");
+            tracing::info!("Opening io-uring file: {:?}", path.as_ref());
             Ok(File {
                 path: path.as_ref().to_owned(),
                 inner: tokio_uring::fs::File::open(path).await?,
@@ -190,21 +142,18 @@ mod io_uring {
         }
 
         pub(crate) async fn create(path: impl AsRef<Path>) -> std::io::Result<Self> {
-            tracing::info!("Creating io-uring file");
+            tracing::info!("Creating io-uring file: {:?}", path.as_ref());
             Ok(File {
                 path: path.as_ref().to_owned(),
                 inner: tokio_uring::fs::File::create(path).await?,
             })
         }
 
-        pub(crate) async fn metadata(&self) -> std::io::Result<Metadata> {
+        async fn metadata(&self) -> std::io::Result<Metadata> {
             tokio::fs::metadata(&self.path).await
         }
 
-        pub(crate) async fn write_from_bytes<'a>(
-            &'a mut self,
-            bytes: Bytes,
-        ) -> std::io::Result<()> {
+        pub(crate) async fn write_from_bytes(&mut self, bytes: Bytes) -> std::io::Result<()> {
             let mut buf = bytes.to_vec();
             let len: u64 = buf.len().try_into().unwrap();
 
@@ -233,8 +182,8 @@ mod io_uring {
             Ok(())
         }
 
-        pub(crate) async fn write_from_async_read<'a, R>(
-            &'a mut self,
+        pub(crate) async fn write_from_async_read<R>(
+            &mut self,
             mut reader: R,
         ) -> std::io::Result<()>
         where
@@ -283,12 +232,9 @@ mod io_uring {
             Ok(())
         }
 
-        pub(crate) async fn read_to_async_write<'a, W>(
-            &'a mut self,
-            writer: &mut W,
-        ) -> std::io::Result<()>
+        pub(crate) async fn read_to_async_write<W>(&mut self, writer: &mut W) -> std::io::Result<()>
         where
-            W: AsyncWrite + Unpin,
+            W: AsyncWrite + Unpin + ?Sized,
         {
             let metadata = self.metadata().await?;
             let size = metadata.len();
@@ -323,20 +269,17 @@ mod io_uring {
             self,
             from_start: Option<u64>,
             len: Option<u64>,
-        ) -> Result<impl Stream<Item = Result<Bytes, crate::error::Error>>, crate::error::Error>
-        {
+        ) -> Result<impl Stream<Item = std::io::Result<Bytes>>, FileError> {
             let size = self.metadata().await?.len();
 
             let cursor = from_start.unwrap_or(0);
             let size = len.unwrap_or(size - cursor) + cursor;
 
-            Ok(super::CrateError {
-                inner: BytesStream {
-                    state: ReadFileState::File { file: Some(self) },
-                    size,
-                    cursor,
-                    callback: read_file,
-                },
+            Ok(BytesStream {
+                state: ReadFileState::File { file: Some(self) },
+                size,
+                cursor,
+                callback: read_file,
             })
         }
 

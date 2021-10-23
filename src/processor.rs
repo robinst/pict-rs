@@ -14,6 +14,50 @@ pub(crate) trait Processor {
 }
 
 pub(crate) struct Identity;
+pub(crate) struct Thumbnail(usize);
+pub(crate) struct Resize(usize);
+pub(crate) struct Crop(usize, usize);
+pub(crate) struct Blur(f64);
+
+#[instrument]
+pub(crate) fn build_chain(
+    args: &[(String, String)],
+    filename: String,
+) -> Result<(PathBuf, Vec<String>), Error> {
+    fn parse<P: Processor>(key: &str, value: &str) -> Result<Option<P>, UploadError> {
+        if key == P::NAME {
+            return Ok(Some(P::parse(key, value).ok_or(UploadError::ParsePath)?));
+        }
+
+        Ok(None)
+    }
+
+    macro_rules! parse {
+        ($inner:expr, $x:ident, $k:expr, $v:expr) => {{
+            if let Some(processor) = parse::<$x>($k, $v)? {
+                return Ok((processor.path($inner.0), processor.command($inner.1)));
+            };
+        }};
+    }
+
+    let (path, args) =
+        args.into_iter()
+            .fold(Ok((PathBuf::default(), vec![])), |inner, (name, value)| {
+                if let Ok(inner) = inner {
+                    parse!(inner, Identity, name, value);
+                    parse!(inner, Thumbnail, name, value);
+                    parse!(inner, Resize, name, value);
+                    parse!(inner, Crop, name, value);
+                    parse!(inner, Blur, name, value);
+
+                    Err(Error::from(UploadError::ParsePath))
+                } else {
+                    inner
+                }
+            })?;
+
+    Ok((path.join(filename), args))
+}
 
 impl Processor for Identity {
     const NAME: &'static str = "identity";
@@ -33,8 +77,6 @@ impl Processor for Identity {
         args
     }
 }
-
-pub(crate) struct Thumbnail(usize);
 
 impl Processor for Thumbnail {
     const NAME: &'static str = "thumbnail";
@@ -59,8 +101,6 @@ impl Processor for Thumbnail {
         args
     }
 }
-
-pub(crate) struct Resize(usize);
 
 impl Processor for Resize {
     const NAME: &'static str = "resize";
@@ -90,8 +130,6 @@ impl Processor for Resize {
         args
     }
 }
-
-pub(crate) struct Crop(usize, usize);
 
 impl Processor for Crop {
     const NAME: &'static str = "crop";
@@ -133,8 +171,6 @@ impl Processor for Crop {
     }
 }
 
-pub(crate) struct Blur(f64);
-
 impl Processor for Blur {
     const NAME: &'static str = "blur";
 
@@ -154,44 +190,4 @@ impl Processor for Blur {
 
         args
     }
-}
-
-#[instrument]
-pub(crate) fn build_chain(
-    args: &[(String, String)],
-    filename: String,
-) -> Result<(PathBuf, Vec<String>), Error> {
-    fn parse<P: Processor>(key: &str, value: &str) -> Result<Option<P>, UploadError> {
-        if key == P::NAME {
-            return Ok(Some(P::parse(key, value).ok_or(UploadError::ParsePath)?));
-        }
-
-        Ok(None)
-    }
-
-    macro_rules! parse {
-        ($inner:expr, $x:ident, $k:expr, $v:expr) => {{
-            if let Some(processor) = parse::<$x>($k, $v)? {
-                return Ok((processor.path($inner.0), processor.command($inner.1)));
-            };
-        }};
-    }
-
-    let (path, args) =
-        args.into_iter()
-            .fold(Ok((PathBuf::default(), vec![])), |inner, (name, value)| {
-                if let Ok(inner) = inner {
-                    parse!(inner, Identity, name, value);
-                    parse!(inner, Thumbnail, name, value);
-                    parse!(inner, Resize, name, value);
-                    parse!(inner, Crop, name, value);
-                    parse!(inner, Blur, name, value);
-
-                    Err(Error::from(UploadError::ParsePath))
-                } else {
-                    inner
-                }
-            })?;
-
-    Ok((path.join(filename), args))
 }

@@ -1,6 +1,8 @@
 use std::{collections::HashSet, net::SocketAddr, path::PathBuf};
 use url::Url;
 
+use crate::magick::ValidInputType;
+
 #[derive(Clone, Debug, structopt::StructOpt)]
 pub(crate) struct Config {
     #[structopt(
@@ -130,7 +132,7 @@ impl Config {
 #[error("Invalid format supplied, {0}")]
 pub(crate) struct FormatError(String);
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum Format {
     Jpeg,
     Png,
@@ -151,6 +153,14 @@ impl Format {
             Format::Jpeg => "JPEG",
             Format::Png => "PNG",
             Format::Webp => "WEBP",
+        }
+    }
+
+    pub(crate) fn to_hint(&self) -> Option<ValidInputType> {
+        match self {
+            Format::Jpeg => Some(ValidInputType::Jpeg),
+            Format::Png => Some(ValidInputType::Png),
+            Format::Webp => Some(ValidInputType::Webp),
         }
     }
 }

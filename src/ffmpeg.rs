@@ -1,11 +1,9 @@
-use crate::{
-    error::{Error, UploadError},
-    process::Process,
-};
+use crate::{error::Error, process::Process, store::Store};
 use actix_web::web::Bytes;
-use tokio::{io::AsyncRead, process::Command};
+use tokio::io::AsyncRead;
 use tracing::instrument;
 
+#[derive(Debug)]
 pub(crate) enum InputFormat {
     Gif,
     Mp4,
@@ -71,48 +69,29 @@ pub(crate) fn to_mp4_bytes(
     Ok(process.bytes_read(input).unwrap())
 }
 
-#[instrument(name = "Create video thumbnail", skip(from, to))]
-pub(crate) async fn thumbnail<P1, P2>(
-    from: P1,
-    to: P2,
+#[instrument(name = "Create video thumbnail")]
+pub(crate) async fn thumbnail<S: Store>(
+    store: S,
+    from: S::Identifier,
+    input_format: InputFormat,
     format: ThumbnailFormat,
-) -> Result<(), Error>
-where
-    P1: AsRef<std::path::Path>,
-    P2: AsRef<std::path::Path>,
-{
-    let command = "ffmpeg";
-    let first_arg = "-i";
-    let args = [
-        "-vframes",
-        "1",
-        "-codec",
-        format.as_codec(),
-        "-f",
-        format.as_format(),
-    ];
+) -> Result<impl AsyncRead + Unpin, Error> {
+    let process = Process::run(
+        "ffmpeg",
+        &[
+            "-f",
+            input_format.as_format(),
+            "-i",
+            "pipe:",
+            "-vframes",
+            "1",
+            "-codec",
+            format.as_codec(),
+            "-f",
+            format.as_format(),
+            "pipe:",
+        ],
+    )?;
 
-    tracing::info!(
-        "Spawning command: {} {} {:?} {:?} {:?}",
-        command,
-        first_arg,
-        from.as_ref(),
-        args,
-        to.as_ref()
-    );
-
-    let mut child = Command::new(command)
-        .arg(first_arg)
-        .arg(from.as_ref())
-        .args(args)
-        .arg(to.as_ref())
-        .spawn()?;
-
-    let status = child.wait().await?;
-
-    if !status.success() {
-        return Err(UploadError::Status.into());
-    }
-
-    Ok(())
+    Ok(process.store_read(store, from).unwrap())
 }

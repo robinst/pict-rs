@@ -1155,6 +1155,7 @@ dependencies = [
  "actix-server",
  "actix-web",
  "anyhow",
+ "async-trait",
  "awc",
  "base64",
  "dashmap",

@@ -1,22 +1,22 @@
 use crate::{
     config::Format,
     error::{Error, UploadError},
-    ffmpeg::ThumbnailFormat,
-    migrate::{alias_id_key, alias_key, alias_key_bounds, LatestDb},
+    ffmpeg::{InputFormat, ThumbnailFormat},
+    magick::{details_hint, ValidInputType},
+    migrate::{alias_id_key, alias_key, alias_key_bounds},
+    store::{Identifier, Store},
 };
 use actix_web::web;
 use sha2::Digest;
 use std::{
     ops::{Deref, DerefMut},
-    path::PathBuf,
+    string::FromUtf8Error,
     sync::Arc,
 };
-use storage_path_generator::{Generator, Path};
 use tracing::{debug, error, info, instrument, warn, Span};
 use tracing_futures::Instrument;
 
 mod hasher;
-mod restructure;
 mod session;
 
 pub(super) use session::UploadManagerSession;
@@ -35,33 +35,26 @@ pub(super) use session::UploadManagerSession;
 // - Filename Tree
 //   - filename -> hash
 // - Details Tree
-//   - filename / relative path -> details
+//   - filename / S::Identifier -> details
 // - Path Tree
-//   - filename -> relative path
-//   - filename / relative variant path -> relative variant path
-//   - filename / motion -> relative motion path
-// - Settings Tree
-//   - last-path -> last generated path
-//   - fs-restructure-01-complete -> bool
-
-const GENERATOR_KEY: &'static [u8] = b"last-path";
+//   - filename -> S::Identifier
+//   - filename / variant path -> S::Identifier
+//   - filename / motion -> S::Identifier
 
 #[derive(Clone)]
-pub struct UploadManager {
+pub(crate) struct UploadManager<S> {
     inner: Arc<UploadManagerInner>,
+    store: S,
 }
 
-struct UploadManagerInner {
+pub(crate) struct UploadManagerInner {
     format: Option<Format>,
     hasher: sha2::Sha256,
-    root_dir: PathBuf,
-    alias_tree: sled::Tree,
-    filename_tree: sled::Tree,
-    main_tree: sled::Tree,
+    pub(crate) alias_tree: sled::Tree,
+    pub(crate) filename_tree: sled::Tree,
+    pub(crate) main_tree: sled::Tree,
     details_tree: sled::Tree,
-    path_tree: sled::Tree,
-    settings_tree: sled::Tree,
-    path_gen: Generator,
+    pub(crate) identifier_tree: sled::Tree,
     db: sled::Db,
 }
 
@@ -82,88 +75,85 @@ struct FilenameIVec {
     inner: sled::IVec,
 }
 
-impl UploadManager {
+impl<S> UploadManager<S>
+where
+    S: Store + 'static,
+    Error: From<S::Error>,
+{
     /// Create a new UploadManager
-    pub(crate) async fn new(root_dir: PathBuf, format: Option<Format>) -> Result<Self, Error> {
-        let root_clone = root_dir.clone();
-        // sled automatically creates it's own directories
-        let db = web::block(move || LatestDb::exists(root_clone).migrate()).await??;
-
-        // Ensure file dir exists
-        tokio::fs::create_dir_all(&root_dir).await?;
-
-        let settings_tree = db.open_tree("settings")?;
-
-        let path_gen = init_generator(&settings_tree)?;
-
+    pub(crate) async fn new(store: S, db: sled::Db, format: Option<Format>) -> Result<Self, Error> {
         let manager = UploadManager {
             inner: Arc::new(UploadManagerInner {
                 format,
                 hasher: sha2::Sha256::new(),
-                root_dir,
                 alias_tree: db.open_tree("alias")?,
                 filename_tree: db.open_tree("filename")?,
                 details_tree: db.open_tree("details")?,
                 main_tree: db.open_tree("main")?,
-                path_tree: db.open_tree("path")?,
-                settings_tree,
-                path_gen,
+                identifier_tree: db.open_tree("path")?,
                 db,
             }),
+            store,
         };
-
-        manager.restructure().await?;
 
         Ok(manager)
     }
 
-    pub(crate) async fn still_path_from_filename(
-        &self,
-        filename: String,
-    ) -> Result<PathBuf, Error> {
-        let path = self.path_from_filename(filename.clone()).await?;
-        let details =
-            if let Some(details) = self.variant_details(path.clone(), filename.clone()).await? {
-                details
-            } else {
-                Details::from_path(&path).await?
-            };
-
-        if !details.is_motion() {
-            return Ok(path);
-        }
-
-        if let Some(motion_path) = self.motion_path(&filename).await? {
-            return Ok(motion_path);
-        }
-
-        let jpeg_path = self.next_directory()?.join(&filename);
-        crate::safe_create_parent(&jpeg_path).await?;
-
-        let permit = crate::PROCESS_SEMAPHORE.acquire().await;
-        let res = crate::ffmpeg::thumbnail(&path, &jpeg_path, ThumbnailFormat::Jpeg).await;
-        drop(permit);
-
-        if let Err(e) = res {
-            error!("transcode error: {:?}", e);
-            self.remove_path(&jpeg_path).await?;
-            return Err(e);
-        }
-
-        self.store_motion_path(&filename, &jpeg_path).await?;
-        Ok(jpeg_path)
+    pub(crate) fn store(&self) -> &S {
+        &self.store
     }
 
-    async fn motion_path(&self, filename: &str) -> Result<Option<PathBuf>, Error> {
-        let path_tree = self.inner.path_tree.clone();
+    pub(crate) fn inner(&self) -> &UploadManagerInner {
+        &self.inner
+    }
+
+    pub(crate) async fn still_identifier_from_filename(
+        &self,
+        filename: String,
+    ) -> Result<S::Identifier, Error> {
+        let identifier = self.identifier_from_filename(filename.clone()).await?;
+        let details = if let Some(details) = self
+            .variant_details(identifier.clone(), filename.clone())
+            .await?
+        {
+            details
+        } else {
+            let hint = details_hint(&filename);
+            Details::from_store(self.store.clone(), identifier.clone(), hint).await?
+        };
+
+        if !details.is_motion() {
+            return Ok(identifier);
+        }
+
+        if let Some(motion_identifier) = self.motion_identifier(&filename).await? {
+            return Ok(motion_identifier);
+        }
+
+        let permit = crate::PROCESS_SEMAPHORE.acquire().await;
+        let mut reader = crate::ffmpeg::thumbnail(
+            self.store.clone(),
+            identifier,
+            InputFormat::Mp4,
+            ThumbnailFormat::Jpeg,
+        )
+        .await?;
+        let motion_identifier = self.store.save_async_read(&mut reader).await?;
+        drop(permit);
+
+        self.store_motion_path(&filename, &motion_identifier)
+            .await?;
+        Ok(motion_identifier)
+    }
+
+    async fn motion_identifier(&self, filename: &str) -> Result<Option<S::Identifier>, Error> {
+        let identifier_tree = self.inner.identifier_tree.clone();
         let motion_key = format!("{}/motion", filename);
 
-        let opt = web::block(move || path_tree.get(motion_key.as_bytes())).await??;
+        let opt = web::block(move || identifier_tree.get(motion_key.as_bytes())).await??;
 
         if let Some(ivec) = opt {
-            return Ok(Some(
-                self.inner.root_dir.join(String::from_utf8(ivec.to_vec())?),
-            ));
+            return Ok(Some(S::Identifier::from_bytes(ivec.to_vec())?));
         }
 
         Ok(None)
@@ -172,59 +162,57 @@ impl UploadManager {
     async fn store_motion_path(
         &self,
         filename: &str,
-        path: impl AsRef<std::path::Path>,
+        identifier: &S::Identifier,
     ) -> Result<(), Error> {
-        let path_bytes = self
-            .generalize_path(path.as_ref())?
-            .to_str()
-            .ok_or(UploadError::Path)?
-            .as_bytes()
-            .to_vec();
+        let identifier_bytes = identifier.to_bytes()?;
         let motion_key = format!("{}/motion", filename);
-        let path_tree = self.inner.path_tree.clone();
+        let identifier_tree = self.inner.identifier_tree.clone();
 
-        web::block(move || path_tree.insert(motion_key.as_bytes(), path_bytes)).await??;
+        web::block(move || identifier_tree.insert(motion_key.as_bytes(), identifier_bytes))
+            .await??;
         Ok(())
     }
 
     #[instrument(skip(self))]
-    pub(crate) async fn path_from_filename(&self, filename: String) -> Result<PathBuf, Error> {
-        let path_tree = self.inner.path_tree.clone();
-        let path_ivec = web::block(move || path_tree.get(filename.as_bytes()))
+    pub(crate) async fn identifier_from_filename(
+        &self,
+        filename: String,
+    ) -> Result<S::Identifier, Error> {
+        let identifier_tree = self.inner.identifier_tree.clone();
+        let path_ivec = web::block(move || identifier_tree.get(filename.as_bytes()))
             .await??
             .ok_or(UploadError::MissingFile)?;
 
-        let relative = PathBuf::from(String::from_utf8(path_ivec.to_vec())?);
+        let identifier = S::Identifier::from_bytes(path_ivec.to_vec())?;
 
-        Ok(self.inner.root_dir.join(relative))
+        Ok(identifier)
     }
 
     #[instrument(skip(self))]
-    async fn store_path(&self, filename: String, path: &std::path::Path) -> Result<(), Error> {
-        let path_bytes = self
-            .generalize_path(path)?
-            .to_str()
-            .ok_or(UploadError::Path)?
-            .as_bytes()
-            .to_vec();
-        let path_tree = self.inner.path_tree.clone();
-        web::block(move || path_tree.insert(filename.as_bytes(), path_bytes)).await??;
+    async fn store_identifier(
+        &self,
+        filename: String,
+        identifier: &S::Identifier,
+    ) -> Result<(), Error> {
+        let identifier_bytes = identifier.to_bytes()?;
+        let identifier_tree = self.inner.identifier_tree.clone();
+        web::block(move || identifier_tree.insert(filename.as_bytes(), identifier_bytes)).await??;
         Ok(())
     }
 
     #[instrument(skip(self))]
-    pub(crate) async fn variant_path(
+    pub(crate) async fn variant_identifier(
         &self,
         process_path: &std::path::Path,
         filename: &str,
-    ) -> Result<Option<PathBuf>, Error> {
+    ) -> Result<Option<S::Identifier>, Error> {
         let key = self.variant_key(process_path, filename)?;
-        let path_tree = self.inner.path_tree.clone();
-        let path_opt = web::block(move || path_tree.get(key)).await??;
+        let identifier_tree = self.inner.identifier_tree.clone();
+        let path_opt = web::block(move || identifier_tree.get(key)).await??;
 
-        if let Some(path_ivec) = path_opt {
-            let relative = PathBuf::from(String::from_utf8(path_ivec.to_vec())?);
-            Ok(Some(self.inner.root_dir.join(relative)))
+        if let Some(ivec) = path_opt {
+            let identifier = S::Identifier::from_bytes(ivec.to_vec())?;
+            Ok(Some(identifier))
         } else {
             Ok(None)
         }
@@ -235,22 +223,22 @@ impl UploadManager {
     pub(crate) async fn store_variant(
         &self,
         variant_process_path: Option<&std::path::Path>,
-        real_path: &std::path::Path,
+        identifier: &S::Identifier,
         filename: &str,
     ) -> Result<(), Error> {
-        let path_bytes = self
-            .generalize_path(real_path)?
-            .to_str()
-            .ok_or(UploadError::Path)?
-            .as_bytes()
-            .to_vec();
-
-        let variant_path = variant_process_path.unwrap_or(real_path);
-        let key = self.variant_key(variant_path, filename)?;
-        let path_tree = self.inner.path_tree.clone();
+        let key = if let Some(path) = variant_process_path {
+            self.variant_key(path, filename)?
+        } else {
+            let mut vec = filename.as_bytes().to_vec();
+            vec.extend(b"/");
+            vec.extend(&identifier.to_bytes()?);
+            vec
+        };
+        let identifier_tree = self.inner.identifier_tree.clone();
+        let identifier_bytes = identifier.to_bytes()?;
 
         debug!("Storing variant");
-        web::block(move || path_tree.insert(key, path_bytes)).await??;
+        web::block(move || identifier_tree.insert(key, identifier_bytes)).await??;
         debug!("Stored variant");
 
         Ok(())
@@ -260,10 +248,10 @@ impl UploadManager {
     #[instrument(skip(self))]
     pub(crate) async fn variant_details(
         &self,
-        path: PathBuf,
+        identifier: S::Identifier,
         filename: String,
     ) -> Result<Option<Details>, Error> {
-        let key = self.details_key(&path, &filename)?;
+        let key = self.details_key(identifier, &filename)?;
         let details_tree = self.inner.details_tree.clone();
 
         debug!("Getting details");
@@ -282,11 +270,11 @@ impl UploadManager {
     #[instrument(skip(self))]
     pub(crate) async fn store_variant_details(
         &self,
-        path: PathBuf,
+        identifier: S::Identifier,
         filename: String,
         details: &Details,
     ) -> Result<(), Error> {
-        let key = self.details_key(&path, &filename)?;
+        let key = self.details_key(identifier, &filename)?;
         let details_tree = self.inner.details_tree.clone();
         let details_value = serde_json::to_vec(details)?;
 
@@ -315,21 +303,6 @@ impl UploadManager {
             .ok_or(UploadError::MissingFilename)?;
 
         self.aliases_by_hash(&hash).await
-    }
-
-    pub(crate) fn next_directory(&self) -> Result<PathBuf, Error> {
-        let path = self.inner.path_gen.next();
-
-        self.inner
-            .settings_tree
-            .insert(GENERATOR_KEY, path.to_be_bytes())?;
-
-        let mut target_path = self.inner.root_dir.join("files");
-        for dir in path.to_strings() {
-            target_path.push(dir)
-        }
-
-        Ok(target_path)
     }
 
     async fn aliases_by_hash(&self, hash: &sled::IVec) -> Result<Vec<String>, Error> {
@@ -386,26 +359,26 @@ impl UploadManager {
                 debug!("Deleting alias -> delete-token mapping");
                 let existing_token = alias_tree
                     .remove(delete_key(&alias2).as_bytes())?
-                    .ok_or_else(|| trans_err(UploadError::MissingAlias))?;
+                    .ok_or_else(|| trans_upload_error(UploadError::MissingAlias))?;
 
                 // Bail if invalid token
                 if existing_token != token {
                     warn!("Invalid delete token");
-                    return Err(trans_err(UploadError::InvalidToken));
+                    return Err(trans_upload_error(UploadError::InvalidToken));
                 }
 
                 // -- GET ID FOR HASH TREE CLEANUP --
                 debug!("Deleting alias -> id mapping");
                 let id = alias_tree
                     .remove(alias_id_key(&alias2).as_bytes())?
-                    .ok_or_else(|| trans_err(UploadError::MissingAlias))?;
-                let id = String::from_utf8(id.to_vec()).map_err(trans_err)?;
+                    .ok_or_else(|| trans_upload_error(UploadError::MissingAlias))?;
+                let id = String::from_utf8(id.to_vec()).map_err(trans_utf8_error)?;
 
                 // -- GET HASH FOR HASH TREE CLEANUP --
                 debug!("Deleting alias -> hash mapping");
                 let hash = alias_tree
                     .remove(alias2.as_bytes())?
-                    .ok_or_else(|| trans_err(UploadError::MissingAlias))?;
+                    .ok_or_else(|| trans_upload_error(UploadError::MissingAlias))?;
 
                 // -- REMOVE HASH TREE ELEMENT --
                 debug!("Deleting hash -> alias mapping");
@@ -491,7 +464,7 @@ impl UploadManager {
         Ok(filename)
     }
 
-    pub(crate) fn session(&self) -> UploadManagerSession {
+    pub(crate) fn session(&self) -> UploadManagerSession<S> {
         UploadManagerSession::new(self.clone())
     }
 
@@ -501,14 +474,14 @@ impl UploadManager {
         let filename = filename.inner;
 
         let filename2 = filename.clone();
-        let path_tree = self.inner.path_tree.clone();
-        let path = web::block(move || path_tree.remove(filename2)).await??;
+        let identifier_tree = self.inner.identifier_tree.clone();
+        let identifier = web::block(move || identifier_tree.remove(filename2)).await??;
 
         let mut errors = Vec::new();
-        if let Some(path) = path {
-            let path = self.inner.root_dir.join(String::from_utf8(path.to_vec())?);
-            debug!("Deleting {:?}", path);
-            if let Err(e) = self.remove_path(&path).await {
+        if let Some(identifier) = identifier {
+            let identifier = S::Identifier::from_bytes(identifier.to_vec())?;
+            debug!("Deleting {:?}", identifier);
+            if let Err(e) = self.store.remove(&identifier).await {
                 errors.push(e.into());
             }
         }
@@ -519,36 +492,34 @@ impl UploadManager {
         web::block(move || fname_tree.remove(filename2)).await??;
 
         let path_prefix = filename.clone();
-        let path_tree = self.inner.path_tree.clone();
+        let identifier_tree = self.inner.identifier_tree.clone();
         debug!("Fetching file variants");
-        let paths = web::block(move || {
-            path_tree
+        let identifiers = web::block(move || {
+            identifier_tree
                 .scan_prefix(path_prefix)
                 .values()
                 .collect::<Result<Vec<sled::IVec>, sled::Error>>()
         })
         .await??;
 
-        debug!("{} files prepared for deletion", paths.len());
+        debug!("{} files prepared for deletion", identifiers.len());
 
-        for path in paths {
-            let path = self
-                .inner
-                .root_dir
-                .join(String::from_utf8_lossy(&path).as_ref());
-            debug!("Deleting {:?}", path);
-            if let Err(e) = self.remove_path(&path).await {
+        for id in identifiers {
+            let identifier = S::Identifier::from_bytes(id.to_vec())?;
+
+            debug!("Deleting {:?}", identifier);
+            if let Err(e) = self.store.remove(&identifier).await {
                 errors.push(e);
             }
         }
 
         let path_prefix = filename.clone();
-        let path_tree = self.inner.path_tree.clone();
+        let identifier_tree = self.inner.identifier_tree.clone();
         debug!("Deleting path info");
         web::block(move || {
-            for res in path_tree.scan_prefix(path_prefix).keys() {
+            for res in identifier_tree.scan_prefix(path_prefix).keys() {
                 let key = res?;
-                path_tree.remove(key)?;
+                identifier_tree.remove(key)?;
             }
             Ok(()) as Result<(), Error>
         })
@@ -560,30 +531,7 @@ impl UploadManager {
         Ok(())
     }
 
-    async fn try_remove_parents(&self, mut path: &std::path::Path) -> Result<(), Error> {
-        let root = self.inner.root_dir.join("files");
-
-        while let Some(parent) = path.parent() {
-            if parent.ends_with(&root) {
-                break;
-            }
-
-            if tokio::fs::remove_dir(parent).await.is_err() {
-                break;
-            }
-
-            path = parent;
-        }
-
-        Ok(())
-    }
-
-    async fn remove_path(&self, path: &std::path::Path) -> Result<(), Error> {
-        tokio::fs::remove_file(path).await?;
-        self.try_remove_parents(path).await
-    }
-
-    fn variant_key(
+    pub(crate) fn variant_key(
         &self,
         variant_process_path: &std::path::Path,
         filename: &str,
@@ -597,15 +545,11 @@ impl UploadManager {
         Ok(vec)
     }
 
-    fn details_key(
-        &self,
-        variant_path: &std::path::Path,
-        filename: &str,
-    ) -> Result<Vec<u8>, Error> {
-        let path = self.generalize_path(variant_path)?;
-        let path_string = path.to_str().ok_or(UploadError::Path)?.to_string();
+    fn details_key(&self, identifier: S::Identifier, filename: &str) -> Result<Vec<u8>, Error> {
+        let mut vec = filename.as_bytes().to_vec();
+        vec.extend(b"/");
+        vec.extend(&identifier.to_bytes()?);
 
-        let vec = format!("{}/{}", filename, path_string).as_bytes().to_vec();
         Ok(vec)
     }
 }
@@ -623,8 +567,11 @@ impl Details {
     }
 
     #[tracing::instrument("Details from bytes", skip(input))]
-    pub(crate) async fn from_bytes(input: web::Bytes) -> Result<Self, Error> {
-        let details = crate::magick::details_bytes(input).await?;
+    pub(crate) async fn from_bytes(
+        input: web::Bytes,
+        hint: Option<ValidInputType>,
+    ) -> Result<Self, Error> {
+        let details = crate::magick::details_bytes(input, hint).await?;
 
         Ok(Details::now(
             details.width,
@@ -633,12 +580,13 @@ impl Details {
         ))
     }
 
-    #[tracing::instrument("Details from path", fields(path = &tracing::field::debug(&path.as_ref())))]
-    pub(crate) async fn from_path<P>(path: P) -> Result<Self, Error>
-    where
-        P: AsRef<std::path::Path>,
-    {
-        let details = crate::magick::details(&path).await?;
+    #[tracing::instrument("Details from store")]
+    pub(crate) async fn from_store<S: Store>(
+        store: S,
+        identifier: S::Identifier,
+        expected_format: Option<ValidInputType>,
+    ) -> Result<Self, Error> {
+        let details = crate::magick::details_store(store, identifier, expected_format).await?;
 
         Ok(Details::now(
             details.width,
@@ -671,14 +619,14 @@ impl FilenameIVec {
     }
 }
 
-fn init_generator(settings: &sled::Tree) -> Result<Generator, Error> {
-    if let Some(ivec) = settings.get(GENERATOR_KEY)? {
-        Ok(Generator::from_existing(Path::from_be_bytes(
-            ivec.to_vec(),
-        )?))
-    } else {
-        Ok(Generator::new())
-    }
+fn trans_upload_error(
+    upload_error: UploadError,
+) -> sled::transaction::ConflictableTransactionError<Error> {
+    trans_err(upload_error)
+}
+
+fn trans_utf8_error(e: FromUtf8Error) -> sled::transaction::ConflictableTransactionError<Error> {
+    trans_err(e)
 }
 
 fn trans_err<E>(e: E) -> sled::transaction::ConflictableTransactionError<Error>
@@ -706,7 +654,7 @@ impl<T> DerefMut for Serde<T> {
     }
 }
 
-impl std::fmt::Debug for UploadManager {
+impl<S> std::fmt::Debug for UploadManager<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("UploadManager").finish()
     }

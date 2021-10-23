@@ -2,6 +2,7 @@ use crate::{
     config::Format,
     error::{Error, UploadError},
     process::Process,
+    store::Store,
 };
 use actix_web::web::Bytes;
 use tokio::{
@@ -10,12 +11,33 @@ use tokio::{
 };
 use tracing::instrument;
 
+pub(crate) fn details_hint(filename: &str) -> Option<ValidInputType> {
+    if filename.ends_with(".mp4") {
+        Some(ValidInputType::Mp4)
+    } else {
+        None
+    }
+}
+
+#[derive(Debug)]
 pub(crate) enum ValidInputType {
     Mp4,
     Gif,
     Png,
     Jpeg,
     Webp,
+}
+
+impl ValidInputType {
+    fn to_str(&self) -> &'static str {
+        match self {
+            Self::Mp4 => "MP4",
+            Self::Gif => "GIF",
+            Self::Png => "PNG",
+            Self::Jpeg => "JPEG",
+            Self::Webp => "WEBP",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -32,10 +54,19 @@ pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> std::io::Result<impl As
 }
 
 #[instrument(name = "Getting details from input bytes", skip(input))]
-pub(crate) async fn details_bytes(input: Bytes) -> Result<Details, Error> {
+pub(crate) async fn details_bytes(
+    input: Bytes,
+    hint: Option<ValidInputType>,
+) -> Result<Details, Error> {
+    let last_arg = if let Some(expected_format) = hint {
+        format!("{}:-", expected_format.to_str())
+    } else {
+        "-".to_owned()
+    };
+
     let process = Process::run(
         "magick",
-        &["identify", "-ping", "-format", "%w %h | %m\n", "-"],
+        &["identify", "-ping", "-format", "%w %h | %m\n", &last_arg],
     )?;
 
     let mut reader = process.bytes_read(input).unwrap();
@@ -64,22 +95,28 @@ pub(crate) fn convert_bytes_read(
     Ok(process.bytes_read(input).unwrap())
 }
 
-pub(crate) async fn details<P>(file: P) -> Result<Details, Error>
-where
-    P: AsRef<std::path::Path>,
-{
-    let command = "magick";
-    let args = ["identify", "-ping", "-format", "%w %h | %m\n"];
-    let last_arg = file.as_ref();
+pub(crate) async fn details_store<S: Store>(
+    store: S,
+    identifier: S::Identifier,
+    expected_format: Option<ValidInputType>,
+) -> Result<Details, Error> {
+    let last_arg = if let Some(expected_format) = expected_format {
+        format!("{}:-", expected_format.to_str())
+    } else {
+        "-".to_owned()
+    };
 
-    tracing::info!("Spawning command: {} {:?} {:?}", command, args, last_arg);
-    let output = Command::new(command)
-        .args(args)
-        .arg(last_arg)
-        .output()
-        .await?;
+    let process = Process::run(
+        "magick",
+        &["identify", "-ping", "-format", "%w %h | %m\n", &last_arg],
+    )?;
 
-    let s = String::from_utf8_lossy(&output.stdout);
+    let mut reader = process.store_read(store, identifier).unwrap();
+
+    let mut output = Vec::new();
+    reader.read_to_end(&mut output).await?;
+
+    let s = String::from_utf8_lossy(&output);
 
     parse_details(s)
 }
@@ -137,12 +174,13 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
 
 #[instrument(name = "Getting input type from bytes", skip(input))]
 pub(crate) async fn input_type_bytes(input: Bytes) -> Result<ValidInputType, Error> {
-    details_bytes(input).await?.validate_input()
+    details_bytes(input, None).await?.validate_input()
 }
 
-#[instrument(name = "Spawning process command", skip(input))]
-pub(crate) fn process_image_file_read(
-    input: crate::file::File,
+#[instrument(name = "Spawning process command")]
+pub(crate) fn process_image_store_read<S: Store>(
+    store: S,
+    identifier: S::Identifier,
     args: Vec<String>,
     format: Format,
 ) -> std::io::Result<impl AsyncRead + Unpin> {
@@ -157,7 +195,7 @@ pub(crate) fn process_image_file_read(
             .arg(last_arg),
     )?;
 
-    Ok(process.file_read(input).unwrap())
+    Ok(process.store_read(store, identifier).unwrap())
 }
 
 impl Details {

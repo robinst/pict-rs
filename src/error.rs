@@ -69,6 +69,9 @@ pub(crate) enum UploadError {
     #[error(transparent)]
     StripPrefix(#[from] std::path::StripPrefixError),
 
+    #[error(transparent)]
+    FileStore(#[from] crate::store::file_store::FileError),
+
     #[error("Provided process path is invalid")]
     ParsePath,
 
@@ -114,17 +117,11 @@ pub(crate) enum UploadError {
     #[error("Tried to save an image with an already-taken name")]
     DuplicateAlias,
 
-    #[error("Tried to create file, but file already exists")]
-    FileExists,
-
     #[error("{0}")]
     Json(#[from] serde_json::Error),
 
     #[error("Range header not satisfiable")]
     Range,
-
-    #[error("Command failed")]
-    Status,
 
     #[error(transparent)]
     Limit(#[from] super::LimitError),
