@@ -28,6 +28,7 @@ mod either;
 mod error;
 mod exiftool;
 mod ffmpeg;
+mod file;
 mod init_tracing;
 mod magick;
 mod map_error;
@@ -37,6 +38,7 @@ mod process;
 mod processor;
 mod range;
 mod store;
+mod tmp_file;
 mod upload_manager;
 mod validate;
 
@@ -820,6 +822,8 @@ where
     .bind(CONFIG.bind_address())?
     .run()
     .await?;
+
+    crate::tmp_file::remove_tmp_dir().await?;
 
     Ok(())
 }

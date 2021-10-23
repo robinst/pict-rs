@@ -57,6 +57,10 @@ impl ValidInputType {
         }
     }
 
+    fn is_mp4(&self) -> bool {
+        matches!(self, Self::Mp4)
+    }
+
     pub(crate) fn from_format(format: Format) -> Self {
         match format {
             Format::Jpeg => ValidInputType::Jpeg,
@@ -79,11 +83,40 @@ pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> std::io::Result<impl As
     Ok(process.bytes_read(input).unwrap())
 }
 
+pub(crate) fn convert_bytes_read(
+    input: Bytes,
+    format: Format,
+) -> std::io::Result<impl AsyncRead + Unpin> {
+    let process = Process::run(
+        "magick",
+        &[
+            "convert",
+            "-",
+            "-strip",
+            format!("{}:-", format.to_magick_format()).as_str(),
+        ],
+    )?;
+
+    Ok(process.bytes_read(input).unwrap())
+}
+
 #[instrument(name = "Getting details from input bytes", skip(input))]
 pub(crate) async fn details_bytes(
     input: Bytes,
     hint: Option<ValidInputType>,
 ) -> Result<Details, Error> {
+    if hint.as_ref().map(|h| h.is_mp4()).unwrap_or(false) {
+        let input_file = crate::tmp_file::tmp_file(Some(".mp4"));
+        let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
+        crate::store::file_store::safe_create_parent(&input_file).await?;
+
+        let mut tmp_one = crate::file::File::create(&input_file).await?;
+        tmp_one.write_from_bytes(input).await?;
+        tmp_one.close().await?;
+
+        return details_file(input_file_str).await;
+    }
+
     let last_arg = if let Some(expected_format) = hint {
         format!("{}:-", expected_format.to_str())
     } else {
@@ -104,29 +137,29 @@ pub(crate) async fn details_bytes(
     parse_details(s)
 }
 
-pub(crate) fn convert_bytes_read(
-    input: Bytes,
-    format: Format,
-) -> std::io::Result<impl AsyncRead + Unpin> {
-    let process = Process::run(
-        "magick",
-        &[
-            "convert",
-            "-",
-            "-strip",
-            format!("{}:-", format.to_magick_format()).as_str(),
-        ],
-    )?;
-
-    Ok(process.bytes_read(input).unwrap())
-}
-
 pub(crate) async fn details_store<S: Store>(
     store: S,
     identifier: S::Identifier,
-    expected_format: Option<ValidInputType>,
-) -> Result<Details, Error> {
-    let last_arg = if let Some(expected_format) = expected_format {
+    hint: Option<ValidInputType>,
+) -> Result<Details, Error>
+where
+    Error: From<S::Error>,
+{
+    if hint.as_ref().map(|h| h.is_mp4()).unwrap_or(false) {
+        let input_file = crate::tmp_file::tmp_file(Some(".mp4"));
+        let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
+        crate::store::file_store::safe_create_parent(&input_file).await?;
+
+        let mut tmp_one = crate::file::File::create(&input_file).await?;
+        tmp_one
+            .write_from_stream(store.to_stream(&identifier, None, None).await?)
+            .await?;
+        tmp_one.close().await?;
+
+        return details_file(input_file_str).await;
+    }
+
+    let last_arg = if let Some(expected_format) = hint {
         format!("{}:-", expected_format.to_str())
     } else {
         "-".to_owned()
@@ -141,6 +174,23 @@ pub(crate) async fn details_store<S: Store>(
 
     let mut output = Vec::new();
     reader.read_to_end(&mut output).await?;
+
+    let s = String::from_utf8_lossy(&output);
+
+    parse_details(s)
+}
+
+pub(crate) async fn details_file(path_str: &str) -> Result<Details, Error> {
+    let process = Process::run(
+        "magick",
+        &["identify", "-ping", "-format", "%w %h | %m\n", &path_str],
+    )?;
+
+    let mut reader = process.read().unwrap();
+
+    let mut output = Vec::new();
+    reader.read_to_end(&mut output).await?;
+    tokio::fs::remove_file(path_str).await?;
 
     let s = String::from_utf8_lossy(&output);
 

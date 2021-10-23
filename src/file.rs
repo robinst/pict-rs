@@ -8,8 +8,8 @@ pub(crate) use tokio_file::File;
 mod tokio_file {
     use crate::{store::file_store::FileError, Either};
     use actix_web::web::{Bytes, BytesMut};
-    use futures_util::stream::Stream;
-    use std::{io::SeekFrom, path::Path};
+    use futures_util::stream::{Stream, StreamExt};
+    use std::{io::SeekFrom, path::Path, pin::Pin};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
     use tokio_util::codec::{BytesCodec, FramedRead};
 
@@ -35,6 +35,22 @@ mod tokio_file {
             Ok(())
         }
 
+        pub(crate) async fn write_from_stream<S>(&mut self, mut stream: S) -> std::io::Result<()>
+        where
+            S: Stream<Item = std::io::Result<Bytes>>,
+        {
+            // SAFETY: pinned stream shadows original stream so it cannot be moved
+            let mut stream = unsafe { Pin::new_unchecked(&mut stream) };
+
+            while let Some(res) = stream.next().await {
+                let mut bytes = res?;
+
+                self.inner.write_all_buf(&mut bytes).await?;
+            }
+
+            Ok(())
+        }
+
         pub(crate) async fn write_from_async_read<R>(
             &mut self,
             mut reader: R,
@@ -43,6 +59,10 @@ mod tokio_file {
             R: AsyncRead + Unpin,
         {
             tokio::io::copy(&mut reader, &mut self.inner).await?;
+            Ok(())
+        }
+
+        pub(crate) async fn close(self) -> std::io::Result<()> {
             Ok(())
         }
 
@@ -112,7 +132,7 @@ mod tokio_file {
 mod io_uring {
     use crate::store::file_store::FileError;
     use actix_web::web::Bytes;
-    use futures_util::stream::Stream;
+    use futures_util::stream::{Stream, StreamExt};
     use std::{
         convert::TryInto,
         fs::Metadata,
@@ -182,6 +202,50 @@ mod io_uring {
             Ok(())
         }
 
+        pub(crate) async fn write_from_stream<S>(&mut self, mut stream: S) -> std::io::Result<()>
+        where
+            S: Stream<Item = std::io::Result<Bytes>>,
+        {
+            // SAFETY: pinned stream shadows original stream so it cannot be moved
+            let mut stream = unsafe { Pin::new_unchecked(&mut stream) };
+            let mut cursor: u64 = 0;
+
+            while let Some(res) = stream.next().await {
+                let bytes = res?;
+                let mut buf = bytes.to_vec();
+
+                let len = buf.len();
+                let mut position = 0;
+
+                loop {
+                    if position == len {
+                        break;
+                    }
+
+                    let position_u64: u64 = position.try_into().unwrap();
+                    let (res, slice) = self
+                        .write_at(buf.slice(position..len), cursor + position_u64)
+                        .await;
+
+                    let n = res?;
+                    if n == 0 {
+                        return Err(std::io::ErrorKind::UnexpectedEof.into());
+                    }
+
+                    position += n;
+
+                    buf = slice.into_inner();
+                }
+
+                let position: u64 = position.try_into().unwrap();
+                cursor += position;
+            }
+
+            self.inner.sync_all().await?;
+
+            Ok(())
+        }
+
         pub(crate) async fn write_from_async_read<R>(
             &mut self,
             mut reader: R,
@@ -230,6 +294,10 @@ mod io_uring {
             self.inner.sync_all().await?;
 
             Ok(())
+        }
+
+        pub(crate) async fn close(self) -> std::io::Result<()> {
+            self.inner.close().await
         }
 
         pub(crate) async fn read_to_async_write<W>(&mut self, writer: &mut W) -> std::io::Result<()>

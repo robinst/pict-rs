@@ -47,17 +47,15 @@ pub(crate) async fn validate_image_bytes(
     match (prescribed_format, input_type) {
         (_, ValidInputType::Gif) => Ok((
             ValidInputType::Mp4,
-            Either::right(Either::left(crate::ffmpeg::to_mp4_bytes(
-                bytes,
-                InputFormat::Gif,
-            )?)),
+            Either::right(Either::left(
+                crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Gif).await?,
+            )),
         )),
         (_, ValidInputType::Mp4) => Ok((
             ValidInputType::Mp4,
-            Either::right(Either::left(crate::ffmpeg::to_mp4_bytes(
-                bytes,
-                InputFormat::Mp4,
-            )?)),
+            Either::right(Either::left(
+                crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Mp4).await?,
+            )),
         )),
         (Some(Format::Jpeg) | None, ValidInputType::Jpeg) => Ok((
             ValidInputType::Jpeg,

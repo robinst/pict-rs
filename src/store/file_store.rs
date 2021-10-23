@@ -1,4 +1,4 @@
-use crate::store::Store;
+use crate::{file::File, store::Store};
 use actix_web::web::Bytes;
 use futures_util::stream::Stream;
 use std::{
@@ -10,10 +10,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, error, instrument};
 use uuid::Uuid;
 
-mod file;
 mod file_id;
 mod restructure;
-use file::File;
 pub(crate) use file_id::FileId;
 
 // - Settings Tree

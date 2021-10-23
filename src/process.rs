@@ -63,6 +63,14 @@ impl Process {
         cmd.spawn().map(|child| Process { child, span })
     }
 
+    pub(crate) async fn wait(mut self) -> std::io::Result<()> {
+        let status = self.child.wait().await?;
+        if !status.success() {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+        }
+        Ok(())
+    }
+
     pub(crate) fn bytes_read(mut self, mut input: Bytes) -> Option<impl AsyncRead + Unpin> {
         let mut stdin = self.child.stdin.take()?;
         let stdout = self.child.stdout.take()?;
@@ -79,6 +87,39 @@ impl Process {
                 }
                 drop(stdin);
 
+                match child.wait().await {
+                    Ok(status) => {
+                        if !status.success() {
+                            let _ = tx
+                                .send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(e);
+                    }
+                }
+            }
+            .instrument(span),
+        );
+
+        Some(ProcessRead {
+            inner: stdout,
+            span: self.span,
+            err_recv: rx,
+            err_closed: false,
+            handle: DropHandle { inner: handle },
+        })
+    }
+
+    pub(crate) fn read(mut self) -> Option<impl AsyncRead + Unpin> {
+        let stdout = self.child.stdout.take()?;
+
+        let (tx, rx) = channel();
+
+        let span = self.spawn_span();
+        let mut child = self.child;
+        let handle = actix_rt::spawn(
+            async move {
                 match child.wait().await {
                     Ok(status) => {
                         if !status.success() {
