@@ -1712,9 +1712,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cde1cf55178e0293453ba2cca0d5f8392a922e52aa958aee9c28ed02becc6d03"
+checksum = "99beeb0daeac2bd1e86ac2c21caddecb244b39a093594da1a661ec2060c7aedd"
 dependencies = [
  "itoa",
  "libc",
@@ -1918,7 +1918,7 @@ dependencies = [
 [[package]]
 name = "tracing-actix-web"
 version = "0.4.0-beta.15"
-source = "git+https://github.com/asonix/tracing-actix-web?branch=asonix/update-tracing-subscriber#378f35c89acf01956fbc2d5e0e7314377e15c11d"
+source = "git+https://github.com/asonix/tracing-actix-web?branch=asonix/update-tracing-subscriber#a3a9b1e6af6833586608a6aa4ce56cdb9d302f01"
 dependencies = [
  "actix-web",
  "opentelemetry",
@@ -1943,7 +1943,7 @@ dependencies = [
 [[package]]
 name = "tracing-awc"
 version = "0.1.0-beta.6"
-source = "git+https://git.asonix.dog/asonix/tracing-awc#858cb9c1ac1cac63c0462b7e4d1a5bbca8803db3"
+source = "git+https://git.asonix.dog/asonix/tracing-awc#23c419c3c88d24ed578211670e4cdc816ac9c026"
 dependencies = [
  "actix-http",
  "awc",
@@ -2013,9 +2013,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cf865b5ddc38e503a29c41c4843e616a73028ae18c637bc3eb2afaef4909c84"
+checksum = "80a4ddde70311d8da398062ecf6fc2c309337de6b0f77d6c27aff8d53f6fca52"
 dependencies = [
  "ansi_term 0.12.1",
  "lazy_static",
