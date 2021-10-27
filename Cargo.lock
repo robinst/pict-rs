@@ -1234,9 +1234,9 @@ checksum = "bc881b2c22681370c6a780e47af9840ef841837bc98118431d4e1868bd0c1086"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.30"
+version = "1.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc3358ebc67bc8b7fa0c007f945b0b18226f78437d61bec735a9eb96b61ee70"
+checksum = "ba508cc11742c0dc5c1659771673afbab7a0efab23aa17e854cbab0837ed0b43"
 dependencies = [
  "unicode-xid",
 ]
@@ -1649,9 +1649,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "1.0.80"
+version = "1.0.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d010a1623fbd906d51d650a9916aaefc05ffa0e4053ff7fe601167f3e715d194"
+checksum = "f2afee18b8beb5a596ecb4a2dce128c719b4ba399d34126b9e4396e3f9860966"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1917,8 +1917,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-actix-web"
-version = "0.4.0-beta.15"
-source = "git+https://github.com/asonix/tracing-actix-web?branch=asonix/update-tracing-subscriber#a3a9b1e6af6833586608a6aa4ce56cdb9d302f01"
+version = "0.5.0-beta.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42294d195afb0ae79ea237040399179a8b5050b454c210fe4566ed383c6f0c17"
 dependencies = [
  "actix-web",
  "opentelemetry",
@@ -1942,8 +1943,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-awc"
-version = "0.1.0-beta.6"
-source = "git+https://git.asonix.dog/asonix/tracing-awc#23c419c3c88d24ed578211670e4cdc816ac9c026"
+version = "0.1.0-beta.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ad0e6191ec442bb569839502f12a1701cf31c87eb301104a3908bded5b9647e"
 dependencies = [
  "actix-http",
  "awc",
