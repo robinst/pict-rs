@@ -207,7 +207,6 @@ impl Config {
         base_config.merge(config::Environment::with_prefix("PICTRS").separator("__"))?;
 
         let config: Self = base_config.try_into()?;
-        println!("{:#?}", config);
 
         Ok(config)
     }
