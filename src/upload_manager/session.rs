@@ -157,7 +157,7 @@ where
         debug!("Validating bytes");
         let (content_type, validated_reader) = crate::validate::validate_image_bytes(
             bytes_mut.freeze(),
-            self.manager.inner.format.clone(),
+            self.manager.inner.format,
             validate,
         )
         .await?;
@@ -199,7 +199,7 @@ where
         debug!("Validating bytes");
         let (input_type, validated_reader) = crate::validate::validate_image_bytes(
             bytes_mut.freeze(),
-            self.manager.inner.format.clone(),
+            self.manager.inner.format,
             true,
         )
         .await?;
@@ -236,11 +236,11 @@ where
         if dup.exists() {
             debug!("Duplicate exists, removing file");
 
-            self.manager.store.remove(&identifier).await?;
+            self.manager.store.remove(identifier).await?;
             return Ok(());
         }
 
-        self.manager.store_identifier(name, &identifier).await?;
+        self.manager.store_identifier(name, identifier).await?;
 
         Ok(())
     }
@@ -412,5 +412,5 @@ where
 }
 
 fn file_name(name: Uuid, input_type: ValidInputType) -> String {
-    format!("{}{}", name, input_type.to_ext())
+    format!("{}{}", name, input_type.as_ext())
 }

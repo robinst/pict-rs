@@ -15,7 +15,6 @@ use std::{
     task::{Context, Poll},
     time::SystemTime,
 };
-use structopt::StructOpt;
 use tokio::{io::AsyncReadExt, sync::Semaphore};
 use tracing::{debug, error, info, instrument, Span};
 use tracing_actix_web::TracingLogger;
@@ -37,6 +36,7 @@ mod migrate;
 mod process;
 mod processor;
 mod range;
+mod serde_str;
 mod store;
 mod tmp_file;
 mod upload_manager;
@@ -61,7 +61,7 @@ const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
 const DAYS: u32 = 24 * HOURS;
 
-static CONFIG: Lazy<Config> = Lazy::new(Config::from_args);
+static CONFIG: Lazy<Config> = Lazy::new(|| Config::build().unwrap());
 static PROCESS_SEMAPHORE: Lazy<Semaphore> =
     Lazy::new(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
 
@@ -397,7 +397,7 @@ where
 
         drop(permit);
 
-        let details = Details::from_bytes(bytes.clone(), format.to_hint()).await?;
+        let details = Details::from_bytes(bytes.clone(), format.as_hint()).await?;
 
         let save_span = tracing::info_span!(
             parent: None,
@@ -835,10 +835,38 @@ async fn main() -> anyhow::Result<()> {
     let root_dir = CONFIG.data_dir();
     let db = LatestDb::exists(root_dir.clone()).migrate()?;
 
-    let store = FileStore::build(root_dir, &db)?;
+    match CONFIG.store() {
+        config::Store::FileStore { path } => {
+            let path = path.to_owned().unwrap_or_else(|| root_dir.clone());
 
-    let manager = UploadManager::new(store, db, CONFIG.format()).await?;
+            let store = FileStore::build(path, &db)?;
 
-    manager.restructure().await?;
-    launch(manager).await
+            let manager = UploadManager::new(store, db, CONFIG.format()).await?;
+
+            manager.restructure().await?;
+            launch(manager).await
+        }
+        #[cfg(feature = "object-storage")]
+        config::Store::S3Store {
+            bucket_name,
+            region,
+            access_key,
+            secret_key,
+            security_token,
+            session_token,
+        } => {
+            let store = crate::store::object_store::ObjectStore::build(
+                bucket_name,
+                (**region).clone(),
+                access_key.clone(),
+                secret_key.clone(),
+                security_token.clone(),
+                session_token.clone(),
+                &db,
+            )?;
+
+            let manager = UploadManager::new(store, db, CONFIG.format()).await?;
+            launch(manager).await
+        }
+    }
 }

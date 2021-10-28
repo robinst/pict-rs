@@ -5,6 +5,8 @@ use futures_util::stream::Stream;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub(crate) mod file_store;
+#[cfg(feature = "object-storage")]
+pub(crate) mod object_store;
 
 pub(crate) trait Identifier: Send + Sync + Clone + Debug {
     type Error: std::error::Error;

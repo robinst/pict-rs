@@ -8,13 +8,13 @@ pub(crate) struct Error {
 
 impl std::fmt::Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}\n", self.kind)
+        writeln!(f, "{}", self.kind)
     }
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}\n", self.kind)?;
+        writeln!(f, "{}", self.kind)?;
         std::fmt::Display::fmt(&self.context, f)
     }
 }
@@ -71,6 +71,10 @@ pub(crate) enum UploadError {
 
     #[error(transparent)]
     FileStore(#[from] crate::store::file_store::FileError),
+
+    #[cfg(feature = "object-storage")]
+    #[error(transparent)]
+    ObjectStore(#[from] crate::store::object_store::ObjectError),
 
     #[error("Provided process path is invalid")]
     ParsePath,

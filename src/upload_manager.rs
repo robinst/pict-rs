@@ -4,15 +4,12 @@ use crate::{
     ffmpeg::{InputFormat, ThumbnailFormat},
     magick::{details_hint, ValidInputType},
     migrate::{alias_id_key, alias_key, alias_key_bounds},
+    serde_str::Serde,
     store::{Identifier, Store},
 };
 use actix_web::web;
 use sha2::Digest;
-use std::{
-    ops::{Deref, DerefMut},
-    string::FromUtf8Error,
-    sync::Arc,
-};
+use std::{string::FromUtf8Error, sync::Arc};
 use tracing::{debug, error, info, instrument, warn, Span};
 use tracing_futures::Instrument;
 
@@ -56,11 +53,6 @@ pub(crate) struct UploadManagerInner {
     details_tree: sled::Tree,
     pub(crate) identifier_tree: sled::Tree,
     db: sled::Db,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct Serde<T> {
-    inner: T,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -482,7 +474,7 @@ where
             let identifier = S::Identifier::from_bytes(identifier.to_vec())?;
             debug!("Deleting {:?}", identifier);
             if let Err(e) = self.store.remove(&identifier).await {
-                errors.push(e.into());
+                errors.push(e);
             }
         }
 
@@ -554,12 +546,6 @@ where
     }
 }
 
-impl<T> Serde<T> {
-    pub(crate) fn new(inner: T) -> Self {
-        Serde { inner }
-    }
-}
-
 impl Details {
     fn is_motion(&self) -> bool {
         self.content_type.type_() == "video"
@@ -608,7 +594,7 @@ impl Details {
     }
 
     pub(crate) fn content_type(&self) -> mime::Mime {
-        self.content_type.inner.clone()
+        (*self.content_type).clone()
     }
 
     pub(crate) fn system_time(&self) -> std::time::SystemTime {
@@ -643,54 +629,9 @@ fn delete_key(alias: &str) -> String {
     format!("{}/delete", alias)
 }
 
-impl<T> Deref for Serde<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T> DerefMut for Serde<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
 impl<S> std::fmt::Debug for UploadManager<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("UploadManager").finish()
-    }
-}
-
-impl<T> serde::Serialize for Serde<T>
-where
-    T: std::fmt::Display,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let s = self.inner.to_string();
-        serde::Serialize::serialize(s.as_str(), serializer)
-    }
-}
-
-impl<'de, T> serde::Deserialize<'de> for Serde<T>
-where
-    T: std::str::FromStr,
-    <T as std::str::FromStr>::Err: std::fmt::Display,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s: String = serde::Deserialize::deserialize(deserializer)?;
-        let inner = s
-            .parse::<T>()
-            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
-
-        Ok(Serde { inner })
     }
 }
 

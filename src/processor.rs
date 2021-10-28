@@ -41,7 +41,7 @@ pub(crate) fn build_chain(
     }
 
     let (path, args) =
-        args.into_iter()
+        args.iter()
             .fold(Ok((PathBuf::default(), vec![])), |inner, (name, value)| {
                 if let Ok(inner) = inner {
                     parse!(inner, Identity, name, value);

@@ -37,7 +37,7 @@ pub(crate) enum ValidInputType {
 }
 
 impl ValidInputType {
-    fn to_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             Self::Mp4 => "MP4",
             Self::Gif => "GIF",
@@ -47,7 +47,7 @@ impl ValidInputType {
         }
     }
 
-    pub(crate) fn to_ext(&self) -> &'static str {
+    pub(crate) fn as_ext(&self) -> &'static str {
         match self {
             Self::Mp4 => ".mp4",
             Self::Gif => ".gif",
@@ -93,7 +93,7 @@ pub(crate) fn convert_bytes_read(
             "convert",
             "-",
             "-strip",
-            format!("{}:-", format.to_magick_format()).as_str(),
+            format!("{}:-", format.as_magick_format()).as_str(),
         ],
     )?;
 
@@ -118,7 +118,7 @@ pub(crate) async fn details_bytes(
     }
 
     let last_arg = if let Some(expected_format) = hint {
-        format!("{}:-", expected_format.to_str())
+        format!("{}:-", expected_format.as_str())
     } else {
         "-".to_owned()
     };
@@ -160,7 +160,7 @@ where
     }
 
     let last_arg = if let Some(expected_format) = hint {
-        format!("{}:-", expected_format.to_str())
+        format!("{}:-", expected_format.as_str())
     } else {
         "-".to_owned()
     };
@@ -183,7 +183,7 @@ where
 pub(crate) async fn details_file(path_str: &str) -> Result<Details, Error> {
     let process = Process::run(
         "magick",
-        &["identify", "-ping", "-format", "%w %h | %m\n", &path_str],
+        &["identify", "-ping", "-format", "%w %h | %m\n", path_str],
     )?;
 
     let mut reader = process.read().unwrap();
@@ -262,7 +262,7 @@ pub(crate) fn process_image_store_read<S: Store>(
 ) -> std::io::Result<impl AsyncRead + Unpin> {
     let command = "magick";
     let convert_args = ["convert", "-"];
-    let last_arg = format!("{}:-", format.to_magick_format());
+    let last_arg = format!("{}:-", format.as_magick_format());
 
     let process = Process::spawn(
         Command::new(command)
@@ -277,7 +277,10 @@ pub(crate) fn process_image_store_read<S: Store>(
 impl Details {
     #[instrument(name = "Validating input type")]
     fn validate_input(&self) -> Result<ValidInputType, Error> {
-        if self.width > crate::CONFIG.max_width() || self.height > crate::CONFIG.max_height() {
+        if self.width > crate::CONFIG.max_width()
+            || self.height > crate::CONFIG.max_height()
+            || self.width * self.height > crate::CONFIG.max_area()
+        {
             return Err(UploadError::Dimensions.into());
         }
 

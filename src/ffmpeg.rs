@@ -70,7 +70,7 @@ pub(crate) async fn to_mp4_bytes(
         "ffmpeg",
         &[
             "-i",
-            &input_file_str,
+            input_file_str,
             "-pix_fmt",
             "yuv420p",
             "-vf",
@@ -80,7 +80,7 @@ pub(crate) async fn to_mp4_bytes(
             "h264",
             "-f",
             "mp4",
-            &output_file_str,
+            output_file_str,
         ],
     )?;
 
@@ -123,14 +123,14 @@ where
         "ffmpeg",
         &[
             "-i",
-            &input_file_str,
+            input_file_str,
             "-vframes",
             "1",
             "-codec",
             format.as_codec(),
             "-f",
             format.as_format(),
-            &output_file_str,
+            output_file_str,
         ],
     )?;
 

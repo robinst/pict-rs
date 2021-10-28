@@ -317,14 +317,14 @@ mod io_uring {
                 let max_size = (size - cursor).min(65_536);
                 let buf = Vec::with_capacity(max_size.try_into().unwrap());
 
-                let (res, mut buf): (_, Vec<u8>) = self.read_at(buf, cursor).await;
+                let (res, buf): (_, Vec<u8>) = self.read_at(buf, cursor).await;
                 let n: usize = res?;
 
                 if n == 0 {
                     return Err(std::io::ErrorKind::UnexpectedEof.into());
                 }
 
-                writer.write_all(&mut buf[0..n]).await?;
+                writer.write_all(&buf[0..n]).await?;
 
                 let n: u64 = n.try_into().unwrap();
                 cursor += n;

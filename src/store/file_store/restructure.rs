@@ -5,8 +5,8 @@ use crate::{
 };
 use std::path::{Path, PathBuf};
 
-const RESTRUCTURE_COMPLETE: &'static [u8] = b"fs-restructure-01-complete";
-const DETAILS: &'static [u8] = b"details";
+const RESTRUCTURE_COMPLETE: &[u8] = b"fs-restructure-01-complete";
+const DETAILS: &[u8] = b"details";
 
 impl UploadManager<FileStore> {
     #[tracing::instrument(skip(self))]

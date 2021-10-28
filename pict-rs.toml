@@ -1,0 +1,65 @@
+## Required: path to store pict-rs database
+path = './data'
+
+## Optional: pict-rs binding address
+# default: 0.0.0.0:8080
+addr = '0.0.0.0:8080'
+
+## Optional: format to transcode all uploaded images
+# valid options: 'jpeg', 'png', 'webp'
+# default: empty
+#
+# Not specifying image-format means images will be stored in their original format
+# This does not affect gif or mp4 uploads
+image-format = 'jpeg'
+
+## Optional: permitted image processing filters
+# valid options: 'identity', 'thumbnail', 'resize', 'crop', 'blur'
+# default: empty
+#
+# Not specifying filters implies all filters are permitted
+filters = [
+    'identity',
+    'thumbnail',
+    'resize',
+    'crop',
+    'blur',
+]
+
+## Optional: image bounds
+# default: 40
+max-file-size = 40 # in Megabytes
+# default: 10,000
+max-image-width = 10000 # in Pixels
+# default: 10,000
+max-image-height = 10000 # in Pixels
+# default: 40,000
+max-image-area = 40000 # in Pixels
+
+## Optional: 
+# default: false
+skip-validate-imports = false
+
+## Optional: url for exporting otlp traces
+# default: empty
+#
+# Not specifying opentelemetry-url means no traces will be exported
+opentelemetry-url = 'http://localhost:4317/'
+
+## Optional: store definition
+# default: empty
+# 
+# Not specifying a store will default to using a file-store in the same directory provided by the `path` field defined above
+[store]
+type = 'file-store'
+path = './data'
+
+## Example s3 store
+# [store]
+# type = 's3-store'
+# bucket-name = 'rust-s3'
+# region = 'eu-central-1' # can also be endpoint of local s3 store
+# access-key = 'ACCESS_KEY'
+# secret-key = 'SECRET_KEY'
+# security-token = 'SECURITY_TOKEN'
+# session-token = 'SESSION-TOKEN'

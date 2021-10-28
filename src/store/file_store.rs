@@ -18,7 +18,7 @@ pub(crate) use file_id::FileId;
 //   - last-path -> last generated path
 //   - fs-restructure-01-complete -> bool
 
-const GENERATOR_KEY: &'static [u8] = b"last-path";
+const GENERATOR_KEY: &[u8] = b"last-path";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FileError {
