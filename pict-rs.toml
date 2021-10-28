@@ -1,65 +1,116 @@
 ## Required: path to store pict-rs database
+# environment variable: PICTRS_PATH
 path = './data'
 
 ## Optional: pict-rs binding address
+# environment variable: PICTRS_ADDR
 # default: 0.0.0.0:8080
 addr = '0.0.0.0:8080'
 
 ## Optional: format to transcode all uploaded images
+# environment variable: PICTRS_IMAGE_FORMAT
 # valid options: 'jpeg', 'png', 'webp'
 # default: empty
 #
-# Not specifying image-format means images will be stored in their original format
+# Not specifying image_format means images will be stored in their original format
 # This does not affect gif or mp4 uploads
-image-format = 'jpeg'
+image_format = 'jpeg'
 
 ## Optional: permitted image processing filters
+# environment variable: PICTRS_FILTERS
 # valid options: 'identity', 'thumbnail', 'resize', 'crop', 'blur'
 # default: empty
 #
 # Not specifying filters implies all filters are permitted
 filters = [
-    'identity',
-    'thumbnail',
-    'resize',
-    'crop',
-    'blur',
+  'identity',
+  'thumbnail',
+  'resize',
+  'crop',
+  'blur',
 ]
 
 ## Optional: image bounds
+# environment variable: PICTRS_MAX_FILE_SIZE
 # default: 40
-max-file-size = 40 # in Megabytes
+max_file_size = 40 # in Megabytes
+# environment variable: PICTRS_MAX_IMAGE_WIDTH
 # default: 10,000
-max-image-width = 10000 # in Pixels
+max_image_width = 10000 # in Pixels
+# environment variable: PICTRS_MAX_IMAGE_HEIGHT
 # default: 10,000
-max-image-height = 10000 # in Pixels
+max_image_height = 10000 # in Pixels
+# environment variable: PICTRS_MAX_IMAGE_AREA
 # default: 40,000
-max-image-area = 40000 # in Pixels
+max_image_area = 40000 # in Pixels
 
-## Optional: 
+## Optional: skip image validation on the import endpoint
+# environment variable: PICTRS_SKIP_VALIDATE_IMPORTS
 # default: false
-skip-validate-imports = false
+skip_validate_imports = false
 
-## Optional: url for exporting otlp traces
+## Optional: shared secret for internal endpoints
+# environment variable: PICTRS_API_KEY
 # default: empty
 #
-# Not specifying opentelemetry-url means no traces will be exported
-opentelemetry-url = 'http://localhost:4317/'
+# Not specifying api_key disables internal endpoints
+api_key = 'API_KEY'
+
+## Optional: url for exporting otlp traces
+# environment variable: PICTRS_OPENTELEMETRY_URL
+# default: empty
+#
+# Not specifying opentelemetry_url means no traces will be exported
+opentelemetry_url = 'http://localhost:4317/'
 
 ## Optional: store definition
-# default: empty
-# 
-# Not specifying a store will default to using a file-store in the same directory provided by the `path` field defined above
+# default store: file_store
 [store]
-type = 'file-store'
-path = './data'
+type = "file_store"
+
+## Example file store
+# [store]
+#
+# # environment variable: PICTRS_STORE__TYPE
+# type = 'file_store'
+#
+# # Optional: file path
+# # environment variable: PICTRS_STORE__PATH
+# # default: empty
+# #
+# # Not specifying path means pict-rs' top-level `path` config is used
+# path = './data'
 
 ## Example s3 store
 # [store]
-# type = 's3-store'
-# bucket-name = 'rust-s3'
+#
+# # environment variable: PICTRS_STORE__TYPE
+# type = 's3_store'
+#
+# # Required: bucket name
+# # environment variable: PICTRS_STORE__BUCKET_NAME
+# bucket_name = 'rust_s3'
+#
+# # Required: bucket region
+# # environment variable: PICTRS_STORE__REGION
 # region = 'eu-central-1' # can also be endpoint of local s3 store
-# access-key = 'ACCESS_KEY'
-# secret-key = 'SECRET_KEY'
-# security-token = 'SECURITY_TOKEN'
-# session-token = 'SESSION-TOKEN'
+#
+# # Optional: bucket access key
+# # environment variable: PICTRS_STORE__ACCESS_KEY
+# # default: empty
+# access_key = 'ACCESS_KEY'
+#
+# # Optional: bucket secret key
+# # environment variable: PICTRS_STORE__SECRET_KEY
+# # default: empty
+# secret_key = 'SECRET_KEY'
+#
+# # Optional: bucket security token
+# # environment variable: PICTRS_STORE__SECURITY_TOKEN
+# # default: empty
+# security_token = 'SECURITY_TOKEN'
+#
+# # Optional: bucket session token
+# # environment variable: PICTRS_STORE__SESSION_TOKEN
+# # default: empty
+# session_token = 'SESSION_TOKEN'

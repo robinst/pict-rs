@@ -220,10 +220,12 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         if let Some(value) = req.headers().get("x-api-token") {
-            if value.to_str().is_ok() && value.to_str().ok() == self.0.as_deref() {
-                return InternalFuture::Internal {
-                    future: self.1.call(req),
-                };
+            if let (Ok(header), Some(api_key)) = (value.to_str(), &self.0) {
+                if header == api_key {
+                    return InternalFuture::Internal {
+                        future: self.1.call(req),
+                    };
+                }
             }
         }
 

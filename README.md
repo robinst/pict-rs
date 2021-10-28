@@ -9,10 +9,10 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-alpha.39
+pict-rs 0.3.0-alpha.42
 
 USAGE:
-    pict-rs [FLAGS] [OPTIONS] --path <path>
+    pict-rs [FLAGS] [OPTIONS] [SUBCOMMAND]
 
 FLAGS:
     -h, --help                     Prints help information
@@ -20,32 +20,64 @@ FLAGS:
     -V, --version                  Prints version information
 
 OPTIONS:
-    -a, --addr <addr>
-            The address and port the server binds to. [env: PICTRS_ADDR=]  [default: 0.0.0.0:8080]
-
-        --api-key <api-key>
-            An optional string to be checked on requests to privileged endpoints [env: PICTRS_API_KEY=]
-
+    -a, --addr <addr>                              The address and port the server binds to.
+        --api-key <api-key>                        An optional string to be checked on requests to privileged endpoints
+    -c, --config-file <config-file>                Path to the pict-rs configuration file
     -f, --filters <filters>...
-            An optional list of filters to permit, supports 'identity', 'thumbnail', 'resize', 'crop', and 'blur' [env:
-            PICTRS_ALLOWED_FILTERS=]
+            An optional list of filters to permit, supports 'identity', 'thumbnail', 'resize', 'crop', and 'blur'
+
     -i, --image-format <image-format>
-            An optional image format to convert all uploaded files into, supports 'jpg', 'png', and 'webp' [env:
-            PICTRS_FORMAT=]
-    -m, --max-file-size <max-file-size>
-            Specify the maximum allowed uploaded file size (in Megabytes) [env: PICTRS_MAX_FILE_SIZE=]  [default: 40]
+            An optional image format to convert all uploaded files into, supports 'jpg', 'png', and 'webp'
 
-        --max-image-height <max-image-height>
-            Specify the maximum width in pixels allowed on an image [env: PICTRS_MAX_IMAGE_HEIGHT=]  [default: 10000]
-
-        --max-image-width <max-image-width>
-            Specify the maximum width in pixels allowed on an image [env: PICTRS_MAX_IMAGE_WIDTH=]  [default: 10000]
-
+    -m, --max-file-size <max-file-size>            Specify the maximum allowed uploaded file size (in Megabytes)
+        --max-image-area <max-image-area>          Specify the maximum area in pixels allowed in an image
+        --max-image-height <max-image-height>      Specify the maximum width in pixels allowed on an image
+        --max-image-width <max-image-width>        Specify the maximum width in pixels allowed on an image
     -o, --opentelemetry-url <opentelemetry-url>
-            Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector [env: PICTRS_OPENTELEMETRY_URL=]
+            Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector
 
-    -p, --path <path>                              The path to the data directory, e.g. data/ [env: PICTRS_PATH=]
+    -p, --path <path>                              The path to the data directory, e.g. data/
+
+SUBCOMMANDS:
+    file-store    
+    help          Prints this message or the help of the given subcommand(s)
+    s3-store    
 ```
+
+```
+pict-rs-file-store 0.3.0-alpha.42
+
+USAGE:
+    pict-rs file-store [OPTIONS]
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+        --path <path> 
+```
+
+```
+pict-rs-s3-store 0.3.0-alpha.42
+
+USAGE:
+    pict-rs s3-store [OPTIONS] --bucket-name <bucket-name> --region <region>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+        --access-key <access-key>            
+        --bucket-name <bucket-name>          
+        --region <region>                    
+        --secret-key <secret-key>            
+        --security-token <security-token>    
+        --session-token <session-token>
+```
+
+See [`pict-rs.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/pict-rs.toml) for more configuration
 
 #### Example:
 Running on all interfaces, port 8080, storing data in /opt/data
@@ -59,6 +91,10 @@ $ ./pict-rs -a 127.0.0.1:9000 -p data/ -f png
 Running locally, port 8080, storing data in data/, and only allowing the `thumbnail` and `identity` filters
 ```
 $ ./pict-rs -a 127.0.0.1:8080 -p data/ -w thumbnail identity
+```
+Running from a configuration file
+```
+$ ./pict-rs -c ./pict-rs.toml
 ```
 
 #### Docker

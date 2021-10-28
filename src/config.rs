@@ -13,20 +13,27 @@ pub(crate) struct Args {
     overrides: Overrides,
 }
 
+fn is_false(b: &bool) -> bool {
+    !b
+}
+
 #[derive(Clone, Debug, serde::Serialize, structopt::StructOpt)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Overrides {
     #[structopt(
         short,
         long,
         help = "Whether to skip validating images uploaded via the internal import API"
     )]
+    #[serde(skip_serializing_if = "is_false")]
     skip_validate_imports: bool,
 
     #[structopt(short, long, help = "The address and port the server binds to.")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     addr: Option<SocketAddr>,
 
     #[structopt(short, long, help = "The path to the data directory, e.g. data/")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<PathBuf>,
 
     #[structopt(
@@ -34,6 +41,7 @@ pub(crate) struct Overrides {
         long,
         help = "An optional image format to convert all uploaded files into, supports 'jpg', 'png', and 'webp'"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     image_format: Option<Format>,
 
     #[structopt(
@@ -41,6 +49,7 @@ pub(crate) struct Overrides {
         long,
         help = "An optional list of filters to permit, supports 'identity', 'thumbnail', 'resize', 'crop', and 'blur'"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     filters: Option<Vec<String>>,
 
     #[structopt(
@@ -48,21 +57,26 @@ pub(crate) struct Overrides {
         long,
         help = "Specify the maximum allowed uploaded file size (in Megabytes)"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_file_size: Option<usize>,
 
     #[structopt(long, help = "Specify the maximum width in pixels allowed on an image")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_image_width: Option<usize>,
 
     #[structopt(long, help = "Specify the maximum width in pixels allowed on an image")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_image_height: Option<usize>,
 
     #[structopt(long, help = "Specify the maximum area in pixels allowed in an image")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_image_area: Option<usize>,
 
     #[structopt(
         long,
         help = "An optional string to be checked on requests to privileged endpoints"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     api_key: Option<String>,
 
     #[structopt(
@@ -70,33 +84,69 @@ pub(crate) struct Overrides {
         long,
         help = "Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     opentelemetry_url: Option<Url>,
 
     #[structopt(subcommand)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     store: Option<Store>,
 }
 
+impl Overrides {
+    fn is_default(&self) -> bool {
+        !self.skip_validate_imports
+            && self.addr.is_none()
+            && self.path.is_none()
+            && self.image_format.is_none()
+            && self.filters.is_none()
+            && self.max_file_size.is_none()
+            && self.max_image_width.is_none()
+            && self.max_image_height.is_none()
+            && self.max_image_area.is_none()
+            && self.api_key.is_none()
+            && self.opentelemetry_url.is_none()
+            && self.store.is_none()
+    }
+}
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, structopt::StructOpt)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
 pub(crate) enum Store {
     FileStore {
         // defaults to {config.path}
+        #[structopt(long)]
+        #[serde(skip_serializing_if = "Option::is_none")]
         path: Option<PathBuf>,
     },
     #[cfg(feature = "object-storage")]
     S3Store {
+        #[structopt(long)]
         bucket_name: String,
+
+        #[structopt(long)]
         region: crate::serde_str::Serde<s3::Region>,
+
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[structopt(long)]
         access_key: Option<String>,
+
+        #[structopt(long)]
+        #[serde(skip_serializing_if = "Option::is_none")]
         secret_key: Option<String>,
+
+        #[structopt(long)]
+        #[serde(skip_serializing_if = "Option::is_none")]
         security_token: Option<String>,
+
+        #[structopt(long)]
+        #[serde(skip_serializing_if = "Option::is_none")]
         session_token: Option<String>,
     },
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Config {
     skip_validate_imports: bool,
     addr: SocketAddr,
@@ -113,7 +163,7 @@ pub(crate) struct Config {
 }
 
 #[derive(serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Defaults {
     skip_validate_imports: bool,
     addr: SocketAddr,
@@ -141,17 +191,25 @@ impl Defaults {
 impl Config {
     pub(crate) fn build() -> anyhow::Result<Self> {
         let args = Args::from_args();
-        let mut base_config = config::Config::try_from(&Defaults::new())?;
+        let mut base_config = config::Config::new();
+        base_config.merge(config::Config::try_from(&Defaults::new())?)?;
 
         if let Some(path) = args.config_file {
             base_config.merge(config::File::from(path))?;
         };
 
-        base_config.merge(config::Config::try_from(&args.overrides)?)?;
+        if !args.overrides.is_default() {
+            let merging = config::Config::try_from(&args.overrides)?;
 
-        base_config.merge(config::Environment::with_prefix("PICTRS"))?;
+            base_config.merge(merging)?;
+        }
 
-        Ok(base_config.try_into()?)
+        base_config.merge(config::Environment::with_prefix("PICTRS").separator("__"))?;
+
+        let config: Self = base_config.try_into()?;
+        println!("{:#?}", config);
+
+        Ok(config)
     }
 
     pub(crate) fn store(&self) -> &Store {
@@ -208,7 +266,7 @@ impl Config {
 pub(crate) struct FormatError(String);
 
 #[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum Format {
     Jpeg,
     Png,
