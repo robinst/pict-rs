@@ -65,6 +65,8 @@ opentelemetry_url = 'http://localhost:4317/'
 
 ## Optional: store definition
 # default store: file_store
+#
+# Not specifying a store means a file_store will be used with the top-level pict-rs' path
 [store]
 type = "file_store"
 
