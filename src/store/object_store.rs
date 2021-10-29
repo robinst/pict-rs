@@ -39,7 +39,7 @@ pub(crate) enum ObjectError {
     Anyhow(#[from] anyhow::Error),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct ObjectStore {
     path_gen: Generator,
     settings_tree: sled::Tree,
@@ -228,5 +228,15 @@ where
         this.inner.poll_next(cx).map(|opt| {
             opt.map(|res| res.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
         })
+    }
+}
+
+impl std::fmt::Debug for ObjectStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ObjectStore")
+            .field("path_gen", &self.path_gen)
+            .field("bucket", &self.bucket.name)
+            .field("region", &self.bucket.region)
+            .finish()
     }
 }
