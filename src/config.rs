@@ -182,7 +182,7 @@ impl Defaults {
             max_file_size: 40,
             max_image_width: 10_000,
             max_image_height: 10_000,
-            max_image_area: 40_000,
+            max_image_area: 40_000_000,
             store: Store::FileStore { path: None },
         }
     }

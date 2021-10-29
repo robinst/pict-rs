@@ -54,6 +54,7 @@ impl Store for FileStore {
     type Identifier = FileId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
+    #[tracing::instrument(skip(reader))]
     async fn save_async_read<Reader>(
         &self,
         reader: &mut Reader,
@@ -71,6 +72,7 @@ impl Store for FileStore {
         self.file_id_from_path(path)
     }
 
+    #[tracing::instrument(skip(bytes))]
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error> {
         let path = self.next_file()?;
 
@@ -82,6 +84,7 @@ impl Store for FileStore {
         self.file_id_from_path(path)
     }
 
+    #[tracing::instrument]
     async fn to_stream(
         &self,
         identifier: &Self::Identifier,
@@ -98,6 +101,7 @@ impl Store for FileStore {
         Ok(Box::pin(stream))
     }
 
+    #[tracing::instrument(skip(writer))]
     async fn read_into<Writer>(
         &self,
         identifier: &Self::Identifier,
@@ -113,6 +117,7 @@ impl Store for FileStore {
         Ok(())
     }
 
+    #[tracing::instrument]
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Self::Error> {
         let path = self.path_from_file_id(identifier);
 
@@ -121,6 +126,7 @@ impl Store for FileStore {
         Ok(len)
     }
 
+    #[tracing::instrument]
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Self::Error> {
         let path = self.path_from_file_id(identifier);
 

@@ -59,6 +59,7 @@ impl Store for ObjectStore {
     type Identifier = ObjectId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
+    #[tracing::instrument(skip(reader))]
     async fn save_async_read<Reader>(
         &self,
         reader: &mut Reader,
@@ -73,6 +74,7 @@ impl Store for ObjectStore {
         Ok(ObjectId::from_string(path))
     }
 
+    #[tracing::instrument(skip(bytes))]
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error> {
         let path = self.next_file()?;
 
@@ -81,6 +83,7 @@ impl Store for ObjectStore {
         Ok(ObjectId::from_string(path))
     }
 
+    #[tracing::instrument]
     async fn to_stream(
         &self,
         identifier: &Self::Identifier,
@@ -99,6 +102,7 @@ impl Store for ObjectStore {
         Ok(Box::pin(io_error(response.bytes_stream())))
     }
 
+    #[tracing::instrument(skip(writer))]
     async fn read_into<Writer>(
         &self,
         identifier: &Self::Identifier,
@@ -121,6 +125,7 @@ impl Store for ObjectStore {
         Ok(())
     }
 
+    #[tracing::instrument]
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Self::Error> {
         let path = identifier.as_str();
 
@@ -130,6 +135,7 @@ impl Store for ObjectStore {
         Ok(length as u64)
     }
 
+    #[tracing::instrument]
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Self::Error> {
         let path = identifier.as_str();
 
@@ -155,9 +161,15 @@ impl ObjectStore {
         Ok(ObjectStore {
             path_gen,
             settings_tree,
-            bucket: Bucket::new(
+            bucket: Bucket::new_with_path_style(
                 bucket_name,
-                region,
+                match region {
+                    Region::Custom { endpoint, .. } => Region::Custom {
+                        region: String::from(""),
+                        endpoint,
+                    },
+                    region => region,
+                },
                 Credentials {
                     access_key,
                     secret_key,
@@ -181,7 +193,7 @@ impl ObjectStore {
         let filename = Uuid::new_v4().to_string();
         let path = self.next_directory()?.to_strings().join("/");
 
-        Ok(format!("/{}/{}", path, filename))
+        Ok(format!("{}/{}", path, filename))
     }
 }
 

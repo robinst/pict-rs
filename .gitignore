@@ -2,3 +2,4 @@
 /data
 /docker/dev/volumes
 /client-examples/javascript/node_modules
+/docker/object-storage/storage
