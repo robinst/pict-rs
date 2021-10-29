@@ -95,7 +95,9 @@ type = "file_store"
 #
 # # Required: bucket region
 # # environment variable: PICTRS_STORE__REGION
-# region = 'eu-central-1' # can also be endpoint of local s3 store
+# #
+# # can also be endpoint of local s3 store, e.g. 'http://minio:9000'
+# region = 'eu-central-1'
 #
 # # Optional: bucket access key
 # # environment variable: PICTRS_STORE__ACCESS_KEY
