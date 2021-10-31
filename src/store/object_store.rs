@@ -1,6 +1,6 @@
 use crate::store::Store;
 use actix_web::web::Bytes;
-use futures_util::stream::{Stream, StreamExt};
+use futures_util::stream::Stream;
 use s3::{
     command::Command, creds::Credentials, request::Reqwest, request_trait::Request, Bucket, Region,
 };
@@ -10,7 +10,7 @@ use std::{
     task::{Context, Poll},
 };
 use storage_path_generator::{Generator, Path};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
 mod object_id;
@@ -109,18 +109,14 @@ impl Store for ObjectStore {
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
-        Writer: AsyncWrite + Unpin,
+        Writer: AsyncWrite + Send + Unpin,
     {
-        let mut stream = self
-            .to_stream(identifier, None, None)
+        let path = identifier.as_str();
+
+        self.bucket
+            .get_object_stream(path, writer)
             .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-        while let Some(res) = stream.next().await {
-            let mut bytes = res?;
-
-            writer.write_all_buf(&mut bytes).await?;
-        }
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, Self::Error::from(e)))?;
 
         Ok(())
     }

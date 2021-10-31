@@ -108,7 +108,7 @@ impl Store for FileStore {
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
-        Writer: AsyncWrite + Unpin,
+        Writer: AsyncWrite + Send + Unpin,
     {
         let path = self.path_from_file_id(identifier);
 

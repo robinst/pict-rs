@@ -1754,8 +1754,7 @@ dependencies = [
 [[package]]
 name = "rust-s3"
 version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2f26775d15f43dc848ef0ec65f83de8775549e486c7a3a576652049a7122d32"
+source = "git+https://github.com/asonix/rust-s3?branch=asonix/use-async-write#f61e422d77484288cf32e40896c8b361eb60afac"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -46,7 +46,7 @@ pub(crate) trait Store: Send + Sync + Clone + Debug + 'static {
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
-        Writer: AsyncWrite + Unpin;
+        Writer: AsyncWrite + Send + Unpin;
 
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Self::Error>;
 

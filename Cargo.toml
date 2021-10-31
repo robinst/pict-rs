@@ -33,7 +33,7 @@ opentelemetry = { version = "0.16", features = ["rt-tokio"] }
 opentelemetry-otlp = "0.9"
 pin-project-lite = "0.2.7"
 reqwest = { version = "0.11.5", default-features = false, features = ["stream"], optional = true}
-rust-s3 = { version = "0.27.0", default-features = false, features = ["tokio-rustls-tls"], optional = true }
+rust-s3 = { version = "0.27.0", default-features = false, features = ["tokio-rustls-tls"], optional = true, git = "https://github.com/asonix/rust-s3", branch = "asonix/use-async-write" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.9.0"
