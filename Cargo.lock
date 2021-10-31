@@ -1225,7 +1225,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "opentelemetry"
 version = "0.16.0"
-source = "git+https://github.com/asonix/opentelemetry-rust?branch=asonix/limit-futures-deps#cc6d483c2f75622c2905150ef894dd580ff30f18"
+source = "git+https://github.com/asonix/opentelemetry-rust?branch=asonix/limit-futures-deps#e1734e3fe6c3610dca54308d4b545753a67997c3"
 dependencies = [
  "async-trait",
  "crossbeam-channel",
@@ -1245,7 +1245,7 @@ dependencies = [
 [[package]]
 name = "opentelemetry-otlp"
 version = "0.9.0"
-source = "git+https://github.com/asonix/opentelemetry-rust?branch=asonix/limit-futures-deps#cc6d483c2f75622c2905150ef894dd580ff30f18"
+source = "git+https://github.com/asonix/opentelemetry-rust?branch=asonix/limit-futures-deps#e1734e3fe6c3610dca54308d4b545753a67997c3"
 dependencies = [
  "async-trait",
  "futures-core",
