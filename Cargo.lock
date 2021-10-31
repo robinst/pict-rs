@@ -371,7 +371,7 @@ dependencies = [
 [[package]]
 name = "aws-creds"
 version = "0.26.2"
-source = "git+https://github.com/asonix/rust-s3?branch=asonix/main#8829310b9966d1081a8dab8031bed49b3e5d56f0"
+source = "git+https://github.com/asonix/rust-s3?branch=asonix/main#8d185a2b10654d3f2b86d99bd149e6a0197f2aac"
 dependencies = [
  "anyhow",
  "dirs",
@@ -677,28 +677,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "futures"
-version = "0.3.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a12aa0eb539080d55c3f2d45a67c3b58b6b0773c1a3ca2dfec66d58c97fd66ca"
-dependencies = [
- "futures-channel",
- "futures-core",
- "futures-executor",
- "futures-io",
- "futures-sink",
- "futures-task",
- "futures-util",
-]
-
-[[package]]
 name = "futures-channel"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5da6ba8c3bb3c165d3c7319fc1cc8304facf1fb8db99c5de877183c08a273888"
 dependencies = [
  "futures-core",
- "futures-sink",
 ]
 
 [[package]]
@@ -717,12 +701,6 @@ dependencies = [
  "futures-task",
  "futures-util",
 ]
-
-[[package]]
-name = "futures-io"
-version = "0.3.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "522de2a0fe3e380f1bc577ba0474108faf3f6b18321dbf60b3b9c39a75073377"
 
 [[package]]
 name = "futures-macro"
@@ -756,13 +734,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36568465210a3a6ee45e1f165136d68671471a501e632e9a98d96872222b5481"
 dependencies = [
  "autocfg",
- "futures-channel",
  "futures-core",
- "futures-io",
  "futures-macro",
  "futures-sink",
  "futures-task",
- "memchr",
  "pin-project-lite",
  "pin-utils",
  "proc-macro-hack",
@@ -1250,12 +1225,13 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "opentelemetry"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1cf9b1c4e9a6c4de793c632496fa490bdc0e1eea73f0c91394f7b6990935d22"
+source = "git+https://github.com/asonix/opentelemetry-rust?branch=asonix/limit-futures-deps#cc6d483c2f75622c2905150ef894dd580ff30f18"
 dependencies = [
  "async-trait",
  "crossbeam-channel",
- "futures",
+ "futures-channel",
+ "futures-executor",
+ "futures-util",
  "js-sys",
  "lazy_static",
  "percent-encoding",
@@ -1269,11 +1245,10 @@ dependencies = [
 [[package]]
 name = "opentelemetry-otlp"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f19d4b43842433c420c548c985d158f5628bba5b518e0be64627926d19889992"
+source = "git+https://github.com/asonix/opentelemetry-rust?branch=asonix/limit-futures-deps#cc6d483c2f75622c2905150ef894dd580ff30f18"
 dependencies = [
  "async-trait",
- "futures",
+ "futures-core",
  "http",
  "opentelemetry",
  "prost",
@@ -1711,7 +1686,7 @@ dependencies = [
 [[package]]
 name = "rust-s3"
 version = "0.27.0"
-source = "git+https://github.com/asonix/rust-s3?branch=asonix/main#8829310b9966d1081a8dab8031bed49b3e5d56f0"
+source = "git+https://github.com/asonix/rust-s3?branch=asonix/main#8d185a2b10654d3f2b86d99bd149e6a0197f2aac"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1720,7 +1695,6 @@ dependencies = [
  "base64",
  "cfg-if",
  "chrono",
- "futures-io",
  "hex",
  "hmac",
  "http",
