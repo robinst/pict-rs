@@ -99,6 +99,10 @@ Running from a configuration file
 ```
 $ ./pict-rs -c ./pict-rs.toml
 ```
+Migrating between storage backends
+```
+$ ./pict-rs -p ./data --migrate-file ./migrate.toml
+```
 
 #### Docker
 Run the following commands:
