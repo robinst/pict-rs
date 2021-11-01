@@ -281,6 +281,11 @@ let request = client
 ## Contributing
 Feel free to open issues for anything you find an issue with. Please note that any contributed code will be licensed under the AGPLv3.
 
+## FAQ
+### Question: I want to configure it with yaml instead of toml
+Answer: That's not a question, but you can configure pict-rs with json, hjson, yaml, ini, or toml.
+Writing configs in other formats is left as an exercise to the reader.
+
 ## License
 
 Copyright © 2021 Riley Trautman
