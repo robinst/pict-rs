@@ -6,7 +6,7 @@ use actix_web::{
 };
 use awc::Client;
 use futures_util::{stream::once, Stream};
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use std::{
     collections::HashSet,
     future::ready,
@@ -46,7 +46,7 @@ use crate::{magick::details_hint, store::file_store::FileStore};
 
 use self::{
     concurrent_processor::CancelSafeProcessor,
-    config::{Config, Format},
+    config::{Config, Format, Migrate},
     either::Either,
     error::{Error, UploadError},
     init_tracing::init_tracing,
@@ -61,6 +61,7 @@ const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
 const DAYS: u32 = 24 * HOURS;
 
+static MIGRATE: OnceCell<Migrate> = OnceCell::new();
 static CONFIG: Lazy<Config> = Lazy::new(|| Config::build().unwrap());
 static PROCESS_SEMAPHORE: Lazy<Semaphore> =
     Lazy::new(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
@@ -69,7 +70,8 @@ static PROCESS_SEMAPHORE: Lazy<Semaphore> =
 #[instrument(name = "Uploaded files", skip(value, manager))]
 async fn upload<S: Store>(
     value: Value<UploadManagerSession<S>>,
-    manager: web::Data<UploadManager<S>>,
+    manager: web::Data<UploadManager>,
+    store: web::Data<S>,
 ) -> Result<HttpResponse, Error>
 where
     Error: From<S::Error>,
@@ -91,11 +93,9 @@ where
             let delete_token = image.result.delete_token().await?;
 
             let name = manager.from_alias(alias.to_owned()).await?;
-            let identifier = manager.identifier_from_filename(name.clone()).await?;
+            let identifier = manager.identifier_from_filename::<S>(name.clone()).await?;
 
-            let details = manager
-                .variant_details(identifier.clone(), name.clone())
-                .await?;
+            let details = manager.variant_details(&identifier, name.clone()).await?;
 
             let details = if let Some(details) = details {
                 debug!("details exist");
@@ -104,10 +104,10 @@ where
                 debug!("generating new details from {:?}", identifier);
                 let hint = details_hint(&name);
                 let new_details =
-                    Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
+                    Details::from_store((**store).clone(), identifier.clone(), hint).await?;
                 debug!("storing details for {:?} {}", identifier, name);
                 manager
-                    .store_variant_details(identifier, name, &new_details)
+                    .store_variant_details(&identifier, name, &new_details)
                     .await?;
                 debug!("stored");
                 new_details
@@ -192,7 +192,8 @@ where
 #[instrument(name = "Downloading file", skip(client, manager))]
 async fn download<S: Store>(
     client: web::Data<Client>,
-    manager: web::Data<UploadManager<S>>,
+    manager: web::Data<UploadManager>,
+    store: web::Data<S>,
     query: web::Query<UrlQuery>,
 ) -> Result<HttpResponse, Error>
 where
@@ -204,35 +205,31 @@ where
         return Err(UploadError::Download(res.status()).into());
     }
 
-    let mut stream = Limit::new(
+    let stream = Limit::new(
         map_error::map_crate_error(res),
         (CONFIG.max_file_size() * MEGABYTES) as u64,
     );
 
-    // SAFETY: stream is shadowed, so original cannot not be moved
-    let stream = unsafe { Pin::new_unchecked(&mut stream) };
+    futures_util::pin_mut!(stream);
 
     let permit = PROCESS_SEMAPHORE.acquire().await?;
-    let session = manager.session().upload(stream).await?;
+    let session = manager.session((**store).clone()).upload(stream).await?;
     let alias = session.alias().unwrap().to_owned();
     drop(permit);
     let delete_token = session.delete_token().await?;
 
     let name = manager.from_alias(alias.to_owned()).await?;
-    let identifier = manager.identifier_from_filename(name.clone()).await?;
+    let identifier = manager.identifier_from_filename::<S>(name.clone()).await?;
 
-    let details = manager
-        .variant_details(identifier.clone(), name.clone())
-        .await?;
+    let details = manager.variant_details(&identifier, name.clone()).await?;
 
     let details = if let Some(details) = details {
         details
     } else {
         let hint = details_hint(&name);
-        let new_details =
-            Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
+        let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
         manager
-            .store_variant_details(identifier, name, &new_details)
+            .store_variant_details(&identifier, name, &new_details)
             .await?;
         new_details
     };
@@ -251,7 +248,8 @@ where
 /// Delete aliases and files
 #[instrument(name = "Deleting file", skip(manager))]
 async fn delete<S: Store>(
-    manager: web::Data<UploadManager<S>>,
+    manager: web::Data<UploadManager>,
+    store: web::Data<S>,
     path_entries: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error>
 where
@@ -259,22 +257,19 @@ where
 {
     let (alias, token) = path_entries.into_inner();
 
-    manager.delete(token, alias).await?;
+    manager.delete((**store).clone(), token, alias).await?;
 
     Ok(HttpResponse::NoContent().finish())
 }
 
 type ProcessQuery = Vec<(String, String)>;
 
-async fn prepare_process<S: Store>(
+async fn prepare_process(
     query: web::Query<ProcessQuery>,
     ext: &str,
-    manager: &UploadManager<S>,
+    manager: &UploadManager,
     filters: &Option<HashSet<String>>,
-) -> Result<(Format, String, PathBuf, Vec<String>), Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<(Format, String, PathBuf, Vec<String>), Error> {
     let (alias, operations) =
         query
             .into_inner()
@@ -318,7 +313,8 @@ where
 async fn process_details<S: Store>(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    manager: web::Data<UploadManager<S>>,
+    manager: web::Data<UploadManager>,
+    store: web::Data<S>,
     filters: web::Data<Option<HashSet<String>>>,
 ) -> Result<HttpResponse, Error>
 where
@@ -328,11 +324,11 @@ where
         prepare_process(query, ext.as_str(), &manager, &filters).await?;
 
     let identifier = manager
-        .variant_identifier(&thumbnail_path, &name)
+        .variant_identifier::<S>(&thumbnail_path, &name)
         .await?
         .ok_or(UploadError::MissingAlias)?;
 
-    let details = manager.variant_details(identifier, name).await?;
+    let details = manager.variant_details(&identifier, name).await?;
 
     let details = details.ok_or(UploadError::NoFiles)?;
 
@@ -345,7 +341,8 @@ async fn process<S: Store + 'static>(
     range: Option<range::RangeHeader>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    manager: web::Data<UploadManager<S>>,
+    manager: web::Data<UploadManager>,
+    store: web::Data<S>,
     filters: web::Data<Option<HashSet<String>>>,
 ) -> Result<HttpResponse, Error>
 where
@@ -354,29 +351,30 @@ where
     let (format, name, thumbnail_path, thumbnail_args) =
         prepare_process(query, ext.as_str(), &manager, &filters).await?;
 
-    let identifier_opt = manager.variant_identifier(&thumbnail_path, &name).await?;
+    let identifier_opt = manager
+        .variant_identifier::<S>(&thumbnail_path, &name)
+        .await?;
 
     if let Some(identifier) = identifier_opt {
-        let details_opt = manager
-            .variant_details(identifier.clone(), name.clone())
-            .await?;
+        let details_opt = manager.variant_details(&identifier, name.clone()).await?;
 
         let details = if let Some(details) = details_opt {
             details
         } else {
             let hint = details_hint(&name);
-            let details =
-                Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
+            let details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
             manager
-                .store_variant_details(identifier.clone(), name, &details)
+                .store_variant_details(&identifier, name, &details)
                 .await?;
             details
         };
 
-        return ranged_file_resp(manager.store().clone(), identifier, range, details).await;
+        return ranged_file_resp(&**store, identifier, range, details).await;
     }
 
-    let identifier = manager.still_identifier_from_filename(name.clone()).await?;
+    let identifier = manager
+        .still_identifier_from_filename((**store).clone(), name.clone())
+        .await?;
 
     let thumbnail_path2 = thumbnail_path.clone();
     let process_fut = async {
@@ -385,7 +383,7 @@ where
         let permit = PROCESS_SEMAPHORE.acquire().await?;
 
         let mut processed_reader = crate::magick::process_image_store_read(
-            manager.store().clone(),
+            (**store).clone(),
             identifier,
             thumbnail_args,
             format,
@@ -410,7 +408,7 @@ where
         let bytes2 = bytes.clone();
         actix_rt::spawn(
             async move {
-                let identifier = match manager.store().save_bytes(bytes2).await {
+                let identifier = match store.save_bytes(bytes2).await {
                     Ok(identifier) => identifier,
                     Err(e) => {
                         tracing::warn!("Failed to generate directory path: {}", e);
@@ -418,7 +416,7 @@ where
                     }
                 };
                 if let Err(e) = manager
-                    .store_variant_details(identifier.clone(), name.clone(), &details2)
+                    .store_variant_details(&identifier, name.clone(), &details2)
                     .await
                 {
                     tracing::warn!("Error saving variant details: {}", e);
@@ -479,26 +477,24 @@ where
 #[instrument(name = "Fetching details", skip(manager))]
 async fn details<S: Store>(
     alias: web::Path<String>,
-    manager: web::Data<UploadManager<S>>,
+    manager: web::Data<UploadManager>,
+    store: web::Data<S>,
 ) -> Result<HttpResponse, Error>
 where
     Error: From<S::Error>,
 {
     let name = manager.from_alias(alias.into_inner()).await?;
-    let identifier = manager.identifier_from_filename(name.clone()).await?;
+    let identifier = manager.identifier_from_filename::<S>(name.clone()).await?;
 
-    let details = manager
-        .variant_details(identifier.clone(), name.clone())
-        .await?;
+    let details = manager.variant_details(&identifier, name.clone()).await?;
 
     let details = if let Some(details) = details {
         details
     } else {
         let hint = details_hint(&name);
-        let new_details =
-            Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
+        let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
         manager
-            .store_variant_details(identifier, name, &new_details)
+            .store_variant_details(&identifier, name, &new_details)
             .await?;
         new_details
     };
@@ -511,35 +507,33 @@ where
 async fn serve<S: Store>(
     range: Option<range::RangeHeader>,
     alias: web::Path<String>,
-    manager: web::Data<UploadManager<S>>,
+    manager: web::Data<UploadManager>,
+    store: web::Data<S>,
 ) -> Result<HttpResponse, Error>
 where
     Error: From<S::Error>,
 {
     let name = manager.from_alias(alias.into_inner()).await?;
-    let identifier = manager.identifier_from_filename(name.clone()).await?;
+    let identifier = manager.identifier_from_filename::<S>(name.clone()).await?;
 
-    let details = manager
-        .variant_details(identifier.clone(), name.clone())
-        .await?;
+    let details = manager.variant_details(&identifier, name.clone()).await?;
 
     let details = if let Some(details) = details {
         details
     } else {
         let hint = details_hint(&name);
-        let details =
-            Details::from_store(manager.store().clone(), identifier.clone(), hint).await?;
+        let details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
         manager
-            .store_variant_details(identifier.clone(), name, &details)
+            .store_variant_details(&identifier, name, &details)
             .await?;
         details
     };
 
-    ranged_file_resp(manager.store().clone(), identifier, range, details).await
+    ranged_file_resp(&**store, identifier, range, details).await
 }
 
 async fn ranged_file_resp<S: Store>(
-    store: S,
+    store: &S,
     identifier: S::Identifier,
     range: Option<range::RangeHeader>,
     details: Details,
@@ -627,7 +621,8 @@ enum FileOrAlias {
 #[instrument(name = "Purging file", skip(upload_manager))]
 async fn purge<S: Store>(
     query: web::Query<FileOrAlias>,
-    upload_manager: web::Data<UploadManager<S>>,
+    upload_manager: web::Data<UploadManager>,
+    store: web::Data<S>,
 ) -> Result<HttpResponse, Error>
 where
     Error: From<S::Error>,
@@ -639,7 +634,7 @@ where
 
     for alias in aliases.iter() {
         upload_manager
-            .delete_without_token(alias.to_owned())
+            .delete_without_token((**store).clone(), alias.to_owned())
             .await?;
     }
 
@@ -652,7 +647,8 @@ where
 #[instrument(name = "Fetching aliases", skip(upload_manager))]
 async fn aliases<S: Store>(
     query: web::Query<FileOrAlias>,
-    upload_manager: web::Data<UploadManager<S>>,
+    upload_manager: web::Data<UploadManager>,
+    store: web::Data<S>,
 ) -> Result<HttpResponse, Error>
 where
     Error: From<S::Error>,
@@ -676,7 +672,8 @@ struct ByAlias {
 #[instrument(name = "Fetching filename", skip(upload_manager))]
 async fn filename_by_alias<S: Store>(
     query: web::Query<ByAlias>,
-    upload_manager: web::Data<UploadManager<S>>,
+    upload_manager: web::Data<UploadManager>,
+    store: web::Data<S>,
 ) -> Result<HttpResponse, Error>
 where
     Error: From<S::Error>,
@@ -695,7 +692,7 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
     error
 }
 
-async fn launch<S: Store>(manager: UploadManager<S>) -> anyhow::Result<()>
+async fn launch<S: Store + Clone + 'static>(manager: UploadManager, store: S) -> anyhow::Result<()>
 where
     S::Error: Unpin,
     Error: From<S::Error>,
@@ -704,6 +701,7 @@ where
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
     let manager2 = manager.clone();
+    let store2 = store.clone();
     let form = Form::new()
         .max_files(10)
         .max_file_size(CONFIG.max_file_size() * MEGABYTES)
@@ -711,6 +709,7 @@ where
         .field(
             "images",
             Field::array(Field::file(move |filename, _, stream| {
+                let store = store2.clone();
                 let manager = manager2.clone();
 
                 let span = tracing::info_span!("file-upload", ?filename);
@@ -719,7 +718,7 @@ where
                     let permit = PROCESS_SEMAPHORE.acquire().await?;
 
                     let res = manager
-                        .session()
+                        .session(store)
                         .upload(map_error::map_crate_error(stream))
                         .await;
 
@@ -735,6 +734,7 @@ where
     // This form is expecting a single array field, 'images' with at most 10 files in it
     let validate_imports = CONFIG.validate_imports();
     let manager2 = manager.clone();
+    let store2 = store.clone();
     let import_form = Form::new()
         .max_files(10)
         .max_file_size(CONFIG.max_file_size() * MEGABYTES)
@@ -743,6 +743,7 @@ where
             "images",
             Field::array(Field::file(move |filename, _, stream| {
                 let manager = manager2.clone();
+                let store = store2.clone();
 
                 let span = tracing::info_span!("file-import", ?filename);
 
@@ -750,7 +751,7 @@ where
                     let permit = PROCESS_SEMAPHORE.acquire().await?;
 
                     let res = manager
-                        .session()
+                        .session(store)
                         .import(
                             filename,
                             validate_imports,
@@ -773,6 +774,7 @@ where
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
+            .app_data(web::Data::new(store.clone()))
             .app_data(web::Data::new(manager.clone()))
             .app_data(web::Data::new(client))
             .app_data(web::Data::new(CONFIG.allowed_filters()))
@@ -828,23 +830,108 @@ where
     Ok(())
 }
 
+async fn migrate_inner<S1>(
+    manager: &UploadManager,
+    db: &sled::Db,
+    from: S1,
+    to: &config::Store,
+) -> anyhow::Result<()>
+where
+    S1: Store,
+    Error: From<S1::Error>,
+{
+    match to {
+        config::Store::FileStore { path } => {
+            let path = path.to_owned().unwrap_or_else(|| CONFIG.data_dir());
+
+            let to = FileStore::build(path, &db)?;
+            manager.restructure(&to).await?;
+
+            manager.migrate_store::<S1, FileStore>(from, to).await?;
+        }
+        #[cfg(feature = "object-storage")]
+        config::Store::S3Store {
+            bucket_name,
+            region,
+            access_key,
+            secret_key,
+            security_token,
+            session_token,
+        } => {
+            use store::object_store::ObjectStore;
+
+            let to = ObjectStore::build(
+                bucket_name,
+                (**region).clone(),
+                access_key.clone(),
+                secret_key.clone(),
+                security_token.clone(),
+                session_token.clone(),
+                &db,
+            )?;
+
+            manager.migrate_store::<S1, ObjectStore>(from, to).await?;
+        }
+    }
+
+    Ok(())
+}
+
 #[actix_rt::main]
 async fn main() -> anyhow::Result<()> {
     init_tracing("pict-rs", CONFIG.opentelemetry_url())?;
 
-    let root_dir = CONFIG.data_dir();
-    let db = LatestDb::exists(root_dir.clone()).migrate()?;
+    let db = LatestDb::exists(CONFIG.data_dir()).migrate()?;
+
+    let manager = UploadManager::new(db.clone(), CONFIG.format()).await?;
+
+    if let Some(m) = MIGRATE.get() {
+        let from = m.from();
+        let to = m.to();
+
+        match from {
+            config::Store::FileStore { path } => {
+                let path = path.to_owned().unwrap_or_else(|| CONFIG.data_dir());
+
+                let from = FileStore::build(path, &db)?;
+                manager.restructure(&from).await?;
+
+                migrate_inner(&manager, &db, from, to).await?;
+            }
+            #[cfg(feature = "object-storage")]
+            config::Store::S3Store {
+                bucket_name,
+                region,
+                access_key,
+                secret_key,
+                security_token,
+                session_token,
+            } => {
+                let from = crate::store::object_store::ObjectStore::build(
+                    bucket_name,
+                    (**region).clone(),
+                    access_key.clone(),
+                    secret_key.clone(),
+                    security_token.clone(),
+                    session_token.clone(),
+                    &db,
+                )?;
+
+                migrate_inner(&manager, &db, from, to).await?;
+            }
+        }
+
+        return Ok(());
+    }
 
     match CONFIG.store() {
         config::Store::FileStore { path } => {
-            let path = path.to_owned().unwrap_or_else(|| root_dir.clone());
+            let path = path.to_owned().unwrap_or_else(|| CONFIG.data_dir());
 
             let store = FileStore::build(path, &db)?;
+            manager.restructure(&store).await?;
 
-            let manager = UploadManager::new(store, db, CONFIG.format()).await?;
-
-            manager.restructure().await?;
-            launch(manager).await
+            launch(manager, store).await
         }
         #[cfg(feature = "object-storage")]
         config::Store::S3Store {
@@ -865,8 +952,7 @@ async fn main() -> anyhow::Result<()> {
                 &db,
             )?;
 
-            let manager = UploadManager::new(store, db, CONFIG.format()).await?;
-            launch(manager).await
+            launch(manager, store).await
         }
     }
 }

@@ -9,6 +9,9 @@ pub(crate) struct Args {
     #[structopt(short, long, help = "Path to the pict-rs configuration file")]
     config_file: Option<PathBuf>,
 
+    #[structopt(long, help = "Path to a file defining a store migration")]
+    migrate_file: Option<PathBuf>,
+
     #[structopt(flatten)]
     overrides: Overrides,
 }
@@ -109,22 +112,45 @@ impl Overrides {
     }
 }
 
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct Migrate {
+    from: Store,
+    to: Store,
+}
+
+impl Migrate {
+    pub(crate) fn from(&self) -> &Store {
+        &self.from
+    }
+
+    pub(crate) fn to(&self) -> &Store {
+        &self.to
+    }
+}
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, structopt::StructOpt)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
 pub(crate) enum Store {
     FileStore {
         // defaults to {config.path}
-        #[structopt(long)]
+        #[structopt(
+            long,
+            help = "Path in which pict-rs will create it's 'files' directory"
+        )]
         #[serde(skip_serializing_if = "Option::is_none")]
         path: Option<PathBuf>,
     },
     #[cfg(feature = "object-storage")]
     S3Store {
-        #[structopt(long)]
+        #[structopt(long, help = "Name of the bucket in which pict-rs will store images")]
         bucket_name: String,
 
-        #[structopt(long)]
+        #[structopt(
+            long,
+            help = "Region in which the bucket exists, can be an http endpoint"
+        )]
         region: crate::serde_str::Serde<s3::Region>,
 
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,6 +219,14 @@ impl Config {
         let args = Args::from_args();
         let mut base_config = config::Config::new();
         base_config.merge(config::Config::try_from(&Defaults::new())?)?;
+
+        if let Some(path) = args.migrate_file {
+            let mut migrate_config = config::Config::new();
+            migrate_config.merge(config::File::from(path))?;
+            let migrate: Migrate = migrate_config.try_into()?;
+
+            crate::MIGRATE.set(migrate).unwrap();
+        }
 
         if let Some(path) = args.config_file {
             base_config.merge(config::File::from(path))?;

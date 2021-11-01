@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 const RESTRUCTURE_COMPLETE: &[u8] = b"fs-restructure-01-complete";
 const DETAILS: &[u8] = b"details";
 
-impl UploadManager<FileStore> {
+impl UploadManager {
     #[tracing::instrument(skip(self))]
-    pub(crate) async fn restructure(&self) -> Result<(), Error> {
-        if self.restructure_complete()? {
+    pub(crate) async fn restructure(&self, store: &FileStore) -> Result<(), Error> {
+        if self.restructure_complete(store)? {
             return Ok(());
         }
 
@@ -20,13 +20,13 @@ impl UploadManager<FileStore> {
             let filename = String::from_utf8(filename.to_vec())?;
             tracing::info!("Migrating {}", filename);
 
-            let file_path = self.store().root_dir.join("files").join(&filename);
+            let file_path = store.root_dir.join("files").join(&filename);
 
             if tokio::fs::metadata(&file_path).await.is_ok() {
-                let target_path = self.store().next_directory()?.join(&filename);
+                let target_path = store.next_directory()?.join(&filename);
 
                 let target_path_bytes = self
-                    .generalize_path(&target_path)?
+                    .generalize_path(store, &target_path)?
                     .to_str()
                     .ok_or(UploadError::Path)?
                     .as_bytes()
@@ -36,7 +36,7 @@ impl UploadManager<FileStore> {
                     .identifier_tree
                     .insert(filename.as_bytes(), target_path_bytes)?;
 
-                self.store().safe_move_file(file_path, target_path).await?;
+                store.safe_move_file(file_path, target_path).await?;
             }
 
             let (start, end) = variant_key_bounds(&hash);
@@ -48,25 +48,26 @@ impl UploadManager<FileStore> {
                     let variant_path =
                         PathBuf::from(String::from_utf8(variant_path_or_details.to_vec())?);
                     if tokio::fs::metadata(&variant_path).await.is_ok() {
-                        let target_path = self.store().next_directory()?.join(&filename);
+                        let target_path = store.next_directory()?.join(&filename);
 
                         let relative_target_path_bytes = self
-                            .generalize_path(&target_path)?
+                            .generalize_path(store, &target_path)?
                             .to_str()
                             .ok_or(UploadError::Path)?
                             .as_bytes()
                             .to_vec();
 
-                        let variant_key = self.migrate_variant_key(&variant_path, &filename)?;
+                        let variant_key =
+                            self.migrate_variant_key(store, &variant_path, &filename)?;
 
                         self.inner()
                             .identifier_tree
                             .insert(variant_key, relative_target_path_bytes)?;
 
-                        self.store()
+                        store
                             .safe_move_file(variant_path.clone(), target_path)
                             .await?;
-                        self.store().try_remove_parents(&variant_path).await;
+                        store.try_remove_parents(&variant_path).await;
                     }
                 }
 
@@ -74,37 +75,32 @@ impl UploadManager<FileStore> {
             }
         }
 
-        self.mark_restructure_complete()?;
+        self.mark_restructure_complete(store)?;
         Ok(())
     }
 
-    fn restructure_complete(&self) -> Result<bool, Error> {
-        Ok(self
-            .store()
-            .settings_tree
-            .get(RESTRUCTURE_COMPLETE)?
-            .is_some())
+    fn restructure_complete(&self, store: &FileStore) -> Result<bool, Error> {
+        Ok(store.settings_tree.get(RESTRUCTURE_COMPLETE)?.is_some())
     }
 
-    fn mark_restructure_complete(&self) -> Result<(), Error> {
-        self.store()
-            .settings_tree
-            .insert(RESTRUCTURE_COMPLETE, b"true")?;
+    fn mark_restructure_complete(&self, store: &FileStore) -> Result<(), Error> {
+        store.settings_tree.insert(RESTRUCTURE_COMPLETE, b"true")?;
 
         Ok(())
     }
 
-    fn generalize_path<'a>(&self, path: &'a Path) -> Result<&'a Path, Error> {
-        Ok(path.strip_prefix(&self.store().root_dir)?)
+    fn generalize_path<'a>(&self, store: &FileStore, path: &'a Path) -> Result<&'a Path, Error> {
+        Ok(path.strip_prefix(&store.root_dir)?)
     }
 
     fn migrate_variant_key(
         &self,
+        store: &FileStore,
         variant_process_path: &Path,
         filename: &str,
     ) -> Result<Vec<u8>, Error> {
         let path = self
-            .generalize_path(variant_process_path)?
+            .generalize_path(&store, variant_process_path)?
             .strip_prefix("files")?;
 
         self.variant_key(path, filename)

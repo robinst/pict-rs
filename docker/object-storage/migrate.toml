@@ -1,0 +1,9 @@
+[from]
+type = "file_store"
+
+[to]
+type = 's3_store'
+bucket_name = 'pict-rs'
+region = 'http://minio:9000'
+access_key = '09ODZ3BGBISV4U92JLIM'
+secret_key = 'j35YE9RrxhBP0dpiD5mmdXRXvPkEJR4k6zK12q3o'

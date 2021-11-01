@@ -9,7 +9,7 @@ mod tokio_file {
     use crate::{store::file_store::FileError, Either};
     use actix_web::web::{Bytes, BytesMut};
     use futures_util::stream::{Stream, StreamExt};
-    use std::{io::SeekFrom, path::Path, pin::Pin};
+    use std::{io::SeekFrom, path::Path};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
     use tokio_util::codec::{BytesCodec, FramedRead};
 
@@ -35,12 +35,11 @@ mod tokio_file {
             Ok(())
         }
 
-        pub(crate) async fn write_from_stream<S>(&mut self, mut stream: S) -> std::io::Result<()>
+        pub(crate) async fn write_from_stream<S>(&mut self, stream: S) -> std::io::Result<()>
         where
             S: Stream<Item = std::io::Result<Bytes>>,
         {
-            // SAFETY: pinned stream shadows original stream so it cannot be moved
-            let mut stream = unsafe { Pin::new_unchecked(&mut stream) };
+            futures_util::pin_mut!(stream);
 
             while let Some(res) = stream.next().await {
                 let mut bytes = res?;
@@ -202,12 +201,11 @@ mod io_uring {
             Ok(())
         }
 
-        pub(crate) async fn write_from_stream<S>(&mut self, mut stream: S) -> std::io::Result<()>
+        pub(crate) async fn write_from_stream<S>(&mut self, stream: S) -> std::io::Result<()>
         where
             S: Stream<Item = std::io::Result<Bytes>>,
         {
-            // SAFETY: pinned stream shadows original stream so it cannot be moved
-            let mut stream = unsafe { Pin::new_unchecked(&mut stream) };
+            futures_util::pin_mut!(stream);
             let mut cursor: u64 = 0;
 
             while let Some(res) = stream.next().await {

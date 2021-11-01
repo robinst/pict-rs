@@ -15,21 +15,23 @@ use tracing::{debug, instrument, warn, Span};
 use tracing_futures::Instrument;
 use uuid::Uuid;
 
-pub(crate) struct UploadManagerSession<S: Store>
+pub(crate) struct UploadManagerSession<S: Store + Clone + 'static>
 where
     Error: From<S::Error>,
 {
-    manager: UploadManager<S>,
+    store: S,
+    manager: UploadManager,
     alias: Option<String>,
     finished: bool,
 }
 
-impl<S: Store> UploadManagerSession<S>
+impl<S: Store + Clone + 'static> UploadManagerSession<S>
 where
     Error: From<S::Error>,
 {
-    pub(super) fn new(manager: UploadManager<S>) -> Self {
+    pub(super) fn new(manager: UploadManager, store: S) -> Self {
         UploadManagerSession {
+            store,
             manager,
             alias: None,
             finished: false,
@@ -56,7 +58,7 @@ impl Dup {
     }
 }
 
-impl<S: Store> Drop for UploadManagerSession<S>
+impl<S: Store + Clone + 'static> Drop for UploadManagerSession<S>
 where
     Error: From<S::Error>,
 {
@@ -66,6 +68,7 @@ where
         }
 
         if let Some(alias) = self.alias.take() {
+            let store = self.store.clone();
             let manager = self.manager.clone();
             let cleanup_span = tracing::info_span!(
                 parent: None,
@@ -89,7 +92,7 @@ where
                             let _ = manager.inner.main_tree.remove(&key);
                         }
 
-                        let _ = manager.check_delete_files(hash).await;
+                        let _ = manager.check_delete_files(store, hash).await;
                     }
                 }
                 .instrument(cleanup_span),
@@ -164,11 +167,7 @@ where
 
         let mut hasher_reader = Hasher::new(validated_reader, self.manager.inner.hasher.clone());
 
-        let identifier = self
-            .manager
-            .store
-            .save_async_read(&mut hasher_reader)
-            .await?;
+        let identifier = self.store.save_async_read(&mut hasher_reader).await?;
         let hash = hasher_reader.finalize_reset().await?;
 
         debug!("Storing alias");
@@ -206,11 +205,7 @@ where
 
         let mut hasher_reader = Hasher::new(validated_reader, self.manager.inner.hasher.clone());
 
-        let identifier = self
-            .manager
-            .store
-            .save_async_read(&mut hasher_reader)
-            .await?;
+        let identifier = self.store.save_async_read(&mut hasher_reader).await?;
         let hash = hasher_reader.finalize_reset().await?;
 
         debug!("Adding alias");
@@ -236,7 +231,7 @@ where
         if dup.exists() {
             debug!("Duplicate exists, removing file");
 
-            self.manager.store.remove(identifier).await?;
+            self.store.remove(identifier).await?;
             return Ok(());
         }
 

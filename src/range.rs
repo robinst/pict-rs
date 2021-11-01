@@ -57,7 +57,7 @@ impl Range {
 
     pub(crate) async fn chop_store<S: Store>(
         &self,
-        store: S,
+        store: &S,
         identifier: S::Identifier,
     ) -> Result<impl Stream<Item = std::io::Result<Bytes>>, Error>
     where
