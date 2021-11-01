@@ -137,6 +137,17 @@ impl UploadManager {
             self.inner
                 .settings_tree
                 .insert(STORE_MIGRATION_PROGRESS, key)?;
+
+            let (ident, detail, settings) = futures_util::future::join3(
+                self.inner.identifier_tree.flush_async(),
+                self.inner.details_tree.flush_async(),
+                self.inner.settings_tree.flush_async(),
+            )
+            .await;
+
+            ident?;
+            detail?;
+            settings?;
         }
 
         Ok(())
