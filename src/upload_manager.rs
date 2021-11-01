@@ -150,6 +150,10 @@ impl UploadManager {
             settings?;
         }
 
+        // clean up the migration key to avoid interfering with future migrations
+        self.inner.settings_tree.remove(STORE_MIGRATION_PROGRESS)?;
+        self.inner.settings_tree.flush_async().await?;
+
         Ok(())
     }
 

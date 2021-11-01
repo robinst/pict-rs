@@ -9,7 +9,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-alpha.42
+pict-rs 0.3.0-alpha.43
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] [SUBCOMMAND]
@@ -33,6 +33,7 @@ OPTIONS:
         --max-image-area <max-image-area>          Specify the maximum area in pixels allowed in an image
         --max-image-height <max-image-height>      Specify the maximum width in pixels allowed on an image
         --max-image-width <max-image-width>        Specify the maximum width in pixels allowed on an image
+        --migrate-file <migrate-file>              Path to a file defining a store migration
     -o, --opentelemetry-url <opentelemetry-url>
             Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector
 
@@ -41,11 +42,11 @@ OPTIONS:
 SUBCOMMANDS:
     file-store    
     help          Prints this message or the help of the given subcommand(s)
-    s3-store    
+    s3-store   
 ```
 
 ```
-pict-rs-file-store 0.3.0-alpha.42
+pict-rs-file-store 0.3.0-alpha.43
 
 USAGE:
     pict-rs file-store [OPTIONS]
@@ -55,11 +56,11 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
-        --path <path> 
+        --path <path>    Path in which pict-rs will create it's 'files' directory
 ```
 
 ```
-pict-rs-s3-store 0.3.0-alpha.42
+pict-rs-s3-store 0.3.0-alpha.43
 
 USAGE:
     pict-rs s3-store [OPTIONS] --bucket-name <bucket-name> --region <region>
@@ -70,14 +71,16 @@ FLAGS:
 
 OPTIONS:
         --access-key <access-key>            
-        --bucket-name <bucket-name>          
-        --region <region>                    
+        --bucket-name <bucket-name>          Name of the bucket in which pict-rs will store images
+        --region <region>                    Region in which the bucket exists, can be an http endpoint
         --secret-key <secret-key>            
         --security-token <security-token>    
-        --session-token <session-token>
+        --session-token <session-token>  
 ```
 
-See [`pict-rs.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/pict-rs.toml) for more configuration
+See [`pict-rs.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/pict-rs.toml) and 
+[`migrate.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/migrate.toml) for more
+configuration
 
 #### Example:
 Running on all interfaces, port 8080, storing data in /opt/data
