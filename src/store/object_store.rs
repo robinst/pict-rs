@@ -2,7 +2,7 @@ use crate::store::Store;
 use actix_web::web::Bytes;
 use futures_util::stream::Stream;
 use s3::{
-    command::Command, creds::Credentials, request::Reqwest, request_trait::Request, Bucket, Region,
+    client::Client, command::Command, creds::Credentials, request_trait::Request, Bucket, Region,
 };
 use std::{
     pin::Pin,
@@ -44,6 +44,7 @@ pub(crate) struct ObjectStore {
     path_gen: Generator,
     settings_tree: sled::Tree,
     bucket: Bucket,
+    client: reqwest::Client,
 }
 
 pin_project_lite::pin_project! {
@@ -69,7 +70,9 @@ impl Store for ObjectStore {
     {
         let path = self.next_file()?;
 
-        self.bucket.put_object_stream(reader, &path).await?;
+        self.bucket
+            .put_object_stream(&self.client, reader, &path)
+            .await?;
 
         Ok(ObjectId::from_string(path))
     }
@@ -78,7 +81,7 @@ impl Store for ObjectStore {
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error> {
         let path = self.next_file()?;
 
-        self.bucket.put_object(&path, &bytes).await?;
+        self.bucket.put_object(&self.client, &path, &bytes).await?;
 
         Ok(ObjectId::from_string(path))
     }
@@ -95,7 +98,12 @@ impl Store for ObjectStore {
         let start = from_start.unwrap_or(0);
         let end = len.map(|len| start + len);
 
-        let request = Reqwest::new(&self.bucket, path, Command::GetObjectRange { start, end });
+        let request = Client::request(
+            &self.client,
+            &self.bucket,
+            path,
+            Command::GetObjectRange { start, end },
+        );
 
         let response = request.response().await?;
 
@@ -114,7 +122,7 @@ impl Store for ObjectStore {
         let path = identifier.as_str();
 
         self.bucket
-            .get_object_stream(path, writer)
+            .get_object_stream(&self.client, path, writer)
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, Self::Error::from(e)))?;
 
@@ -125,7 +133,7 @@ impl Store for ObjectStore {
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Self::Error> {
         let path = identifier.as_str();
 
-        let (head, _) = self.bucket.head_object(path).await?;
+        let (head, _) = self.bucket.head_object(&self.client, path).await?;
         let length = head.content_length.ok_or(ObjectError::Length)?;
 
         Ok(length as u64)
@@ -135,7 +143,7 @@ impl Store for ObjectStore {
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Self::Error> {
         let path = identifier.as_str();
 
-        self.bucket.delete_object(path).await?;
+        self.bucket.delete_object(&self.client, path).await?;
         Ok(())
     }
 }
@@ -149,7 +157,8 @@ impl ObjectStore {
         security_token: Option<String>,
         session_token: Option<String>,
         db: &sled::Db,
-    ) -> Result<Self, ObjectError> {
+        client: reqwest::Client,
+    ) -> Result<ObjectStore, ObjectError> {
         let settings_tree = db.open_tree("settings")?;
 
         let path_gen = init_generator(&settings_tree)?;
@@ -173,6 +182,7 @@ impl ObjectStore {
                     session_token,
                 },
             )?,
+            client,
         })
     }
 

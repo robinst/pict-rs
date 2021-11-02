@@ -692,6 +692,19 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
     error
 }
 
+fn build_client() -> awc::Client {
+    Client::builder()
+        .header("User-Agent", "pict-rs v0.3.0-main")
+        .finish()
+}
+
+#[cfg(feature = "object-storage")]
+fn build_reqwest_client() -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent("pict-rs v0.3.0-main")
+        .build()
+}
+
 async fn launch<S: Store + Clone + 'static>(manager: UploadManager, store: S) -> anyhow::Result<()>
 where
     S::Error: Unpin,
@@ -742,8 +755,8 @@ where
         .field(
             "images",
             Field::array(Field::file(move |filename, _, stream| {
-                let manager = manager2.clone();
                 let store = store2.clone();
+                let manager = manager2.clone();
 
                 let span = tracing::info_span!("file-import", ?filename);
 
@@ -767,16 +780,12 @@ where
         );
 
     HttpServer::new(move || {
-        let client = Client::builder()
-            .header("User-Agent", "pict-rs v0.3.0-main")
-            .finish();
-
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
             .app_data(web::Data::new(store.clone()))
             .app_data(web::Data::new(manager.clone()))
-            .app_data(web::Data::new(client))
+            .app_data(web::Data::new(build_client()))
             .app_data(web::Data::new(CONFIG.allowed_filters()))
             .service(
                 web::scope("/image")
@@ -868,6 +877,7 @@ where
                 security_token.clone(),
                 session_token.clone(),
                 &db,
+                build_reqwest_client()?,
             )?;
 
             manager.migrate_store::<S1, ObjectStore>(from, to).await?;
@@ -915,6 +925,7 @@ async fn main() -> anyhow::Result<()> {
                     security_token.clone(),
                     session_token.clone(),
                     &db,
+                    build_reqwest_client()?,
                 )?;
 
                 migrate_inner(&manager, &db, from, to).await?;
@@ -928,7 +939,7 @@ async fn main() -> anyhow::Result<()> {
         config::Store::FileStore { path } => {
             let path = path.to_owned().unwrap_or_else(|| CONFIG.data_dir());
 
-            let store = FileStore::build(path, &db)?;
+            let store = FileStore::build(path.clone(), &db)?;
             manager.restructure(&store).await?;
 
             launch(manager, store).await
@@ -950,6 +961,7 @@ async fn main() -> anyhow::Result<()> {
                 security_token.clone(),
                 session_token.clone(),
                 &db,
+                build_reqwest_client()?,
             )?;
 
             launch(manager, store).await

@@ -282,9 +282,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.44"
+version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61604a8f862e1d5c3229fdd78f8b02c68dcf73a4c4b05fd636d12240aaa242c1"
+checksum = "ee10e43ae4a853c0a3591d4e2ada1719e553be18199d9da9d4a83f5927c2f5c7"
 
 [[package]]
 name = "arrayvec"
@@ -371,7 +371,7 @@ dependencies = [
 [[package]]
 name = "aws-creds"
 version = "0.26.2"
-source = "git+https://github.com/asonix/rust-s3?branch=asonix/main#8d185a2b10654d3f2b86d99bd149e6a0197f2aac"
+source = "git+https://github.com/asonix/rust-s3?branch=asonix/main#a9323756817ed94665a0f5a05770290fa3a2160e"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1711,7 +1711,7 @@ dependencies = [
 [[package]]
 name = "rust-s3"
 version = "0.27.0"
-source = "git+https://github.com/asonix/rust-s3?branch=asonix/main#8d185a2b10654d3f2b86d99bd149e6a0197f2aac"
+source = "git+https://github.com/asonix/rust-s3?branch=asonix/main#a9323756817ed94665a0f5a05770290fa3a2160e"
 dependencies = [
  "anyhow",
  "async-trait",
