@@ -5,7 +5,10 @@ use actix_web::{
     web, App, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::Client;
-use futures_util::{stream::once, Stream};
+use futures_util::{
+    stream::{empty, once},
+    Stream,
+};
 use once_cell::sync::{Lazy, OnceCell};
 use std::{
     collections::HashSet,
@@ -437,40 +440,34 @@ where
 
     let (details, bytes) = CancelSafeProcessor::new(thumbnail_path.clone(), process_fut).await?;
 
-    match range {
-        Some(range_header) => {
-            if !range_header.is_bytes() {
-                return Err(UploadError::Range.into());
-            }
-
-            if range_header.is_empty() {
-                Err(UploadError::Range.into())
-            } else if range_header.len() == 1 {
-                let range = range_header.ranges().next().unwrap();
-                let content_range = range.to_content_range(bytes.len() as u64);
-                let stream = range.chop_bytes(bytes);
+    let (builder, stream) = if let Some(range_header) = range {
+        if let Some(range) = range_header.single_bytes_range() {
+            if let Some(content_range) = range.to_content_range(bytes.len() as u64) {
                 let mut builder = HttpResponse::PartialContent();
                 builder.insert_header(content_range);
+                let stream = range.chop_bytes(bytes);
 
-                Ok(srv_response(
-                    builder,
-                    stream,
-                    details.content_type(),
-                    7 * DAYS,
-                    details.system_time(),
-                ))
+                (builder, Either::left(Either::left(stream)))
             } else {
-                Err(UploadError::Range.into())
+                (
+                    HttpResponse::RangeNotSatisfiable(),
+                    Either::left(Either::right(empty())),
+                )
             }
+        } else {
+            return Err(UploadError::Range.into());
         }
-        None => Ok(srv_response(
-            HttpResponse::Ok(),
-            once(ready(Ok(bytes) as Result<_, Error>)),
-            details.content_type(),
-            7 * DAYS,
-            details.system_time(),
-        )),
-    }
+    } else {
+        (HttpResponse::Ok(), Either::right(once(ready(Ok(bytes)))))
+    };
+
+    Ok(srv_response(
+        builder,
+        stream,
+        details.content_type(),
+        7 * DAYS,
+        details.system_time(),
+    ))
 }
 
 /// Fetch file details
@@ -541,39 +538,34 @@ async fn ranged_file_resp<S: Store>(
 where
     Error: From<S::Error>,
 {
-    let (builder, stream) = match range {
+    let (builder, stream) = if let Some(range_header) = range {
         //Range header exists - return as ranged
-        Some(range_header) => {
-            if !range_header.is_bytes() {
-                return Err(UploadError::Range.into());
-            }
+        if let Some(range) = range_header.single_bytes_range() {
+            let len = store.len(&identifier).await?;
 
-            if range_header.is_empty() {
-                return Err(UploadError::Range.into());
-            } else if range_header.len() == 1 {
-                let len = store.len(&identifier).await?;
-
-                let range = range_header.ranges().next().unwrap();
-
+            if let Some(content_range) = range.to_content_range(len) {
                 let mut builder = HttpResponse::PartialContent();
-                builder.insert_header(range.to_content_range(len));
+                builder.insert_header(content_range);
 
                 (
                     builder,
-                    Either::left(map_error::map_crate_error(
+                    Either::left(Either::left(map_error::map_crate_error(
                         range.chop_store(store, identifier).await?,
-                    )),
+                    ))),
                 )
             } else {
-                return Err(UploadError::Range.into());
+                (
+                    HttpResponse::RangeNotSatisfiable(),
+                    Either::left(Either::right(empty())),
+                )
             }
+        } else {
+            return Err(UploadError::Range.into());
         }
+    } else {
         //No Range header in the request - return the entire document
-        None => {
-            let stream =
-                map_error::map_crate_error(store.to_stream(&identifier, None, None).await?);
-            (HttpResponse::Ok(), Either::right(stream))
-        }
+        let stream = map_error::map_crate_error(store.to_stream(&identifier, None, None).await?);
+        (HttpResponse::Ok(), Either::right(stream))
     };
 
     Ok(srv_response(

@@ -28,20 +28,38 @@ pub(crate) struct RangeHeader {
 }
 
 impl Range {
-    pub(crate) fn to_content_range(&self, instance_length: u64) -> ContentRange {
+    pub(crate) fn to_content_range(&self, instance_length: u64) -> Option<ContentRange> {
         match self {
-            Range::Start(start) => ContentRange(ContentRangeSpec::Bytes {
-                range: Some((*start, instance_length)),
-                instance_length: Some(instance_length),
-            }),
-            Range::SuffixLength(from_start) => ContentRange(ContentRangeSpec::Bytes {
-                range: Some((0, *from_start)),
-                instance_length: Some(instance_length),
-            }),
-            Range::Segment(start, end) => ContentRange(ContentRangeSpec::Bytes {
-                range: Some((*start, *end)),
-                instance_length: Some(instance_length),
-            }),
+            Range::Start(start) => {
+                if *start >= instance_length {
+                    return None;
+                }
+
+                Some(ContentRange(ContentRangeSpec::Bytes {
+                    range: Some((*start, instance_length - *start)),
+                    instance_length: Some(instance_length),
+                }))
+            }
+            Range::SuffixLength(from_start) => {
+                if *from_start > instance_length {
+                    return None;
+                }
+
+                Some(ContentRange(ContentRangeSpec::Bytes {
+                    range: Some((0, *from_start)),
+                    instance_length: Some(instance_length),
+                }))
+            }
+            Range::Segment(start, end) => {
+                if *start >= instance_length || *end > instance_length {
+                    return None;
+                }
+
+                Some(ContentRange(ContentRangeSpec::Bytes {
+                    range: Some((*start, *end)),
+                    instance_length: Some(instance_length),
+                }))
+            }
         }
     }
 
@@ -76,20 +94,12 @@ impl Range {
 }
 
 impl RangeHeader {
-    pub(crate) fn is_bytes(&self) -> bool {
-        self.unit == "bytes"
-    }
-
-    pub(crate) fn ranges(&self) -> impl Iterator<Item = &'_ Range> + '_ {
-        self.ranges.iter()
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.ranges.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.ranges.is_empty()
+    pub(crate) fn single_bytes_range(&self) -> Option<&'_ Range> {
+        if self.ranges.len() == 1 && self.unit == "bytes" {
+            self.ranges.iter().next()
+        } else {
+            None
+        }
     }
 }
 
