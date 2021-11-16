@@ -11,7 +11,6 @@ use std::{
 };
 use storage_path_generator::{Generator, Path};
 use tokio::io::{AsyncRead, AsyncWrite};
-use uuid::Uuid;
 
 mod object_id;
 pub(crate) use object_id::ObjectId;
@@ -64,11 +63,12 @@ impl Store for ObjectStore {
     async fn save_async_read<Reader>(
         &self,
         reader: &mut Reader,
+        filename: &str,
     ) -> Result<Self::Identifier, Self::Error>
     where
         Reader: AsyncRead + Unpin,
     {
-        let path = self.next_file()?;
+        let path = self.next_file(filename)?;
 
         self.bucket
             .put_object_stream(&self.client, reader, &path)
@@ -78,8 +78,12 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip(bytes))]
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error> {
-        let path = self.next_file()?;
+    async fn save_bytes(
+        &self,
+        bytes: Bytes,
+        filename: &str,
+    ) -> Result<Self::Identifier, Self::Error> {
+        let path = self.next_file(filename)?;
 
         self.bucket.put_object(&self.client, &path, &bytes).await?;
 
@@ -195,8 +199,7 @@ impl ObjectStore {
         Ok(path)
     }
 
-    fn next_file(&self) -> Result<String, ObjectError> {
-        let filename = Uuid::new_v4().to_string();
+    fn next_file(&self, filename: &str) -> Result<String, ObjectError> {
         let path = self.next_directory()?.to_strings().join("/");
 
         Ok(format!("{}/{}", path, filename))

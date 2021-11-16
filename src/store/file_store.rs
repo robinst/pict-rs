@@ -8,7 +8,6 @@ use std::{
 use storage_path_generator::Generator;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, error, instrument};
-use uuid::Uuid;
 
 mod file_id;
 mod restructure;
@@ -58,11 +57,12 @@ impl Store for FileStore {
     async fn save_async_read<Reader>(
         &self,
         reader: &mut Reader,
+        filename: &str,
     ) -> Result<Self::Identifier, Self::Error>
     where
         Reader: AsyncRead + Unpin,
     {
-        let path = self.next_file()?;
+        let path = self.next_file(filename)?;
 
         if let Err(e) = self.safe_save_reader(&path, reader).await {
             self.safe_remove_file(&path).await?;
@@ -73,8 +73,12 @@ impl Store for FileStore {
     }
 
     #[tracing::instrument(skip(bytes))]
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error> {
-        let path = self.next_file()?;
+    async fn save_bytes(
+        &self,
+        bytes: Bytes,
+        filename: &str,
+    ) -> Result<Self::Identifier, Self::Error> {
+        let path = self.next_file(filename)?;
 
         if let Err(e) = self.safe_save_bytes(&path, bytes).await {
             self.safe_remove_file(&path).await?;
@@ -163,10 +167,8 @@ impl FileStore {
         Ok(target_path)
     }
 
-    fn next_file(&self) -> Result<PathBuf, FileError> {
+    fn next_file(&self, filename: &str) -> Result<PathBuf, FileError> {
         let target_path = self.next_directory()?;
-
-        let filename = Uuid::new_v4().to_string();
 
         Ok(target_path.join(filename))
     }

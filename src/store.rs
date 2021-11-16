@@ -27,11 +27,16 @@ pub(crate) trait Store: Send + Sync + Clone + Debug + 'static {
     async fn save_async_read<Reader>(
         &self,
         reader: &mut Reader,
+        filename: &str,
     ) -> Result<Self::Identifier, Self::Error>
     where
         Reader: AsyncRead + Unpin;
 
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error>;
+    async fn save_bytes(
+        &self,
+        bytes: Bytes,
+        filename: &str,
+    ) -> Result<Self::Identifier, Self::Error>;
 
     async fn to_stream(
         &self,

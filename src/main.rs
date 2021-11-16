@@ -411,7 +411,7 @@ where
         let bytes2 = bytes.clone();
         actix_rt::spawn(
             async move {
-                let identifier = match store.save_bytes(bytes2).await {
+                let identifier = match store.save_bytes(bytes2, &name).await {
                     Ok(identifier) => identifier,
                     Err(e) => {
                         tracing::warn!("Failed to generate directory path: {}", e);

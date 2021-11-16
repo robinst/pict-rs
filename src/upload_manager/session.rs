@@ -167,7 +167,12 @@ where
 
         let mut hasher_reader = Hasher::new(validated_reader, self.manager.inner.hasher.clone());
 
-        let identifier = self.store.save_async_read(&mut hasher_reader).await?;
+        let filename = self.next_file(content_type).await?;
+
+        let identifier = self
+            .store
+            .save_async_read(&mut hasher_reader, &filename)
+            .await?;
         let hash = hasher_reader.finalize_reset().await?;
 
         debug!("Storing alias");
@@ -175,7 +180,7 @@ where
         self.add_existing_alias(&hash, &alias).await?;
 
         debug!("Saving file");
-        self.save_upload(&identifier, hash, content_type).await?;
+        self.save_upload(&identifier, hash, filename).await?;
 
         // Return alias to file
         Ok(self)
@@ -205,14 +210,19 @@ where
 
         let mut hasher_reader = Hasher::new(validated_reader, self.manager.inner.hasher.clone());
 
-        let identifier = self.store.save_async_read(&mut hasher_reader).await?;
+        let filename = self.next_file(input_type).await?;
+
+        let identifier = self
+            .store
+            .save_async_read(&mut hasher_reader, &filename)
+            .await?;
         let hash = hasher_reader.finalize_reset().await?;
 
         debug!("Adding alias");
         self.add_alias(&hash, input_type).await?;
 
         debug!("Saving file");
-        self.save_upload(&identifier, hash, input_type).await?;
+        self.save_upload(&identifier, hash, filename).await?;
 
         // Return alias to file
         Ok(self)
@@ -223,9 +233,9 @@ where
         &self,
         identifier: &S::Identifier,
         hash: Hash,
-        input_type: ValidInputType,
+        filename: String,
     ) -> Result<(), Error> {
-        let (dup, name) = self.check_duplicate(hash, input_type).await?;
+        let dup = self.check_duplicate(hash, filename.clone()).await?;
 
         // bail early with alias to existing file if this is a duplicate
         if dup.exists() {
@@ -235,21 +245,15 @@ where
             return Ok(());
         }
 
-        self.manager.store_identifier(name, identifier).await?;
+        self.manager.store_identifier(filename, identifier).await?;
 
         Ok(())
     }
 
     // check for an already-uploaded image with this hash, returning the path to the target file
-    #[instrument(skip(self, hash, input_type))]
-    async fn check_duplicate(
-        &self,
-        hash: Hash,
-        input_type: ValidInputType,
-    ) -> Result<(Dup, String), Error> {
+    #[instrument(skip(self, hash))]
+    async fn check_duplicate(&self, hash: Hash, filename: String) -> Result<Dup, Error> {
         let main_tree = self.manager.inner.main_tree.clone();
-
-        let filename = self.next_file(input_type).await?;
 
         let filename2 = filename.clone();
         let hash2 = hash.as_slice().to_vec();
@@ -270,15 +274,14 @@ where
         {
             let name = String::from_utf8(ivec.to_vec())?;
             debug!("Filename exists for hash, {}", name);
-            return Ok((Dup::Exists, name));
+            return Ok(Dup::Exists);
         }
 
         let fname_tree = self.manager.inner.filename_tree.clone();
-        let filename2 = filename.clone();
         debug!("Saving filename -> hash relation");
-        web::block(move || fname_tree.insert(filename2, hash.into_inner())).await??;
+        web::block(move || fname_tree.insert(filename, hash.into_inner())).await??;
 
-        Ok((Dup::New, filename))
+        Ok(Dup::New)
     }
 
     // generate a short filename that isn't already in-use

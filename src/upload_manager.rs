@@ -120,7 +120,7 @@ impl UploadManager {
             futures_util::pin_mut!(stream);
             let mut reader = tokio_util::io::StreamReader::new(stream);
 
-            let new_identifier = to.save_async_read(&mut reader).await?;
+            let new_identifier = to.save_async_read(&mut reader, &filename).await?;
 
             let details_key = self.details_key(&identifier, &filename)?;
 
@@ -194,7 +194,7 @@ impl UploadManager {
             ThumbnailFormat::Jpeg,
         )
         .await?;
-        let motion_identifier = store.save_async_read(&mut reader).await?;
+        let motion_identifier = store.save_async_read(&mut reader, &filename).await?;
         drop(permit);
 
         self.store_motion_path(&filename, &motion_identifier)
