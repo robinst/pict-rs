@@ -15,6 +15,8 @@ RUN \
         -g $GID \
         app
 
+COPY root/ /
+
 COPY ./pict-rs.toml /etc/pict-rs.toml
 
 ENV PATH=$PATH:/usr/bin/vendor_perl
