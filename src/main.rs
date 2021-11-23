@@ -599,8 +599,7 @@ where
         ]))
         .insert_header((ACCEPT_RANGES, "bytes"))
         .content_type(ext.to_string())
-        // TODO: remove pin when actix-web drops Unpin requirement
-        .streaming(Box::pin(stream))
+        .streaming(stream)
 }
 
 #[derive(Debug, serde::Deserialize)]
