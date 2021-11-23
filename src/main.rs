@@ -845,7 +845,7 @@ where
         config::Store::FileStore { path } => {
             let path = path.to_owned().unwrap_or_else(|| CONFIG.data_dir());
 
-            let to = FileStore::build(path, &db)?;
+            let to = FileStore::build(path, db)?;
             manager.restructure(&to).await?;
 
             manager.migrate_store::<S1, FileStore>(from, to).await?;
@@ -868,7 +868,7 @@ where
                 secret_key.clone(),
                 security_token.clone(),
                 session_token.clone(),
-                &db,
+                db,
                 build_reqwest_client()?,
             )?;
 

@@ -96,7 +96,7 @@ impl Range {
 impl RangeHeader {
     pub(crate) fn single_bytes_range(&self) -> Option<&'_ Range> {
         if self.ranges.len() == 1 && self.unit == "bytes" {
-            self.ranges.iter().next()
+            self.ranges.get(0)
         } else {
             None
         }

@@ -153,6 +153,7 @@ impl Store for ObjectStore {
 }
 
 impl ObjectStore {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build(
         bucket_name: &str,
         region: Region,

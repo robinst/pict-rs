@@ -100,7 +100,7 @@ impl UploadManager {
         filename: &str,
     ) -> Result<Vec<u8>, Error> {
         let path = self
-            .generalize_path(&store, variant_process_path)?
+            .generalize_path(store, variant_process_path)?
             .strip_prefix("files")?;
 
         self.variant_key(path, filename)
