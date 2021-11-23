@@ -21,9 +21,9 @@ dependencies = [
 
 [[package]]
 name = "actix-form-data"
-version = "0.6.0-beta.10"
+version = "0.6.0-beta.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3899a939c4e76a04e0ef65e0f937b1a2be840b92a2a5a55bdbc88e01919fa9bf"
+checksum = "57f6b53ea0b9305fdc5b30696d9d6c65b4091166038df2ffff9f5f877623d789"
 dependencies = [
  "actix-multipart",
  "actix-rt",
@@ -83,9 +83,9 @@ dependencies = [
 
 [[package]]
 name = "actix-multipart"
-version = "0.4.0-beta.7"
+version = "0.4.0-beta.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee3878dadc5d0e2afa0439b4e1ef3b03fa2feb72c208d8c6f196ed6242979f6d"
+checksum = "64b9a2bada994f9a85a6b705cfb02cbc422d53ccf4176b4b20623f8a7c181873"
 dependencies = [
  "actix-utils",
  "actix-web",
@@ -116,9 +116,9 @@ dependencies = [
 
 [[package]]
 name = "actix-rt"
-version = "2.4.0"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0c218d0a17c120f10ee0c69c9f0c45d87319e8f66b1f065e8412b612fc3e24"
+checksum = "05c2f80ce8d0c990941c7a7a931f69fd0701b76d521f8d36298edf59cd3fbf1f"
 dependencies = [
  "actix-macros",
  "futures-core",
@@ -158,9 +158,9 @@ dependencies = [
 
 [[package]]
 name = "actix-tls"
-version = "3.0.0-beta.8"
+version = "3.0.0-beta.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a563b0245222230c860c1b077ca7309179fff0f575b1914967c1ee385aa5da64"
+checksum = "53d4739910b49c77ea88308a9fbfae544524b34884161527f9978c0102052da0"
 dependencies = [
  "actix-codec",
  "actix-rt",
@@ -170,6 +170,7 @@ dependencies = [
  "futures-core",
  "http",
  "log",
+ "pin-project-lite",
  "tokio-rustls 0.23.1",
  "tokio-util",
  "webpki-roots 0.22.1",
@@ -283,9 +284,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.45"
+version = "1.0.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee10e43ae4a853c0a3591d4e2ada1719e553be18199d9da9d4a83f5927c2f5c7"
+checksum = "62e1f47f7dc0422027a4e370dd4548d4d66b26782e513e98dca1e689e058a80e"
 
 [[package]]
 name = "arrayvec"
@@ -369,7 +370,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rand",
- "rustls 0.20.1",
+ "rustls 0.20.2",
  "serde 1.0.130",
  "serde_json",
  "serde_urlencoded",
@@ -906,9 +907,9 @@ checksum = "acd94fdbe1d4ff688b67b04eee2e17bd50995534a61539e45adfefb45e5e5503"
 
 [[package]]
 name = "httpdate"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6456b8a6c8f33fee7d958fcd1b60d55b11940a79e63ae87013e6d22e26034440"
+checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
 
 [[package]]
 name = "hyper"
@@ -1058,9 +1059,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.107"
+version = "0.2.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbe5e23404da5b4f555ef85ebed98fb4083e55a00c317800bc2a50ede9f3d219"
+checksum = "8521a1b57e76b1ec69af7599e75e38e7b7fad6610f037db8c79b127201b5d119"
 
 [[package]]
 name = "linked-hash-map"
@@ -1769,9 +1770,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.20.1"
+version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dac4581f0fc0e0efd529d069e8189ec7b90b8e7680e21beb35141bdc45f36040"
+checksum = "d37e5e2290f3e040b594b1a9e04377c2c671f1a1cfd9bfdef82106ac1c113f84"
 dependencies = [
  "log",
  "ring",
@@ -1887,9 +1888,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.70"
+version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e277c495ac6cd1a01a58d0a0c574568b4d1ddf14f59965c6a58b8d96400b54f3"
+checksum = "063bf466a64011ac24040a49009724ee60a57da1b437617ceb32e53ad61bfb19"
 dependencies = [
  "itoa",
  "ryu",
@@ -2205,7 +2206,7 @@ version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4baa378e417d780beff82bf54ceb0d195193ea6a00c14e22359e7f39456b5689"
 dependencies = [
- "rustls 0.20.1",
+ "rustls 0.20.2",
  "tokio",
  "webpki 0.22.0",
 ]
@@ -2302,9 +2303,9 @@ dependencies = [
 
 [[package]]
 name = "tower"
-version = "0.4.10"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c00e500fff5fa1131c866b246041a6bf96da9c965f8fe4128cb1421f23e93c00"
+checksum = "5651b5f6860a99bd1adb59dbfe1db8beb433e73709d9032b413a77e2fb7c066a"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -2348,8 +2349,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-actix-web"
-version = "0.5.1-alpha.0"
-source = "git+https://github.com/asonix/tracing-actix-web?branch=asonix/beta-11#017d71adcdefbb4214e48c9b71c0733da542a9fc"
+version = "0.5.0-beta.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cac34827e06f78b69523b2fbe5b2dd4dfc75940b2ea5ba37e4fa2a25d4a0edf"
 dependencies = [
  "actix-web",
  "opentelemetry",
@@ -2374,7 +2376,8 @@ dependencies = [
 [[package]]
 name = "tracing-awc"
 version = "0.1.0-beta.9"
-source = "git+https://git.asonix.dog/asonix/tracing-awc#5d6c96e03e4a881c7d3f7a24a01f95aab70e7897"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebd4b847e7dda81d94259935b8abcb7ddc7946ae99f11e4e6496cd32c237a304"
 dependencies = [
  "actix-http",
  "awc",
@@ -2444,9 +2447,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80a4ddde70311d8da398062ecf6fc2c309337de6b0f77d6c27aff8d53f6fca52"
+checksum = "7507ec620f809cdf07cccb5bc57b13069a88031b795efd4079b1c71b66c1613d"
 dependencies = [
  "ansi_term 0.12.1",
  "lazy_static",

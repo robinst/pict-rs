@@ -15,7 +15,7 @@ object-storage = ["reqwest", "rust-s3"]
 io-uring = ["actix-rt/io-uring", "actix-server/io-uring", "tokio-uring", "sled/io_uring"]
 
 [dependencies]
-actix-form-data = "0.6.0-beta.1"
+actix-form-data = "0.6.0-beta.11"
 actix-rt = "2.2.0"
 actix-server = "2.0.0-beta.6"
 actix-web = { version = "4.0.0-beta.10", default-features = false }
@@ -55,14 +55,11 @@ url = { version = "2.2", features = ["serde"] }
 uuid = { version = "0.8.2", features = ["v4", "serde"] }
 
 [dependencies.tracing-actix-web]
-version = "0.5.1-alpha.0"
+version = "0.5.0-alpha.2"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_16"]
-git = "https://github.com/asonix/tracing-actix-web"
-branch = "asonix/beta-11"
 
 [dependencies.tracing-awc]
 version = "0.1.0-beta.8"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_16"]
-git = "https://git.asonix.dog/asonix/tracing-awc"

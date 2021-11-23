@@ -36,13 +36,13 @@ filters = [
 max_file_size = 40 # in Megabytes
 # environment variable: PICTRS_MAX_IMAGE_WIDTH
 # default: 10,000
-max_image_width = 10000 # in Pixels
+max_image_width = 10_000 # in Pixels
 # environment variable: PICTRS_MAX_IMAGE_HEIGHT
 # default: 10,000
-max_image_height = 10000 # in Pixels
+max_image_height = 10_000 # in Pixels
 # environment variable: PICTRS_MAX_IMAGE_AREA
 # default: 40,000,000
-max_image_area = 40000000 # in Pixels
+max_image_area = 40_000_000 # in Pixels
 
 ## Optional: skip image validation on the import endpoint
 # environment variable: PICTRS_SKIP_VALIDATE_IMPORTS
