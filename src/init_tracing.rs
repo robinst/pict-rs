@@ -19,7 +19,7 @@ pub(super) fn init_tracing(
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let format_layer = tracing_subscriber::fmt::layer()
-        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_span_events(FmtSpan::CLOSE)
         .pretty();
 
     let subscriber = Registry::default()
