@@ -21,7 +21,7 @@ use std::{
 use tokio::{io::AsyncReadExt, sync::Semaphore};
 use tracing::{debug, error, info, instrument, Span};
 use tracing_actix_web::TracingLogger;
-use tracing_awc::Propagate;
+use tracing_awc::Tracing;
 use tracing_futures::Instrument;
 
 mod concurrent_processor;
@@ -202,7 +202,7 @@ async fn download<S: Store>(
 where
     Error: From<S::Error>,
 {
-    let res = client.get(&query.url).propagate().send().await?;
+    let res = client.get(&query.url).send().await?;
 
     if !res.status().is_success() {
         return Err(UploadError::Download(res.status()).into());
@@ -685,6 +685,7 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
 
 fn build_client() -> awc::Client {
     Client::builder()
+        .wrap(Tracing)
         .header("User-Agent", "pict-rs v0.3.0-main")
         .finish()
 }
