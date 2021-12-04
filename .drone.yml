@@ -89,7 +89,7 @@ steps:
   image: asonix/rust-builder:amd64-latest
   pull: always
   commands:
-  - cargo check --target=x86_64-unknown-linux-musl
+  - cargo check --target=$TARGET
 
 trigger:
   event:
@@ -121,7 +121,22 @@ steps:
   image: asonix/rust-builder:amd64-latest
   pull: always
   commands:
-  - cargo build --target=x86_64-unknown-linux-musl --release
+  - cargo build --target=$TARGET --release
+  - $TOOL-strip target/$TARGET/release/pict-rs
+
+- name: push
+  image: plugins/docker
+  settings:
+    username: asonix
+    password:
+      from_secret: dockerhub_token
+    repo: asonix/pictrs
+    dockerfile: docker/drone/Dockerfile
+    auto_tag: true
+    auto_tag_suffix: amd64
+    build_args:
+    - REPO_ARCH=amd64
+    - TARGET=x86_64-unknown-linux-musl
 
 trigger:
   event:
@@ -152,7 +167,7 @@ steps:
   image: asonix/rust-builder:arm64v8-latest
   pull: always
   commands:
-  - cargo check --target=aarch64-unknown-linux-musl
+  - cargo check --target=$TARGET
 
 trigger:
   event:
@@ -184,7 +199,22 @@ steps:
   image: asonix/rust-builder:arm64v8-latest
   pull: always
   commands:
-  - cargo build --target=aarch64-unknown-linux-musl --release
+  - cargo build --target=$TARGET --release
+  - $TOOL-strip target/$TARGET/release/pict-rs
+
+- name: push
+  image: plugins/docker
+  settings:
+    username: asonix
+    password:
+      from_secret: dockerhub_token
+    repo: asonix/pictrs
+    dockerfile: docker/drone/Dockerfile
+    auto_tag: true
+    auto_tag_suffix: arv64v8
+    build_args:
+    - REPO_ARCH=arm64v8
+    - TARGET=aarch64-unknown-linux-musl
 
 trigger:
   event:
@@ -215,7 +245,7 @@ steps:
   image: asonix/rust-builder:arm32v7-latest
   pull: always
   commands:
-  - cargo check --target=armv7-unknown-linux-musleabihf
+  - cargo check --target=$TARGET
 
 trigger:
   event:
@@ -247,7 +277,22 @@ steps:
   image: asonix/rust-builder:arm32v7-latest
   pull: always
   commands:
-  - cargo build --target=armv7-unknown-linux-musleabihf --release
+  - cargo build --target=$TARGET --release
+  - $TOOL-strip target/$TARGET/release/pict-rs
+
+- name: push
+  image: plugins/docker
+  settings:
+    username: asonix
+    password:
+      from_secret: dockerhub_token
+    repo: asonix/pictrs
+    dockerfile: docker/drone/Dockerfile
+    auto_tag: true
+    auto_tag_suffix: arm32v7
+    build_args:
+    - REPO_ARCH=arm32v7
+    - TARGET=armv7-unknown-linux-musleabifh
 
 trigger:
   event:
