@@ -2,24 +2,21 @@ image: asonix/pictrs:{{#if build.tag}}{{trimPrefix "v" build.tag}}{{else}}latest
 {{#if build.tags}}
 tags:
 {{#each build.tags}}
-  - {{this}}
+- {{this}}
 {{/each}}
 {{/if}}
 manifests:
-  -
-    image: asonix/pictrs:{{#if build.tag}}{{trimPrefix "v" build.tag}}{{else}}latest{{/if}}-amd64
-    platform:
-      architecture: amd64
-      os: linux
-  -
-    image: asonix/pictrs:{{#if build.tag}}{{trimPrefix "v" build.tag}}{{else}}latest{{/if}}-arm64v8
-    platform:
-      architecture: arm64
-      os: linux
-      variant: v8
-  -
-    image: asonix/pictrs:{{#if build.tag}}{{trimPrefix "v" build.tag}}{{else}}latest{{/if}}-arm32v7
-    platform:
-      architecture: arm
-      os: linux
-      variant: v7
+- image: asonix/pictrs:{{#if build.tag}}{{trimPrefix "v" build.tag}}{{else}}latest{{/if}}-amd64
+  platform:
+    architecture: amd64
+    os: linux
+- image: asonix/pictrs:{{#if build.tag}}{{trimPrefix "v" build.tag}}{{else}}latest{{/if}}-arm64v8
+  platform:
+    architecture: arm64
+    os: linux
+    variant: v8
+- image: asonix/pictrs:{{#if build.tag}}{{trimPrefix "v" build.tag}}{{else}}latest{{/if}}-arm32v7
+  platform:
+    architecture: arm
+    os: linux
+    variant: v7
