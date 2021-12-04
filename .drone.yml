@@ -305,7 +305,7 @@ trigger:
 
 kind: pipeline
 type: docker
-name: build-arm32v7
+name: manifest
 
 platform:
   arch: amd64
