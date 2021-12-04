@@ -136,7 +136,7 @@ steps:
     auto_tag_suffix: amd64
     build_args:
     - REPO_ARCH=amd64
-    - TARGET=x86_64-unknown-linux-musl
+    - TARGET_ARCH=x86_64-unknown-linux-musl
 
 trigger:
   event:
@@ -214,7 +214,7 @@ steps:
     auto_tag_suffix: arv64v8
     build_args:
     - REPO_ARCH=arm64v8
-    - TARGET=aarch64-unknown-linux-musl
+    - TARGET_ARCH=aarch64-unknown-linux-musl
 
 trigger:
   event:
@@ -292,7 +292,7 @@ steps:
     auto_tag_suffix: arm32v7
     build_args:
     - REPO_ARCH=arm32v7
-    - TARGET=armv7-unknown-linux-musleabifh
+    - TARGET_ARCH=armv7-unknown-linux-musleabifh
 
 trigger:
   event:
