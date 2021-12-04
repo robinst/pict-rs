@@ -134,7 +134,7 @@ steps:
     repo: asonix/pictrs
     dockerfile: docker/drone/Dockerfile
     auto_tag: true
-    auto_tag_suffix: amd64
+    auto_tag_suffix: linux-amd64
     build_args:
     - REPO_ARCH=amd64
     - TARGET_ARCH=x86_64-unknown-linux-musl
@@ -213,7 +213,7 @@ steps:
     repo: asonix/pictrs
     dockerfile: docker/drone/Dockerfile
     auto_tag: true
-    auto_tag_suffix: arm64v8
+    auto_tag_suffix: linux-arm64v8
     build_args:
     - REPO_ARCH=arm64v8
     - TARGET_ARCH=aarch64-unknown-linux-musl
@@ -292,7 +292,7 @@ steps:
     repo: asonix/pictrs
     dockerfile: docker/drone/Dockerfile
     auto_tag: true
-    auto_tag_suffix: arm32v7
+    auto_tag_suffix: linux-arm32v7
     build_args:
     - REPO_ARCH=arm32v7
     - TARGET_ARCH=armv7-unknown-linux-musleabifh
