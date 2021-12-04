@@ -124,6 +124,7 @@ steps:
   - cargo build --target=$TARGET --release
   - $TOOL-strip target/$TARGET/release/pict-rs
   - cp target/$TARGET/release/pict-rs .
+  - cp pict-rs pict-rs-linux-amd64
 
 - name: push
   image: plugins/docker:20
@@ -138,6 +139,18 @@ steps:
     build_args:
     - REPO_ARCH=amd64
     - TARGET_ARCH=x86_64-unknown-linux-musl
+
+- name: publish
+  image: plugins/gitea-release:1
+  settings:
+    api_key:
+      from_secret: gitea_token
+    base_url: https://git.asonix.dog
+    files:
+    - pict-rs-linux-amd64
+    checksum:
+    - sha256
+    - sha512
 
 trigger:
   event:
@@ -203,6 +216,7 @@ steps:
   - cargo build --target=$TARGET --release
   - $TOOL-strip target/$TARGET/release/pict-rs
   - cp target/$TARGET/release/pict-rs .
+  - cp pict-rs pict-rs-linux-arm64v8
 
 - name: push
   image: plugins/docker:20
@@ -217,6 +231,18 @@ steps:
     build_args:
     - REPO_ARCH=arm64v8
     - TARGET_ARCH=aarch64-unknown-linux-musl
+
+- name: publish
+  image: plugins/gitea-release:1
+  settings:
+    api_key:
+      from_secret: gitea_token
+    base_url: https://git.asonix.dog
+    files:
+    - pict-rs-linux-arm64v8
+    checksum:
+    - sha256
+    - sha512
 
 trigger:
   event:
@@ -282,6 +308,7 @@ steps:
   - cargo build --target=$TARGET --release
   - $TOOL-strip target/$TARGET/release/pict-rs
   - cp target/$TARGET/release/pict-rs .
+  - cp pict-rs pict-rs-linux-arm32v7
 
 - name: push
   image: plugins/docker:20
@@ -296,6 +323,18 @@ steps:
     build_args:
     - REPO_ARCH=arm32v7
     - TARGET_ARCH=armv7-unknown-linux-musleabifh
+
+- name: publish
+  image: plugins/gitea-release:1
+  settings:
+    api_key:
+      from_secret: gitea_token
+    base_url: https://git.asonix.dog
+    files:
+    - pict-rs-linux-arm32v7
+    checksum:
+    - sha256
+    - sha512
 
 trigger:
   event:
