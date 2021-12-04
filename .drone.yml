@@ -320,6 +320,7 @@ steps:
     username: asonix
     password:
       from_secret: dockerhub_token
+    dump: true
     auto_tag: true
     ignore_missing: true
     spec: docker/drone/manifest.tmpl
