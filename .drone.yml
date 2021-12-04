@@ -148,9 +148,6 @@ steps:
     base_url: https://git.asonix.dog
     files:
     - pict-rs-linux-amd64
-    checksum:
-    - sha256
-    - sha512
 
 trigger:
   event:
@@ -240,9 +237,6 @@ steps:
     base_url: https://git.asonix.dog
     files:
     - pict-rs-linux-arm64v8
-    checksum:
-    - sha256
-    - sha512
 
 trigger:
   event:
@@ -332,9 +326,6 @@ steps:
     base_url: https://git.asonix.dog
     files:
     - pict-rs-linux-arm32v7
-    checksum:
-    - sha256
-    - sha512
 
 trigger:
   event:
