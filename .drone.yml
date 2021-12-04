@@ -123,6 +123,7 @@ steps:
   commands:
   - cargo build --target=$TARGET --release
   - $TOOL-strip target/$TARGET/release/pict-rs
+  - cp target/$TARGET/release/pict-rs .
 
 - name: push
   image: plugins/docker
@@ -201,6 +202,7 @@ steps:
   commands:
   - cargo build --target=$TARGET --release
   - $TOOL-strip target/$TARGET/release/pict-rs
+  - cp target/$TARGET/release/pict-rs .
 
 - name: push
   image: plugins/docker
@@ -279,6 +281,7 @@ steps:
   commands:
   - cargo build --target=$TARGET --release
   - $TOOL-strip target/$TARGET/release/pict-rs
+  - cp target/$TARGET/release/pict-rs .
 
 - name: push
   image: plugins/docker
