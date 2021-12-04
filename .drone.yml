@@ -314,6 +314,14 @@ clone:
   disable: true
 
 steps:
+- name: clone
+  image: alpine/git:latest
+  user: root
+  commands:
+  - git clone $DRONE_GIT_HTTP_URL .
+  - git checkout $DRONE_COMMIT
+  - chown -R 991:991 .
+
 - name: manifest
   image: plugins/manifest:1
   settings:
