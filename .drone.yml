@@ -85,7 +85,7 @@ steps:
   - git checkout $DRONE_COMMIT
   - chown -R 991:991 .
 
-- name: build
+- name: check
   image: asonix/rust-builder:amd64-latest
   pull: always
   commands:
@@ -174,7 +174,7 @@ steps:
   - git checkout $DRONE_COMMIT
   - chown -R 991:991 .
 
-- name: build
+- name: check
   image: asonix/rust-builder:arm64v8-latest
   pull: always
   commands:
@@ -263,7 +263,7 @@ steps:
   - git checkout $DRONE_COMMIT
   - chown -R 991:991 .
 
-- name: build
+- name: check
   image: asonix/rust-builder:arm32v7-latest
   pull: always
   commands:
