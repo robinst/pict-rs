@@ -22,10 +22,10 @@ steps:
   pull: always
   commands:
   - rustup component add clippy
-  - cargo clippy --no-default-features
-  - cargo clippy --no-default-features --features io-uring
-  - cargo clippy --no-default-features --features object-storage
-  - cargo clippy --no-default-features --features object-storage,io-uring
+  - cargo clippy --no-default-features -- -D warnings
+  - cargo clippy --no-default-features --features io-uring -- -D warnings
+  - cargo clippy --no-default-features --features object-storage -- -D warnings
+  - cargo clippy --no-default-features --features object-storage,io-uring -- -D warnings
 
 trigger:
   event:
@@ -138,7 +138,6 @@ steps:
     auto_tag_suffix: linux-amd64
     build_args:
     - REPO_ARCH=amd64
-    - TARGET_ARCH=x86_64-unknown-linux-musl
 
 - name: publish
   image: plugins/gitea-release:1
@@ -227,7 +226,6 @@ steps:
     auto_tag_suffix: linux-arm64v8
     build_args:
     - REPO_ARCH=arm64v8
-    - TARGET_ARCH=aarch64-unknown-linux-musl
 
 - name: publish
   image: plugins/gitea-release:1
@@ -316,7 +314,6 @@ steps:
     auto_tag_suffix: linux-arm32v7
     build_args:
     - REPO_ARCH=arm32v7
-    - TARGET_ARCH=armv7-unknown-linux-musleabifh
 
 - name: publish
   image: plugins/gitea-release:1
