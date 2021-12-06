@@ -1,4 +1,4 @@
-use crate::store::Store;
+use crate::{id_or_span::IdOrSpan, store::Store};
 use actix_rt::task::JoinHandle;
 use actix_web::web::Bytes;
 use std::{
@@ -13,14 +13,14 @@ use tokio::{
     sync::oneshot::{channel, Receiver},
 };
 use tracing::Instrument;
-use tracing::Span;
+use tracing::{Id, Span};
 
 #[derive(Debug)]
 struct StatusError;
 
 pub(crate) struct Process {
     child: Child,
-    span: Span,
+    id: Option<Id>,
 }
 
 struct DropHandle {
@@ -31,7 +31,7 @@ pin_project_lite::pin_project! {
     struct ProcessRead<I> {
         #[pin]
         inner: I,
-        span: Span,
+        span: IdOrSpan,
         err_recv: Receiver<std::io::Error>,
         err_closed: bool,
         handle: DropHandle,
@@ -46,21 +46,19 @@ impl Process {
     fn spawn_span(&self) -> Span {
         let span = tracing::info_span!(parent: None, "Spawned command writer",);
 
-        span.follows_from(self.span.clone());
+        span.follows_from(self.id.clone());
 
         span
     }
 
+    #[tracing::instrument(name = "Spawning Command")]
     pub(crate) fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
         let cmd = cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
 
-        let span = tracing::info_span!(
-            "Spawning Command",
-            command = &tracing::field::debug(&cmd),
-            exception.message = &tracing::field::Empty,
-            exception.details = &tracing::field::Empty,
-        );
-        cmd.spawn().map(|child| Process { child, span })
+        cmd.spawn().map(|child| Process {
+            child,
+            id: Span::current().id(),
+        })
     }
 
     pub(crate) async fn wait(mut self) -> std::io::Result<()> {
@@ -104,7 +102,7 @@ impl Process {
 
         Some(ProcessRead {
             inner: stdout,
-            span: self.span,
+            span: IdOrSpan::from_id(self.id),
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
@@ -137,7 +135,7 @@ impl Process {
 
         Some(ProcessRead {
             inner: stdout,
-            span: self.span,
+            span: IdOrSpan::from_id(self.id),
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
@@ -181,7 +179,7 @@ impl Process {
 
         Some(ProcessRead {
             inner: stdout,
-            span: self.span,
+            span: IdOrSpan::from_id(self.id),
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
@@ -200,10 +198,15 @@ where
     ) -> Poll<std::io::Result<()>> {
         let this = self.as_mut().project();
 
-        let span = this.span;
         let err_recv = this.err_recv;
         let err_closed = this.err_closed;
         let inner = this.inner;
+
+        let span = this.span.as_span(|id| {
+            let span = tracing::info_span!("Processing Command");
+            span.follows_from(id);
+            span
+        });
 
         span.in_scope(|| {
             if !*err_closed {
