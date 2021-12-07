@@ -45,18 +45,22 @@ impl Process {
 
     fn spawn_span(&self) -> Span {
         let span = tracing::info_span!(parent: None, "Spawned command writer",);
+
         span.follows_from(self.span.clone());
+
         span
     }
 
-    #[tracing::instrument(name = "Spawning Command")]
     pub(crate) fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
         let cmd = cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
 
-        cmd.spawn().map(|child| Process {
-            child,
-            span: Span::current(),
-        })
+        let span = tracing::info_span!(
+            "Spawning Command",
+            command = &tracing::field::debug(&cmd),
+            exception.message = &tracing::field::Empty,
+            exception.details = &tracing::field::Empty,
+        );
+        cmd.spawn().map(|child| Process { child, span })
     }
 
     pub(crate) async fn wait(mut self) -> std::io::Result<()> {
@@ -100,7 +104,7 @@ impl Process {
 
         Some(ProcessRead {
             inner: stdout,
-            span: body_span(self.span),
+            span: self.span,
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
@@ -133,7 +137,7 @@ impl Process {
 
         Some(ProcessRead {
             inner: stdout,
-            span: body_span(self.span),
+            span: self.span,
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
@@ -177,18 +181,12 @@ impl Process {
 
         Some(ProcessRead {
             inner: stdout,
-            span: body_span(self.span),
+            span: self.span,
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
         })
     }
-}
-
-fn body_span(following: Span) -> Span {
-    let span = tracing::info_span!(parent: None, "Processing Command");
-    span.follows_from(following);
-    span
 }
 
 impl<I> AsyncRead for ProcessRead<I>
@@ -202,10 +200,10 @@ where
     ) -> Poll<std::io::Result<()>> {
         let this = self.as_mut().project();
 
+        let span = this.span;
         let err_recv = this.err_recv;
         let err_closed = this.err_closed;
         let inner = this.inner;
-        let span = this.span;
 
         span.in_scope(|| {
             if !*err_closed {
