@@ -31,7 +31,6 @@ mod error;
 mod exiftool;
 mod ffmpeg;
 mod file;
-mod id_or_span;
 mod init_tracing;
 mod magick;
 mod map_error;

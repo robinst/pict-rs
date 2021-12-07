@@ -1,4 +1,4 @@
-use crate::{id_or_span::IdOrSpan, store::Store};
+use crate::store::Store;
 use actix_rt::task::JoinHandle;
 use actix_web::web::Bytes;
 use std::{
@@ -13,14 +13,14 @@ use tokio::{
     sync::oneshot::{channel, Receiver},
 };
 use tracing::Instrument;
-use tracing::{Id, Span};
+use tracing::Span;
 
 #[derive(Debug)]
 struct StatusError;
 
 pub(crate) struct Process {
     child: Child,
-    id: Option<Id>,
+    span: Span,
 }
 
 struct DropHandle {
@@ -31,7 +31,7 @@ pin_project_lite::pin_project! {
     struct ProcessRead<I> {
         #[pin]
         inner: I,
-        span: IdOrSpan,
+        span: Span,
         err_recv: Receiver<std::io::Error>,
         err_closed: bool,
         handle: DropHandle,
@@ -45,9 +45,7 @@ impl Process {
 
     fn spawn_span(&self) -> Span {
         let span = tracing::info_span!(parent: None, "Spawned command writer",);
-
-        span.follows_from(self.id.clone());
-
+        span.follows_from(self.span.clone());
         span
     }
 
@@ -57,7 +55,7 @@ impl Process {
 
         cmd.spawn().map(|child| Process {
             child,
-            id: Span::current().id(),
+            span: Span::current(),
         })
     }
 
@@ -102,7 +100,7 @@ impl Process {
 
         Some(ProcessRead {
             inner: stdout,
-            span: IdOrSpan::from_id(self.id),
+            span: body_span(self.span),
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
@@ -135,7 +133,7 @@ impl Process {
 
         Some(ProcessRead {
             inner: stdout,
-            span: IdOrSpan::from_id(self.id),
+            span: body_span(self.span),
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
@@ -179,12 +177,18 @@ impl Process {
 
         Some(ProcessRead {
             inner: stdout,
-            span: IdOrSpan::from_id(self.id),
+            span: body_span(self.span),
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
         })
     }
+}
+
+fn body_span(following: Span) -> Span {
+    let span = tracing::info_span!(parent: None, "Processing Command");
+    span.follows_from(following);
+    span
 }
 
 impl<I> AsyncRead for ProcessRead<I>
@@ -201,12 +205,7 @@ where
         let err_recv = this.err_recv;
         let err_closed = this.err_closed;
         let inner = this.inner;
-
-        let span = this.span.as_span(|id| {
-            let span = tracing::info_span!("Processing Command");
-            span.follows_from(id);
-            span
-        });
+        let span = this.span;
 
         span.in_scope(|| {
             if !*err_closed {
