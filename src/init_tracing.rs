@@ -18,9 +18,8 @@ pub(super) fn init_tracing(
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let format_layer = tracing_subscriber::fmt::layer()
-        .with_span_events(FmtSpan::CLOSE)
-        .pretty();
+    let format_layer =
+        tracing_subscriber::fmt::layer().with_span_events(FmtSpan::NEW | FmtSpan::CLOSE);
 
     let subscriber = Registry::default()
         .with(env_filter)
