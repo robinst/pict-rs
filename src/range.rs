@@ -4,10 +4,7 @@ use crate::{
 };
 use actix_web::{
     dev::Payload,
-    http::{
-        header::{ContentRange, ContentRangeSpec},
-        HeaderValue,
-    },
+    http::header::{ContentRange, ContentRangeSpec, HeaderValue},
     web::Bytes,
     FromRequest, HttpRequest,
 };
