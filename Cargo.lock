@@ -1755,9 +1755,9 @@ dependencies = [
 
 [[package]]
 name = "ryu"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b30e4c09749c107e83dd61baf9604198efc4542863c88af39dafcaca89c7c9f9"
+checksum = "73b4b750c782965c211b42f022f59af1fbceabdd026623714f104152f1ec149f"
 
 [[package]]
 name = "scoped-tls"
@@ -2289,8 +2289,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-actix-web"
-version = "0.5.0-beta.4"
-source = "git+https://github.com/asonix/tracing-actix-web?branch=riley/beta.14#1abbda4ed0229552bcfd6a7ce7da0e3de5d89d41"
+version = "0.5.0-beta.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13030b85c40d37169eee20eec527f7e87724e6128efa2ae791d6ffdd4046d32f"
 dependencies = [
  "actix-web",
  "opentelemetry",
@@ -2315,7 +2316,8 @@ dependencies = [
 [[package]]
 name = "tracing-awc"
 version = "0.1.0-beta.14"
-source = "git+https://git.asonix.dog/asonix/tracing-awc#4898546aa1bebb00577b6fecf5dae025613f9d09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67d8a6f1eeb0b85e61a55c0c46ca45c7b487946d7df2e81997a9282e102ebe96"
 dependencies = [
  "actix-http",
  "actix-service",
