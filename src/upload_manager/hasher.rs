@@ -1,6 +1,6 @@
 use crate::error::Error;
 use actix_web::web;
-use sha2::Digest;
+use sha2::{digest::FixedOutputReset, Digest};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -22,7 +22,7 @@ pub(super) struct Hash {
 
 impl<I, D> Hasher<I, D>
 where
-    D: Digest + Send + 'static,
+    D: Digest + FixedOutputReset + Send + 'static,
 {
     pub(super) fn new(reader: I, digest: D) -> Self {
         Hasher {
