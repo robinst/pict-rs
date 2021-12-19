@@ -1,6 +1,6 @@
 ARG REPO_ARCH
 
-FROM asonix/rust-runner:$REPO_ARCH-latest
+FROM asonix/rust-runner:latest-linux-$REPO_ARCH
 
 USER root
 RUN \
@@ -11,6 +11,7 @@ COPY pict-rs /usr/local/bin/pict-rs
 COPY docker/prod/root/ /
 
 USER app
+EXPOSE 6669
 EXPOSE 8080
 VOLUME /mnt
 ENTRYPOINT ["/sbin/tini", "--"]
