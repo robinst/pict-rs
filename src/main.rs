@@ -686,7 +686,7 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
 fn build_client() -> awc::Client {
     Client::builder()
         .wrap(Tracing)
-        .header("User-Agent", "pict-rs v0.3.0-main")
+        .add_default_header(("User-Agent", "pict-rs v0.3.0-main"))
         .finish()
 }
 
