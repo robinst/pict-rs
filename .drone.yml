@@ -31,6 +31,7 @@ trigger:
   event:
   - push
   - pull_request
+  - tag
 
 ---
 
@@ -63,6 +64,7 @@ trigger:
   event:
   - push
   - pull_request
+  - tag
 
 ---
 
@@ -147,6 +149,10 @@ steps:
     base_url: https://git.asonix.dog
     files:
     - pict-rs-linux-amd64
+
+depends_on:
+- clippy
+- tests
 
 trigger:
   event:
@@ -236,6 +242,10 @@ steps:
     files:
     - pict-rs-linux-arm64v8
 
+depends_on:
+- clippy
+- tests
+
 trigger:
   event:
   - tag
@@ -323,6 +333,10 @@ steps:
     base_url: https://git.asonix.dog
     files:
     - pict-rs-linux-arm32v7
+
+depends_on:
+- clippy
+- tests
 
 trigger:
   event:
