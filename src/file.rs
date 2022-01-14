@@ -130,7 +130,7 @@ mod tokio_file {
 #[cfg(feature = "io-uring")]
 mod io_uring {
     use crate::store::file_store::FileError;
-    use actix_web::web::Bytes;
+    use actix_web::web::{Bytes, BytesMut};
     use futures_util::stream::{Stream, StreamExt};
     use std::{
         convert::TryInto,
@@ -172,8 +172,7 @@ mod io_uring {
             tokio::fs::metadata(&self.path).await
         }
 
-        pub(crate) async fn write_from_bytes(&mut self, bytes: Bytes) -> std::io::Result<()> {
-            let mut buf = bytes.to_vec();
+        pub(crate) async fn write_from_bytes(&mut self, mut buf: Bytes) -> std::io::Result<()> {
             let len: u64 = buf.len().try_into().unwrap();
 
             let mut cursor: u64 = 0;
@@ -209,8 +208,7 @@ mod io_uring {
             let mut cursor: u64 = 0;
 
             while let Some(res) = stream.next().await {
-                let bytes = res?;
-                let mut buf = bytes.to_vec();
+                let mut buf = res?;
 
                 let len = buf.len();
                 let mut position = 0;
@@ -313,9 +311,9 @@ mod io_uring {
                 }
 
                 let max_size = (size - cursor).min(65_536);
-                let buf = Vec::with_capacity(max_size.try_into().unwrap());
+                let buf = BytesMut::with_capacity(max_size.try_into().unwrap());
 
-                let (res, buf): (_, Vec<u8>) = self.read_at(buf, cursor).await;
+                let (res, buf): (_, BytesMut) = self.read_at(buf, cursor).await;
                 let n: usize = res?;
 
                 if n == 0 {
@@ -342,7 +340,10 @@ mod io_uring {
             let size = len.unwrap_or(size - cursor) + cursor;
 
             Ok(BytesStream {
-                state: ReadFileState::File { file: Some(self) },
+                state: ReadFileState::File {
+                    file: Some(self),
+                    bytes: Some(BytesMut::new()),
+                },
                 size,
                 cursor,
                 callback: read_file,
@@ -375,6 +376,7 @@ mod io_uring {
         enum ReadFileState<Fut> {
             File {
                 file: Option<File>,
+                bytes: Option<BytesMut>,
             },
             Future {
                 #[pin]
@@ -385,11 +387,9 @@ mod io_uring {
 
     async fn read_file(
         file: File,
-        capacity: usize,
+        buf: BytesMut,
         cursor: u64,
-    ) -> (File, BufResult<usize, Vec<u8>>) {
-        let buf = Vec::with_capacity(capacity);
-
+    ) -> (File, BufResult<usize, BytesMut>) {
         let buf_res = file.read_at(buf, cursor).await;
 
         (file, buf_res)
@@ -397,8 +397,8 @@ mod io_uring {
 
     impl<F, Fut> Stream for BytesStream<F, Fut>
     where
-        F: Fn(File, usize, u64) -> Fut,
-        Fut: Future<Output = (File, BufResult<usize, Vec<u8>>)> + 'static,
+        F: Fn(File, BytesMut, u64) -> Fut,
+        Fut: Future<Output = (File, BufResult<usize, BytesMut>)> + 'static,
     {
         type Item = std::io::Result<Bytes>;
 
@@ -406,7 +406,7 @@ mod io_uring {
             let mut this = self.as_mut().project();
 
             match this.state.as_mut().project() {
-                ReadFileStateProj::File { file } => {
+                ReadFileStateProj::File { file, bytes } => {
                     let cursor = *this.cursor;
                     let max_size = *this.size - *this.cursor;
 
@@ -415,9 +415,14 @@ mod io_uring {
                     }
 
                     let capacity = max_size.min(65_356) as usize;
+                    let mut bytes = bytes.take().unwrap();
                     let file = file.take().unwrap();
 
-                    let fut = (this.callback)(file, capacity, cursor);
+                    if bytes.capacity() < capacity {
+                        bytes.reserve(capacity - bytes.capacity());
+                    }
+
+                    let fut = (this.callback)(file, bytes, cursor);
 
                     this.state.project_replace(ReadFileState::Future { fut });
                     self.poll_next(cx)
@@ -425,10 +430,13 @@ mod io_uring {
                 ReadFileStateProj::Future { fut } => match fut.poll(cx) {
                     Poll::Pending => Poll::Pending,
                     Poll::Ready((file, (Ok(n), mut buf))) => {
-                        this.state
-                            .project_replace(ReadFileState::File { file: Some(file) });
+                        let bytes = buf.split_off(n);
 
-                        let _ = buf.split_off(n);
+                        this.state.project_replace(ReadFileState::File {
+                            file: Some(file),
+                            bytes: Some(bytes),
+                        });
+
                         let n: u64 = match n.try_into() {
                             Ok(n) => n,
                             Err(_) => {
@@ -482,17 +490,17 @@ mod io_uring {
             let mut source = std::fs::File::open(EARTH_GIF).unwrap();
             let mut dest = std::fs::File::open(tmp).unwrap();
 
-            let mut source_vec = Vec::new();
-            source.read_to_end(&mut source_vec).unwrap();
+            let mut source_bytes = Vec::new();
+            source.read_to_end(&mut source_bytes).unwrap();
 
-            let mut dest_vec = Vec::new();
-            dest.read_to_end(&mut dest_vec).unwrap();
+            let mut dest_bytes = Vec::new();
+            dest.read_to_end(&mut dest_bytes).unwrap();
 
             drop(dest);
             std::fs::remove_file(tmp).unwrap();
 
-            assert_eq!(source_vec.len(), dest_vec.len());
-            assert_eq!(source_vec, dest_vec);
+            assert_eq!(source_bytes.len(), dest_bytes.len());
+            assert_eq!(source_bytes, dest_bytes);
         }
 
         #[test]
@@ -508,17 +516,17 @@ mod io_uring {
             let mut source = std::fs::File::open(EARTH_GIF).unwrap();
             let mut dest = std::fs::File::open(tmp).unwrap();
 
-            let mut source_vec = Vec::new();
-            source.read_to_end(&mut source_vec).unwrap();
+            let mut source_bytes = Vec::new();
+            source.read_to_end(&mut source_bytes).unwrap();
 
-            let mut dest_vec = Vec::new();
-            dest.read_to_end(&mut dest_vec).unwrap();
+            let mut dest_bytes = Vec::new();
+            dest.read_to_end(&mut dest_bytes).unwrap();
 
             drop(dest);
             std::fs::remove_file(tmp).unwrap();
 
-            assert_eq!(source_vec.len(), dest_vec.len());
-            assert_eq!(source_vec, dest_vec);
+            assert_eq!(source_bytes.len(), dest_bytes.len());
+            assert_eq!(source_bytes, dest_bytes);
         }
     }
 }
