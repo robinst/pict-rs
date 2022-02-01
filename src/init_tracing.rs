@@ -1,3 +1,4 @@
+#[cfg(feature = "console")]
 use console_subscriber::ConsoleLayer;
 use opentelemetry::{
     sdk::{propagation::TraceContextPropagator, Resource},
@@ -28,6 +29,7 @@ pub(super) fn init_tracing(
         .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
         .with_filter(targets.clone());
 
+    #[cfg(feature = "console")]
     let console_layer = ConsoleLayer::builder()
         .with_default_env()
         .event_buffer_capacity(1024 * 1024)
@@ -36,8 +38,10 @@ pub(super) fn init_tracing(
 
     let subscriber = Registry::default()
         .with(format_layer)
-        .with(console_layer)
         .with(ErrorLayer::default());
+
+    #[cfg(feature = "console")]
+    let subscriber = subscriber.with(console_layer);
 
     if let Some(url) = opentelemetry_url {
         let tracer =
