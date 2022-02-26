@@ -9,7 +9,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-alpha.43
+pict-rs 0.3.0-rc.1
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] [SUBCOMMAND]
@@ -46,7 +46,7 @@ SUBCOMMANDS:
 ```
 
 ```
-pict-rs-file-store 0.3.0-alpha.43
+pict-rs-file-store 0.3.0-rc.1
 
 USAGE:
     pict-rs file-store [OPTIONS]
@@ -60,7 +60,7 @@ OPTIONS:
 ```
 
 ```
-pict-rs-s3-store 0.3.0-alpha.43
+pict-rs-s3-store 0.3.0-rc.1
 
 USAGE:
     pict-rs s3-store [OPTIONS] --bucket-name <bucket-name> --region <region>
@@ -75,7 +75,7 @@ OPTIONS:
         --region <region>                    Region in which the bucket exists, can be an http endpoint
         --secret-key <secret-key>            
         --security-token <security-token>    
-        --session-token <session-token>  
+        --session-token <session-token>   
 ```
 
 See [`pict-rs.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/pict-rs.toml) and 

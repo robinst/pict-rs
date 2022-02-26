@@ -217,30 +217,33 @@ impl Defaults {
 impl Config {
     pub(crate) fn build() -> anyhow::Result<Self> {
         let args = Args::from_args();
-        let mut base_config = config::Config::new();
-        base_config.merge(config::Config::try_from(&Defaults::new())?)?;
 
         if let Some(path) = args.migrate_file {
-            let mut migrate_config = config::Config::new();
-            migrate_config.merge(config::File::from(path))?;
-            let migrate: Migrate = migrate_config.try_into()?;
+            let migrate_config = config::Config::builder()
+                .add_source(config::File::from(path))
+                .build()?;
+            let migrate: Migrate = migrate_config.try_deserialize()?;
 
             crate::MIGRATE.set(migrate).unwrap();
         }
 
+        let mut base_config =
+            config::Config::builder().add_source(config::Config::try_from(&Defaults::new())?);
+
         if let Some(path) = args.config_file {
-            base_config.merge(config::File::from(path))?;
+            base_config = base_config.add_source(config::File::from(path));
         };
 
         if !args.overrides.is_default() {
             let merging = config::Config::try_from(&args.overrides)?;
 
-            base_config.merge(merging)?;
+            base_config = base_config.add_source(merging);
         }
 
-        base_config.merge(config::Environment::with_prefix("PICTRS").separator("__"))?;
-
-        let config: Self = base_config.try_into()?;
+        let config: Self = base_config
+            .add_source(config::Environment::with_prefix("PICTRS").separator("__"))
+            .build()?
+            .try_deserialize()?;
 
         Ok(config)
     }

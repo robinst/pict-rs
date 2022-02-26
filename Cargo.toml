@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.3.0-beta.20"
+version = "0.3.0-rc.1"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -11,7 +11,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 console = ["console-subscriber"]
-default = ["object-storage"]
+default = ["object-storage", "console"]
 object-storage = ["reqwest", "rust-s3"]
 io-uring = [
   "actix-rt/io-uring",
@@ -24,14 +24,14 @@ io-uring = [
 actix-form-data = "0.6.0-beta.11"
 actix-rt = { version = "2.6.0", default-features = false }
 actix-server = "2.0.0"
-actix-web = { version = "4.0.0-rc.3", default-features = false }
+actix-web = { version = "4.0.0", default-features = false }
 anyhow = "1.0"
 async-trait = "0.1.51"
-awc = { version = "3.0.0-beta.20", default-features = false, features = [
+awc = { version = "3.0.0-beta.21", default-features = false, features = [
   "rustls",
 ] }
 base64 = "0.13.0"
-config = "0.11.0"
+config = "0.12.0"
 console-subscriber = { version = "0.1", optional = true }
 dashmap = "5.1.0"
 futures-util = "0.3.17"
@@ -45,7 +45,7 @@ reqwest = { version = "0.11.5", default-features = false, features = [
   "rustls-tls",
   "stream",
 ], optional = true }
-rust-s3 = { version = "0.28.0", default-features = false, features = [
+rust-s3 = { version = "0.29.0", default-features = false, features = [
   "fail-on-err",
   "with-reqwest",
 ], optional = true, git = "https://github.com/asonix/rust-s3", branch = "asonix/generic-client" }
@@ -74,11 +74,11 @@ url = { version = "2.2", features = ["serde"] }
 uuid = { version = "0.8.2", features = ["v4", "serde"] }
 
 [dependencies.tracing-actix-web]
-version = "0.5.0-rc.3"
+version = "0.5.0"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_17"]
 
 [dependencies.tracing-awc]
-version = "0.1.0-beta.23"
+version = "0.1.0-beta.24"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_17"]
