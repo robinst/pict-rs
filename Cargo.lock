@@ -1586,7 +1586,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-uring",
- "tokio-util 0.6.9",
+ "tokio-util 0.7.0",
  "tracing",
  "tracing-actix-web",
  "tracing-awc",

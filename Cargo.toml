@@ -59,7 +59,7 @@ thiserror = "1.0"
 time = { version = "0.3.0", features = ["serde"] }
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-uring = { version = "0.2", optional = true, features = ["bytes"] }
-tokio-util = { version = "0.6", default-features = false, features = ["codec"] }
+tokio-util = { version = "0.7", default-features = false, features = ["codec"] }
 tracing = "0.1.15"
 tracing-error = "0.2.0"
 tracing-futures = "0.2.4"
