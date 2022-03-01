@@ -57,9 +57,6 @@ pub(crate) enum UploadError {
     #[error("Error parsing string, {0}")]
     ParseString(#[from] std::string::FromUtf8Error),
 
-    #[error("Error parsing request, {0}")]
-    ParseReq(String),
-
     #[error("Error interacting with filesystem, {0}")]
     Io(#[from] std::io::Error),
 
@@ -155,8 +152,7 @@ impl ResponseError for Error {
             UploadError::DuplicateAlias
             | UploadError::Limit(_)
             | UploadError::NoFiles
-            | UploadError::Upload(_)
-            | UploadError::ParseReq(_) => StatusCode::BAD_REQUEST,
+            | UploadError::Upload(_) => StatusCode::BAD_REQUEST,
             UploadError::MissingAlias | UploadError::MissingFilename => StatusCode::NOT_FOUND,
             UploadError::InvalidToken => StatusCode::FORBIDDEN,
             UploadError::Range => StatusCode::RANGE_NOT_SATISFIABLE,
