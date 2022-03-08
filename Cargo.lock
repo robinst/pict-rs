@@ -21,9 +21,9 @@ dependencies = [
 
 [[package]]
 name = "actix-form-data"
-version = "0.6.0-beta.11"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57f6b53ea0b9305fdc5b30696d9d6c65b4091166038df2ffff9f5f877623d789"
+checksum = "d1dcbd8e748ddbac923534f2144b21f9f98d8a92e95a7bf59ebae07765ea5f7d"
 dependencies = [
  "actix-multipart",
  "actix-rt",
@@ -37,9 +37,9 @@ dependencies = [
 
 [[package]]
 name = "actix-http"
-version = "3.0.0"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f3fdd63b9cfeaf92eeeece719dabbddddb420a57d3fd171ce1490ecfb7086b1"
+checksum = "86f4fb03b18c988b0944792e2538c7c1a4b32d3019214e2a734846e45207743e"
 dependencies = [
  "actix-codec",
  "actix-rt",
@@ -262,9 +262,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.55"
+version = "1.0.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "159bb86af3a200e19a068f4224eae4c8bb2d0fa054c7e5d1cacd5cef95e684cd"
+checksum = "4361135be9122e0870de935d7c439aef945b9f9ddd4199a553b5270b49c82a27"
 
 [[package]]
 name = "async-stream"
@@ -317,9 +317,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "awc"
-version = "3.0.0-beta.21"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d91ad5074d7d2d8be6ef74d4ecb79c0f4d5f58bdc7ec896d5fbaa9f2fb9bfa5e"
+checksum = "65c60c44fbf3c8cee365e86b97d706e513b733c4eeb16437b45b88d2fffe889a"
 dependencies = [
  "actix-codec",
  "actix-http",
@@ -1116,9 +1116,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.3.1"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68f2d64f2edebec4ce84ad108148e67e1064789bee435edc5b60ad398714a3a9"
+checksum = "35e70ee094dc02fd9c13fdad4940090f22dbd6ac7c9e7094a46cf0232a50bc7c"
 
 [[package]]
 name = "itertools"
@@ -1368,9 +1368,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da32515d9f6e6e489d7bc9d84c71b060db7247dc035bbe44eac88cf87486d8d5"
+checksum = "87f3e037eac156d1775da914196f0f37741a274155e34a0b7e427c35d2a2ecb9"
 
 [[package]]
 name = "opaque-debug"
@@ -1554,7 +1554,7 @@ dependencies = [
 
 [[package]]
 name = "pict-rs"
-version = "0.3.0-rc.2"
+version = "0.3.0-rc.3"
 dependencies = [
  "actix-form-data",
  "actix-rt",
@@ -1764,9 +1764,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8383f39639269cde97d255a32bdb68c047337295414940c68bdd30c2e13203ff"
+checksum = "8380fe0152551244f0747b1bf41737e0f8a74f97a14ccefd1148187271634f3c"
 dependencies = [
  "bitflags",
 ]
@@ -1783,9 +1783,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d07a8629359eb56f1e2fb1652bb04212c072a87ba68546a04065d525673ac461"
+checksum = "1a11647b6b25ff05a515cb92c365cec08801e83423a235b51e231e1808747286"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -2505,9 +2505,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-actix-web"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "245a559f6fafd06e8f4cf7731c408a78623585a737467927b54c1c9813db3774"
+checksum = "99bcebac55fba44eadf75a424ee403e756f9165596a613d125876388e5fb4c34"
 dependencies = [
  "actix-web",
  "opentelemetry",
@@ -2531,9 +2531,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-awc"
-version = "0.1.0-beta.24"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f5a615bd1950747052e9cc354ef0b3823e571b67e83ed43371ea147a1d07059"
+checksum = "cdf3ba9e7ac4f2da0b32242809929a7da3d8848fb938647735f521994c5d5083"
 dependencies = [
  "actix-http",
  "actix-service",

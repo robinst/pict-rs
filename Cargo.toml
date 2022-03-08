@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.3.0-rc.2"
+version = "0.3.0-rc.3"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -21,15 +21,13 @@ io-uring = [
 ]
 
 [dependencies]
-actix-form-data = "0.6.0-beta.11"
+actix-form-data = "0.6.0"
 actix-rt = { version = "2.6.0", default-features = false }
 actix-server = "2.0.0"
 actix-web = { version = "4.0.0", default-features = false }
 anyhow = "1.0"
 async-trait = "0.1.51"
-awc = { version = "3.0.0-beta.21", default-features = false, features = [
-  "rustls",
-] }
+awc = { version = "3.0.0", default-features = false, features = ["rustls"] }
 base64 = "0.13.0"
 config = "0.12.0"
 console-subscriber = { version = "0.1", optional = true }
@@ -79,6 +77,6 @@ default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_17"]
 
 [dependencies.tracing-awc]
-version = "0.1.0-beta.24"
+version = "0.1.0"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_17"]
