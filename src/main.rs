@@ -1,7 +1,7 @@
 use actix_form_data::{Field, Form, Value};
 use actix_web::{
     guard,
-    http::header::{CacheControl, CacheDirective, LastModified, ACCEPT_RANGES},
+    http::header::{CacheControl, CacheDirective, LastModified, Range, ACCEPT_RANGES},
     web, App, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::Client;
@@ -341,7 +341,7 @@ where
 /// Process files
 #[instrument(name = "Serving processed image", skip(manager, filters))]
 async fn process<S: Store + 'static>(
-    range: Option<range::RangeHeader>,
+    range: Option<web::Header<Range>>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
@@ -440,12 +440,14 @@ where
 
     let (details, bytes) = CancelSafeProcessor::new(thumbnail_path.clone(), process_fut).await?;
 
-    let (builder, stream) = if let Some(range_header) = range {
-        if let Some(range) = range_header.single_bytes_range() {
-            if let Some(content_range) = range.to_content_range(bytes.len() as u64) {
+    let (builder, stream) = if let Some(web::Header(range_header)) = range {
+        if let Some(range) = range::single_bytes_range(&range_header) {
+            let len = bytes.len() as u64;
+
+            if let Some(content_range) = range::to_content_range(range, len) {
                 let mut builder = HttpResponse::PartialContent();
                 builder.insert_header(content_range);
-                let stream = range.chop_bytes(bytes);
+                let stream = range::chop_bytes(range, bytes, len)?;
 
                 (builder, Either::left(Either::left(stream)))
             } else {
@@ -502,7 +504,7 @@ where
 /// Serve files
 #[instrument(name = "Serving file", skip(manager))]
 async fn serve<S: Store>(
-    range: Option<range::RangeHeader>,
+    range: Option<web::Header<Range>>,
     alias: web::Path<String>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
@@ -532,25 +534,24 @@ where
 async fn ranged_file_resp<S: Store>(
     store: &S,
     identifier: S::Identifier,
-    range: Option<range::RangeHeader>,
+    range: Option<web::Header<Range>>,
     details: Details,
 ) -> Result<HttpResponse, Error>
 where
     Error: From<S::Error>,
 {
-    let (builder, stream) = if let Some(range_header) = range {
+    let (builder, stream) = if let Some(web::Header(range_header)) = range {
         //Range header exists - return as ranged
-        if let Some(range) = range_header.single_bytes_range() {
+        if let Some(range) = range::single_bytes_range(&range_header) {
             let len = store.len(&identifier).await?;
 
-            if let Some(content_range) = range.to_content_range(len) {
+            if let Some(content_range) = range::to_content_range(range, len) {
                 let mut builder = HttpResponse::PartialContent();
                 builder.insert_header(content_range);
-
                 (
                     builder,
                     Either::left(Either::left(map_error::map_crate_error(
-                        range.chop_store(store, identifier).await?,
+                        range::chop_store(range, store, &identifier, len).await?,
                     ))),
                 )
             } else {
