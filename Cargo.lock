@@ -21,9 +21,9 @@ dependencies = [
 
 [[package]]
 name = "actix-form-data"
-version = "0.6.0"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1dcbd8e748ddbac923534f2144b21f9f98d8a92e95a7bf59ebae07765ea5f7d"
+checksum = "dd2788a4c359a372371292ef9903cf26759abf3ddf00ed710061808b1414fc75"
 dependencies = [
  "actix-multipart",
  "actix-rt",
@@ -2531,9 +2531,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-awc"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdf3ba9e7ac4f2da0b32242809929a7da3d8848fb938647735f521994c5d5083"
+checksum = "b524ca012b208a8b5014b68da09573d6d43de93bb850c9303550ac2f5d896631"
 dependencies = [
  "actix-http",
  "actix-service",
