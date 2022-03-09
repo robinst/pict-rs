@@ -22,7 +22,7 @@ io-uring = [
 
 [dependencies]
 actix-form-data = "0.6.0"
-actix-rt = { version = "2.6.0", default-features = false }
+actix-rt = { version = "2.7.0", default-features = false }
 actix-server = "2.0.0"
 actix-web = { version = "4.0.0", default-features = false }
 anyhow = "1.0"
@@ -56,7 +56,7 @@ structopt = "0.3.14"
 thiserror = "1.0"
 time = { version = "0.3.0", features = ["serde"] }
 tokio = { version = "1", features = ["full", "tracing"] }
-tokio-uring = { version = "0.2", optional = true, features = ["bytes"] }
+tokio-uring = { version = "0.3", optional = true, features = ["bytes"] }
 tokio-util = { version = "0.7", default-features = false, features = ["codec"] }
 tracing = "0.1.15"
 tracing-error = "0.2.0"
