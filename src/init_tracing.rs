@@ -16,6 +16,7 @@ use url::Url;
 pub(super) fn init_tracing(
     servic_name: &'static str,
     opentelemetry_url: Option<&Url>,
+    #[cfg(feature = "console")] buffer_capacity: usize,
 ) -> anyhow::Result<()> {
     LogTracer::init()?;
 
@@ -32,7 +33,7 @@ pub(super) fn init_tracing(
     #[cfg(feature = "console")]
     let console_layer = ConsoleLayer::builder()
         .with_default_env()
-        .event_buffer_capacity(1024 * 1024)
+        .event_buffer_capacity(buffer_capacity)
         .server_addr(([0, 0, 0, 0], 6669))
         .spawn();
 

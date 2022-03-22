@@ -882,7 +882,12 @@ where
 
 #[actix_rt::main]
 async fn main() -> anyhow::Result<()> {
-    init_tracing("pict-rs", CONFIG.opentelemetry_url())?;
+    init_tracing(
+        "pict-rs",
+        CONFIG.opentelemetry_url(),
+        #[cfg(feature = "console")]
+        CONFIG.console_buffer_capacity(),
+    )?;
 
     let db = LatestDb::exists(CONFIG.data_dir(), CONFIG.sled_cache_capacity()).migrate()?;
 

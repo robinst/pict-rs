@@ -84,6 +84,13 @@ pub(crate) struct Overrides {
 
     #[structopt(
         long,
+        help = "Specify the number of events the console subscriber is allowed to buffer"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    console_buffer_capacity: Option<usize>,
+
+    #[structopt(
+        long,
         help = "An optional string to be checked on requests to privileged endpoints"
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,6 +121,7 @@ impl Overrides {
             && self.max_image_height.is_none()
             && self.max_image_area.is_none()
             && self.sled_cache_capacity.is_none()
+            && self.console_buffer_capacity.is_none()
             && self.api_key.is_none()
             && self.opentelemetry_url.is_none()
             && self.store.is_none()
@@ -192,6 +200,7 @@ pub(crate) struct Config {
     max_image_height: usize,
     max_image_area: usize,
     sled_cache_capacity: u64,
+    console_buffer_capacity: usize,
     api_key: Option<String>,
     opentelemetry_url: Option<Url>,
     store: Store,
@@ -207,6 +216,7 @@ pub(crate) struct Defaults {
     max_image_height: usize,
     max_image_area: usize,
     sled_cache_capacity: u64,
+    console_buffer_capacity: usize,
     store: Store,
 }
 
@@ -220,6 +230,7 @@ impl Defaults {
             max_image_height: 10_000,
             max_image_area: 40_000_000,
             sled_cache_capacity: 1024 * 1024 * 64, // 16 times smaller than sled's default of 1GB
+            console_buffer_capacity: 1024 * 128,
             store: Store::FileStore { path: None },
         }
     }
@@ -273,6 +284,11 @@ impl Config {
 
     pub(crate) fn sled_cache_capacity(&self) -> u64 {
         self.sled_cache_capacity
+    }
+
+    #[cfg(feature = "console")]
+    pub(crate) fn console_buffer_capacity(&self) -> usize {
+        self.console_buffer_capacity
     }
 
     pub(crate) fn format(&self) -> Option<Format> {
