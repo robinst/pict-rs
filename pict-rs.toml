@@ -22,13 +22,7 @@ image_format = 'jpeg'
 # default: empty
 #
 # Not specifying filters implies all filters are permitted
-filters = [
-  'identity',
-  'thumbnail',
-  'resize',
-  'crop',
-  'blur',
-]
+filters = ['identity', 'thumbnail', 'resize', 'crop', 'blur']
 
 ## Optional: image bounds
 # environment variable: PICTRS_MAX_FILE_SIZE
@@ -48,6 +42,44 @@ max_image_area = 40_000_000 # in Pixels
 # environment variable: PICTRS_SKIP_VALIDATE_IMPORTS
 # default: false
 skip_validate_imports = false
+
+## Optional: set sled's cache capacity to a given number of bytes
+# environment variable: PICTRS_SLED_CACHE_CAPACITY
+# default: 67_108_864 (1024 * 1024 * 64) e.g. 64MB
+#
+# Increasing this value can improve performance by keeping more of the database in RAM
+sled_cache_capacity = 67_108_864 # in bytes
+
+## Optional: enable tokio-console and set the event buffer size
+# environment variable: PICTRS_CONSOLE_BUFFER_CAPACITY
+# default: empty
+#
+# NOTE: this is the number of _events_ to buffer, not the number of bytes. In reality, the amount of
+# RAM used will be significatnly larger (in bytes) than the buffer capacity (in events)
+#
+# When set, tokio-console can connect to the pict-rs service on port 6669
+#
+# Configure your container to expose the console port
+# ```
+# # docker-compose.yml
+# version: '3.3'
+#
+# services:
+#   pictrs:
+#     image: asonix/pictrs:v0.3.0-beta.6
+#     ports:
+#       - "127.0.0.1:8080:8080"
+#       - "127.0.0.1:6669:6669" # this is the line that exposes console
+#     restart: always
+#     volumes:
+#       - ./volumes/pictrs:/mnt
+# ```
+#
+# Connect from console
+# ```
+# $ tokio-console localhost 6669
+# ```
+console_buffer_capacity = 102_400 # 102_400 (or 1024 * 100) is the default size used by console-subscriber
 
 ## Optional: shared secret for internal endpoints
 # environment variable: PICTRS_API_KEY
