@@ -14,8 +14,8 @@ pub(crate) fn exists(mut base: PathBuf) -> bool {
     std::fs::metadata(base).is_ok()
 }
 
-pub(crate) fn migrating(base: PathBuf) -> bool {
-    if let Ok(db) = open(base) {
+pub(crate) fn migrating(base: PathBuf, cache_capacity: u64) -> bool {
+    if let Ok(db) = open(base, cache_capacity) {
         if let Ok(tree) = db.open_tree("migrate") {
             if let Ok(Some(_)) = tree.get("done") {
                 return false;
@@ -26,11 +26,16 @@ pub(crate) fn migrating(base: PathBuf) -> bool {
     true
 }
 
-pub(crate) fn open(mut base: PathBuf) -> Result<sled034::Db, UploadError> {
+pub(crate) fn open(mut base: PathBuf, cache_capacity: u64) -> Result<sled034::Db, UploadError> {
     base.push("sled");
     base.push(SLED_034);
 
-    Ok(sled034::open(base)?)
+    let db = sled034::Config::default()
+        .cache_capacity(cache_capacity)
+        .path(base)
+        .open()?;
+
+    Ok(db)
 }
 
 impl SledDb for sled034::Db {

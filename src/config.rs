@@ -75,6 +75,10 @@ pub(crate) struct Overrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_image_area: Option<usize>,
 
+    #[structopt(long, help = "Specify the maximum area in pixels allowed in an image")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sled_cache_capacity: Option<u64>,
+
     #[structopt(
         long,
         help = "An optional string to be checked on requests to privileged endpoints"
@@ -106,6 +110,7 @@ impl Overrides {
             && self.max_image_width.is_none()
             && self.max_image_height.is_none()
             && self.max_image_area.is_none()
+            && self.sled_cache_capacity.is_none()
             && self.api_key.is_none()
             && self.opentelemetry_url.is_none()
             && self.store.is_none()
@@ -183,6 +188,7 @@ pub(crate) struct Config {
     max_image_width: usize,
     max_image_height: usize,
     max_image_area: usize,
+    sled_cache_capacity: u64,
     api_key: Option<String>,
     opentelemetry_url: Option<Url>,
     store: Store,
@@ -197,6 +203,7 @@ pub(crate) struct Defaults {
     max_image_width: usize,
     max_image_height: usize,
     max_image_area: usize,
+    sled_cache_capacity: u64,
     store: Store,
 }
 
@@ -209,6 +216,7 @@ impl Defaults {
             max_image_width: 10_000,
             max_image_height: 10_000,
             max_image_area: 40_000_000,
+            sled_cache_capacity: 1024 * 1024 * 64, // 16 times smaller than sled's default of 1GB
             store: Store::FileStore { path: None },
         }
     }
@@ -258,6 +266,10 @@ impl Config {
 
     pub(crate) fn data_dir(&self) -> PathBuf {
         self.path.clone()
+    }
+
+    pub(crate) fn sled_cache_capacity(&self) -> u64 {
+        self.sled_cache_capacity
     }
 
     pub(crate) fn format(&self) -> Option<Format> {

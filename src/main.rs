@@ -884,7 +884,7 @@ where
 async fn main() -> anyhow::Result<()> {
     init_tracing("pict-rs", CONFIG.opentelemetry_url())?;
 
-    let db = LatestDb::exists(CONFIG.data_dir()).migrate()?;
+    let db = LatestDb::exists(CONFIG.data_dir(), CONFIG.sled_cache_capacity()).migrate()?;
 
     let manager = UploadManager::new(db.clone(), CONFIG.format()).await?;
 
