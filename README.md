@@ -9,7 +9,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-rc.6
+pict-rs 0.3.0-rc.7
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] [SUBCOMMAND]
