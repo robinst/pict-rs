@@ -302,7 +302,7 @@ fn init_generator(settings: &sled::Tree) -> Result<Generator, FileError> {
 impl std::fmt::Debug for FileStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FileStore")
-            .field("path_gen", &self.path_gen)
+            .field("path_gen", &"generator")
             .field("root_dir", &self.root_dir)
             .finish()
     }
