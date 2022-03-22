@@ -1,4 +1,3 @@
-#[cfg(feature = "console")]
 use console_subscriber::ConsoleLayer;
 use opentelemetry::{
     sdk::{propagation::TraceContextPropagator, Resource},
@@ -9,14 +8,15 @@ use tracing::subscriber::set_global_default;
 use tracing_error::ErrorLayer;
 use tracing_log::LogTracer;
 use tracing_subscriber::{
-    filter::Targets, fmt::format::FmtSpan, layer::SubscriberExt, Layer, Registry,
+    filter::Targets, fmt::format::FmtSpan, layer::SubscriberExt, registry::LookupSpan, Layer,
+    Registry,
 };
 use url::Url;
 
 pub(super) fn init_tracing(
     servic_name: &'static str,
     opentelemetry_url: Option<&Url>,
-    #[cfg(feature = "console")] buffer_capacity: usize,
+    buffer_capacity: Option<usize>,
 ) -> anyhow::Result<()> {
     LogTracer::init()?;
 
@@ -30,20 +30,35 @@ pub(super) fn init_tracing(
         .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
         .with_filter(targets.clone());
 
-    #[cfg(feature = "console")]
-    let console_layer = ConsoleLayer::builder()
-        .with_default_env()
-        .event_buffer_capacity(buffer_capacity)
-        .server_addr(([0, 0, 0, 0], 6669))
-        .spawn();
-
     let subscriber = Registry::default()
         .with(format_layer)
         .with(ErrorLayer::default());
 
-    #[cfg(feature = "console")]
-    let subscriber = subscriber.with(console_layer);
+    if let Some(buffer_capacity) = buffer_capacity {
+        let console_layer = ConsoleLayer::builder()
+            .with_default_env()
+            .event_buffer_capacity(buffer_capacity)
+            .server_addr(([0, 0, 0, 0], 6669))
+            .spawn();
 
+        let subscriber = subscriber.with(console_layer);
+
+        with_otel(subscriber, targets, servic_name, opentelemetry_url)
+    } else {
+        with_otel(subscriber, targets, servic_name, opentelemetry_url)
+    }
+}
+
+fn with_otel<S>(
+    subscriber: S,
+    targets: Targets,
+    servic_name: &'static str,
+    opentelemetry_url: Option<&Url>,
+) -> anyhow::Result<()>
+where
+    S: SubscriberExt + Send + Sync,
+    for<'a> S: LookupSpan<'a>,
+{
     if let Some(url) = opentelemetry_url {
         let tracer =
             opentelemetry_otlp::new_pipeline()

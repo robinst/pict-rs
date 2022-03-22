@@ -885,7 +885,6 @@ async fn main() -> anyhow::Result<()> {
     init_tracing(
         "pict-rs",
         CONFIG.opentelemetry_url(),
-        #[cfg(feature = "console")]
         CONFIG.console_buffer_capacity(),
     )?;
 
