@@ -75,7 +75,10 @@ pub(crate) struct Overrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_image_area: Option<usize>,
 
-    #[structopt(long, help = "Specify the maximum area in pixels allowed in an image")]
+    #[structopt(
+        long,
+        help = "Specify the number of bytes sled is allowed to use for it's cache"
+    )]
     #[serde(skip_serializing_if = "Option::is_none")]
     sled_cache_capacity: Option<u64>,
 
