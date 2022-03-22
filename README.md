@@ -9,7 +9,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0-rc.1
+pict-rs 0.3.0-rc.5
 
 USAGE:
     pict-rs [FLAGS] [OPTIONS] [SUBCOMMAND]
@@ -20,29 +20,32 @@ FLAGS:
     -V, --version                  Prints version information
 
 OPTIONS:
-    -a, --addr <addr>                              The address and port the server binds to.
-        --api-key <api-key>                        An optional string to be checked on requests to privileged endpoints
-    -c, --config-file <config-file>                Path to the pict-rs configuration file
+    -a, --addr <addr>                                  The address and port the server binds to.
+        --api-key <api-key>
+            An optional string to be checked on requests to privileged endpoints
+
+    -c, --config-file <config-file>                    Path to the pict-rs configuration file
     -f, --filters <filters>...
             An optional list of filters to permit, supports 'identity', 'thumbnail', 'resize', 'crop', and 'blur'
 
     -i, --image-format <image-format>
             An optional image format to convert all uploaded files into, supports 'jpg', 'png', and 'webp'
 
-    -m, --max-file-size <max-file-size>            Specify the maximum allowed uploaded file size (in Megabytes)
-        --max-image-area <max-image-area>          Specify the maximum area in pixels allowed in an image
-        --max-image-height <max-image-height>      Specify the maximum width in pixels allowed on an image
-        --max-image-width <max-image-width>        Specify the maximum width in pixels allowed on an image
-        --migrate-file <migrate-file>              Path to a file defining a store migration
+    -m, --max-file-size <max-file-size>                Specify the maximum allowed uploaded file size (in Megabytes)
+        --max-image-area <max-image-area>              Specify the maximum area in pixels allowed in an image
+        --max-image-height <max-image-height>          Specify the maximum width in pixels allowed on an image
+        --max-image-width <max-image-width>            Specify the maximum width in pixels allowed on an image
+        --migrate-file <migrate-file>                  Path to a file defining a store migration
     -o, --opentelemetry-url <opentelemetry-url>
             Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector
 
-    -p, --path <path>                              The path to the data directory, e.g. data/
+    -p, --path <path>                                  The path to the data directory, e.g. data/
+        --sled-cache-capacity <sled-cache-capacity>    Specify the number of bytes sled is allowed to use for it's cache
 
 SUBCOMMANDS:
     file-store    
     help          Prints this message or the help of the given subcommand(s)
-    s3-store   
+    s3-store  
 ```
 
 ```
