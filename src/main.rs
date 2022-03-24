@@ -26,6 +26,7 @@ use tracing_futures::Instrument;
 
 mod concurrent_processor;
 mod config;
+mod details;
 mod either;
 mod error;
 mod exiftool;
@@ -51,13 +52,14 @@ use crate::{magick::details_hint, store::file_store::FileStore};
 use self::{
     concurrent_processor::CancelSafeProcessor,
     config::{Config, Format, Migrate},
+    details::Details,
     either::Either,
     error::{Error, UploadError},
     init_tracing::init_tracing,
     middleware::{Deadline, Internal},
     migrate::LatestDb,
     store::Store,
-    upload_manager::{Details, UploadManager, UploadManagerSession},
+    upload_manager::{UploadManager, UploadManagerSession},
 };
 
 const MEGABYTES: usize = 1024 * 1024;

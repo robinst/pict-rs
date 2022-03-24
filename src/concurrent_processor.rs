@@ -1,6 +1,6 @@
 use crate::{
+    details::Details,
     error::{Error, UploadError},
-    upload_manager::Details,
 };
 use actix_web::web;
 use dashmap::{mapref::entry::Entry, DashMap};
