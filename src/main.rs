@@ -39,6 +39,7 @@ mod migrate;
 mod process;
 mod processor;
 mod range;
+mod repo;
 mod serde_str;
 mod store;
 mod tmp_file;
