@@ -12,6 +12,10 @@ impl<T> Serde<T> {
     pub(crate) fn new(inner: T) -> Self {
         Serde { inner }
     }
+
+    pub(crate) fn into_inner(this: Self) -> T {
+        this.inner
+    }
 }
 
 impl<T> Deref for Serde<T> {

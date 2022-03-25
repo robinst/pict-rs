@@ -8,9 +8,11 @@ pub(crate) struct Alias {
     id: Uuid,
     extension: String,
 }
+
 pub(crate) struct DeleteToken {
     id: Uuid,
 }
+
 pub(crate) struct AlreadyExists;
 
 impl Alias {

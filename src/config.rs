@@ -1,18 +1,19 @@
+use crate::serde_str::Serde;
+use clap::{ArgEnum, Parser, Subcommand};
 use std::{collections::HashSet, net::SocketAddr, path::PathBuf};
-use structopt::StructOpt;
 use url::Url;
 
 use crate::magick::ValidInputType;
 
-#[derive(Clone, Debug, StructOpt)]
+#[derive(Clone, Debug, Parser)]
 pub(crate) struct Args {
-    #[structopt(short, long, help = "Path to the pict-rs configuration file")]
+    #[clap(short, long, help = "Path to the pict-rs configuration file")]
     config_file: Option<PathBuf>,
 
-    #[structopt(long, help = "Path to a file defining a store migration")]
-    migrate_file: Option<PathBuf>,
+    #[clap(subcommand)]
+    command: Command,
 
-    #[structopt(flatten)]
+    #[clap(flatten)]
     overrides: Overrides,
 }
 
@@ -20,10 +21,10 @@ fn is_false(b: &bool) -> bool {
     !b
 }
 
-#[derive(Clone, Debug, serde::Serialize, structopt::StructOpt)]
+#[derive(Clone, Debug, serde::Serialize, Parser)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Overrides {
-    #[structopt(
+    #[clap(
         short,
         long,
         help = "Whether to skip validating images uploaded via the internal import API"
@@ -31,15 +32,15 @@ pub(crate) struct Overrides {
     #[serde(skip_serializing_if = "is_false")]
     skip_validate_imports: bool,
 
-    #[structopt(short, long, help = "The address and port the server binds to.")]
+    #[clap(short, long, help = "The address and port the server binds to.")]
     #[serde(skip_serializing_if = "Option::is_none")]
     addr: Option<SocketAddr>,
 
-    #[structopt(short, long, help = "The path to the data directory, e.g. data/")]
+    #[clap(short, long, help = "The path to the data directory, e.g. data/")]
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<PathBuf>,
 
-    #[structopt(
+    #[clap(
         short,
         long,
         help = "An optional image format to convert all uploaded files into, supports 'jpg', 'png', and 'webp'"
@@ -47,7 +48,7 @@ pub(crate) struct Overrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     image_format: Option<Format>,
 
-    #[structopt(
+    #[clap(
         short,
         long,
         help = "An optional list of filters to permit, supports 'identity', 'thumbnail', 'resize', 'crop', and 'blur'"
@@ -55,7 +56,7 @@ pub(crate) struct Overrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     filters: Option<Vec<String>>,
 
-    #[structopt(
+    #[clap(
         short,
         long,
         help = "Specify the maximum allowed uploaded file size (in Megabytes)"
@@ -63,40 +64,40 @@ pub(crate) struct Overrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_file_size: Option<usize>,
 
-    #[structopt(long, help = "Specify the maximum width in pixels allowed on an image")]
+    #[clap(long, help = "Specify the maximum width in pixels allowed on an image")]
     #[serde(skip_serializing_if = "Option::is_none")]
     max_image_width: Option<usize>,
 
-    #[structopt(long, help = "Specify the maximum width in pixels allowed on an image")]
+    #[clap(long, help = "Specify the maximum width in pixels allowed on an image")]
     #[serde(skip_serializing_if = "Option::is_none")]
     max_image_height: Option<usize>,
 
-    #[structopt(long, help = "Specify the maximum area in pixels allowed in an image")]
+    #[clap(long, help = "Specify the maximum area in pixels allowed in an image")]
     #[serde(skip_serializing_if = "Option::is_none")]
     max_image_area: Option<usize>,
 
-    #[structopt(
+    #[clap(
         long,
         help = "Specify the number of bytes sled is allowed to use for it's cache"
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     sled_cache_capacity: Option<u64>,
 
-    #[structopt(
+    #[clap(
         long,
         help = "Specify the number of events the console subscriber is allowed to buffer"
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     console_buffer_capacity: Option<usize>,
 
-    #[structopt(
+    #[clap(
         long,
         help = "An optional string to be checked on requests to privileged endpoints"
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     api_key: Option<String>,
 
-    #[structopt(
+    #[clap(
         short,
         long,
         help = "Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector"
@@ -104,9 +105,41 @@ pub(crate) struct Overrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     opentelemetry_url: Option<Url>,
 
-    #[structopt(subcommand)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repo: Option<Repo>,
+
+    #[clap(flatten)]
+    sled_repo: SledRepo,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     store: Option<Store>,
+
+    #[clap(flatten)]
+    filesystem_storage: FilesystemStorage,
+
+    #[clap(flatten)]
+    object_storage: ObjectStorage,
+}
+
+impl ObjectStorage {
+    pub(crate) fn required(&self) -> Result<RequiredObjectStorage, RequiredError> {
+        Ok(RequiredObjectStorage {
+            bucket_name: self
+                .s3_store_bucket_name
+                .as_ref()
+                .cloned()
+                .ok_or(RequiredError)?,
+            region: self
+                .s3_store_region
+                .as_ref()
+                .cloned()
+                .map(Serde::into_inner)
+                .ok_or(RequiredError)?,
+            access_key: self.s3_store_access_key.as_ref().cloned(),
+            security_token: self.s3_store_security_token.as_ref().cloned(),
+            session_token: self.s3_store_session_token.as_ref().cloned(),
+        })
+    }
 }
 
 impl Overrides {
@@ -124,67 +157,99 @@ impl Overrides {
             && self.console_buffer_capacity.is_none()
             && self.api_key.is_none()
             && self.opentelemetry_url.is_none()
+            && self.repo.is_none()
             && self.store.is_none()
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) struct Migrate {
-    from: Store,
-    to: Store,
-}
-
-impl Migrate {
-    pub(crate) fn from(&self) -> &Store {
-        &self.from
-    }
-
-    pub(crate) fn to(&self) -> &Store {
-        &self.to
-    }
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, structopt::StructOpt)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Subcommand)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
+pub(crate) enum Command {
+    Run,
+    MigrateStore { to: Store },
+    MigrateRepo { to: Repo },
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, ArgEnum)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Repo {
+    Sled,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Parser)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct SledRepo {
+    // defaults to {config.path}
+    #[clap(long, help = "Path in which pict-rs will create it's 'repo' directory")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sled_repo_path: Option<PathBuf>,
+
+    #[clap(
+        long,
+        help = "The number of bytes sled is allowed to use for it's in-memory cache"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sled_repo_cache_capacity: Option<u64>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, ArgEnum)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum Store {
-    FileStore {
-        // defaults to {config.path}
-        #[structopt(
-            long,
-            help = "Path in which pict-rs will create it's 'files' directory"
-        )]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        path: Option<PathBuf>,
-    },
+    Filesystem,
     #[cfg(feature = "object-storage")]
-    S3Store {
-        #[structopt(long, help = "Name of the bucket in which pict-rs will store images")]
-        bucket_name: String,
+    ObjectStorage,
+}
 
-        #[structopt(
-            long,
-            help = "Region in which the bucket exists, can be an http endpoint"
-        )]
-        region: crate::serde_str::Serde<s3::Region>,
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Parser)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct FilesystemStorage {
+    // defaults to {config.path}
+    #[clap(
+        long,
+        help = "Path in which pict-rs will create it's 'files' directory"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filesystem_storage_path: Option<PathBuf>,
+}
 
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[structopt(long)]
-        access_key: Option<String>,
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Parser)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct ObjectStorage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[clap(long, help = "Name of the bucket in which pict-rs will store images")]
+    s3_store_bucket_name: Option<String>,
 
-        #[structopt(long)]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        secret_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[clap(
+        long,
+        help = "Region in which the bucket exists, can be an http endpoint"
+    )]
+    s3_store_region: Option<Serde<s3::Region>>,
 
-        #[structopt(long)]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        security_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[clap(long)]
+    s3_store_access_key: Option<String>,
 
-        #[structopt(long)]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        session_token: Option<String>,
-    },
+    #[clap(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    s3_store_secret_key: Option<String>,
+
+    #[clap(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    s3_store_security_token: Option<String>,
+
+    #[clap(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    s3_store_session_token: Option<String>,
+}
+
+pub(crate) struct RequiredObjectStorage {
+    pub(crate) bucket_name: String,
+    pub(crate) region: s3::Region,
+    pub(crate) access_key: Option<String>,
+    pub(crate) security_token: Option<String>,
+    pub(crate) session_token: Option<String>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -203,7 +268,11 @@ pub(crate) struct Config {
     console_buffer_capacity: Option<usize>,
     api_key: Option<String>,
     opentelemetry_url: Option<Url>,
+    repo: Repo,
+    sled_repo: SledRepo,
     store: Store,
+    filesystem_storage: FilesystemStorage,
+    object_storage: ObjectStorage,
 }
 
 #[derive(serde::Serialize)]
@@ -216,8 +285,21 @@ pub(crate) struct Defaults {
     max_image_height: usize,
     max_image_area: usize,
     sled_cache_capacity: u64,
+    repo: Repo,
+    sled_repo: SledRepoDefaults,
     store: Store,
+    filesystem_store: FilesystemDefaults,
 }
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct SledRepoDefaults {
+    sled_repo_cache_capacity: usize,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct FilesystemDefaults {}
 
 impl Defaults {
     fn new() -> Self {
@@ -229,23 +311,19 @@ impl Defaults {
             max_image_height: 10_000,
             max_image_area: 40_000_000,
             sled_cache_capacity: 1024 * 1024 * 64, // 16 times smaller than sled's default of 1GB
-            store: Store::FileStore { path: None },
+            repo: Repo::Sled,
+            sled_repo: SledRepoDefaults {
+                sled_repo_cache_capacity: 1024 * 1024 * 64,
+            },
+            store: Store::Filesystem,
+            filesystem_store: FilesystemDefaults {},
         }
     }
 }
 
 impl Config {
     pub(crate) fn build() -> anyhow::Result<Self> {
-        let args = Args::from_args();
-
-        if let Some(path) = args.migrate_file {
-            let migrate_config = config::Config::builder()
-                .add_source(config::File::from(path))
-                .build()?;
-            let migrate: Migrate = migrate_config.try_deserialize()?;
-
-            crate::MIGRATE.set(migrate).unwrap();
-        }
+        let args = Args::parse();
 
         let mut base_config =
             config::Config::builder().add_source(config::Config::try_from(&Defaults::new())?);
@@ -253,6 +331,8 @@ impl Config {
         if let Some(path) = args.config_file {
             base_config = base_config.add_source(config::File::from(path));
         };
+
+        // TODO: Command parsing
 
         if !args.overrides.is_default() {
             let merging = config::Config::try_from(&args.overrides)?;
@@ -270,6 +350,18 @@ impl Config {
 
     pub(crate) fn store(&self) -> &Store {
         &self.store
+    }
+
+    pub(crate) fn repo(&self) -> &Repo {
+        &self.repo
+    }
+
+    pub(crate) fn object_storage(&self) -> Result<RequiredObjectStorage, RequiredError> {
+        self.object_storage.required()
+    }
+
+    pub(crate) fn filesystem_storage_path(&self) -> Option<&PathBuf> {
+        self.filesystem_storage.filesystem_storage_path.as_ref()
     }
 
     pub(crate) fn bind_address(&self) -> SocketAddr {
@@ -329,7 +421,19 @@ impl Config {
 #[error("Invalid format supplied, {0}")]
 pub(crate) struct FormatError(String);
 
-#[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid store supplied, {0}")]
+pub(crate) struct StoreError(String);
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid repo supplied, {0}")]
+pub(crate) struct RepoError(String);
+
+#[derive(Debug, thiserror::Error)]
+#[error("Missing required fields")]
+pub(crate) struct RequiredError;
+
+#[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize, ArgEnum)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Format {
     Jpeg,
@@ -359,11 +463,37 @@ impl std::str::FromStr for Format {
     type Err = FormatError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "png" => Ok(Format::Png),
-            "jpg" => Ok(Format::Jpeg),
-            "webp" => Ok(Format::Webp),
-            other => Err(FormatError(other.to_string())),
+        for variant in Self::value_variants() {
+            if variant.to_possible_value().unwrap().matches(s, false) {
+                return Ok(*variant);
+            }
         }
+        Err(FormatError(s.into()))
+    }
+}
+
+impl std::str::FromStr for Store {
+    type Err = StoreError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        for variant in Self::value_variants() {
+            if variant.to_possible_value().unwrap().matches(s, false) {
+                return Ok(*variant);
+            }
+        }
+        Err(StoreError(s.into()))
+    }
+}
+
+impl std::str::FromStr for Repo {
+    type Err = RepoError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        for variant in Self::value_variants() {
+            if variant.to_possible_value().unwrap().matches(s, false) {
+                return Ok(*variant);
+            }
+        }
+        Err(RepoError(s.into()))
     }
 }
