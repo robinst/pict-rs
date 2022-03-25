@@ -51,30 +51,21 @@ trait SledTree {
 pub(crate) struct LatestDb {
     root_dir: PathBuf,
     version: DbVersion,
-    cache_capacity: u64,
 }
 
 impl LatestDb {
-    pub(crate) fn exists(root_dir: PathBuf, cache_capacity: u64) -> Self {
-        let version = DbVersion::exists(root_dir.clone(), cache_capacity);
+    pub(crate) fn exists(root_dir: PathBuf) -> Self {
+        let version = DbVersion::exists(root_dir.clone());
 
-        LatestDb {
-            root_dir,
-            version,
-            cache_capacity,
-        }
+        LatestDb { root_dir, version }
     }
 
     pub(crate) fn migrate(self) -> Result<sled::Db, UploadError> {
-        let LatestDb {
-            root_dir,
-            version,
-            cache_capacity,
-        } = self;
+        let LatestDb { root_dir, version } = self;
 
         loop {
             let root_dir2 = root_dir.clone();
-            let res = std::panic::catch_unwind(move || version.migrate(root_dir2, cache_capacity));
+            let res = std::panic::catch_unwind(move || version.migrate(root_dir2));
 
             if let Ok(res) = res {
                 return res;
@@ -90,17 +81,17 @@ enum DbVersion {
 }
 
 impl DbVersion {
-    fn exists(root: PathBuf, cache_capacity: u64) -> Self {
-        if s034::exists(root.clone()) && !s034::migrating(root, cache_capacity) {
+    fn exists(root: PathBuf) -> Self {
+        if s034::exists(root.clone()) && !s034::migrating(root) {
             return DbVersion::Sled034;
         }
 
         DbVersion::Fresh
     }
 
-    fn migrate(self, root: PathBuf, cache_capacity: u64) -> Result<sled::Db, UploadError> {
+    fn migrate(self, root: PathBuf) -> Result<sled::Db, UploadError> {
         match self {
-            DbVersion::Sled034 | DbVersion::Fresh => s034::open(root, cache_capacity),
+            DbVersion::Sled034 | DbVersion::Fresh => s034::open(root),
         }
     }
 }

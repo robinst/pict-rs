@@ -78,13 +78,6 @@ pub(crate) struct Overrides {
 
     #[clap(
         long,
-        help = "Specify the number of bytes sled is allowed to use for it's cache"
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sled_cache_capacity: Option<u64>,
-
-    #[clap(
-        long,
         help = "Specify the number of events the console subscriber is allowed to buffer"
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -106,12 +99,22 @@ pub(crate) struct Overrides {
     opentelemetry_url: Option<Url>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[clap(
+        short = 'R',
+        long,
+        help = "Set the database implementation. Available options are 'sled'. Default is 'sled'"
+    )]
     repo: Option<Repo>,
 
     #[clap(flatten)]
-    sled_repo: SledRepo,
+    sled: Sled,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[clap(
+        short = 'S',
+        long,
+        help = "Set the image store. Available options are 'object-storage' or 'filesystem'. Default is 'filesystem'"
+    )]
     store: Option<Store>,
 
     #[clap(flatten)]
@@ -125,19 +128,20 @@ impl ObjectStorage {
     pub(crate) fn required(&self) -> Result<RequiredObjectStorage, RequiredError> {
         Ok(RequiredObjectStorage {
             bucket_name: self
-                .s3_store_bucket_name
+                .object_store_bucket_name
                 .as_ref()
                 .cloned()
-                .ok_or(RequiredError)?,
+                .ok_or(RequiredError("object-store-bucket-name"))?,
             region: self
-                .s3_store_region
+                .object_store_region
                 .as_ref()
                 .cloned()
                 .map(Serde::into_inner)
-                .ok_or(RequiredError)?,
-            access_key: self.s3_store_access_key.as_ref().cloned(),
-            security_token: self.s3_store_security_token.as_ref().cloned(),
-            session_token: self.s3_store_session_token.as_ref().cloned(),
+                .ok_or(RequiredError("object-store-region"))?,
+            access_key: self.object_store_access_key.as_ref().cloned(),
+            secret_key: self.object_store_secret_key.as_ref().cloned(),
+            security_token: self.object_store_security_token.as_ref().cloned(),
+            session_token: self.object_store_session_token.as_ref().cloned(),
         })
     }
 }
@@ -153,7 +157,6 @@ impl Overrides {
             && self.max_image_width.is_none()
             && self.max_image_height.is_none()
             && self.max_image_area.is_none()
-            && self.sled_cache_capacity.is_none()
             && self.console_buffer_capacity.is_none()
             && self.api_key.is_none()
             && self.opentelemetry_url.is_none()
@@ -171,37 +174,47 @@ pub(crate) enum Command {
     MigrateRepo { to: Repo },
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, ArgEnum)]
+pub(crate) enum CommandConfig {
+    Run,
+    MigrateStore {
+        to: Storage,
+    },
+    MigrateRepo {
+        #[allow(dead_code)]
+        to: Repository,
+    },
+}
+
+#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, ArgEnum)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Repo {
     Sled,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Parser)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, Parser)]
 #[serde(rename_all = "snake_case")]
-pub(crate) struct SledRepo {
+pub(crate) struct Sled {
     // defaults to {config.path}
     #[clap(long, help = "Path in which pict-rs will create it's 'repo' directory")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    sled_repo_path: Option<PathBuf>,
+    pub(crate) sled_path: Option<PathBuf>,
 
     #[clap(
         long,
         help = "The number of bytes sled is allowed to use for it's in-memory cache"
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    sled_repo_cache_capacity: Option<u64>,
+    pub(crate) sled_cache_capacity: Option<u64>,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, ArgEnum)]
+#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, ArgEnum)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Store {
     Filesystem,
-    #[cfg(feature = "object-storage")]
     ObjectStorage,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Parser)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, Parser)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct FilesystemStorage {
     // defaults to {config.path}
@@ -210,51 +223,71 @@ pub(crate) struct FilesystemStorage {
         help = "Path in which pict-rs will create it's 'files' directory"
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
-    filesystem_storage_path: Option<PathBuf>,
+    pub(crate) filesystem_storage_path: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Parser)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, Parser)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct ObjectStorage {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[clap(long, help = "Name of the bucket in which pict-rs will store images")]
-    s3_store_bucket_name: Option<String>,
+    object_store_bucket_name: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[clap(
         long,
         help = "Region in which the bucket exists, can be an http endpoint"
     )]
-    s3_store_region: Option<Serde<s3::Region>>,
+    object_store_region: Option<Serde<s3::Region>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[clap(long)]
-    s3_store_access_key: Option<String>,
+    object_store_access_key: Option<String>,
 
     #[clap(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    s3_store_secret_key: Option<String>,
+    object_store_secret_key: Option<String>,
 
     #[clap(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    s3_store_security_token: Option<String>,
+    object_store_security_token: Option<String>,
 
     #[clap(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    s3_store_session_token: Option<String>,
+    object_store_session_token: Option<String>,
+}
+
+pub(crate) struct RequiredSledRepo {
+    pub(crate) path: PathBuf,
+    pub(crate) cache_capacity: u64,
 }
 
 pub(crate) struct RequiredObjectStorage {
     pub(crate) bucket_name: String,
     pub(crate) region: s3::Region,
     pub(crate) access_key: Option<String>,
+    pub(crate) secret_key: Option<String>,
     pub(crate) security_token: Option<String>,
     pub(crate) session_token: Option<String>,
+}
+
+pub(crate) struct RequiredFilesystemStorage {
+    pub(crate) path: PathBuf,
+}
+
+pub(crate) enum Storage {
+    ObjectStorage(RequiredObjectStorage),
+    Filesystem(RequiredFilesystemStorage),
+}
+
+pub(crate) enum Repository {
+    Sled(RequiredSledRepo),
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Config {
+    command: Command,
     skip_validate_imports: bool,
     addr: SocketAddr,
     path: PathBuf,
@@ -264,59 +297,52 @@ pub(crate) struct Config {
     max_image_width: usize,
     max_image_height: usize,
     max_image_area: usize,
-    sled_cache_capacity: u64,
     console_buffer_capacity: Option<usize>,
     api_key: Option<String>,
     opentelemetry_url: Option<Url>,
     repo: Repo,
-    sled_repo: SledRepo,
+    sled: Option<Sled>,
     store: Store,
-    filesystem_storage: FilesystemStorage,
-    object_storage: ObjectStorage,
+    filesystem_storage: Option<FilesystemStorage>,
+    object_storage: Option<ObjectStorage>,
 }
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Defaults {
+    command: Command,
     skip_validate_imports: bool,
     addr: SocketAddr,
     max_file_size: usize,
     max_image_width: usize,
     max_image_height: usize,
     max_image_area: usize,
-    sled_cache_capacity: u64,
     repo: Repo,
-    sled_repo: SledRepoDefaults,
+    sled: SledDefaults,
     store: Store,
-    filesystem_store: FilesystemDefaults,
 }
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-struct SledRepoDefaults {
-    sled_repo_cache_capacity: usize,
+struct SledDefaults {
+    sled_cache_capacity: usize,
 }
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-struct FilesystemDefaults {}
 
 impl Defaults {
     fn new() -> Self {
         Defaults {
+            command: Command::Run,
             skip_validate_imports: false,
             addr: ([0, 0, 0, 0], 8080).into(),
             max_file_size: 40,
             max_image_width: 10_000,
             max_image_height: 10_000,
             max_image_area: 40_000_000,
-            sled_cache_capacity: 1024 * 1024 * 64, // 16 times smaller than sled's default of 1GB
             repo: Repo::Sled,
-            sled_repo: SledRepoDefaults {
-                sled_repo_cache_capacity: 1024 * 1024 * 64,
+            sled: SledDefaults {
+                sled_cache_capacity: 1024 * 1024 * 64,
             },
             store: Store::Filesystem,
-            filesystem_store: FilesystemDefaults {},
         }
     }
 }
@@ -332,8 +358,6 @@ impl Config {
             base_config = base_config.add_source(config::File::from(path));
         };
 
-        // TODO: Command parsing
-
         if !args.overrides.is_default() {
             let merging = config::Config::try_from(&args.overrides)?;
 
@@ -348,20 +372,88 @@ impl Config {
         Ok(config)
     }
 
-    pub(crate) fn store(&self) -> &Store {
-        &self.store
+    pub(crate) fn command(&self) -> anyhow::Result<CommandConfig> {
+        Ok(match &self.command {
+            Command::Run => CommandConfig::Run,
+            Command::MigrateStore { to } => CommandConfig::MigrateStore {
+                to: match to {
+                    Store::ObjectStorage => Storage::ObjectStorage(
+                        self.object_storage
+                            .as_ref()
+                            .cloned()
+                            .unwrap_or_default()
+                            .required()?,
+                    ),
+                    Store::Filesystem => Storage::Filesystem(RequiredFilesystemStorage {
+                        path: self
+                            .filesystem_storage
+                            .as_ref()
+                            .and_then(|f| f.filesystem_storage_path.clone())
+                            .unwrap_or_else(|| {
+                                let mut path = self.path.clone();
+                                path.push("files");
+                                path
+                            }),
+                    }),
+                },
+            },
+            Command::MigrateRepo { to } => CommandConfig::MigrateRepo {
+                to: match to {
+                    Repo::Sled => {
+                        let sled = self.sled.as_ref().cloned().unwrap_or_default();
+
+                        Repository::Sled(RequiredSledRepo {
+                            path: sled.sled_path.unwrap_or_else(|| {
+                                let mut path = self.path.clone();
+                                path.push("sled-repo");
+                                path
+                            }),
+                            cache_capacity: sled.sled_cache_capacity.unwrap_or(1024 * 1024 * 64),
+                        })
+                    }
+                },
+            },
+        })
     }
 
-    pub(crate) fn repo(&self) -> &Repo {
-        &self.repo
+    pub(crate) fn store(&self) -> anyhow::Result<Storage> {
+        Ok(match self.store {
+            Store::Filesystem => Storage::Filesystem(RequiredFilesystemStorage {
+                path: self
+                    .filesystem_storage
+                    .as_ref()
+                    .and_then(|f| f.filesystem_storage_path.clone())
+                    .unwrap_or_else(|| {
+                        let mut path = self.path.clone();
+                        path.push("files");
+                        path
+                    }),
+            }),
+            Store::ObjectStorage => Storage::ObjectStorage(
+                self.object_storage
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_default()
+                    .required()?,
+            ),
+        })
     }
 
-    pub(crate) fn object_storage(&self) -> Result<RequiredObjectStorage, RequiredError> {
-        self.object_storage.required()
-    }
+    pub(crate) fn repo(&self) -> Repository {
+        match self.repo {
+            Repo::Sled => {
+                let sled = self.sled.as_ref().cloned().unwrap_or_default();
 
-    pub(crate) fn filesystem_storage_path(&self) -> Option<&PathBuf> {
-        self.filesystem_storage.filesystem_storage_path.as_ref()
+                Repository::Sled(RequiredSledRepo {
+                    path: sled.sled_path.unwrap_or_else(|| {
+                        let mut path = self.path.clone();
+                        path.push("sled-repo");
+                        path
+                    }),
+                    cache_capacity: sled.sled_cache_capacity.unwrap_or(1024 * 1024 * 64),
+                })
+            }
+        }
     }
 
     pub(crate) fn bind_address(&self) -> SocketAddr {
@@ -370,10 +462,6 @@ impl Config {
 
     pub(crate) fn data_dir(&self) -> PathBuf {
         self.path.clone()
-    }
-
-    pub(crate) fn sled_cache_capacity(&self) -> u64 {
-        self.sled_cache_capacity
     }
 
     pub(crate) fn console_buffer_capacity(&self) -> Option<usize> {
@@ -430,10 +518,10 @@ pub(crate) struct StoreError(String);
 pub(crate) struct RepoError(String);
 
 #[derive(Debug, thiserror::Error)]
-#[error("Missing required fields")]
-pub(crate) struct RequiredError;
+#[error("Missing required {0} field")]
+pub(crate) struct RequiredError(&'static str);
 
-#[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize, ArgEnum)]
+#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize, ArgEnum)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Format {
     Jpeg,

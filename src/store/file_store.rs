@@ -159,7 +159,7 @@ impl FileStore {
         self.settings_tree
             .insert(GENERATOR_KEY, path.to_be_bytes())?;
 
-        let mut target_path = self.root_dir.join("files");
+        let mut target_path = self.root_dir.clone();
         for dir in path.to_strings() {
             target_path.push(dir)
         }

@@ -9,7 +9,7 @@ use futures_util::{
     stream::{empty, once},
     Stream,
 };
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::Lazy;
 use std::{
     collections::HashSet,
     future::ready,
@@ -47,18 +47,17 @@ mod tmp_file;
 mod upload_manager;
 mod validate;
 
-use crate::{magick::details_hint, store::file_store::FileStore};
-
 use self::{
     concurrent_processor::CancelSafeProcessor,
-    config::{Config, Format, Migrate},
+    config::{CommandConfig, Config, Format, RequiredFilesystemStorage, RequiredObjectStorage},
     details::Details,
     either::Either,
     error::{Error, UploadError},
     init_tracing::init_tracing,
+    magick::details_hint,
     middleware::{Deadline, Internal},
     migrate::LatestDb,
-    store::Store,
+    store::{file_store::FileStore, object_store::ObjectStore, Store},
     upload_manager::{UploadManager, UploadManagerSession},
 };
 
@@ -67,7 +66,6 @@ const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
 const DAYS: u32 = 24 * HOURS;
 
-static MIGRATE: OnceCell<Migrate> = OnceCell::new();
 static CONFIG: Lazy<Config> = Lazy::new(|| Config::build().unwrap());
 static PROCESS_SEMAPHORE: Lazy<Semaphore> =
     Lazy::new(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
@@ -694,7 +692,6 @@ fn build_client() -> awc::Client {
         .finish()
 }
 
-#[cfg(feature = "object-storage")]
 fn build_reqwest_client() -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent("pict-rs v0.3.0-main")
@@ -839,35 +836,30 @@ async fn migrate_inner<S1>(
     manager: &UploadManager,
     db: &sled::Db,
     from: S1,
-    to: &config::Store,
+    to: &config::Storage,
 ) -> anyhow::Result<()>
 where
     S1: Store,
     Error: From<S1::Error>,
 {
     match to {
-        config::Store::FileStore { path } => {
-            let path = path.to_owned().unwrap_or_else(|| CONFIG.data_dir());
-
-            let to = FileStore::build(path, db)?;
+        config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
+            let to = FileStore::build(path.clone(), db)?;
             manager.restructure(&to).await?;
 
             manager.migrate_store::<S1, FileStore>(from, to).await?;
         }
-        #[cfg(feature = "object-storage")]
-        config::Store::S3Store {
+        config::Storage::ObjectStorage(RequiredObjectStorage {
             bucket_name,
             region,
             access_key,
             secret_key,
             security_token,
             session_token,
-        } => {
-            use store::object_store::ObjectStore;
-
+        }) => {
             let to = ObjectStore::build(
                 bucket_name,
-                (**region).clone(),
+                region.clone(),
                 access_key.clone(),
                 secret_key.clone(),
                 security_token.clone(),
@@ -891,75 +883,78 @@ async fn main() -> anyhow::Result<()> {
         CONFIG.console_buffer_capacity(),
     )?;
 
-    let db = LatestDb::exists(CONFIG.data_dir(), CONFIG.sled_cache_capacity()).migrate()?;
+    let db = LatestDb::exists(CONFIG.data_dir()).migrate()?;
+
+    let repo = self::repo::Repo::open(CONFIG.repo())?;
+
+    repo.from_db(db).await?;
 
     let manager = UploadManager::new(db.clone(), CONFIG.format()).await?;
 
-    if let Some(m) = MIGRATE.get() {
-        let from = m.from();
-        let to = m.to();
-
-        match from {
-            config::Store::FileStore { path } => {
-                let path = path.to_owned().unwrap_or_else(|| CONFIG.data_dir());
-
-                let from = FileStore::build(path, &db)?;
-                manager.restructure(&from).await?;
-
-                migrate_inner(&manager, &db, from, to).await?;
-            }
-            #[cfg(feature = "object-storage")]
-            config::Store::S3Store {
-                bucket_name,
-                region,
-                access_key,
-                secret_key,
-                security_token,
-                session_token,
-            } => {
-                let from = crate::store::object_store::ObjectStore::build(
-                    bucket_name,
-                    (**region).clone(),
-                    access_key.clone(),
-                    secret_key.clone(),
-                    security_token.clone(),
-                    session_token.clone(),
-                    &db,
-                    build_reqwest_client()?,
-                )?;
-
-                migrate_inner(&manager, &db, from, to).await?;
-            }
+    match CONFIG.command()? {
+        CommandConfig::Run => (),
+        CommandConfig::MigrateRepo { to: _ } => {
+            unimplemented!("Repo migrations are currently unsupported")
         }
+        CommandConfig::MigrateStore { to } => {
+            let from = CONFIG.store()?;
 
-        return Ok(());
+            match from {
+                config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
+                    let from = FileStore::build(path.clone(), &db)?;
+                    manager.restructure(&from).await?;
+
+                    migrate_inner(&manager, &db, from, &to).await?;
+                }
+                config::Storage::ObjectStorage(RequiredObjectStorage {
+                    bucket_name,
+                    region,
+                    access_key,
+                    secret_key,
+                    security_token,
+                    session_token,
+                }) => {
+                    let from = ObjectStore::build(
+                        &bucket_name,
+                        region,
+                        access_key,
+                        secret_key,
+                        security_token,
+                        session_token,
+                        &db,
+                        build_reqwest_client()?,
+                    )?;
+
+                    migrate_inner(&manager, &db, from, &to).await?;
+                }
+            }
+
+            return Ok(());
+        }
     }
 
-    match CONFIG.store() {
-        config::Store::FileStore { path } => {
-            let path = path.to_owned().unwrap_or_else(|| CONFIG.data_dir());
-
-            let store = FileStore::build(path.clone(), &db)?;
+    match CONFIG.store()? {
+        config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
+            let store = FileStore::build(path, &db)?;
             manager.restructure(&store).await?;
 
             launch(manager, store).await
         }
-        #[cfg(feature = "object-storage")]
-        config::Store::S3Store {
+        config::Storage::ObjectStorage(RequiredObjectStorage {
             bucket_name,
             region,
             access_key,
             secret_key,
             security_token,
             session_token,
-        } => {
-            let store = crate::store::object_store::ObjectStore::build(
-                bucket_name,
-                (**region).clone(),
-                access_key.clone(),
-                secret_key.clone(),
-                security_token.clone(),
-                session_token.clone(),
+        }) => {
+            let store = ObjectStore::build(
+                &bucket_name,
+                region,
+                access_key,
+                secret_key,
+                security_token,
+                session_token,
                 &db,
                 build_reqwest_client()?,
             )?;

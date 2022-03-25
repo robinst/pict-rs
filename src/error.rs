@@ -69,7 +69,6 @@ pub(crate) enum UploadError {
     #[error(transparent)]
     FileStore(#[from] crate::store::file_store::FileError),
 
-    #[cfg(feature = "object-storage")]
     #[error(transparent)]
     ObjectStore(#[from] crate::store::object_store::ObjectError),
 
