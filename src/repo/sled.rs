@@ -18,7 +18,7 @@ pub(crate) enum Error {
     Sled(#[from] sled::Error),
 
     #[error("Invalid identifier")]
-    Identifier(#[source] Box<dyn std::error::Error + Send + Sync>),
+    Identifier(#[source] Box<dyn std::error::Error + Sync + Send>),
 
     #[error("Invalid details json")]
     Details(#[from] serde_json::Error),
@@ -30,6 +30,7 @@ pub(crate) enum Error {
     Panic,
 }
 
+#[derive(Clone)]
 pub(crate) struct SledRepo {
     settings: Tree,
     identifier_details: Tree,
@@ -62,7 +63,7 @@ impl SledRepo {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl SettingsRepo for SledRepo {
     type Bytes = IVec;
     type Error = Error;
@@ -89,31 +90,35 @@ impl SettingsRepo for SledRepo {
 fn identifier_bytes<I>(identifier: &I) -> Result<Vec<u8>, Error>
 where
     I: Identifier,
-    I::Error: Send + Sync + 'static,
 {
     identifier
         .to_bytes()
         .map_err(|e| Error::Identifier(Box::new(e)))
 }
 
-fn variant_key(hash: &[u8], variant: &str) -> Result<Vec<u8>, Error> {
+fn variant_key(hash: &[u8], variant: &str) -> Vec<u8> {
     let mut bytes = hash.to_vec();
     bytes.push(b'/');
     bytes.extend_from_slice(variant.as_bytes());
-    Ok(bytes)
+    bytes
 }
 
-#[async_trait::async_trait]
-impl<I> IdentifierRepo<I> for SledRepo
-where
-    I: Identifier + 'static,
-    I::Error: Send + Sync + 'static,
-{
+fn variant_from_key(hash: &[u8], key: &[u8]) -> Option<String> {
+    let prefix_len = hash.len() + 1;
+    let variant_bytes = key.get(prefix_len..)?.to_vec();
+    String::from_utf8(variant_bytes).ok()
+}
+
+#[async_trait::async_trait(?Send)]
+impl IdentifierRepo for SledRepo {
     type Error = Error;
 
-    async fn relate_details(&self, identifier: I, details: Details) -> Result<(), Self::Error> {
-        let key = identifier_bytes(&identifier)?;
-
+    async fn relate_details<I: Identifier>(
+        &self,
+        identifier: &I,
+        details: &Details,
+    ) -> Result<(), Self::Error> {
+        let key = identifier_bytes(identifier)?;
         let details = serde_json::to_vec(&details)?;
 
         b!(
@@ -124,8 +129,8 @@ where
         Ok(())
     }
 
-    async fn details(&self, identifier: I) -> Result<Option<Details>, Self::Error> {
-        let key = identifier_bytes(&identifier)?;
+    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, Self::Error> {
+        let key = identifier_bytes(identifier)?;
 
         let opt = b!(self.identifier_details, identifier_details.get(key));
 
@@ -136,8 +141,8 @@ where
         }
     }
 
-    async fn cleanup(&self, identifier: I) -> Result<(), Self::Error> {
-        let key = identifier_bytes(&identifier)?;
+    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), Self::Error> {
+        let key = identifier_bytes(identifier)?;
 
         b!(self.identifier_details, identifier_details.remove(key));
 
@@ -182,11 +187,12 @@ impl futures_util::Stream for HashStream {
         } else if let Some(mut iter) = this.hashes.take() {
             let fut = Box::pin(async move {
                 actix_rt::task::spawn_blocking(move || {
-                    let opt = iter.next().map(|res| res.map_err(Error::from));
+                    let opt = iter.next();
 
                     (iter, opt)
                 })
                 .await
+                .map(|(iter, opt)| (iter, opt.map(|res| res.map_err(Error::from))))
                 .map_err(Error::from)
             });
 
@@ -204,12 +210,8 @@ fn hash_alias_key(hash: &IVec, alias: &Alias) -> Vec<u8> {
     v
 }
 
-#[async_trait::async_trait]
-impl<I> HashRepo<I> for SledRepo
-where
-    I: Identifier + 'static,
-    I::Error: Send + Sync + 'static,
-{
+#[async_trait::async_trait(?Send)]
+impl HashRepo for SledRepo {
     type Bytes = IVec;
     type Error = Error;
     type Stream = HashStream;
@@ -232,19 +234,17 @@ where
         Ok(res.map_err(|_| AlreadyExists))
     }
 
-    async fn relate_alias(&self, hash: Self::Bytes, alias: Alias) -> Result<(), Self::Error> {
-        let key = hash_alias_key(&hash, &alias);
+    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Self::Error> {
+        let key = hash_alias_key(&hash, alias);
+        let value = alias.to_bytes();
 
-        b!(
-            self.hash_aliases,
-            hash_aliases.insert(key, alias.to_bytes())
-        );
+        b!(self.hash_aliases, hash_aliases.insert(key, value));
 
         Ok(())
     }
 
-    async fn remove_alias(&self, hash: Self::Bytes, alias: Alias) -> Result<(), Self::Error> {
-        let key = hash_alias_key(&hash, &alias);
+    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Self::Error> {
+        let key = hash_alias_key(&hash, alias);
 
         b!(self.hash_aliases, hash_aliases.remove(key));
 
@@ -258,21 +258,28 @@ where
                 .values()
                 .filter_map(Result::ok)
                 .filter_map(|ivec| Alias::from_slice(&ivec))
-                .collect::<Vec<_>>()) as Result<_, Error>
+                .collect::<Vec<_>>()) as Result<_, sled::Error>
         });
 
         Ok(v)
     }
 
-    async fn relate_identifier(&self, hash: Self::Bytes, identifier: I) -> Result<(), Self::Error> {
-        let bytes = identifier_bytes(&identifier)?;
+    async fn relate_identifier<I: Identifier>(
+        &self,
+        hash: Self::Bytes,
+        identifier: &I,
+    ) -> Result<(), Self::Error> {
+        let bytes = identifier_bytes(identifier)?;
 
         b!(self.hash_identifiers, hash_identifiers.insert(hash, bytes));
 
         Ok(())
     }
 
-    async fn identifier(&self, hash: Self::Bytes) -> Result<I, Self::Error> {
+    async fn identifier<I: Identifier + 'static>(
+        &self,
+        hash: Self::Bytes,
+    ) -> Result<I, Self::Error> {
         let opt = b!(self.hash_identifiers, hash_identifiers.get(hash));
 
         opt.ok_or(Error::Missing).and_then(|ivec| {
@@ -280,14 +287,14 @@ where
         })
     }
 
-    async fn relate_variant_identifier(
+    async fn relate_variant_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         variant: String,
-        identifier: I,
+        identifier: &I,
     ) -> Result<(), Self::Error> {
-        let key = variant_key(&hash, &variant)?;
-        let value = identifier_bytes(&identifier)?;
+        let key = variant_key(&hash, &variant);
+        let value = identifier_bytes(identifier)?;
 
         b!(
             self.hash_variant_identifiers,
@@ -297,12 +304,12 @@ where
         Ok(())
     }
 
-    async fn variant_identifier(
+    async fn variant_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
         variant: String,
     ) -> Result<Option<I>, Self::Error> {
-        let key = variant_key(&hash, &variant)?;
+        let key = variant_key(&hash, &variant);
 
         let opt = b!(
             self.hash_variant_identifiers,
@@ -318,12 +325,33 @@ where
         }
     }
 
-    async fn relate_motion_identifier(
+    async fn variants<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-        identifier: I,
+    ) -> Result<Vec<(String, I)>, Self::Error> {
+        let vec = b!(
+            self.hash_variant_identifiers,
+            Ok(hash_variant_identifiers
+                .scan_prefix(&hash)
+                .filter_map(|res| res.ok())
+                .filter_map(|(key, ivec)| {
+                    let identifier = I::from_bytes(ivec.to_vec()).ok()?;
+                    let variant = variant_from_key(&hash, &key)?;
+
+                    Some((variant, identifier))
+                })
+                .collect::<Vec<_>>()) as Result<Vec<_>, sled::Error>
+        );
+
+        Ok(vec)
+    }
+
+    async fn relate_motion_identifier<I: Identifier>(
+        &self,
+        hash: Self::Bytes,
+        identifier: &I,
     ) -> Result<(), Self::Error> {
-        let bytes = identifier_bytes(&identifier)?;
+        let bytes = identifier_bytes(identifier)?;
 
         b!(
             self.hash_motion_identifiers,
@@ -333,7 +361,10 @@ where
         Ok(())
     }
 
-    async fn motion_identifier(&self, hash: Self::Bytes) -> Result<Option<I>, Self::Error> {
+    async fn motion_identifier<I: Identifier + 'static>(
+        &self,
+        hash: Self::Bytes,
+    ) -> Result<Option<I>, Self::Error> {
         let opt = b!(
             self.hash_motion_identifiers,
             hash_motion_identifiers.get(hash)
@@ -361,7 +392,7 @@ where
             hash_motion_identifiers.remove(hash2)
         );
 
-        let aliases = HashRepo::<I>::aliases(self, hash.clone()).await?;
+        let aliases = self.aliases(hash.clone()).await?;
         let hash2 = hash.clone();
         b!(self.hash_aliases, {
             for alias in aliases {
@@ -369,7 +400,7 @@ where
 
                 let _ = hash_aliases.remove(key);
             }
-            Ok(()) as Result<(), Error>
+            Ok(()) as Result<(), sled::Error>
         });
 
         let variant_keys = b!(self.hash_variant_identifiers, {
@@ -379,25 +410,25 @@ where
                 .filter_map(Result::ok)
                 .collect::<Vec<_>>();
 
-            Ok(v) as Result<Vec<_>, Error>
+            Ok(v) as Result<Vec<_>, sled::Error>
         });
         b!(self.hash_variant_identifiers, {
             for key in variant_keys {
                 let _ = hash_variant_identifiers.remove(key);
             }
-            Ok(()) as Result<(), Error>
+            Ok(()) as Result<(), sled::Error>
         });
 
         Ok(())
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl AliasRepo for SledRepo {
     type Bytes = sled::IVec;
     type Error = Error;
 
-    async fn create(&self, alias: Alias) -> Result<Result<(), AlreadyExists>, Self::Error> {
+    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Self::Error> {
         let bytes = alias.to_bytes();
         let bytes2 = bytes.clone();
 
@@ -411,8 +442,8 @@ impl AliasRepo for SledRepo {
 
     async fn relate_delete_token(
         &self,
-        alias: Alias,
-        delete_token: DeleteToken,
+        alias: &Alias,
+        delete_token: &DeleteToken,
     ) -> Result<Result<(), AlreadyExists>, Self::Error> {
         let key = alias.to_bytes();
         let token = delete_token.to_bytes();
@@ -425,7 +456,7 @@ impl AliasRepo for SledRepo {
         Ok(res.map_err(|_| AlreadyExists))
     }
 
-    async fn delete_token(&self, alias: Alias) -> Result<DeleteToken, Self::Error> {
+    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, Self::Error> {
         let key = alias.to_bytes();
 
         let opt = b!(self.alias_delete_tokens, alias_delete_tokens.get(key));
@@ -434,7 +465,7 @@ impl AliasRepo for SledRepo {
             .ok_or(Error::Missing)
     }
 
-    async fn relate_hash(&self, alias: Alias, hash: Self::Bytes) -> Result<(), Self::Error> {
+    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), Self::Error> {
         let key = alias.to_bytes();
 
         b!(self.alias_hashes, alias_hashes.insert(key, hash));
@@ -442,7 +473,7 @@ impl AliasRepo for SledRepo {
         Ok(())
     }
 
-    async fn hash(&self, alias: Alias) -> Result<Self::Bytes, Self::Error> {
+    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, Self::Error> {
         let key = alias.to_bytes();
 
         let opt = b!(self.alias_hashes, alias_hashes.get(key));
@@ -450,7 +481,7 @@ impl AliasRepo for SledRepo {
         opt.ok_or(Error::Missing)
     }
 
-    async fn cleanup(&self, alias: Alias) -> Result<(), Self::Error> {
+    async fn cleanup(&self, alias: &Alias) -> Result<(), Self::Error> {
         let key = alias.to_bytes();
 
         let key2 = key.clone();

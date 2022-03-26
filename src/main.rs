@@ -57,6 +57,7 @@ use self::{
     magick::details_hint,
     middleware::{Deadline, Internal},
     migrate::LatestDb,
+    repo::{Alias, DeleteToken, Repo},
     store::{file_store::FileStore, object_store::ObjectStore, Store},
     upload_manager::{UploadManager, UploadManagerSession},
 };
@@ -96,30 +97,26 @@ where
             info!("Uploaded {} as {:?}", image.filename, alias);
             let delete_token = image.result.delete_token().await?;
 
-            let name = manager.from_alias(alias.to_owned()).await?;
-            let identifier = manager.identifier_from_filename::<S>(name.clone()).await?;
-
-            let details = manager.variant_details(&identifier, name.clone()).await?;
+            let identifier = manager.identifier_from_alias::<S>(alias).await?;
+            let details = manager.details(&identifier).await?;
 
             let details = if let Some(details) = details {
                 debug!("details exist");
                 details
             } else {
                 debug!("generating new details from {:?}", identifier);
-                let hint = details_hint(&name);
+                let hint = details_hint(alias);
                 let new_details =
                     Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-                debug!("storing details for {:?} {}", identifier, name);
-                manager
-                    .store_variant_details(&identifier, name, &new_details)
-                    .await?;
+                debug!("storing details for {:?}", identifier);
+                manager.store_details(&identifier, &new_details).await?;
                 debug!("stored");
                 new_details
             };
 
             files.push(serde_json::json!({
-                "file": alias,
-                "delete_token": delete_token,
+                "file": alias.to_string(),
+                "delete_token": delete_token.to_string(),
                 "details": details,
             }));
         }
@@ -222,19 +219,16 @@ where
     drop(permit);
     let delete_token = session.delete_token().await?;
 
-    let name = manager.from_alias(alias.to_owned()).await?;
-    let identifier = manager.identifier_from_filename::<S>(name.clone()).await?;
+    let identifier = manager.identifier_from_alias::<S>(&alias).await?;
 
-    let details = manager.variant_details(&identifier, name.clone()).await?;
+    let details = manager.details(&identifier).await?;
 
     let details = if let Some(details) = details {
         details
     } else {
-        let hint = details_hint(&name);
+        let hint = details_hint(&alias);
         let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        manager
-            .store_variant_details(&identifier, name, &new_details)
-            .await?;
+        manager.store_details(&identifier, &new_details).await?;
         new_details
     };
 
@@ -242,8 +236,8 @@ where
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
         "files": [{
-            "file": alias,
-            "delete_token": delete_token,
+            "file": alias.to_string(),
+            "delete_token": delete_token.to_string(),
             "details": details,
         }]
     })))
@@ -261,19 +255,21 @@ where
 {
     let (alias, token) = path_entries.into_inner();
 
-    manager.delete((**store).clone(), token, alias).await?;
+    let alias = Alias::from_existing(&alias);
+    let token = DeleteToken::from_existing(&token);
+
+    manager.delete((**store).clone(), alias, token).await?;
 
     Ok(HttpResponse::NoContent().finish())
 }
 
 type ProcessQuery = Vec<(String, String)>;
 
-async fn prepare_process(
+fn prepare_process(
     query: web::Query<ProcessQuery>,
     ext: &str,
-    manager: &UploadManager,
     filters: &Option<HashSet<String>>,
-) -> Result<(Format, String, PathBuf, Vec<String>), Error> {
+) -> Result<(Format, Alias, PathBuf, Vec<String>), Error> {
     let (alias, operations) =
         query
             .into_inner()
@@ -291,7 +287,7 @@ async fn prepare_process(
         return Err(UploadError::MissingFilename.into());
     }
 
-    let name = manager.from_alias(alias).await?;
+    let alias = Alias::from_existing(&alias);
 
     let operations = if let Some(filters) = filters.as_ref() {
         operations
@@ -305,12 +301,10 @@ async fn prepare_process(
     let format = ext
         .parse::<Format>()
         .map_err(|_| UploadError::UnsupportedFormat)?;
-    let processed_name = format!("{}.{}", name, ext);
 
-    let (thumbnail_path, thumbnail_args) =
-        self::processor::build_chain(&operations, processed_name)?;
+    let (thumbnail_path, thumbnail_args) = self::processor::build_chain(&operations)?;
 
-    Ok((format, name, thumbnail_path, thumbnail_args))
+    Ok((format, alias, thumbnail_path, thumbnail_args))
 }
 
 #[instrument(name = "Fetching derived details", skip(manager, filters))]
@@ -324,15 +318,14 @@ async fn process_details<S: Store>(
 where
     Error: From<S::Error>,
 {
-    let (_, name, thumbnail_path, _) =
-        prepare_process(query, ext.as_str(), &manager, &filters).await?;
+    let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str(), &filters)?;
 
     let identifier = manager
-        .variant_identifier::<S>(&thumbnail_path, &name)
+        .variant_identifier::<S>(&alias, &thumbnail_path)
         .await?
         .ok_or(UploadError::MissingAlias)?;
 
-    let details = manager.variant_details(&identifier, name).await?;
+    let details = manager.details(&identifier).await?;
 
     let details = details.ok_or(UploadError::NoFiles)?;
 
@@ -352,24 +345,22 @@ async fn process<S: Store + 'static>(
 where
     Error: From<S::Error>,
 {
-    let (format, name, thumbnail_path, thumbnail_args) =
-        prepare_process(query, ext.as_str(), &manager, &filters).await?;
+    let (format, alias, thumbnail_path, thumbnail_args) =
+        prepare_process(query, ext.as_str(), &filters)?;
 
     let identifier_opt = manager
-        .variant_identifier::<S>(&thumbnail_path, &name)
+        .variant_identifier::<S>(&alias, &thumbnail_path)
         .await?;
 
     if let Some(identifier) = identifier_opt {
-        let details_opt = manager.variant_details(&identifier, name.clone()).await?;
+        let details_opt = manager.details(&identifier).await?;
 
         let details = if let Some(details) = details_opt {
             details
         } else {
-            let hint = details_hint(&name);
+            let hint = details_hint(&alias);
             let details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-            manager
-                .store_variant_details(&identifier, name, &details)
-                .await?;
+            manager.store_details(&identifier, &details).await?;
             details
         };
 
@@ -377,7 +368,7 @@ where
     }
 
     let identifier = manager
-        .still_identifier_from_filename((**store).clone(), name.clone())
+        .still_identifier_from_alias((**store).clone(), &alias)
         .await?;
 
     let thumbnail_path2 = thumbnail_path.clone();
@@ -405,29 +396,27 @@ where
             parent: None,
             "Saving variant information",
             path = tracing::field::debug(&thumbnail_path),
-            name = tracing::field::display(&name),
+            name = tracing::field::display(&alias),
         );
         save_span.follows_from(Span::current());
         let details2 = details.clone();
         let bytes2 = bytes.clone();
+        let alias2 = alias.clone();
         actix_rt::spawn(
             async move {
-                let identifier = match store.save_bytes(bytes2, &name).await {
+                let identifier = match store.save_bytes(bytes2).await {
                     Ok(identifier) => identifier,
                     Err(e) => {
                         tracing::warn!("Failed to generate directory path: {}", e);
                         return;
                     }
                 };
-                if let Err(e) = manager
-                    .store_variant_details(&identifier, name.clone(), &details2)
-                    .await
-                {
+                if let Err(e) = manager.store_details(&identifier, &details2).await {
                     tracing::warn!("Error saving variant details: {}", e);
                     return;
                 }
                 if let Err(e) = manager
-                    .store_variant(Some(&thumbnail_path), &identifier, &name)
+                    .store_variant(&alias2, &thumbnail_path, &identifier)
                     .await
                 {
                     tracing::warn!("Error saving variant info: {}", e);
@@ -483,19 +472,19 @@ async fn details<S: Store>(
 where
     Error: From<S::Error>,
 {
-    let name = manager.from_alias(alias.into_inner()).await?;
-    let identifier = manager.identifier_from_filename::<S>(name.clone()).await?;
+    let alias = alias.into_inner();
+    let alias = Alias::from_existing(&alias);
 
-    let details = manager.variant_details(&identifier, name.clone()).await?;
+    let identifier = manager.identifier_from_alias::<S>(&alias).await?;
+
+    let details = manager.details(&identifier).await?;
 
     let details = if let Some(details) = details {
         details
     } else {
-        let hint = details_hint(&name);
+        let hint = details_hint(&alias);
         let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        manager
-            .store_variant_details(&identifier, name, &new_details)
-            .await?;
+        manager.store_details(&identifier, &new_details).await?;
         new_details
     };
 
@@ -513,19 +502,18 @@ async fn serve<S: Store>(
 where
     Error: From<S::Error>,
 {
-    let name = manager.from_alias(alias.into_inner()).await?;
-    let identifier = manager.identifier_from_filename::<S>(name.clone()).await?;
+    let alias = alias.into_inner();
+    let alias = Alias::from_existing(&alias);
+    let identifier = manager.identifier_from_alias::<S>(&alias).await?;
 
-    let details = manager.variant_details(&identifier, name.clone()).await?;
+    let details = manager.details(&identifier).await?;
 
     let details = if let Some(details) = details {
         details
     } else {
-        let hint = details_hint(&name);
+        let hint = details_hint(&alias);
         let details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        manager
-            .store_variant_details(&identifier, name, &details)
-            .await?;
+        manager.store_details(&identifier, &details).await?;
         details
     };
 
@@ -605,25 +593,21 @@ where
 }
 
 #[derive(Debug, serde::Deserialize)]
-#[serde(untagged)]
-enum FileOrAlias {
-    File { file: String },
-    Alias { alias: String },
+struct AliasQuery {
+    alias: String,
 }
 
 #[instrument(name = "Purging file", skip(upload_manager))]
 async fn purge<S: Store>(
-    query: web::Query<FileOrAlias>,
+    query: web::Query<AliasQuery>,
     upload_manager: web::Data<UploadManager>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error>
 where
     Error: From<S::Error>,
 {
-    let aliases = match query.into_inner() {
-        FileOrAlias::File { file } => upload_manager.aliases_by_filename(file).await?,
-        FileOrAlias::Alias { alias } => upload_manager.aliases_by_alias(alias).await?,
-    };
+    let alias = Alias::from_existing(&query.alias);
+    let aliases = upload_manager.aliases_by_alias(&alias).await?;
 
     for alias in aliases.iter() {
         upload_manager
@@ -633,49 +617,25 @@ where
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",
-        "aliases": aliases
+        "aliases": aliases.iter().map(|a| a.to_string()).collect::<Vec<_>>()
     })))
 }
 
 #[instrument(name = "Fetching aliases", skip(upload_manager))]
 async fn aliases<S: Store>(
-    query: web::Query<FileOrAlias>,
+    query: web::Query<AliasQuery>,
     upload_manager: web::Data<UploadManager>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error>
 where
     Error: From<S::Error>,
 {
-    let aliases = match query.into_inner() {
-        FileOrAlias::File { file } => upload_manager.aliases_by_filename(file).await?,
-        FileOrAlias::Alias { alias } => upload_manager.aliases_by_alias(alias).await?,
-    };
+    let alias = Alias::from_existing(&query.alias);
+    let aliases = upload_manager.aliases_by_alias(&alias).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",
-        "aliases": aliases,
-    })))
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct ByAlias {
-    alias: String,
-}
-
-#[instrument(name = "Fetching filename", skip(upload_manager))]
-async fn filename_by_alias<S: Store>(
-    query: web::Query<ByAlias>,
-    upload_manager: web::Data<UploadManager>,
-    store: web::Data<S>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
-    let filename = upload_manager.from_alias(query.into_inner().alias).await?;
-
-    Ok(HttpResponse::Ok().json(&serde_json::json!({
-        "msg": "ok",
-        "filename": filename,
+        "aliases": aliases.iter().map(|a| a.to_string()).collect::<Vec<_>>()
     })))
 }
 
@@ -817,10 +777,7 @@ where
                             .route(web::post().to(upload::<S>)),
                     )
                     .service(web::resource("/purge").route(web::post().to(purge::<S>)))
-                    .service(web::resource("/aliases").route(web::get().to(aliases::<S>)))
-                    .service(
-                        web::resource("/filename").route(web::get().to(filename_by_alias::<S>)),
-                    ),
+                    .service(web::resource("/aliases").route(web::get().to(aliases::<S>))),
             )
     })
     .bind(CONFIG.bind_address())?
@@ -834,7 +791,7 @@ where
 
 async fn migrate_inner<S1>(
     manager: &UploadManager,
-    db: &sled::Db,
+    repo: &Repo,
     from: S1,
     to: &config::Storage,
 ) -> anyhow::Result<()>
@@ -844,9 +801,7 @@ where
 {
     match to {
         config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
-            let to = FileStore::build(path.clone(), db)?;
-            manager.restructure(&to).await?;
-
+            let to = FileStore::build(path.clone(), repo.clone()).await?;
             manager.migrate_store::<S1, FileStore>(from, to).await?;
         }
         config::Storage::ObjectStorage(RequiredObjectStorage {
@@ -864,9 +819,10 @@ where
                 secret_key.clone(),
                 security_token.clone(),
                 session_token.clone(),
-                db,
+                repo.clone(),
                 build_reqwest_client()?,
-            )?;
+            )
+            .await?;
 
             manager.migrate_store::<S1, ObjectStore>(from, to).await?;
         }
@@ -883,13 +839,12 @@ async fn main() -> anyhow::Result<()> {
         CONFIG.console_buffer_capacity(),
     )?;
 
+    let repo = Repo::open(CONFIG.repo())?;
+
     let db = LatestDb::exists(CONFIG.data_dir()).migrate()?;
-
-    let repo = self::repo::Repo::open(CONFIG.repo())?;
-
     repo.from_db(db).await?;
 
-    let manager = UploadManager::new(db.clone(), CONFIG.format()).await?;
+    let manager = UploadManager::new(repo.clone(), CONFIG.format()).await?;
 
     match CONFIG.command()? {
         CommandConfig::Run => (),
@@ -901,10 +856,8 @@ async fn main() -> anyhow::Result<()> {
 
             match from {
                 config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
-                    let from = FileStore::build(path.clone(), &db)?;
-                    manager.restructure(&from).await?;
-
-                    migrate_inner(&manager, &db, from, &to).await?;
+                    let from = FileStore::build(path.clone(), repo.clone()).await?;
+                    migrate_inner(&manager, &repo, from, &to).await?;
                 }
                 config::Storage::ObjectStorage(RequiredObjectStorage {
                     bucket_name,
@@ -921,11 +874,12 @@ async fn main() -> anyhow::Result<()> {
                         secret_key,
                         security_token,
                         session_token,
-                        &db,
+                        repo.clone(),
                         build_reqwest_client()?,
-                    )?;
+                    )
+                    .await?;
 
-                    migrate_inner(&manager, &db, from, &to).await?;
+                    migrate_inner(&manager, &repo, from, &to).await?;
                 }
             }
 
@@ -935,9 +889,7 @@ async fn main() -> anyhow::Result<()> {
 
     match CONFIG.store()? {
         config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
-            let store = FileStore::build(path, &db)?;
-            manager.restructure(&store).await?;
-
+            let store = FileStore::build(path, repo).await?;
             launch(manager, store).await
         }
         config::Storage::ObjectStorage(RequiredObjectStorage {
@@ -955,9 +907,10 @@ async fn main() -> anyhow::Result<()> {
                 secret_key,
                 security_token,
                 session_token,
-                &db,
+                repo,
                 build_reqwest_client()?,
-            )?;
+            )
+            .await?;
 
             launch(manager, store).await
         }

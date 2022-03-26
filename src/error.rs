@@ -37,39 +37,33 @@ where
     }
 }
 
-impl From<sled::transaction::TransactionError<Error>> for Error {
-    fn from(e: sled::transaction::TransactionError<Error>) -> Self {
-        match e {
-            sled::transaction::TransactionError::Abort(t) => t,
-            sled::transaction::TransactionError::Storage(e) => e.into(),
-        }
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum UploadError {
-    #[error("Couln't upload file, {0}")]
+    #[error("Couln't upload file")]
     Upload(#[from] actix_form_data::Error),
 
-    #[error("Error in DB, {0}")]
-    Db(#[from] sled::Error),
+    #[error("Error in DB")]
+    Sled(#[from] crate::repo::sled::Error),
 
-    #[error("Error parsing string, {0}")]
+    #[error("Error in old sled DB")]
+    OldSled(#[from] ::sled::Error),
+
+    #[error("Error parsing string")]
     ParseString(#[from] std::string::FromUtf8Error),
 
-    #[error("Error interacting with filesystem, {0}")]
+    #[error("Error interacting with filesystem")]
     Io(#[from] std::io::Error),
 
-    #[error(transparent)]
+    #[error("Error generating path")]
     PathGenerator(#[from] storage_path_generator::PathError),
 
-    #[error(transparent)]
+    #[error("Error stripping prefix")]
     StripPrefix(#[from] std::path::StripPrefixError),
 
-    #[error(transparent)]
+    #[error("Error storing file")]
     FileStore(#[from] crate::store::file_store::FileError),
 
-    #[error(transparent)]
+    #[error("Error storing object")]
     ObjectStore(#[from] crate::store::object_store::ObjectError),
 
     #[error("Provided process path is invalid")]
@@ -87,9 +81,6 @@ pub(crate) enum UploadError {
     #[error("Requested a file that doesn't exist")]
     MissingAlias,
 
-    #[error("Alias directed to missing file")]
-    MissingFile,
-
     #[error("Provided token did not match expected token")]
     InvalidToken,
 
@@ -102,7 +93,7 @@ pub(crate) enum UploadError {
     #[error("Unable to download image, bad response {0}")]
     Download(actix_web::http::StatusCode),
 
-    #[error("Unable to download image, {0}")]
+    #[error("Unable to download image")]
     Payload(#[from] awc::error::PayloadError),
 
     #[error("Unable to send request, {0}")]
@@ -117,13 +108,13 @@ pub(crate) enum UploadError {
     #[error("Tried to save an image with an already-taken name")]
     DuplicateAlias,
 
-    #[error("{0}")]
+    #[error("Error in json")]
     Json(#[from] serde_json::Error),
 
     #[error("Range header not satisfiable")]
     Range,
 
-    #[error(transparent)]
+    #[error("Hit limit")]
     Limit(#[from] super::LimitError),
 }
 

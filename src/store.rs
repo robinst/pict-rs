@@ -8,7 +8,7 @@ pub(crate) mod file_store;
 pub(crate) mod object_store;
 
 pub(crate) trait Identifier: Send + Sync + Clone + Debug {
-    type Error: std::error::Error;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     fn to_bytes(&self) -> Result<Vec<u8>, Self::Error>;
 
@@ -19,23 +19,18 @@ pub(crate) trait Identifier: Send + Sync + Clone + Debug {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait Store: Send + Sync + Clone + Debug + 'static {
-    type Error: std::error::Error;
+    type Error: std::error::Error + Send + Sync + 'static;
     type Identifier: Identifier<Error = Self::Error>;
     type Stream: Stream<Item = std::io::Result<Bytes>>;
 
     async fn save_async_read<Reader>(
         &self,
         reader: &mut Reader,
-        filename: &str,
     ) -> Result<Self::Identifier, Self::Error>
     where
         Reader: AsyncRead + Unpin;
 
-    async fn save_bytes(
-        &self,
-        bytes: Bytes,
-        filename: &str,
-    ) -> Result<Self::Identifier, Self::Error>;
+    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error>;
 
     async fn to_stream(
         &self,

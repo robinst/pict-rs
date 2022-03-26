@@ -2,6 +2,7 @@ use crate::{
     config::Format,
     error::{Error, UploadError},
     process::Process,
+    repo::Alias,
     store::Store,
 };
 use actix_web::web::Bytes;
@@ -11,8 +12,9 @@ use tokio::{
 };
 use tracing::instrument;
 
-pub(crate) fn details_hint(filename: &str) -> Option<ValidInputType> {
-    if filename.ends_with(".mp4") {
+pub(crate) fn details_hint(alias: &Alias) -> Option<ValidInputType> {
+    let ext = alias.extension()?;
+    if ext.ends_with(".mp4") {
         Some(ValidInputType::Mp4)
     } else {
         None

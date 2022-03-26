@@ -20,10 +20,7 @@ pub(crate) struct Crop(usize, usize);
 pub(crate) struct Blur(f64);
 
 #[instrument]
-pub(crate) fn build_chain(
-    args: &[(String, String)],
-    filename: String,
-) -> Result<(PathBuf, Vec<String>), Error> {
+pub(crate) fn build_chain(args: &[(String, String)]) -> Result<(PathBuf, Vec<String>), Error> {
     fn parse<P: Processor>(key: &str, value: &str) -> Result<Option<P>, UploadError> {
         if key == P::NAME {
             return Ok(Some(P::parse(key, value).ok_or(UploadError::ParsePath)?));
@@ -56,7 +53,7 @@ pub(crate) fn build_chain(
                 }
             })?;
 
-    Ok((path.join(filename), args))
+    Ok((path, args))
 }
 
 impl Processor for Identity {

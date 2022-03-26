@@ -95,26 +95,3 @@ impl DbVersion {
         }
     }
 }
-
-pub(crate) fn alias_key_bounds(hash: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let mut start = hash.to_vec();
-    start.extend(&[0]);
-
-    let mut end = hash.to_vec();
-    end.extend(&[1]);
-
-    (start, end)
-}
-
-pub(crate) fn alias_id_key(alias: &str) -> String {
-    format!("{}/id", alias)
-}
-
-pub(crate) fn alias_key(hash: &[u8], id: &str) -> Vec<u8> {
-    let mut key = hash.to_vec();
-    // add a separator to the key between the hash and the ID
-    key.extend(&[0]);
-    key.extend(id.as_bytes());
-
-    key
-}

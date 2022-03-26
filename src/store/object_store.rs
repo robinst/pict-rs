@@ -1,4 +1,7 @@
-use crate::store::Store;
+use crate::{
+    repo::{Repo, SettingsRepo},
+    store::Store,
+};
 use actix_web::web::Bytes;
 use futures_util::stream::Stream;
 use s3::{
@@ -22,26 +25,26 @@ const GENERATOR_KEY: &[u8] = b"last-path";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ObjectError {
-    #[error(transparent)]
+    #[error("Failed to generate path")]
     PathGenerator(#[from] storage_path_generator::PathError),
 
-    #[error(transparent)]
-    Sled(#[from] sled::Error),
+    #[error("Failed to interact with sled repo")]
+    Sled(#[from] crate::repo::sled::Error),
 
-    #[error(transparent)]
+    #[error("Failed to parse string")]
     Utf8(#[from] FromUtf8Error),
 
     #[error("Invalid length")]
     Length,
 
-    #[error("Storage error: {0}")]
+    #[error("Storage error")]
     Anyhow(#[from] anyhow::Error),
 }
 
 #[derive(Clone)]
 pub(crate) struct ObjectStore {
     path_gen: Generator,
-    settings_tree: sled::Tree,
+    repo: Repo,
     bucket: Bucket,
     client: reqwest::Client,
 }
@@ -63,12 +66,11 @@ impl Store for ObjectStore {
     async fn save_async_read<Reader>(
         &self,
         reader: &mut Reader,
-        filename: &str,
     ) -> Result<Self::Identifier, Self::Error>
     where
         Reader: AsyncRead + Unpin,
     {
-        let path = self.next_file(filename)?;
+        let path = self.next_file().await?;
 
         self.bucket
             .put_object_stream(&self.client, reader, &path)
@@ -78,12 +80,8 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip(bytes))]
-    async fn save_bytes(
-        &self,
-        bytes: Bytes,
-        filename: &str,
-    ) -> Result<Self::Identifier, Self::Error> {
-        let path = self.next_file(filename)?;
+    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error> {
+        let path = self.next_file().await?;
 
         self.bucket.put_object(&self.client, &path, &bytes).await?;
 
@@ -154,23 +152,21 @@ impl Store for ObjectStore {
 
 impl ObjectStore {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn build(
+    pub(crate) async fn build(
         bucket_name: &str,
         region: Region,
         access_key: Option<String>,
         secret_key: Option<String>,
         security_token: Option<String>,
         session_token: Option<String>,
-        db: &sled::Db,
+        repo: Repo,
         client: reqwest::Client,
     ) -> Result<ObjectStore, ObjectError> {
-        let settings_tree = db.open_tree("settings")?;
-
-        let path_gen = init_generator(&settings_tree)?;
+        let path_gen = init_generator(&repo).await?;
 
         Ok(ObjectStore {
             path_gen,
-            settings_tree,
+            repo,
             bucket: Bucket::new_with_path_style(
                 bucket_name,
                 match region {
@@ -191,29 +187,39 @@ impl ObjectStore {
         })
     }
 
-    fn next_directory(&self) -> Result<Path, ObjectError> {
+    async fn next_directory(&self) -> Result<Path, ObjectError> {
         let path = self.path_gen.next();
 
-        self.settings_tree
-            .insert(GENERATOR_KEY, path.to_be_bytes())?;
+        match self.repo {
+            Repo::Sled(ref sled_repo) => {
+                sled_repo
+                    .set(GENERATOR_KEY, path.to_be_bytes().into())
+                    .await?;
+            }
+        }
 
         Ok(path)
     }
 
-    fn next_file(&self, filename: &str) -> Result<String, ObjectError> {
-        let path = self.next_directory()?.to_strings().join("/");
+    async fn next_file(&self) -> Result<String, ObjectError> {
+        let path = self.next_directory().await?.to_strings().join("/");
+        let filename = uuid::Uuid::new_v4().to_string();
 
         Ok(format!("{}/{}", path, filename))
     }
 }
 
-fn init_generator(settings: &sled::Tree) -> Result<Generator, ObjectError> {
-    if let Some(ivec) = settings.get(GENERATOR_KEY)? {
-        Ok(Generator::from_existing(
-            storage_path_generator::Path::from_be_bytes(ivec.to_vec())?,
-        ))
-    } else {
-        Ok(Generator::new())
+async fn init_generator(repo: &Repo) -> Result<Generator, ObjectError> {
+    match repo {
+        Repo::Sled(sled_repo) => {
+            if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {
+                Ok(Generator::from_existing(
+                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())?,
+                ))
+            } else {
+                Ok(Generator::new())
+            }
+        }
     }
 }
 

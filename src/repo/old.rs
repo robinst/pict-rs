@@ -17,8 +17,9 @@
 // - Settings Tree
 //   - store-migration-progress -> Path Tree Key
 
+use std::path::PathBuf;
+
 use super::{Alias, DeleteToken, Details};
-use uuid::Uuid;
 
 pub(super) struct Old {
     alias_tree: ::sled::Tree,
@@ -91,7 +92,7 @@ impl Old {
             .ok_or_else(|| anyhow::anyhow!("Missing identifier"))
     }
 
-    pub(super) fn variants(&self, hash: &sled::IVec) -> anyhow::Result<Vec<(String, sled::IVec)>> {
+    pub(super) fn variants(&self, hash: &sled::IVec) -> anyhow::Result<Vec<(PathBuf, sled::IVec)>> {
         let filename = self
             .main_tree
             .get(hash)?
@@ -106,13 +107,16 @@ impl Old {
             .scan_prefix(&variant_prefix)
             .filter_map(|res| res.ok())
             .filter_map(|(key, value)| {
-                let key_str = String::from_utf8_lossy(&key);
-                let variant_path = key_str.trim_start_matches(&variant_prefix);
-                if variant_path == "motion" {
+                let variant_path_bytes = &key[variant_prefix.as_bytes().len()..];
+                if variant_path_bytes == b"motion" {
                     return None;
                 }
 
-                Some((variant_path.to_string(), value))
+                let path = String::from_utf8(variant_path_bytes.to_vec()).ok()?;
+                let mut path = PathBuf::from(path);
+                path.pop();
+
+                Some((path, value))
             })
             .collect())
     }
@@ -141,29 +145,15 @@ impl Old {
             .scan_prefix(key)
             .values()
             .filter_map(|res| res.ok())
-            .filter_map(|alias| {
-                let alias_str = String::from_utf8_lossy(&alias);
-
-                let (uuid, ext) = alias_str.split_once('.')?;
-
-                let uuid = uuid.parse::<Uuid>().ok()?;
-
-                Some(Alias {
-                    id: uuid,
-                    extension: ext.to_string(),
-                })
-            })
+            .filter_map(|alias| Alias::from_slice(&alias))
             .collect()
     }
 
     pub(super) fn delete_token(&self, alias: &Alias) -> anyhow::Result<Option<DeleteToken>> {
-        let key = format!("{}{}/delete", alias.id, alias.extension);
+        let key = format!("{}/delete", alias);
 
         if let Some(ivec) = self.alias_tree.get(key)? {
-            let token_str = String::from_utf8_lossy(&ivec);
-            if let Ok(uuid) = token_str.parse::<Uuid>() {
-                return Ok(Some(DeleteToken { id: uuid }));
-            }
+            return Ok(DeleteToken::from_slice(&ivec));
         }
 
         Ok(None)
