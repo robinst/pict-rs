@@ -24,8 +24,6 @@ steps:
   - rustup component add clippy
   - cargo clippy --no-default-features -- -D warnings
   - cargo clippy --no-default-features --features io-uring -- -D warnings
-  - cargo clippy --no-default-features --features object-storage -- -D warnings
-  - cargo clippy --no-default-features --features object-storage,io-uring -- -D warnings
 
 trigger:
   event:
