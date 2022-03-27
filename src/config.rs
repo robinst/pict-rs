@@ -170,12 +170,16 @@ impl Overrides {
 #[serde(tag = "type")]
 pub(crate) enum Command {
     Run,
+    Dump { path: PathBuf },
     MigrateStore { to: Store },
     MigrateRepo { to: Repo },
 }
 
 pub(crate) enum CommandConfig {
     Run,
+    Dump {
+        path: PathBuf,
+    },
     MigrateStore {
         to: Storage,
     },
@@ -287,7 +291,6 @@ pub(crate) enum Repository {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Config {
-    command: Command,
     skip_validate_imports: bool,
     addr: SocketAddr,
     path: PathBuf,
@@ -301,8 +304,9 @@ pub(crate) struct Config {
     api_key: Option<String>,
     opentelemetry_url: Option<Url>,
     repo: Repo,
-    sled: Option<Sled>,
     store: Store,
+    command: Command,
+    sled: Option<Sled>,
     filesystem_storage: Option<FilesystemStorage>,
     object_storage: Option<ObjectStorage>,
 }
@@ -329,9 +333,9 @@ struct SledDefaults {
 }
 
 impl Defaults {
-    fn new() -> Self {
+    fn new(command: Command) -> Self {
         Defaults {
-            command: Command::Run,
+            command,
             skip_validate_imports: false,
             addr: ([0, 0, 0, 0], 8080).into(),
             max_file_size: 40,
@@ -351,8 +355,8 @@ impl Config {
     pub(crate) fn build() -> anyhow::Result<Self> {
         let args = Args::parse();
 
-        let mut base_config =
-            config::Config::builder().add_source(config::Config::try_from(&Defaults::new())?);
+        let mut base_config = config::Config::builder()
+            .add_source(config::Config::try_from(&Defaults::new(args.command))?);
 
         if let Some(path) = args.config_file {
             base_config = base_config.add_source(config::File::from(path));
@@ -375,6 +379,7 @@ impl Config {
     pub(crate) fn command(&self) -> anyhow::Result<CommandConfig> {
         Ok(match &self.command {
             Command::Run => CommandConfig::Run,
+            Command::Dump { path } => CommandConfig::Dump { path: path.clone() },
             Command::MigrateStore { to } => CommandConfig::MigrateStore {
                 to: match to {
                     Store::ObjectStorage => Storage::ObjectStorage(

@@ -1,4 +1,5 @@
 use crate::{
+    error::Error,
     file::File,
     repo::{Repo, SettingsRepo},
     store::Store,
@@ -23,9 +24,6 @@ const GENERATOR_KEY: &[u8] = b"last-path";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FileError {
-    #[error("Failed to interact with sled db")]
-    Sled(#[from] crate::repo::sled::Error),
-
     #[error("Failed to read or write file")]
     Io(#[from] std::io::Error),
 
@@ -51,15 +49,11 @@ pub(crate) struct FileStore {
 
 #[async_trait::async_trait(?Send)]
 impl Store for FileStore {
-    type Error = FileError;
     type Identifier = FileId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
     #[tracing::instrument(skip(reader))]
-    async fn save_async_read<Reader>(
-        &self,
-        reader: &mut Reader,
-    ) -> Result<Self::Identifier, Self::Error>
+    async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
     where
         Reader: AsyncRead + Unpin,
     {
@@ -67,22 +61,22 @@ impl Store for FileStore {
 
         if let Err(e) = self.safe_save_reader(&path, reader).await {
             self.safe_remove_file(&path).await?;
-            return Err(e);
+            return Err(e.into());
         }
 
-        self.file_id_from_path(path)
+        Ok(self.file_id_from_path(path)?)
     }
 
     #[tracing::instrument(skip(bytes))]
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error> {
+    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
         let path = self.next_file().await?;
 
         if let Err(e) = self.safe_save_bytes(&path, bytes).await {
             self.safe_remove_file(&path).await?;
-            return Err(e);
+            return Err(e.into());
         }
 
-        self.file_id_from_path(path)
+        Ok(self.file_id_from_path(path)?)
     }
 
     #[tracing::instrument]
@@ -91,7 +85,7 @@ impl Store for FileStore {
         identifier: &Self::Identifier,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, Self::Error> {
+    ) -> Result<Self::Stream, Error> {
         let path = self.path_from_file_id(identifier);
 
         let stream = File::open(path)
@@ -119,7 +113,7 @@ impl Store for FileStore {
     }
 
     #[tracing::instrument]
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Self::Error> {
+    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
         let path = self.path_from_file_id(identifier);
 
         let len = tokio::fs::metadata(path).await?.len();
@@ -128,7 +122,7 @@ impl Store for FileStore {
     }
 
     #[tracing::instrument]
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Self::Error> {
+    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
         let path = self.path_from_file_id(identifier);
 
         self.safe_remove_file(path).await?;
@@ -138,7 +132,7 @@ impl Store for FileStore {
 }
 
 impl FileStore {
-    pub(crate) async fn build(root_dir: PathBuf, repo: Repo) -> Result<Self, FileError> {
+    pub(crate) async fn build(root_dir: PathBuf, repo: Repo) -> Result<Self, Error> {
         let path_gen = init_generator(&repo).await?;
 
         Ok(FileStore {
@@ -148,7 +142,7 @@ impl FileStore {
         })
     }
 
-    async fn next_directory(&self) -> Result<PathBuf, FileError> {
+    async fn next_directory(&self) -> Result<PathBuf, Error> {
         let path = self.path_gen.next();
 
         match self.repo {
@@ -167,7 +161,7 @@ impl FileStore {
         Ok(target_path)
     }
 
-    async fn next_file(&self) -> Result<PathBuf, FileError> {
+    async fn next_file(&self) -> Result<PathBuf, Error> {
         let target_path = self.next_directory().await?;
         let filename = uuid::Uuid::new_v4().to_string();
 
@@ -290,7 +284,7 @@ pub(crate) async fn safe_create_parent<P: AsRef<Path>>(path: P) -> Result<(), Fi
     Ok(())
 }
 
-async fn init_generator(repo: &Repo) -> Result<Generator, FileError> {
+async fn init_generator(repo: &Repo) -> Result<Generator, Error> {
     match repo {
         Repo::Sled(sled_repo) => {
             if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {

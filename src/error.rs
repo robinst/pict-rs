@@ -15,6 +15,20 @@ impl std::fmt::Debug for Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{}", self.kind)?;
+        writeln!(f)?;
+        let mut count = 0;
+        let mut source = std::error::Error::source(self);
+        if source.is_some() {
+            writeln!(f, "Chain:")?;
+        }
+        while let Some(err) = source {
+            write!(f, "{}. ", count)?;
+            writeln!(f, "{}", err)?;
+
+            count += 1;
+            source = std::error::Error::source(err);
+        }
+
         std::fmt::Display::fmt(&self.context, f)
     }
 }
@@ -43,7 +57,7 @@ pub(crate) enum UploadError {
     Upload(#[from] actix_form_data::Error),
 
     #[error("Error in DB")]
-    Sled(#[from] crate::repo::sled::Error),
+    Sled(#[from] crate::repo::sled::SledError),
 
     #[error("Error in old sled DB")]
     OldSled(#[from] ::sled::Error),

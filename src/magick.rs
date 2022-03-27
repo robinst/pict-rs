@@ -139,14 +139,12 @@ pub(crate) async fn details_bytes(
     parse_details(s)
 }
 
+#[tracing::instrument(skip(store))]
 pub(crate) async fn details_store<S: Store>(
     store: S,
     identifier: S::Identifier,
     hint: Option<ValidInputType>,
-) -> Result<Details, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<Details, Error> {
     if hint.as_ref().map(|h| h.is_mp4()).unwrap_or(false) {
         let input_file = crate::tmp_file::tmp_file(Some(".mp4"));
         let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
@@ -182,6 +180,7 @@ where
     parse_details(s)
 }
 
+#[tracing::instrument]
 pub(crate) async fn details_file(path_str: &str) -> Result<Details, Error> {
     let process = Process::run(
         "magick",

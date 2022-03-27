@@ -77,10 +77,7 @@ async fn upload<S: Store>(
     value: Value<UploadManagerSession<S>>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<HttpResponse, Error> {
     let images = value
         .map()
         .and_then(|mut m| m.remove("images"))
@@ -196,10 +193,7 @@ async fn download<S: Store>(
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
     query: web::Query<UrlQuery>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<HttpResponse, Error> {
     let res = client.get(&query.url).send().await?;
 
     if !res.status().is_success() {
@@ -249,14 +243,11 @@ async fn delete<S: Store>(
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
     path_entries: web::Path<(String, String)>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
-    let (alias, token) = path_entries.into_inner();
+) -> Result<HttpResponse, Error> {
+    let (token, alias) = path_entries.into_inner();
 
-    let alias = Alias::from_existing(&alias);
     let token = DeleteToken::from_existing(&token);
+    let alias = Alias::from_existing(&alias);
 
     manager.delete((**store).clone(), alias, token).await?;
 
@@ -314,10 +305,7 @@ async fn process_details<S: Store>(
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
     filters: web::Data<Option<HashSet<String>>>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<HttpResponse, Error> {
     let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str(), &filters)?;
 
     let identifier = manager
@@ -341,10 +329,7 @@ async fn process<S: Store + 'static>(
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
     filters: web::Data<Option<HashSet<String>>>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<HttpResponse, Error> {
     let (format, alias, thumbnail_path, thumbnail_args) =
         prepare_process(query, ext.as_str(), &filters)?;
 
@@ -468,10 +453,7 @@ async fn details<S: Store>(
     alias: web::Path<String>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
     let alias = Alias::from_existing(&alias);
 
@@ -498,10 +480,7 @@ async fn serve<S: Store>(
     alias: web::Path<String>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
     let alias = Alias::from_existing(&alias);
     let identifier = manager.identifier_from_alias::<S>(&alias).await?;
@@ -525,10 +504,7 @@ async fn ranged_file_resp<S: Store>(
     identifier: S::Identifier,
     range: Option<web::Header<Range>>,
     details: Details,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<HttpResponse, Error> {
     let (builder, stream) = if let Some(web::Header(range_header)) = range {
         //Range header exists - return as ranged
         if let Some(range) = range::single_bytes_range(&range_header) {
@@ -602,10 +578,7 @@ async fn purge<S: Store>(
     query: web::Query<AliasQuery>,
     upload_manager: web::Data<UploadManager>,
     store: web::Data<S>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<HttpResponse, Error> {
     let alias = Alias::from_existing(&query.alias);
     let aliases = upload_manager.aliases_by_alias(&alias).await?;
 
@@ -626,10 +599,7 @@ async fn aliases<S: Store>(
     query: web::Query<AliasQuery>,
     upload_manager: web::Data<UploadManager>,
     store: web::Data<S>,
-) -> Result<HttpResponse, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<HttpResponse, Error> {
     let alias = Alias::from_existing(&query.alias);
     let aliases = upload_manager.aliases_by_alias(&alias).await?;
 
@@ -658,11 +628,10 @@ fn build_reqwest_client() -> reqwest::Result<reqwest::Client> {
         .build()
 }
 
-async fn launch<S: Store + Clone + 'static>(manager: UploadManager, store: S) -> anyhow::Result<()>
-where
-    S::Error: Unpin,
-    Error: From<S::Error>,
-{
+async fn launch<S: Store + Clone + 'static>(
+    manager: UploadManager,
+    store: S,
+) -> anyhow::Result<()> {
     // Create a new Multipart Form validator
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
@@ -797,7 +766,6 @@ async fn migrate_inner<S1>(
 ) -> anyhow::Result<()>
 where
     S1: Store,
-    Error: From<S1::Error>,
 {
     match to {
         config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
@@ -848,6 +816,11 @@ async fn main() -> anyhow::Result<()> {
 
     match CONFIG.command()? {
         CommandConfig::Run => (),
+        CommandConfig::Dump { path } => {
+            let configuration = toml::to_string_pretty(&*CONFIG)?;
+            tokio::fs::write(path, configuration).await?;
+            return Ok(());
+        }
         CommandConfig::MigrateRepo { to: _ } => {
             unimplemented!("Repo migrations are currently unsupported")
         }

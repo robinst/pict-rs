@@ -13,20 +13,14 @@ use futures_util::stream::{Stream, StreamExt};
 use tracing::{debug, instrument, Span};
 use tracing_futures::Instrument;
 
-pub(crate) struct UploadManagerSession<S: Store + Clone + 'static>
-where
-    Error: From<S::Error>,
-{
+pub(crate) struct UploadManagerSession<S: Store + Clone + 'static> {
     store: S,
     manager: UploadManager,
     alias: Option<Alias>,
     finished: bool,
 }
 
-impl<S: Store + Clone + 'static> UploadManagerSession<S>
-where
-    Error: From<S::Error>,
-{
+impl<S: Store + Clone + 'static> UploadManagerSession<S> {
     pub(super) fn new(manager: UploadManager, store: S) -> Self {
         UploadManagerSession {
             store,
@@ -45,10 +39,7 @@ where
     }
 }
 
-impl<S: Store + Clone + 'static> Drop for UploadManagerSession<S>
-where
-    Error: From<S::Error>,
-{
+impl<S: Store + Clone + 'static> Drop for UploadManagerSession<S> {
     fn drop(&mut self) {
         if self.finished {
             return;
@@ -91,10 +82,7 @@ where
     }
 }
 
-impl<S: Store> UploadManagerSession<S>
-where
-    Error: From<S::Error>,
-{
+impl<S: Store> UploadManagerSession<S> {
     /// Generate a delete token for an alias
     #[instrument(skip(self))]
     pub(crate) async fn delete_token(&self) -> Result<DeleteToken, Error> {

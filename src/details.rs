@@ -34,10 +34,7 @@ impl Details {
         store: S,
         identifier: S::Identifier,
         expected_format: Option<ValidInputType>,
-    ) -> Result<Self, Error>
-    where
-        Error: From<S::Error>,
-    {
+    ) -> Result<Self, Error> {
         let details = crate::magick::details_store(store, identifier, expected_format).await?;
 
         Ok(Details::now(

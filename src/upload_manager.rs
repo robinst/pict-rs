@@ -51,7 +51,6 @@ impl UploadManager {
     where
         S1: Store,
         S2: Store,
-        Error: From<S1::Error> + From<S2::Error>,
     {
         match self.inner.repo {
             Repo::Sled(ref sled_repo) => do_migrate_store(sled_repo, from, to).await,
@@ -62,10 +61,7 @@ impl UploadManager {
         &self,
         store: S,
         alias: &Alias,
-    ) -> Result<S::Identifier, Error>
-    where
-        Error: From<S::Error>,
-    {
+    ) -> Result<S::Identifier, Error> {
         let identifier = self.identifier_from_alias::<S>(alias).await?;
         let details = if let Some(details) = self.details(&identifier).await? {
             details
@@ -205,10 +201,7 @@ impl UploadManager {
     pub(crate) async fn details<I: Identifier>(
         &self,
         identifier: &I,
-    ) -> Result<Option<Details>, Error>
-    where
-        Error: From<I::Error>,
-    {
+    ) -> Result<Option<Details>, Error> {
         match self.inner.repo {
             Repo::Sled(ref sled_repo) => Ok(sled_repo.details(identifier).await?),
         }
@@ -240,10 +233,7 @@ impl UploadManager {
         &self,
         store: S,
         alias: Alias,
-    ) -> Result<(), Error>
-    where
-        Error: From<S::Error>,
-    {
+    ) -> Result<(), Error> {
         let token = match self.inner.repo {
             Repo::Sled(ref sled_repo) => sled_repo.delete_token(&alias).await?,
         };
@@ -258,10 +248,7 @@ impl UploadManager {
         store: S,
         alias: Alias,
         token: DeleteToken,
-    ) -> Result<(), Error>
-    where
-        Error: From<S::Error>,
-    {
+    ) -> Result<(), Error> {
         let hash = match self.inner.repo {
             Repo::Sled(ref sled_repo) => {
                 let saved_delete_token = sled_repo.delete_token(&alias).await?;
@@ -282,10 +269,7 @@ impl UploadManager {
         &self,
         store: S,
         hash: Vec<u8>,
-    ) -> Result<(), Error>
-    where
-        Error: From<S::Error>,
-    {
+    ) -> Result<(), Error> {
         match self.inner.repo {
             Repo::Sled(ref sled_repo) => {
                 let hash: <SledRepo as HashRepo>::Bytes = hash.into();
@@ -309,7 +293,7 @@ impl UploadManager {
 
                 HashRepo::cleanup(sled_repo, hash).await?;
 
-                let cleanup_span = tracing::info_span!("Cleaning files");
+                let cleanup_span = tracing::info_span!(parent: None, "Cleaning files");
                 cleanup_span.follows_from(Span::current());
 
                 actix_rt::spawn(
@@ -323,12 +307,10 @@ impl UploadManager {
                         {
                             debug!("Deleting {:?}", identifier);
                             if let Err(e) = store.remove(identifier).await {
-                                let e: Error = e.into();
                                 errors.push(e);
                             }
 
                             if let Err(e) = IdentifierRepo::cleanup(&repo, identifier).await {
-                                let e: Error = e.into();
                                 errors.push(e);
                             }
                         }
@@ -350,10 +332,7 @@ impl UploadManager {
         Ok(())
     }
 
-    pub(crate) fn session<S: Store + Clone + 'static>(&self, store: S) -> UploadManagerSession<S>
-    where
-        Error: From<S::Error>,
-    {
+    pub(crate) fn session<S: Store + Clone + 'static>(&self, store: S) -> UploadManagerSession<S> {
         UploadManagerSession::new(self.clone(), store)
     }
 }
@@ -366,7 +345,6 @@ async fn migrate_file<S1, S2>(
 where
     S1: Store,
     S2: Store,
-    Error: From<S1::Error> + From<S2::Error>,
 {
     let stream = from.to_stream(identifier, None, None).await?;
     futures_util::pin_mut!(stream);
@@ -382,7 +360,6 @@ where
     R: IdentifierRepo,
     I1: Identifier,
     I2: Identifier,
-    Error: From<<R as IdentifierRepo>::Error>,
 {
     if let Some(details) = repo.details(&from).await? {
         repo.relate_details(to, &details).await?;
@@ -396,11 +373,7 @@ async fn do_migrate_store<R, S1, S2>(repo: &R, from: S1, to: S2) -> Result<(), E
 where
     S1: Store,
     S2: Store,
-    Error: From<S1::Error> + From<S2::Error>,
     R: IdentifierRepo + HashRepo + SettingsRepo,
-    Error: From<<R as IdentifierRepo>::Error>,
-    Error: From<<R as HashRepo>::Error>,
-    Error: From<<R as SettingsRepo>::Error>,
 {
     let stream = repo.hashes().await;
     let mut stream = Box::pin(stream);

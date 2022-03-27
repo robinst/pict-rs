@@ -2,23 +2,23 @@ use super::{
     Alias, AliasRepo, AlreadyExists, DeleteToken, Details, HashRepo, Identifier, IdentifierRepo,
     SettingsRepo,
 };
+use crate::error::Error;
 use sled::{Db, IVec, Tree};
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
         let $ident = $self.$ident.clone();
 
-        actix_rt::task::spawn_blocking(move || $expr).await??
+        actix_rt::task::spawn_blocking(move || $expr)
+            .await
+            .map_err(SledError::from)??
     }};
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum Error {
+pub(crate) enum SledError {
     #[error("Error in database")]
     Sled(#[from] sled::Error),
-
-    #[error("Invalid identifier")]
-    Identifier(#[source] Box<dyn std::error::Error + Sync + Send>),
 
     #[error("Invalid details json")]
     Details(#[from] serde_json::Error),
@@ -46,7 +46,7 @@ pub(crate) struct SledRepo {
 }
 
 impl SledRepo {
-    pub(crate) fn new(db: Db) -> Result<Self, Error> {
+    pub(crate) fn new(db: Db) -> Result<Self, SledError> {
         Ok(SledRepo {
             settings: db.open_tree("pict-rs-settings-tree")?,
             identifier_details: db.open_tree("pict-rs-identifier-details-tree")?,
@@ -66,34 +66,27 @@ impl SledRepo {
 #[async_trait::async_trait(?Send)]
 impl SettingsRepo for SledRepo {
     type Bytes = IVec;
-    type Error = Error;
 
-    async fn set(&self, key: &'static [u8], value: Self::Bytes) -> Result<(), Self::Error> {
+    #[tracing::instrument(skip(value))]
+    async fn set(&self, key: &'static [u8], value: Self::Bytes) -> Result<(), Error> {
         b!(self.settings, settings.insert(key, value));
 
         Ok(())
     }
 
-    async fn get(&self, key: &'static [u8]) -> Result<Option<Self::Bytes>, Self::Error> {
+    #[tracing::instrument]
+    async fn get(&self, key: &'static [u8]) -> Result<Option<Self::Bytes>, Error> {
         let opt = b!(self.settings, settings.get(key));
 
         Ok(opt)
     }
 
-    async fn remove(&self, key: &'static [u8]) -> Result<(), Self::Error> {
+    #[tracing::instrument]
+    async fn remove(&self, key: &'static [u8]) -> Result<(), Error> {
         b!(self.settings, settings.remove(key));
 
         Ok(())
     }
-}
-
-fn identifier_bytes<I>(identifier: &I) -> Result<Vec<u8>, Error>
-where
-    I: Identifier,
-{
-    identifier
-        .to_bytes()
-        .map_err(|e| Error::Identifier(Box::new(e)))
 }
 
 fn variant_key(hash: &[u8], variant: &str) -> Vec<u8> {
@@ -111,14 +104,13 @@ fn variant_from_key(hash: &[u8], key: &[u8]) -> Option<String> {
 
 #[async_trait::async_trait(?Send)]
 impl IdentifierRepo for SledRepo {
-    type Error = Error;
-
+    #[tracing::instrument]
     async fn relate_details<I: Identifier>(
         &self,
         identifier: &I,
         details: &Details,
-    ) -> Result<(), Self::Error> {
-        let key = identifier_bytes(identifier)?;
+    ) -> Result<(), Error> {
+        let key = identifier.to_bytes()?;
         let details = serde_json::to_vec(&details)?;
 
         b!(
@@ -129,8 +121,9 @@ impl IdentifierRepo for SledRepo {
         Ok(())
     }
 
-    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, Self::Error> {
-        let key = identifier_bytes(identifier)?;
+    #[tracing::instrument]
+    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, Error> {
+        let key = identifier.to_bytes()?;
 
         let opt = b!(self.identifier_details, identifier_details.get(key));
 
@@ -141,8 +134,9 @@ impl IdentifierRepo for SledRepo {
         }
     }
 
-    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), Self::Error> {
-        let key = identifier_bytes(identifier)?;
+    #[tracing::instrument]
+    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), Error> {
+        let key = identifier.to_bytes()?;
 
         b!(self.identifier_details, identifier_details.remove(key));
 
@@ -192,7 +186,13 @@ impl futures_util::Stream for HashStream {
                     (iter, opt)
                 })
                 .await
-                .map(|(iter, opt)| (iter, opt.map(|res| res.map_err(Error::from))))
+                .map(|(iter, opt)| {
+                    (
+                        iter,
+                        opt.map(|res| res.map_err(SledError::from).map_err(Error::from)),
+                    )
+                })
+                .map_err(SledError::from)
                 .map_err(Error::from)
             });
 
@@ -213,7 +213,6 @@ fn hash_alias_key(hash: &IVec, alias: &Alias) -> Vec<u8> {
 #[async_trait::async_trait(?Send)]
 impl HashRepo for SledRepo {
     type Bytes = IVec;
-    type Error = Error;
     type Stream = HashStream;
 
     async fn hashes(&self) -> Self::Stream {
@@ -225,7 +224,8 @@ impl HashRepo for SledRepo {
         }
     }
 
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, Self::Error> {
+    #[tracing::instrument]
+    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, Error> {
         let res = b!(self.hashes, {
             let hash2 = hash.clone();
             hashes.compare_and_swap(hash, None as Option<Self::Bytes>, Some(hash2))
@@ -234,7 +234,8 @@ impl HashRepo for SledRepo {
         Ok(res.map_err(|_| AlreadyExists))
     }
 
-    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Self::Error> {
+    #[tracing::instrument]
+    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error> {
         let key = hash_alias_key(&hash, alias);
         let value = alias.to_bytes();
 
@@ -243,7 +244,8 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Self::Error> {
+    #[tracing::instrument]
+    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error> {
         let key = hash_alias_key(&hash, alias);
 
         b!(self.hash_aliases, hash_aliases.remove(key));
@@ -251,7 +253,8 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, Self::Error> {
+    #[tracing::instrument]
+    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, Error> {
         let v = b!(self.hash_aliases, {
             Ok(hash_aliases
                 .scan_prefix(hash)
@@ -264,37 +267,37 @@ impl HashRepo for SledRepo {
         Ok(v)
     }
 
+    #[tracing::instrument]
     async fn relate_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         identifier: &I,
-    ) -> Result<(), Self::Error> {
-        let bytes = identifier_bytes(identifier)?;
+    ) -> Result<(), Error> {
+        let bytes = identifier.to_bytes()?;
 
         b!(self.hash_identifiers, hash_identifiers.insert(hash, bytes));
 
         Ok(())
     }
 
-    async fn identifier<I: Identifier + 'static>(
-        &self,
-        hash: Self::Bytes,
-    ) -> Result<I, Self::Error> {
+    #[tracing::instrument]
+    async fn identifier<I: Identifier + 'static>(&self, hash: Self::Bytes) -> Result<I, Error> {
         let opt = b!(self.hash_identifiers, hash_identifiers.get(hash));
 
-        opt.ok_or(Error::Missing).and_then(|ivec| {
-            I::from_bytes(ivec.to_vec()).map_err(|e| Error::Identifier(Box::new(e)))
-        })
+        opt.ok_or(SledError::Missing)
+            .map_err(Error::from)
+            .and_then(|ivec| I::from_bytes(ivec.to_vec()))
     }
 
+    #[tracing::instrument]
     async fn relate_variant_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         variant: String,
         identifier: &I,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), Error> {
         let key = variant_key(&hash, &variant);
-        let value = identifier_bytes(identifier)?;
+        let value = identifier.to_bytes()?;
 
         b!(
             self.hash_variant_identifiers,
@@ -304,11 +307,12 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
+    #[tracing::instrument]
     async fn variant_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
         variant: String,
-    ) -> Result<Option<I>, Self::Error> {
+    ) -> Result<Option<I>, Error> {
         let key = variant_key(&hash, &variant);
 
         let opt = b!(
@@ -317,18 +321,17 @@ impl HashRepo for SledRepo {
         );
 
         if let Some(ivec) = opt {
-            Ok(Some(
-                I::from_bytes(ivec.to_vec()).map_err(|e| Error::Identifier(Box::new(e)))?,
-            ))
+            Ok(Some(I::from_bytes(ivec.to_vec())?))
         } else {
             Ok(None)
         }
     }
 
+    #[tracing::instrument]
     async fn variants<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<Vec<(String, I)>, Self::Error> {
+    ) -> Result<Vec<(String, I)>, Error> {
         let vec = b!(
             self.hash_variant_identifiers,
             Ok(hash_variant_identifiers
@@ -346,12 +349,13 @@ impl HashRepo for SledRepo {
         Ok(vec)
     }
 
+    #[tracing::instrument]
     async fn relate_motion_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         identifier: &I,
-    ) -> Result<(), Self::Error> {
-        let bytes = identifier_bytes(identifier)?;
+    ) -> Result<(), Error> {
+        let bytes = identifier.to_bytes()?;
 
         b!(
             self.hash_motion_identifiers,
@@ -361,25 +365,25 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
+    #[tracing::instrument]
     async fn motion_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<Option<I>, Self::Error> {
+    ) -> Result<Option<I>, Error> {
         let opt = b!(
             self.hash_motion_identifiers,
             hash_motion_identifiers.get(hash)
         );
 
         if let Some(ivec) = opt {
-            Ok(Some(
-                I::from_bytes(ivec.to_vec()).map_err(|e| Error::Identifier(Box::new(e)))?,
-            ))
+            Ok(Some(I::from_bytes(ivec.to_vec())?))
         } else {
             Ok(None)
         }
     }
 
-    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), Self::Error> {
+    #[tracing::instrument]
+    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), Error> {
         let hash2 = hash.clone();
         b!(self.hashes, hashes.remove(hash2));
 
@@ -426,9 +430,9 @@ impl HashRepo for SledRepo {
 #[async_trait::async_trait(?Send)]
 impl AliasRepo for SledRepo {
     type Bytes = sled::IVec;
-    type Error = Error;
 
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Self::Error> {
+    #[tracing::instrument]
+    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Error> {
         let bytes = alias.to_bytes();
         let bytes2 = bytes.clone();
 
@@ -440,11 +444,12 @@ impl AliasRepo for SledRepo {
         Ok(res.map_err(|_| AlreadyExists))
     }
 
+    #[tracing::instrument]
     async fn relate_delete_token(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-    ) -> Result<Result<(), AlreadyExists>, Self::Error> {
+    ) -> Result<Result<(), AlreadyExists>, Error> {
         let key = alias.to_bytes();
         let token = delete_token.to_bytes();
 
@@ -456,16 +461,19 @@ impl AliasRepo for SledRepo {
         Ok(res.map_err(|_| AlreadyExists))
     }
 
-    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, Self::Error> {
+    #[tracing::instrument]
+    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, Error> {
         let key = alias.to_bytes();
 
         let opt = b!(self.alias_delete_tokens, alias_delete_tokens.get(key));
 
         opt.and_then(|ivec| DeleteToken::from_slice(&ivec))
-            .ok_or(Error::Missing)
+            .ok_or(SledError::Missing)
+            .map_err(Error::from)
     }
 
-    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), Self::Error> {
+    #[tracing::instrument]
+    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), Error> {
         let key = alias.to_bytes();
 
         b!(self.alias_hashes, alias_hashes.insert(key, hash));
@@ -473,15 +481,17 @@ impl AliasRepo for SledRepo {
         Ok(())
     }
 
-    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, Self::Error> {
+    #[tracing::instrument]
+    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, Error> {
         let key = alias.to_bytes();
 
         let opt = b!(self.alias_hashes, alias_hashes.get(key));
 
-        opt.ok_or(Error::Missing)
+        opt.ok_or(SledError::Missing).map_err(Error::from)
     }
 
-    async fn cleanup(&self, alias: &Alias) -> Result<(), Self::Error> {
+    #[tracing::instrument]
+    async fn cleanup(&self, alias: &Alias) -> Result<(), Error> {
         let key = alias.to_bytes();
 
         let key2 = key.clone();
@@ -502,8 +512,8 @@ impl std::fmt::Debug for SledRepo {
     }
 }
 
-impl From<actix_rt::task::JoinError> for Error {
+impl From<actix_rt::task::JoinError> for SledError {
     fn from(_: actix_rt::task::JoinError) -> Self {
-        Error::Panic
+        SledError::Panic
     }
 }

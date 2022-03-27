@@ -1643,6 +1643,7 @@ dependencies = [
  "tokio",
  "tokio-uring",
  "tokio-util 0.7.0",
+ "toml",
  "tracing",
  "tracing-actix-web",
  "tracing-awc",

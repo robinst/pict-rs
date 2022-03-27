@@ -1,5 +1,9 @@
-use crate::config::RequiredSledRepo;
-use crate::{config::Repository, details::Details, store::Identifier};
+use crate::{
+    config::{Repository, RequiredSledRepo},
+    details::Details,
+    error::Error,
+    store::Identifier,
+};
 use futures_util::Stream;
 use tracing::debug;
 use uuid::Uuid;
@@ -34,98 +38,90 @@ pub(crate) struct AlreadyExists;
 #[async_trait::async_trait(?Send)]
 pub(crate) trait SettingsRepo {
     type Bytes: AsRef<[u8]> + From<Vec<u8>>;
-    type Error: std::error::Error + Send + Sync + 'static;
 
-    async fn set(&self, key: &'static [u8], value: Self::Bytes) -> Result<(), Self::Error>;
-    async fn get(&self, key: &'static [u8]) -> Result<Option<Self::Bytes>, Self::Error>;
-    async fn remove(&self, key: &'static [u8]) -> Result<(), Self::Error>;
+    async fn set(&self, key: &'static [u8], value: Self::Bytes) -> Result<(), Error>;
+    async fn get(&self, key: &'static [u8]) -> Result<Option<Self::Bytes>, Error>;
+    async fn remove(&self, key: &'static [u8]) -> Result<(), Error>;
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait IdentifierRepo {
-    type Error: std::error::Error + Send + Sync + 'static;
-
     async fn relate_details<I: Identifier>(
         &self,
         identifier: &I,
         details: &Details,
-    ) -> Result<(), Self::Error>;
-    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, Self::Error>;
+    ) -> Result<(), Error>;
+    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, Error>;
 
-    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), Self::Error>;
+    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), Error>;
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait HashRepo {
     type Bytes: AsRef<[u8]> + From<Vec<u8>>;
-    type Error: std::error::Error + Send + Sync + 'static;
-    type Stream: Stream<Item = Result<Self::Bytes, Self::Error>>;
+    type Stream: Stream<Item = Result<Self::Bytes, Error>>;
 
     async fn hashes(&self) -> Self::Stream;
 
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, Self::Error>;
+    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, Error>;
 
-    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Self::Error>;
-    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Self::Error>;
-    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, Self::Error>;
+    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error>;
+    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error>;
+    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, Error>;
 
     async fn relate_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         identifier: &I,
-    ) -> Result<(), Self::Error>;
-    async fn identifier<I: Identifier + 'static>(
-        &self,
-        hash: Self::Bytes,
-    ) -> Result<I, Self::Error>;
+    ) -> Result<(), Error>;
+    async fn identifier<I: Identifier + 'static>(&self, hash: Self::Bytes) -> Result<I, Error>;
 
     async fn relate_variant_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         variant: String,
         identifier: &I,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<(), Error>;
     async fn variant_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
         variant: String,
-    ) -> Result<Option<I>, Self::Error>;
+    ) -> Result<Option<I>, Error>;
     async fn variants<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<Vec<(String, I)>, Self::Error>;
+    ) -> Result<Vec<(String, I)>, Error>;
 
     async fn relate_motion_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         identifier: &I,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<(), Error>;
     async fn motion_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<Option<I>, Self::Error>;
+    ) -> Result<Option<I>, Error>;
 
-    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), Self::Error>;
+    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), Error>;
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait AliasRepo {
     type Bytes: AsRef<[u8]> + From<Vec<u8>>;
-    type Error: std::error::Error + Send + Sync + 'static;
 
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Self::Error>;
+    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Error>;
 
     async fn relate_delete_token(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-    ) -> Result<Result<(), AlreadyExists>, Self::Error>;
-    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, Self::Error>;
+    ) -> Result<Result<(), AlreadyExists>, Error>;
+    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, Error>;
 
-    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), Self::Error>;
-    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, Self::Error>;
+    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), Error>;
+    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, Error>;
 
-    async fn cleanup(&self, alias: &Alias) -> Result<(), Self::Error>;
+    async fn cleanup(&self, alias: &Alias) -> Result<(), Error>;
 }
 
 impl Repo {
@@ -389,16 +385,14 @@ impl std::fmt::Display for Alias {
 }
 
 impl Identifier for Vec<u8> {
-    type Error = std::convert::Infallible;
-
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, Self::Error>
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error>
     where
         Self: Sized,
     {
         Ok(bytes)
     }
 
-    fn to_bytes(&self) -> Result<Vec<u8>, Self::Error> {
+    fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         Ok(self.clone())
     }
 }

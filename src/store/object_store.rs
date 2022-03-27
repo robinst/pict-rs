@@ -1,4 +1,5 @@
 use crate::{
+    error::Error,
     repo::{Repo, SettingsRepo},
     store::Store,
 };
@@ -28,9 +29,6 @@ pub(crate) enum ObjectError {
     #[error("Failed to generate path")]
     PathGenerator(#[from] storage_path_generator::PathError),
 
-    #[error("Failed to interact with sled repo")]
-    Sled(#[from] crate::repo::sled::Error),
-
     #[error("Failed to parse string")]
     Utf8(#[from] FromUtf8Error),
 
@@ -58,15 +56,11 @@ pin_project_lite::pin_project! {
 
 #[async_trait::async_trait(?Send)]
 impl Store for ObjectStore {
-    type Error = ObjectError;
     type Identifier = ObjectId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
     #[tracing::instrument(skip(reader))]
-    async fn save_async_read<Reader>(
-        &self,
-        reader: &mut Reader,
-    ) -> Result<Self::Identifier, Self::Error>
+    async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
     where
         Reader: AsyncRead + Unpin,
     {
@@ -74,16 +68,20 @@ impl Store for ObjectStore {
 
         self.bucket
             .put_object_stream(&self.client, reader, &path)
-            .await?;
+            .await
+            .map_err(ObjectError::from)?;
 
         Ok(ObjectId::from_string(path))
     }
 
     #[tracing::instrument(skip(bytes))]
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Self::Error> {
+    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
         let path = self.next_file().await?;
 
-        self.bucket.put_object(&self.client, &path, &bytes).await?;
+        self.bucket
+            .put_object(&self.client, &path, &bytes)
+            .await
+            .map_err(ObjectError::from)?;
 
         Ok(ObjectId::from_string(path))
     }
@@ -94,7 +92,7 @@ impl Store for ObjectStore {
         identifier: &Self::Identifier,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, Self::Error> {
+    ) -> Result<Self::Stream, Error> {
         let path = identifier.as_str();
 
         let start = from_start.unwrap_or(0);
@@ -107,7 +105,7 @@ impl Store for ObjectStore {
             Command::GetObjectRange { start, end },
         );
 
-        let response = request.response().await?;
+        let response = request.response().await.map_err(ObjectError::from)?;
 
         Ok(Box::pin(io_error(response.bytes_stream())))
     }
@@ -126,26 +124,34 @@ impl Store for ObjectStore {
         self.bucket
             .get_object_stream(&self.client, path, writer)
             .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, Self::Error::from(e)))?;
+            .map_err(ObjectError::from)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, Error::from(e)))?;
 
         Ok(())
     }
 
     #[tracing::instrument]
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Self::Error> {
+    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
         let path = identifier.as_str();
 
-        let (head, _) = self.bucket.head_object(&self.client, path).await?;
+        let (head, _) = self
+            .bucket
+            .head_object(&self.client, path)
+            .await
+            .map_err(ObjectError::from)?;
         let length = head.content_length.ok_or(ObjectError::Length)?;
 
         Ok(length as u64)
     }
 
     #[tracing::instrument]
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Self::Error> {
+    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
         let path = identifier.as_str();
 
-        self.bucket.delete_object(&self.client, path).await?;
+        self.bucket
+            .delete_object(&self.client, path)
+            .await
+            .map_err(ObjectError::from)?;
         Ok(())
     }
 }
@@ -161,7 +167,7 @@ impl ObjectStore {
         session_token: Option<String>,
         repo: Repo,
         client: reqwest::Client,
-    ) -> Result<ObjectStore, ObjectError> {
+    ) -> Result<ObjectStore, Error> {
         let path_gen = init_generator(&repo).await?;
 
         Ok(ObjectStore {
@@ -182,12 +188,13 @@ impl ObjectStore {
                     security_token,
                     session_token,
                 },
-            )?,
+            )
+            .map_err(ObjectError::from)?,
             client,
         })
     }
 
-    async fn next_directory(&self) -> Result<Path, ObjectError> {
+    async fn next_directory(&self) -> Result<Path, Error> {
         let path = self.path_gen.next();
 
         match self.repo {
@@ -201,7 +208,7 @@ impl ObjectStore {
         Ok(path)
     }
 
-    async fn next_file(&self) -> Result<String, ObjectError> {
+    async fn next_file(&self) -> Result<String, Error> {
         let path = self.next_directory().await?.to_strings().join("/");
         let filename = uuid::Uuid::new_v4().to_string();
 
@@ -209,7 +216,7 @@ impl ObjectStore {
     }
 }
 
-async fn init_generator(repo: &Repo) -> Result<Generator, ObjectError> {
+async fn init_generator(repo: &Repo) -> Result<Generator, Error> {
     match repo {
         Repo::Sled(sled_repo) => {
             if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {
@@ -250,7 +257,7 @@ where
 impl std::fmt::Debug for ObjectStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ObjectStore")
-            .field("path_gen", &self.path_gen)
+            .field("path_gen", &"generator")
             .field("bucket", &self.bucket.name)
             .field("region", &self.bucket.region)
             .finish()
