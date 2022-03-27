@@ -15,6 +15,8 @@ pub(crate) fn chop_bytes(
     length: u64,
 ) -> Result<impl Stream<Item = Result<Bytes, Error>>, Error> {
     if let Some((start, end)) = byte_range.to_satisfiable_range(length) {
+        // END IS INCLUSIVE
+        let end = end as usize + 1;
         return Ok(once(ready(Ok(bytes.slice(start as usize..end as usize)))));
     }
 
@@ -31,6 +33,8 @@ where
     Error: From<S::Error>,
 {
     if let Some((start, end)) = byte_range.to_satisfiable_range(length) {
+        // END IS INCLUSIVE
+        let end = end + 1;
         return Ok(store
             .to_stream(identifier, Some(start), Some(end.saturating_sub(start)))
             .await?);
