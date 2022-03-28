@@ -49,7 +49,7 @@ mod validate;
 
 use self::{
     concurrent_processor::CancelSafeProcessor,
-    config::{CommandConfig, Config, Format, RequiredFilesystemStorage, RequiredObjectStorage},
+    config::{Configuration, ImageFormat, Operation},
     details::Details,
     either::Either,
     error::{Error, UploadError},
@@ -58,6 +58,7 @@ use self::{
     middleware::{Deadline, Internal},
     migrate::LatestDb,
     repo::{Alias, DeleteToken, Repo},
+    serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Store},
     upload_manager::{UploadManager, UploadManagerSession},
 };
@@ -67,7 +68,10 @@ const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
 const DAYS: u32 = 24 * HOURS;
 
-static CONFIG: Lazy<Config> = Lazy::new(|| Config::build().unwrap());
+static DO_CONFIG: Lazy<(Configuration, Operation)> =
+    Lazy::new(|| config::configure().expect("Failed to configure"));
+static CONFIG: Lazy<Configuration> = Lazy::new(|| DO_CONFIG.0.clone());
+static OPERATION: Lazy<Operation> = Lazy::new(|| DO_CONFIG.1.clone());
 static PROCESS_SEMAPHORE: Lazy<Semaphore> =
     Lazy::new(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
 
@@ -202,7 +206,7 @@ async fn download<S: Store>(
 
     let stream = Limit::new(
         map_error::map_crate_error(res),
-        (CONFIG.max_file_size() * MEGABYTES) as u64,
+        (CONFIG.media.max_file_size * MEGABYTES) as u64,
     );
 
     futures_util::pin_mut!(stream);
@@ -260,7 +264,7 @@ fn prepare_process(
     query: web::Query<ProcessQuery>,
     ext: &str,
     filters: &Option<HashSet<String>>,
-) -> Result<(Format, Alias, PathBuf, Vec<String>), Error> {
+) -> Result<(ImageFormat, Alias, PathBuf, Vec<String>), Error> {
     let (alias, operations) =
         query
             .into_inner()
@@ -290,7 +294,7 @@ fn prepare_process(
     };
 
     let format = ext
-        .parse::<Format>()
+        .parse::<ImageFormat>()
         .map_err(|_| UploadError::UnsupportedFormat)?;
 
     let (thumbnail_path, thumbnail_args) = self::processor::build_chain(&operations)?;
@@ -639,7 +643,7 @@ async fn launch<S: Store + Clone + 'static>(
     let store2 = store.clone();
     let form = Form::new()
         .max_files(10)
-        .max_file_size(CONFIG.max_file_size() * MEGABYTES)
+        .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
         .transform_error(transform_error)
         .field(
             "images",
@@ -667,12 +671,12 @@ async fn launch<S: Store + Clone + 'static>(
     // Create a new Multipart Form validator for internal imports
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
-    let validate_imports = CONFIG.validate_imports();
+    let validate_imports = !CONFIG.media.skip_validate_imports;
     let manager2 = manager.clone();
     let store2 = store.clone();
     let import_form = Form::new()
         .max_files(10)
-        .max_file_size(CONFIG.max_file_size() * MEGABYTES)
+        .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
         .transform_error(transform_error)
         .field(
             "images",
@@ -708,7 +712,7 @@ async fn launch<S: Store + Clone + 'static>(
             .app_data(web::Data::new(store.clone()))
             .app_data(web::Data::new(manager.clone()))
             .app_data(web::Data::new(build_client()))
-            .app_data(web::Data::new(CONFIG.allowed_filters()))
+            .app_data(web::Data::new(CONFIG.media.filters.clone()))
             .service(
                 web::scope("/image")
                     .service(
@@ -739,7 +743,9 @@ async fn launch<S: Store + Clone + 'static>(
             )
             .service(
                 web::scope("/internal")
-                    .wrap(Internal(CONFIG.api_key().map(|s| s.to_owned())))
+                    .wrap(Internal(
+                        CONFIG.server.api_key.as_ref().map(|s| s.to_owned()),
+                    ))
                     .service(
                         web::resource("/import")
                             .wrap(import_form.clone())
@@ -749,7 +755,7 @@ async fn launch<S: Store + Clone + 'static>(
                     .service(web::resource("/aliases").route(web::get().to(aliases::<S>))),
             )
     })
-    .bind(CONFIG.bind_address())?
+    .bind(CONFIG.server.address)?
     .run()
     .await?;
 
@@ -762,17 +768,17 @@ async fn migrate_inner<S1>(
     manager: &UploadManager,
     repo: &Repo,
     from: S1,
-    to: &config::Storage,
+    to: &config::Store,
 ) -> anyhow::Result<()>
 where
     S1: Store,
 {
     match to {
-        config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
+        config::Store::Filesystem(config::Filesystem { path }) => {
             let to = FileStore::build(path.clone(), repo.clone()).await?;
             manager.migrate_store::<S1, FileStore>(from, to).await?;
         }
-        config::Storage::ObjectStorage(RequiredObjectStorage {
+        config::Store::ObjectStorage(config::ObjectStorage {
             bucket_name,
             region,
             access_key,
@@ -782,9 +788,9 @@ where
         }) => {
             let to = ObjectStore::build(
                 bucket_name,
-                region.clone(),
-                access_key.clone(),
-                secret_key.clone(),
+                region.as_ref().clone(),
+                Some(access_key.clone()),
+                Some(secret_key.clone()),
                 security_token.clone(),
                 session_token.clone(),
                 repo.clone(),
@@ -801,38 +807,24 @@ where
 
 #[actix_rt::main]
 async fn main() -> anyhow::Result<()> {
-    init_tracing(
-        "pict-rs",
-        CONFIG.opentelemetry_url(),
-        CONFIG.console_buffer_capacity(),
-    )?;
+    init_tracing(&CONFIG.tracing)?;
 
-    let repo = Repo::open(CONFIG.repo())?;
+    let repo = Repo::open(CONFIG.repo.clone())?;
 
-    let db = LatestDb::exists(CONFIG.data_dir()).migrate()?;
+    let db = LatestDb::exists(CONFIG.old_db.path.clone()).migrate()?;
     repo.from_db(db).await?;
 
-    let manager = UploadManager::new(repo.clone(), CONFIG.format()).await?;
+    let manager = UploadManager::new(repo.clone(), CONFIG.media.format).await?;
 
-    match CONFIG.command()? {
-        CommandConfig::Run => (),
-        CommandConfig::Dump { path } => {
-            let configuration = toml::to_string_pretty(&*CONFIG)?;
-            tokio::fs::write(path, configuration).await?;
-            return Ok(());
-        }
-        CommandConfig::MigrateRepo { to: _ } => {
-            unimplemented!("Repo migrations are currently unsupported")
-        }
-        CommandConfig::MigrateStore { to } => {
-            let from = CONFIG.store()?;
-
+    match (*OPERATION).clone() {
+        Operation::Run => (),
+        Operation::MigrateStore { from, to } => {
             match from {
-                config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
+                config::Store::Filesystem(config::Filesystem { path }) => {
                     let from = FileStore::build(path.clone(), repo.clone()).await?;
                     migrate_inner(&manager, &repo, from, &to).await?;
                 }
-                config::Storage::ObjectStorage(RequiredObjectStorage {
+                config::Store::ObjectStorage(config::ObjectStorage {
                     bucket_name,
                     region,
                     access_key,
@@ -842,9 +834,9 @@ async fn main() -> anyhow::Result<()> {
                 }) => {
                     let from = ObjectStore::build(
                         &bucket_name,
-                        region,
-                        access_key,
-                        secret_key,
+                        Serde::into_inner(region),
+                        Some(access_key),
+                        Some(secret_key),
                         security_token,
                         session_token,
                         repo.clone(),
@@ -860,12 +852,12 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    match CONFIG.store()? {
-        config::Storage::Filesystem(RequiredFilesystemStorage { path }) => {
+    match CONFIG.store.clone() {
+        config::Store::Filesystem(config::Filesystem { path }) => {
             let store = FileStore::build(path, repo).await?;
             launch(manager, store).await
         }
-        config::Storage::ObjectStorage(RequiredObjectStorage {
+        config::Store::ObjectStorage(config::ObjectStorage {
             bucket_name,
             region,
             access_key,
@@ -875,9 +867,9 @@ async fn main() -> anyhow::Result<()> {
         }) => {
             let store = ObjectStore::build(
                 &bucket_name,
-                region,
-                access_key,
-                secret_key,
+                Serde::into_inner(region),
+                Some(access_key),
+                Some(secret_key),
                 security_token,
                 session_token,
                 repo,

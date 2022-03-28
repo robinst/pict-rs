@@ -18,6 +18,18 @@ impl<T> Serde<T> {
     }
 }
 
+impl<T> AsRef<T> for Serde<T> {
+    fn as_ref(&self) -> &T {
+        &self.inner
+    }
+}
+
+impl<T> AsMut<T> for Serde<T> {
+    fn as_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
+}
+
 impl<T> Deref for Serde<T> {
     type Target = T;
 

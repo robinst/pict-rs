@@ -1,5 +1,5 @@
 use crate::{
-    config::Format,
+    config::ImageFormat,
     error::{Error, UploadError},
     process::Process,
     repo::Alias,
@@ -63,11 +63,11 @@ impl ValidInputType {
         matches!(self, Self::Mp4)
     }
 
-    pub(crate) fn from_format(format: Format) -> Self {
+    pub(crate) fn from_format(format: ImageFormat) -> Self {
         match format {
-            Format::Jpeg => ValidInputType::Jpeg,
-            Format::Png => ValidInputType::Png,
-            Format::Webp => ValidInputType::Webp,
+            ImageFormat::Jpeg => ValidInputType::Jpeg,
+            ImageFormat::Png => ValidInputType::Png,
+            ImageFormat::Webp => ValidInputType::Webp,
         }
     }
 }
@@ -87,7 +87,7 @@ pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> std::io::Result<impl As
 
 pub(crate) fn convert_bytes_read(
     input: Bytes,
-    format: Format,
+    format: ImageFormat,
 ) -> std::io::Result<impl AsyncRead + Unpin> {
     let process = Process::run(
         "magick",
@@ -259,7 +259,7 @@ pub(crate) fn process_image_store_read<S: Store>(
     store: S,
     identifier: S::Identifier,
     args: Vec<String>,
-    format: Format,
+    format: ImageFormat,
 ) -> std::io::Result<impl AsyncRead + Unpin> {
     let command = "magick";
     let convert_args = ["convert", "-"];
@@ -278,9 +278,9 @@ pub(crate) fn process_image_store_read<S: Store>(
 impl Details {
     #[instrument(name = "Validating input type")]
     fn validate_input(&self) -> Result<ValidInputType, Error> {
-        if self.width > crate::CONFIG.max_width()
-            || self.height > crate::CONFIG.max_height()
-            || self.width * self.height > crate::CONFIG.max_area()
+        if self.width > crate::CONFIG.media.max_width
+            || self.height > crate::CONFIG.media.max_height
+            || self.width * self.height > crate::CONFIG.media.max_area
         {
             return Err(UploadError::Dimensions.into());
         }

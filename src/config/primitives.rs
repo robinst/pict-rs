@@ -1,8 +1,12 @@
+use crate::magick::ValidInputType;
+use crate::serde_str::Serde;
 use clap::ArgEnum;
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, path::PathBuf, str::FromStr};
+use tracing::Level;
 
 #[derive(
     Clone,
+    Copy,
     Debug,
     PartialEq,
     Eq,
@@ -13,6 +17,7 @@ use std::{fmt::Display, str::FromStr};
     serde::Serialize,
     ArgEnum,
 )]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum LogFormat {
     Compact,
     Json,
@@ -22,6 +27,7 @@ pub(crate) enum LogFormat {
 
 #[derive(
     Clone,
+    Copy,
     Debug,
     PartialEq,
     Eq,
@@ -32,6 +38,7 @@ pub(crate) enum LogFormat {
     serde::Serialize,
     ArgEnum,
 )]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum ImageFormat {
     Jpeg,
     Webp,
@@ -41,6 +48,81 @@ pub(crate) enum ImageFormat {
 #[derive(Clone, Debug)]
 pub(crate) struct Targets {
     pub(crate) targets: tracing_subscriber::filter::Targets,
+}
+
+/// Configuration for filesystem media storage
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, clap::Parser)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct Filesystem {
+    /// Path to store media
+    #[clap(short, long)]
+    pub(crate) path: PathBuf,
+}
+
+/// Configuration for object media storage
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, clap::Parser)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct ObjectStorage {
+    /// The bucket in which to store media
+    #[clap(short, long)]
+    pub(crate) bucket_name: String,
+
+    /// The region the bucket is located in
+    #[clap(short, long)]
+    pub(crate) region: Serde<s3::Region>,
+
+    /// The Access Key for the user accessing the bucket
+    #[clap(short, long)]
+    pub(crate) access_key: String,
+
+    /// The secret key for the user accessing the bucket
+    #[clap(short, long)]
+    pub(crate) secret_key: String,
+
+    /// The security token for accessing the bucket
+    #[clap(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) security_token: Option<String>,
+
+    /// The session token for accessing the bucket
+    #[clap(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) session_token: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type")]
+pub(crate) enum Store {
+    Filesystem(Filesystem),
+
+    ObjectStorage(ObjectStorage),
+}
+
+impl ImageFormat {
+    pub(crate) fn as_hint(self) -> Option<ValidInputType> {
+        Some(ValidInputType::from_format(self))
+    }
+
+    pub(crate) fn as_magick_format(self) -> &'static str {
+        match self {
+            Self::Jpeg => "JPEG",
+            Self::Png => "PNG",
+            Self::Webp => "WEBP",
+        }
+    }
+}
+
+impl From<Filesystem> for Store {
+    fn from(f: Filesystem) -> Self {
+        Self::Filesystem(f)
+    }
+}
+
+impl From<ObjectStorage> for Store {
+    fn from(o: ObjectStorage) -> Self {
+        Self::ObjectStorage(o)
+    }
 }
 
 impl FromStr for Targets {
@@ -62,7 +144,37 @@ impl Display for Targets {
             .collect::<Vec<_>>()
             .join(",");
 
-        write!(f, "{}", targets)
+        let max_level = [
+            Level::TRACE,
+            Level::DEBUG,
+            Level::INFO,
+            Level::WARN,
+            Level::ERROR,
+        ]
+        .iter()
+        .fold(None, |found, level| {
+            if found.is_none()
+                && self
+                    .targets
+                    .would_enable("not_a_real_target_so_nothing_can_conflict", level)
+            {
+                Some(level.to_string().to_lowercase())
+            } else {
+                found
+            }
+        });
+
+        if let Some(level) = max_level {
+            if !targets.is_empty() {
+                write!(f, "{},{}", level, targets)
+            } else {
+                write!(f, "{}", level)
+            }
+        } else if !targets.is_empty() {
+            write!(f, "{}", targets)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -107,5 +219,33 @@ impl Display for LogFormat {
             .expect("no values are skipped")
             .get_name()
             .fmt(f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Serde, Targets};
+
+    #[test]
+    fn builds_info_targets() {
+        let t: Serde<Targets> = "info".parse().unwrap();
+
+        println!("{:?}", t);
+
+        assert_eq!(t.to_string(), "info");
+    }
+
+    #[test]
+    fn builds_specific_targets() {
+        let t: Serde<Targets> = "pict_rs=info".parse().unwrap();
+
+        assert_eq!(t.to_string(), "pict_rs=info");
+    }
+
+    #[test]
+    fn builds_warn_and_specific_targets() {
+        let t: Serde<Targets> = "warn,pict_rs=info".parse().unwrap();
+
+        assert_eq!(t.to_string(), "warn,pict_rs=info");
     }
 }

@@ -1,18 +1,18 @@
 use crate::{
-    config::primitives::{ImageFormat, LogFormat, Targets},
+    config::primitives::{ImageFormat, LogFormat, Store, Targets},
     serde_str::Serde,
 };
-use std::{net::SocketAddr, path::PathBuf};
+use std::{collections::HashSet, net::SocketAddr, path::PathBuf};
 use url::Url;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct ConfigFile {
     pub(crate) server: Server,
 
     pub(crate) tracing: Tracing,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) old_db: Option<OldDb>,
+    pub(crate) old_db: OldDb,
 
     pub(crate) media: Media,
 
@@ -22,20 +22,14 @@ pub(crate) struct ConfigFile {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
 pub(crate) enum Repo {
     Sled(Sled),
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-#[serde(tag = "type")]
-pub(crate) enum Store {
-    Filesystem(Filesystem),
-
-    ObjectStorage(ObjectStorage),
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Server {
     pub(crate) address: SocketAddr,
 
@@ -44,17 +38,17 @@ pub(crate) struct Server {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Tracing {
-    logging: Logging,
+    pub(crate) logging: Logging,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    console: Option<Console>,
+    pub(crate) console: Console,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    opentelemetry: Option<OpenTelemetry>,
+    pub(crate) opentelemetry: OpenTelemetry,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Logging {
     pub(crate) format: LogFormat,
 
@@ -62,8 +56,10 @@ pub(crate) struct Logging {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct OpenTelemetry {
-    pub(crate) url: Url,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) url: Option<Url>,
 
     pub(crate) service_name: String,
 
@@ -71,17 +67,22 @@ pub(crate) struct OpenTelemetry {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Console {
-    pub(crate) address: SocketAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) address: Option<SocketAddr>,
+
     pub(crate) buffer_capacity: usize,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct OldDb {
     pub(crate) path: PathBuf,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Media {
     pub(crate) max_width: usize,
 
@@ -93,7 +94,7 @@ pub(crate) struct Media {
 
     pub(crate) enable_silent_video: bool,
 
-    pub(crate) filters: Vec<String>,
+    pub(crate) filters: HashSet<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) format: Option<ImageFormat>,
@@ -102,28 +103,7 @@ pub(crate) struct Media {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub(crate) struct Filesystem {
-    pub(crate) path: PathBuf,
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub(crate) struct ObjectStorage {
-    pub(crate) bucket_name: String,
-
-    pub(crate) region: Serde<s3::Region>,
-
-    pub(crate) access_key: String,
-
-    pub(crate) secret_key: String,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) security_token: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) session_token: Option<String>,
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Sled {
     pub(crate) path: PathBuf,
 

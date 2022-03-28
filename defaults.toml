@@ -1,0 +1,39 @@
+[server]
+address = '0.0.0.0:8080'
+[tracing.logging]
+format = 'normal'
+targets = 'info'
+
+[tracing.console]
+buffer_capacity = 102400
+
+[tracing.opentelemetry]
+service_name = 'pict-rs'
+targets = 'info'
+
+[old_db]
+path = '/mnt'
+
+[media]
+max_width = 10000
+max_height = 10000
+max_area = 40000000
+max_file_size = 40
+enable_silent_video = true
+filters = [
+    'crop',
+    'blur',
+    'resize',
+    'identity',
+    'thumbnail',
+]
+skip_validate_imports = false
+
+[repo]
+type = 'sled'
+path = '/mnt/sled-repo'
+cache_capacity = 67108864
+
+[store]
+type = 'filesystem'
+path = '/mnt/files'

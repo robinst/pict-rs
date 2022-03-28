@@ -63,8 +63,11 @@ tracing-futures = "0.2.4"
 tracing-log = "0.1.2"
 tracing-opentelemetry = "0.17"
 tracing-subscriber = { version = "0.3.0", features = [
+  "ansi",
   "env-filter",
   "fmt",
+  "json",
+  "registry",
   "tracing-log",
 ] }
 url = { version = "2.2", features = ["serde"] }

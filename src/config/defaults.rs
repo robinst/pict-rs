@@ -4,7 +4,8 @@ use crate::{
 };
 use std::{net::SocketAddr, path::PathBuf};
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Defaults {
     server: ServerDefaults,
     tracing: TracingDefaults,
@@ -14,35 +15,50 @@ pub(crate) struct Defaults {
     store: StoreDefaults,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 struct ServerDefaults {
     address: SocketAddr,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 struct TracingDefaults {
     logging: LoggingDefaults,
 
     console: ConsoleDefaults,
+
+    opentelemetry: OpenTelemetryDefaults,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 struct LoggingDefaults {
     format: LogFormat,
     targets: Serde<Targets>,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 struct ConsoleDefaults {
     buffer_capacity: usize,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct OpenTelemetryDefaults {
+    service_name: String,
+    targets: Serde<Targets>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 struct OldDbDefaults {
     path: PathBuf,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 struct MediaDefaults {
     max_width: usize,
     max_height: usize,
@@ -53,55 +69,37 @@ struct MediaDefaults {
     skip_validate_imports: bool,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
 enum RepoDefaults {
     Sled(SledDefaults),
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 struct SledDefaults {
     path: PathBuf,
     cache_capacity: u64,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
 enum StoreDefaults {
     Filesystem(FilesystemDefaults),
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 struct FilesystemDefaults {
     path: PathBuf,
-}
-
-impl Default for Defaults {
-    fn default() -> Self {
-        Defaults {
-            server: ServerDefaults::default(),
-            tracing: TracingDefaults::default(),
-            old_db: OldDbDefaults::default(),
-            media: MediaDefaults::default(),
-            repo: RepoDefaults::default(),
-            store: StoreDefaults::default(),
-        }
-    }
 }
 
 impl Default for ServerDefaults {
     fn default() -> Self {
         ServerDefaults {
             address: "0.0.0.0:8080".parse().expect("Valid address string"),
-        }
-    }
-}
-
-impl Default for TracingDefaults {
-    fn default() -> TracingDefaults {
-        TracingDefaults {
-            logging: LoggingDefaults::default(),
-            console: ConsoleDefaults::default(),
         }
     }
 }
@@ -119,6 +117,15 @@ impl Default for ConsoleDefaults {
     fn default() -> Self {
         ConsoleDefaults {
             buffer_capacity: 1024 * 100,
+        }
+    }
+}
+
+impl Default for OpenTelemetryDefaults {
+    fn default() -> Self {
+        OpenTelemetryDefaults {
+            service_name: String::from("pict-rs"),
+            targets: "info".parse().expect("Valid targets string"),
         }
     }
 }

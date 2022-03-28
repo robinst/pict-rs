@@ -1,5 +1,5 @@
 use crate::{
-    config::Format,
+    config::ImageFormat,
     details::Details,
     error::{Error, UploadError},
     ffmpeg::{InputFormat, ThumbnailFormat},
@@ -28,14 +28,14 @@ pub(crate) struct UploadManager {
 }
 
 pub(crate) struct UploadManagerInner {
-    format: Option<Format>,
+    format: Option<ImageFormat>,
     hasher: sha2::Sha256,
     repo: Repo,
 }
 
 impl UploadManager {
     /// Create a new UploadManager
-    pub(crate) async fn new(repo: Repo, format: Option<Format>) -> Result<Self, Error> {
+    pub(crate) async fn new(repo: Repo, format: Option<ImageFormat>) -> Result<Self, Error> {
         let manager = UploadManager {
             inner: Arc::new(UploadManagerInner {
                 format,

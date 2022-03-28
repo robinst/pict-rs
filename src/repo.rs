@@ -1,9 +1,4 @@
-use crate::{
-    config::{Repository, RequiredSledRepo},
-    details::Details,
-    error::Error,
-    store::Identifier,
-};
+use crate::{config, details::Details, error::Error, store::Identifier};
 use futures_util::Stream;
 use tracing::debug;
 use uuid::Uuid;
@@ -125,9 +120,9 @@ pub(crate) trait AliasRepo {
 }
 
 impl Repo {
-    pub(crate) fn open(config: Repository) -> anyhow::Result<Self> {
+    pub(crate) fn open(config: config::Repo) -> anyhow::Result<Self> {
         match config {
-            Repository::Sled(RequiredSledRepo {
+            config::Repo::Sled(config::Sled {
                 mut path,
                 cache_capacity,
             }) => {
