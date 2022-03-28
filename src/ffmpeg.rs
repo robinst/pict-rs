@@ -44,7 +44,7 @@ impl ThumbnailFormat {
 
     fn as_format(&self) -> &'static str {
         match self {
-            ThumbnailFormat::Jpeg => "singlejpeg",
+            ThumbnailFormat::Jpeg => "image2",
             // ThumbnailFormat::Webp => "webp",
         }
     }
