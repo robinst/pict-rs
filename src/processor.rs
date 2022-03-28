@@ -20,7 +20,10 @@ pub(crate) struct Crop(usize, usize);
 pub(crate) struct Blur(f64);
 
 #[instrument]
-pub(crate) fn build_chain(args: &[(String, String)]) -> Result<(PathBuf, Vec<String>), Error> {
+pub(crate) fn build_chain(
+    args: &[(String, String)],
+    ext: &str,
+) -> Result<(PathBuf, Vec<String>), Error> {
     fn parse<P: Processor>(key: &str, value: &str) -> Result<Option<P>, UploadError> {
         if key == P::NAME {
             return Ok(Some(P::parse(key, value).ok_or(UploadError::ParsePath)?));
@@ -37,7 +40,7 @@ pub(crate) fn build_chain(args: &[(String, String)]) -> Result<(PathBuf, Vec<Str
         }};
     }
 
-    let (path, args) =
+    let (mut path, args) =
         args.iter()
             .fold(Ok((PathBuf::default(), vec![])), |inner, (name, value)| {
                 if let Ok(inner) = inner {
@@ -52,6 +55,8 @@ pub(crate) fn build_chain(args: &[(String, String)]) -> Result<(PathBuf, Vec<Str
                     inner
                 }
             })?;
+
+    path.push(ext);
 
     Ok((path, args))
 }

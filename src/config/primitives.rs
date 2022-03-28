@@ -182,12 +182,12 @@ impl FromStr for ImageFormat {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        for variant in Self::value_variants() {
-            if variant.to_possible_value().unwrap().matches(s, false) {
-                return Ok(*variant);
-            }
+        match s.to_lowercase().as_str() {
+            "jpeg" | "jpg" => Ok(Self::Jpeg),
+            "png" => Ok(Self::Png),
+            "webp" => Ok(Self::Webp),
+            other => Err(format!("Invalid variant: {}", other)),
         }
-        Err(format!("Invalid variant: {}", s))
     }
 }
 

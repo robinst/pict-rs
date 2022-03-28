@@ -1,17 +1,42 @@
-path = 'data/'
-addr = '0.0.0.0:8080'
+[server]
+address = '0.0.0.0:8080'
+[tracing.logging]
+format = 'normal'
+targets = 'info'
 
-repo = 'sled'
-store = 'object_storage'
+[tracing.console]
+buffer_capacity = 102400
 
-[sled]
-sled_cache_capacity = 67108864
+[tracing.opentelemetry]
+service_name = 'pict-rs'
+targets = 'info'
 
-[filesystem_storage]
-filesystem_storage_path = '/mnt/files'
+[old_db]
+path = '/mnt'
 
-[object_storage]
-object_store_bucket_name = 'pict-rs'
-object_store_region = 'http://minio:9000'
-object_store_access_key = 'XZEZ5B8Y3UCINU1KCVF6'
-object_store_secret_key = 'cWbE5LcCK9YH8j1NvhOZocl+vH+b6T5Zvy3z+BZu'
+[media]
+max_width = 10000
+max_height = 10000
+max_area = 40000000
+max_file_size = 40
+enable_silent_video = true
+filters = [
+    'crop',
+    'resize',
+    'thumbnail',
+    'blur',
+    'identity',
+]
+skip_validate_imports = false
+
+[repo]
+type = 'sled'
+path = '/mnt/sled-repo'
+cache_capacity = 67108864
+
+[store]
+type = 'object_storage'
+bucket_name = 'pict-rs'
+region = 'http://minio:9000'
+access_key = 'XZEZ5B8Y3UCINU1KCVF6'
+secret_key = 'cWbE5LcCK9YH8j1NvhOZocl+vH+b6T5Zvy3z+BZu'

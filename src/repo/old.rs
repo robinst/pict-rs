@@ -87,7 +87,7 @@ impl Old {
             .get(hash)?
             .ok_or_else(|| anyhow::anyhow!("Missing filename"))?;
 
-        self.filename_tree
+        self.identifier_tree
             .get(filename)?
             .ok_or_else(|| anyhow::anyhow!("Missing identifier"))
     }
@@ -114,7 +114,9 @@ impl Old {
 
                 let path = String::from_utf8(variant_path_bytes.to_vec()).ok()?;
                 let mut path = PathBuf::from(path);
+                let extension = path.extension()?.to_str()?.to_string();
                 path.pop();
+                path.push(extension);
 
                 Some((path, value))
             })

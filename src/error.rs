@@ -16,21 +16,30 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{}", self.kind)?;
         writeln!(f)?;
-        let mut count = 0;
-        let mut source = std::error::Error::source(self);
-        if source.is_some() {
-            writeln!(f, "Chain:")?;
-        }
-        while let Some(err) = source {
-            write!(f, "{}. ", count)?;
-            writeln!(f, "{}", err)?;
 
-            count += 1;
-            source = std::error::Error::source(err);
-        }
+        writeln!(f, "Chain:")?;
+        fmt_chain(f, &self.kind)?;
 
+        writeln!(f)?;
+        writeln!(f, "Spantrace:")?;
         std::fmt::Display::fmt(&self.context, f)
     }
+}
+
+fn fmt_chain(
+    f: &mut std::fmt::Formatter<'_>,
+    err: &dyn std::error::Error,
+) -> Result<usize, std::fmt::Error> {
+    let count = if let Some(source) = std::error::Error::source(err) {
+        fmt_chain(f, source)?
+    } else {
+        0
+    };
+
+    write!(f, "\t{}. ", count)?;
+    writeln!(f, "{}", err)?;
+
+    Ok(count + 1)
 }
 
 impl std::error::Error for Error {
@@ -113,9 +122,6 @@ pub(crate) enum UploadError {
     #[error("Unable to send request, {0}")]
     SendRequest(String),
 
-    #[error("No filename provided in request")]
-    MissingFilename,
-
     #[error("Error converting Path to String")]
     Path,
 
@@ -157,7 +163,8 @@ impl ResponseError for Error {
             | UploadError::Limit(_)
             | UploadError::NoFiles
             | UploadError::Upload(_) => StatusCode::BAD_REQUEST,
-            UploadError::MissingAlias | UploadError::MissingFilename => StatusCode::NOT_FOUND,
+            UploadError::Sled(crate::repo::sled::SledError::Missing)
+            | UploadError::MissingAlias => StatusCode::NOT_FOUND,
             UploadError::InvalidToken => StatusCode::FORBIDDEN,
             UploadError::Range => StatusCode::RANGE_NOT_SATISFIABLE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,

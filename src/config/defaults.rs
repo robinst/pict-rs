@@ -108,7 +108,9 @@ impl Default for LoggingDefaults {
     fn default() -> Self {
         LoggingDefaults {
             format: LogFormat::Normal,
-            targets: "info".parse().expect("Valid targets string"),
+            targets: "warn,tracing_actix_web=info,actix_web=info,actix_server=info"
+                .parse()
+                .expect("Valid targets string"),
         }
     }
 }

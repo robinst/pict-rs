@@ -263,7 +263,7 @@ type ProcessQuery = Vec<(String, String)>;
 fn prepare_process(
     query: web::Query<ProcessQuery>,
     ext: &str,
-    filters: &Option<HashSet<String>>,
+    filters: &HashSet<String>,
 ) -> Result<(ImageFormat, Alias, PathBuf, Vec<String>), Error> {
     let (alias, operations) =
         query
@@ -279,25 +279,23 @@ fn prepare_process(
             });
 
     if alias.is_empty() {
-        return Err(UploadError::MissingFilename.into());
+        return Err(UploadError::MissingAlias.into());
     }
 
     let alias = Alias::from_existing(&alias);
 
-    let operations = if let Some(filters) = filters.as_ref() {
-        operations
-            .into_iter()
-            .filter(|(k, _)| filters.contains(&k.to_lowercase()))
-            .collect()
-    } else {
-        operations
-    };
+    let operations = operations
+        .into_iter()
+        .filter(|(k, _)| filters.contains(&k.to_lowercase()))
+        .collect::<Vec<_>>();
 
     let format = ext
         .parse::<ImageFormat>()
         .map_err(|_| UploadError::UnsupportedFormat)?;
 
-    let (thumbnail_path, thumbnail_args) = self::processor::build_chain(&operations)?;
+    let ext = format.to_string();
+
+    let (thumbnail_path, thumbnail_args) = self::processor::build_chain(&operations, &ext)?;
 
     Ok((format, alias, thumbnail_path, thumbnail_args))
 }
@@ -308,7 +306,7 @@ async fn process_details<S: Store>(
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
-    filters: web::Data<Option<HashSet<String>>>,
+    filters: web::Data<HashSet<String>>,
 ) -> Result<HttpResponse, Error> {
     let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str(), &filters)?;
 
@@ -332,7 +330,7 @@ async fn process<S: Store + 'static>(
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
-    filters: web::Data<Option<HashSet<String>>>,
+    filters: web::Data<HashSet<String>>,
 ) -> Result<HttpResponse, Error> {
     let (format, alias, thumbnail_path, thumbnail_args) =
         prepare_process(query, ext.as_str(), &filters)?;
@@ -361,6 +359,7 @@ async fn process<S: Store + 'static>(
         .await?;
 
     let thumbnail_path2 = thumbnail_path.clone();
+    let identifier2 = identifier.clone();
     let process_fut = async {
         let thumbnail_path = thumbnail_path2;
 
@@ -368,7 +367,7 @@ async fn process<S: Store + 'static>(
 
         let mut processed_reader = crate::magick::process_image_store_read(
             (**store).clone(),
-            identifier,
+            identifier2,
             thumbnail_args,
             format,
         )?;
@@ -417,7 +416,8 @@ async fn process<S: Store + 'static>(
         Ok((details, bytes)) as Result<(Details, web::Bytes), Error>
     };
 
-    let (details, bytes) = CancelSafeProcessor::new(thumbnail_path.clone(), process_fut).await?;
+    let (details, bytes) =
+        CancelSafeProcessor::new(identifier, thumbnail_path.clone(), process_fut)?.await?;
 
     let (builder, stream) = if let Some(web::Header(range_header)) = range {
         if let Some(range) = range::single_bytes_range(&range_header) {

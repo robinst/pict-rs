@@ -3,15 +3,21 @@ use crate::{
     repo::{Repo, SettingsRepo},
     store::Store,
 };
+use actix_rt::time::Sleep;
 use actix_web::web::Bytes;
 use futures_util::stream::Stream;
 use s3::{
     client::Client, command::Command, creds::Credentials, request_trait::Request, Bucket, Region,
 };
 use std::{
+    future::Future,
     pin::Pin,
     string::FromUtf8Error,
-    task::{Context, Poll},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    task::{Context, Poll, Wake, Waker},
 };
 use storage_path_generator::{Generator, Path};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -49,6 +55,17 @@ pub(crate) struct ObjectStore {
 
 pin_project_lite::pin_project! {
     struct IoError<S> {
+        #[pin]
+        inner: S,
+    }
+}
+
+pin_project_lite::pin_project! {
+    struct Timeout<S> {
+        sleep: Option<Pin<Box<Sleep>>>,
+
+        woken: Arc<AtomicBool>,
+
         #[pin]
         inner: S,
     }
@@ -107,7 +124,10 @@ impl Store for ObjectStore {
 
         let response = request.response().await.map_err(ObjectError::from)?;
 
-        Ok(Box::pin(io_error(response.bytes_stream())))
+        Ok(Box::pin(timeout(
+            io_error(response.bytes_stream()),
+            std::time::Duration::from_secs(5),
+        )))
     }
 
     #[tracing::instrument(skip(writer))]
@@ -238,6 +258,17 @@ where
     IoError { inner: stream }
 }
 
+fn timeout<S, T>(stream: S, duration: std::time::Duration) -> impl Stream<Item = std::io::Result<T>>
+where
+    S: Stream<Item = std::io::Result<T>>,
+{
+    Timeout {
+        sleep: Some(Box::pin(actix_rt::time::sleep(duration))),
+        woken: Arc::new(AtomicBool::new(true)),
+        inner: stream,
+    }
+}
+
 impl<S, T, E> Stream for IoError<S>
 where
     S: Stream<Item = Result<T, E>>,
@@ -251,6 +282,56 @@ where
         this.inner.poll_next(cx).map(|opt| {
             opt.map(|res| res.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
         })
+    }
+}
+
+struct TimeoutWaker {
+    woken: Arc<AtomicBool>,
+    inner: Waker,
+}
+
+impl Wake for TimeoutWaker {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref()
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.woken.store(true, Ordering::Release);
+        self.inner.wake_by_ref();
+    }
+}
+
+impl<S, T> Stream for Timeout<S>
+where
+    S: Stream<Item = std::io::Result<T>>,
+{
+    type Item = std::io::Result<T>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.as_mut().project();
+
+        if this.woken.swap(false, Ordering::Acquire) {
+            if let Some(mut sleep) = this.sleep.take() {
+                let timeout_waker = Arc::new(TimeoutWaker {
+                    woken: Arc::clone(this.woken),
+                    inner: cx.waker().clone(),
+                })
+                .into();
+                let mut timeout_cx = Context::from_waker(&timeout_waker);
+                if let Poll::Ready(()) = sleep.as_mut().poll(&mut timeout_cx) {
+                    return Poll::Ready(Some(Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Stream timeout".to_string(),
+                    ))));
+                } else {
+                    *this.sleep = Some(sleep);
+                }
+            } else {
+                return Poll::Ready(None);
+            }
+        }
+
+        this.inner.poll_next(cx)
     }
 }
 
