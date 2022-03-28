@@ -20,13 +20,7 @@ max_height = 10000
 max_area = 40000000
 max_file_size = 40
 enable_silent_video = true
-filters = [
-    'crop',
-    'resize',
-    'thumbnail',
-    'blur',
-    'identity',
-]
+filters = ['crop', 'resize', 'thumbnail', 'blur', 'identity']
 skip_validate_imports = false
 
 [repo]
@@ -38,5 +32,5 @@ cache_capacity = 67108864
 type = 'object_storage'
 bucket_name = 'pict-rs'
 region = 'http://minio:9000'
-access_key = 'XZEZ5B8Y3UCINU1KCVF6'
-secret_key = 'cWbE5LcCK9YH8j1NvhOZocl+vH+b6T5Zvy3z+BZu'
+access_key = 'Q7Z3AY3JO01N27UNH5IR'
+secret_key = 'bH3Kj6UVJF+btBtWsExVurN3ukEilC3saECsupzi'
