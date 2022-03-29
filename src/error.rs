@@ -90,6 +90,9 @@ pub(crate) enum UploadError {
     #[error("Unsupported image format")]
     UnsupportedFormat,
 
+    #[error("Gif uploads are not enabled")]
+    SilentVideoDisabled,
+
     #[error("Invalid media dimensions")]
     Dimensions,
 
@@ -143,7 +146,9 @@ impl ResponseError for Error {
                 UploadError::DuplicateAlias
                 | UploadError::Limit(_)
                 | UploadError::NoFiles
-                | UploadError::Upload(_),
+                | UploadError::Upload(_)
+                | UploadError::UnsupportedFormat
+                | UploadError::SilentVideoDisabled,
             ) => StatusCode::BAD_REQUEST,
             Some(
                 UploadError::Sled(crate::repo::sled::SledError::Missing)

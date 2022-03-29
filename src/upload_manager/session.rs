@@ -113,6 +113,7 @@ impl<S: Store> UploadManagerSession<S> {
         mut self,
         alias: String,
         validate: bool,
+        enable_silent_video: bool,
         mut stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin,
     ) -> Result<Self, Error> {
         let mut bytes_mut = actix_web::web::BytesMut::new();
@@ -127,6 +128,7 @@ impl<S: Store> UploadManagerSession<S> {
         let (_, validated_reader) = crate::validate::validate_image_bytes(
             bytes_mut.freeze(),
             self.manager.inner.format,
+            enable_silent_video,
             validate,
         )
         .await?;
@@ -150,6 +152,7 @@ impl<S: Store> UploadManagerSession<S> {
     #[instrument(skip(self, stream))]
     pub(crate) async fn upload(
         mut self,
+        enable_silent_video: bool,
         mut stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin,
     ) -> Result<Self, Error> {
         let mut bytes_mut = actix_web::web::BytesMut::new();
@@ -164,6 +167,7 @@ impl<S: Store> UploadManagerSession<S> {
         let (input_type, validated_reader) = crate::validate::validate_image_bytes(
             bytes_mut.freeze(),
             self.manager.inner.format,
+            enable_silent_video,
             true,
         )
         .await?;

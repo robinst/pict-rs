@@ -1,5 +1,9 @@
 use crate::{
-    config::ImageFormat, either::Either, error::Error, ffmpeg::InputFormat, magick::ValidInputType,
+    config::ImageFormat,
+    either::Either,
+    error::{Error, UploadError},
+    ffmpeg::InputFormat,
+    magick::ValidInputType,
 };
 use actix_web::web::Bytes;
 use tokio::io::AsyncRead;
@@ -36,6 +40,7 @@ impl AsyncRead for UnvalidatedBytes {
 pub(crate) async fn validate_image_bytes(
     bytes: Bytes,
     prescribed_format: Option<ImageFormat>,
+    enable_silent_video: bool,
     validate: bool,
 ) -> Result<(ValidInputType, impl AsyncRead + Unpin), Error> {
     let input_type = crate::magick::input_type_bytes(bytes.clone()).await?;
@@ -45,18 +50,28 @@ pub(crate) async fn validate_image_bytes(
     }
 
     match (prescribed_format, input_type) {
-        (_, ValidInputType::Gif) => Ok((
-            ValidInputType::Mp4,
-            Either::right(Either::left(
-                crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Gif).await?,
-            )),
-        )),
-        (_, ValidInputType::Mp4) => Ok((
-            ValidInputType::Mp4,
-            Either::right(Either::left(
-                crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Mp4).await?,
-            )),
-        )),
+        (_, ValidInputType::Gif) => {
+            if !enable_silent_video {
+                return Err(UploadError::SilentVideoDisabled.into());
+            }
+            Ok((
+                ValidInputType::Mp4,
+                Either::right(Either::left(
+                    crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Gif).await?,
+                )),
+            ))
+        }
+        (_, ValidInputType::Mp4) => {
+            if !enable_silent_video {
+                return Err(UploadError::SilentVideoDisabled.into());
+            }
+            Ok((
+                ValidInputType::Mp4,
+                Either::right(Either::left(
+                    crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Mp4).await?,
+                )),
+            ))
+        }
         (Some(ImageFormat::Jpeg) | None, ValidInputType::Jpeg) => Ok((
             ValidInputType::Jpeg,
             Either::right(Either::right(Either::left(

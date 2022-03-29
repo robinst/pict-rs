@@ -212,7 +212,10 @@ async fn download<S: Store>(
     futures_util::pin_mut!(stream);
 
     let permit = PROCESS_SEMAPHORE.acquire().await?;
-    let session = manager.session((**store).clone()).upload(stream).await?;
+    let session = manager
+        .session((**store).clone())
+        .upload(CONFIG.media.enable_silent_video, stream)
+        .await?;
     let alias = session.alias().unwrap().to_owned();
     drop(permit);
     let delete_token = session.delete_token().await?;
@@ -658,7 +661,10 @@ async fn launch<S: Store + Clone + 'static>(
 
                     let res = manager
                         .session(store)
-                        .upload(map_error::map_crate_error(stream))
+                        .upload(
+                            CONFIG.media.enable_silent_video,
+                            map_error::map_crate_error(stream),
+                        )
                         .await;
 
                     drop(permit);
@@ -694,6 +700,7 @@ async fn launch<S: Store + Clone + 'static>(
                         .import(
                             filename,
                             validate_imports,
+                            CONFIG.media.enable_silent_video,
                             map_error::map_crate_error(stream),
                         )
                         .await;
