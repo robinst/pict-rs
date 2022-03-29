@@ -677,7 +677,6 @@ async fn launch<S: Store + Clone + 'static>(
     // Create a new Multipart Form validator for internal imports
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
-    let validate_imports = !CONFIG.media.skip_validate_imports;
     let manager2 = manager.clone();
     let store2 = store.clone();
     let import_form = Form::new()
@@ -699,7 +698,7 @@ async fn launch<S: Store + Clone + 'static>(
                         .session(store)
                         .import(
                             filename,
-                            validate_imports,
+                            !CONFIG.media.skip_validate_imports,
                             CONFIG.media.enable_silent_video,
                             map_error::map_crate_error(stream),
                         )
