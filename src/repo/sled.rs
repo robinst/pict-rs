@@ -227,7 +227,7 @@ impl HashRepo for SledRepo {
             .keys()
             .map(|res| res.map_err(Error::from));
 
-        Box::pin(from_iterator(iter))
+        Box::pin(from_iterator(iter, 8))
     }
 
     #[tracing::instrument]

@@ -41,9 +41,10 @@ pub(crate) trait StreamTimeout {
 
 pub(crate) fn from_iterator<I: IntoIterator + Unpin + Send + 'static>(
     iterator: I,
+    buffer: usize,
 ) -> IterStream<I, I::Item> {
     IterStream {
-        state: IterStreamState::New { iterator },
+        state: IterStreamState::New { iterator, buffer },
     }
 }
 
@@ -76,6 +77,7 @@ pin_project_lite::pin_project! {
 enum IterStreamState<I, T> {
     New {
         iterator: I,
+        buffer: usize,
     },
     Running {
         handle: JoinHandle<()>,
@@ -184,8 +186,8 @@ where
         let this = self.as_mut().get_mut();
 
         match std::mem::replace(&mut this.state, IterStreamState::Pending) {
-            IterStreamState::New { iterator } => {
-                let (sender, receiver) = tokio::sync::mpsc::channel(1);
+            IterStreamState::New { iterator, buffer } => {
+                let (sender, receiver) = tokio::sync::mpsc::channel(buffer);
 
                 let mut handle = actix_rt::task::spawn_blocking(move || {
                     let iterator = iterator.into_iter();
@@ -202,27 +204,30 @@ where
                 }
 
                 this.state = IterStreamState::Running { handle, receiver };
+
+                self.poll_next(cx)
             }
             IterStreamState::Running {
                 mut handle,
                 mut receiver,
             } => match Pin::new(&mut receiver).poll_recv(cx) {
                 Poll::Ready(Some(item)) => {
+                    this.state = IterStreamState::Running { handle, receiver };
+
+                    Poll::Ready(Some(item))
+                }
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => {
                     if Pin::new(&mut handle).poll(cx).is_ready() {
-                        return Poll::Ready(Some(item));
+                        return Poll::Ready(None);
                     }
 
                     this.state = IterStreamState::Running { handle, receiver };
-                }
-                Poll::Ready(None) => return Poll::Ready(None),
-                Poll::Pending => {
-                    this.state = IterStreamState::Running { handle, receiver };
-                    return Poll::Pending;
+
+                    Poll::Pending
                 }
             },
-            IterStreamState::Pending => return Poll::Ready(None),
+            IterStreamState::Pending => panic!("Polled after completion"),
         }
-
-        self.poll_next(cx)
     }
 }
