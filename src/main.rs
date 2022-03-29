@@ -15,11 +15,12 @@ use std::{
     future::ready,
     path::PathBuf,
     pin::Pin,
+    sync::atomic::{AtomicU64, Ordering},
     task::{Context, Poll},
     time::SystemTime,
 };
 use tokio::{io::AsyncReadExt, sync::Semaphore};
-use tracing::{debug, error, info, instrument, Span};
+use tracing::{debug, error, info, instrument};
 use tracing_actix_web::TracingLogger;
 use tracing_awc::Tracing;
 use tracing_futures::Instrument;
@@ -382,38 +383,11 @@ async fn process<S: Store + 'static>(
 
         let details = Details::from_bytes(bytes.clone(), format.as_hint()).await?;
 
-        let save_span = tracing::info_span!(
-            parent: None,
-            "Saving variant information",
-            path = tracing::field::debug(&thumbnail_path),
-            name = tracing::field::display(&alias),
-        );
-        save_span.follows_from(Span::current());
-        let details2 = details.clone();
-        let bytes2 = bytes.clone();
-        let alias2 = alias.clone();
-        actix_rt::spawn(
-            async move {
-                let identifier = match store.save_bytes(bytes2).await {
-                    Ok(identifier) => identifier,
-                    Err(e) => {
-                        tracing::warn!("Failed to generate directory path: {}", e);
-                        return;
-                    }
-                };
-                if let Err(e) = manager.store_details(&identifier, &details2).await {
-                    tracing::warn!("Error saving variant details: {}", e);
-                    return;
-                }
-                if let Err(e) = manager
-                    .store_variant(&alias2, &thumbnail_path, &identifier)
-                    .await
-                {
-                    tracing::warn!("Error saving variant info: {}", e);
-                }
-            }
-            .instrument(save_span),
-        );
+        let identifier = store.save_bytes(bytes.clone()).await?;
+        manager.store_details(&identifier, &details).await?;
+        manager
+            .store_variant(&alias, &thumbnail_path, &identifier)
+            .await?;
 
         Ok((details, bytes)) as Result<(Details, web::Bytes), Error>
     };
@@ -632,18 +606,18 @@ fn build_reqwest_client() -> reqwest::Result<reqwest::Client> {
         .build()
 }
 
+fn next_worker_id() -> String {
+    static WORKER_ID: AtomicU64 = AtomicU64::new(0);
+
+    let next_id = WORKER_ID.fetch_add(1, Ordering::Relaxed);
+
+    format!("{}-{}", CONFIG.server.worker_id, next_id)
+}
+
 async fn launch<S: Store + Clone + 'static>(
     manager: UploadManager,
     store: S,
 ) -> color_eyre::Result<()> {
-    let repo = manager.repo().clone();
-
-    actix_rt::spawn(queue::process_jobs(
-        repo,
-        store.clone(),
-        CONFIG.server.worker_id.as_bytes().to_vec(),
-    ));
-
     // Create a new Multipart Form validator
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
@@ -717,11 +691,20 @@ async fn launch<S: Store + Clone + 'static>(
         );
 
     HttpServer::new(move || {
+        let manager = manager.clone();
+        let store = store.clone();
+
+        actix_rt::spawn(queue::process_jobs(
+            manager.repo().clone(),
+            store.clone(),
+            next_worker_id(),
+        ));
+
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
-            .app_data(web::Data::new(store.clone()))
-            .app_data(web::Data::new(manager.clone()))
+            .app_data(web::Data::new(store))
+            .app_data(web::Data::new(manager))
             .app_data(web::Data::new(build_client()))
             .app_data(web::Data::new(CONFIG.media.filters.clone()))
             .service(

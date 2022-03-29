@@ -1,5 +1,6 @@
 [server]
 address = '0.0.0.0:8080'
+worker_id = 'pict-rs-1'
 [tracing.logging]
 format = 'normal'
 targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
