@@ -44,6 +44,7 @@ impl Args {
             Command::Run(Run {
                 address,
                 api_key,
+                worker_id,
                 media_skip_validate_imports,
                 media_max_width,
                 media_max_height,
@@ -54,7 +55,11 @@ impl Args {
                 media_format,
                 store,
             }) => {
-                let server = Server { address, api_key };
+                let server = Server {
+                    address,
+                    api_key,
+                    worker_id,
+                };
                 let media = Media {
                     skip_validate_imports: media_skip_validate_imports,
                     max_width: media_max_width,
@@ -240,6 +245,8 @@ struct Server {
     #[serde(skip_serializing_if = "Option::is_none")]
     address: Option<SocketAddr>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    worker_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     api_key: Option<String>,
 }
 
@@ -371,6 +378,9 @@ struct Run {
     /// The API KEY required to access restricted routes
     #[clap(long)]
     api_key: Option<String>,
+
+    #[clap(long)]
+    worker_id: Option<String>,
 
     /// Whether to validate media on the "import" endpoint
     #[clap(long)]

@@ -19,6 +19,7 @@ pub(crate) struct Defaults {
 #[serde(rename_all = "snake_case")]
 struct ServerDefaults {
     address: SocketAddr,
+    worker_id: String,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -100,6 +101,7 @@ impl Default for ServerDefaults {
     fn default() -> Self {
         ServerDefaults {
             address: "0.0.0.0:8080".parse().expect("Valid address string"),
+            worker_id: String::from("pict-rs-1"),
         }
     }
 }

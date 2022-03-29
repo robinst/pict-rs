@@ -5,15 +5,15 @@ use crate::{
     ffmpeg::{InputFormat, ThumbnailFormat},
     magick::details_hint,
     repo::{
-        sled::SledRepo, Alias, AliasRepo, DeleteToken, HashRepo, IdentifierRepo, Repo, SettingsRepo,
+        sled::SledRepo, Alias, AliasRepo, BaseRepo, DeleteToken, HashRepo, IdentifierRepo, Repo,
+        SettingsRepo,
     },
     store::{Identifier, Store},
 };
 use futures_util::StreamExt;
 use sha2::Digest;
 use std::sync::Arc;
-use tracing::{debug, error, instrument, Span};
-use tracing_futures::Instrument;
+use tracing::instrument;
 
 mod hasher;
 mod session;
@@ -34,6 +34,10 @@ pub(crate) struct UploadManagerInner {
 }
 
 impl UploadManager {
+    pub(crate) fn repo(&self) -> &Repo {
+        &self.inner.repo
+    }
+
     /// Create a new UploadManager
     pub(crate) async fn new(repo: Repo, format: Option<ImageFormat>) -> Result<Self, Error> {
         let manager = UploadManager {
@@ -229,26 +233,17 @@ impl UploadManager {
     }
 
     /// Delete an alias without a delete token
-    pub(crate) async fn delete_without_token<S: Store + 'static>(
-        &self,
-        store: S,
-        alias: Alias,
-    ) -> Result<(), Error> {
+    pub(crate) async fn delete_without_token(&self, alias: Alias) -> Result<(), Error> {
         let token = match self.inner.repo {
             Repo::Sled(ref sled_repo) => sled_repo.delete_token(&alias).await?,
         };
 
-        self.delete(store, alias, token).await
+        self.delete(alias, token).await
     }
 
     /// Delete the alias, and the file & variants if no more aliases exist
     #[instrument(skip(self, alias, token))]
-    pub(crate) async fn delete<S: Store + 'static>(
-        &self,
-        store: S,
-        alias: Alias,
-        token: DeleteToken,
-    ) -> Result<(), Error> {
+    pub(crate) async fn delete(&self, alias: Alias, token: DeleteToken) -> Result<(), Error> {
         let hash = match self.inner.repo {
             Repo::Sled(ref sled_repo) => {
                 let saved_delete_token = sled_repo.delete_token(&alias).await?;
@@ -262,17 +257,13 @@ impl UploadManager {
             }
         };
 
-        self.check_delete_files(store, hash).await
+        self.check_delete_files(hash).await
     }
 
-    async fn check_delete_files<S: Store + 'static>(
-        &self,
-        store: S,
-        hash: Vec<u8>,
-    ) -> Result<(), Error> {
+    async fn check_delete_files(&self, hash: Vec<u8>) -> Result<(), Error> {
         match self.inner.repo {
             Repo::Sled(ref sled_repo) => {
-                let hash: <SledRepo as HashRepo>::Bytes = hash.into();
+                let hash: <SledRepo as BaseRepo>::Bytes = hash.into();
 
                 let aliases = sled_repo.aliases(hash.clone()).await?;
 
@@ -280,52 +271,7 @@ impl UploadManager {
                     return Ok(());
                 }
 
-                let variant_idents = sled_repo
-                    .variants::<S::Identifier>(hash.clone())
-                    .await?
-                    .into_iter()
-                    .map(|(_, v)| v)
-                    .collect::<Vec<_>>();
-                let main_ident = sled_repo.identifier(hash.clone()).await?;
-                let motion_ident = sled_repo.motion_identifier(hash.clone()).await?;
-
-                let repo = sled_repo.clone();
-
-                HashRepo::cleanup(sled_repo, hash).await?;
-
-                let cleanup_span = tracing::info_span!(parent: None, "Cleaning files");
-                cleanup_span.follows_from(Span::current());
-
-                actix_rt::spawn(
-                    async move {
-                        let mut errors = Vec::new();
-
-                        for identifier in variant_idents
-                            .iter()
-                            .chain(&[main_ident])
-                            .chain(motion_ident.iter())
-                        {
-                            debug!("Deleting {:?}", identifier);
-                            if let Err(e) = store.remove(identifier).await {
-                                errors.push(e);
-                            }
-
-                            if let Err(e) = IdentifierRepo::cleanup(&repo, identifier).await {
-                                errors.push(e);
-                            }
-                        }
-
-                        if !errors.is_empty() {
-                            let span = tracing::error_span!("Error deleting files");
-                            span.in_scope(|| {
-                                for error in errors {
-                                    error!("{}", error);
-                                }
-                            });
-                        }
-                    }
-                    .instrument(cleanup_span),
-                );
+                crate::queue::queue_cleanup(sled_repo, hash).await?;
             }
         }
 

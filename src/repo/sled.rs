@@ -1,9 +1,15 @@
-use super::{
-    Alias, AliasRepo, AlreadyExists, DeleteToken, Details, HashRepo, Identifier, IdentifierRepo,
-    SettingsRepo,
+use crate::{
+    error::Error,
+    repo::{
+        Alias, AliasRepo, AlreadyExists, DeleteToken, Details, HashRepo, Identifier,
+        IdentifierRepo, QueueRepo, SettingsRepo,
+    },
 };
-use crate::error::Error;
 use sled::{Db, IVec, Tree};
+use std::sync::Arc;
+use tokio::sync::Notify;
+
+use super::BaseRepo;
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -42,7 +48,10 @@ pub(crate) struct SledRepo {
     aliases: Tree,
     alias_hashes: Tree,
     alias_delete_tokens: Tree,
-    _db: Db,
+    queue: Tree,
+    in_progress_queue: Tree,
+    queue_notifier: Arc<Notify>,
+    db: Db,
 }
 
 impl SledRepo {
@@ -58,15 +67,67 @@ impl SledRepo {
             aliases: db.open_tree("pict-rs-aliases-tree")?,
             alias_hashes: db.open_tree("pict-rs-alias-hashes-tree")?,
             alias_delete_tokens: db.open_tree("pict-rs-alias-delete-tokens-tree")?,
-            _db: db,
+            queue: db.open_tree("pict-rs-queue-tree")?,
+            in_progress_queue: db.open_tree("pict-rs-in-progress-queue-tree")?,
+            queue_notifier: Arc::new(Notify::new()),
+            db,
         })
+    }
+}
+
+impl BaseRepo for SledRepo {
+    type Bytes = IVec;
+}
+
+#[async_trait::async_trait(?Send)]
+impl QueueRepo for SledRepo {
+    async fn in_progress(&self, worker_id: Vec<u8>) -> Result<Option<Self::Bytes>, Error> {
+        let opt = b!(self.in_progress_queue, in_progress_queue.get(worker_id));
+
+        Ok(opt)
+    }
+
+    async fn push(&self, job: Self::Bytes) -> Result<(), Error> {
+        let id = self.db.generate_id()?;
+        b!(self.queue, queue.insert(id.to_be_bytes(), job));
+        self.queue_notifier.notify_one();
+        Ok(())
+    }
+
+    async fn pop(&self, worker_id: Vec<u8>) -> Result<Self::Bytes, Error> {
+        let notify = Arc::clone(&self.queue_notifier);
+
+        loop {
+            let in_progress_queue = self.in_progress_queue.clone();
+
+            let worker_id = worker_id.clone();
+            let job = b!(self.queue, {
+                in_progress_queue.remove(&worker_id)?;
+
+                while let Some((key, job)) = queue.iter().find_map(Result::ok) {
+                    in_progress_queue.insert(&worker_id, &job)?;
+
+                    if queue.remove(key)?.is_some() {
+                        return Ok(Some(job));
+                    }
+
+                    in_progress_queue.remove(&worker_id)?;
+                }
+
+                Ok(None) as Result<_, SledError>
+            });
+
+            if let Some(job) = job {
+                return Ok(job);
+            }
+
+            notify.notified().await
+        }
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl SettingsRepo for SledRepo {
-    type Bytes = IVec;
-
     #[tracing::instrument(skip(value))]
     async fn set(&self, key: &'static [u8], value: Self::Bytes) -> Result<(), Error> {
         b!(self.settings, settings.insert(key, value));
@@ -212,7 +273,6 @@ fn hash_alias_key(hash: &IVec, alias: &Alias) -> Vec<u8> {
 
 #[async_trait::async_trait(?Send)]
 impl HashRepo for SledRepo {
-    type Bytes = IVec;
     type Stream = HashStream;
 
     async fn hashes(&self) -> Self::Stream {
@@ -429,8 +489,6 @@ impl HashRepo for SledRepo {
 
 #[async_trait::async_trait(?Send)]
 impl AliasRepo for SledRepo {
-    type Bytes = sled::IVec;
-
     #[tracing::instrument]
     async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Error> {
         let bytes = alias.to_bytes();

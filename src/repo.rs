@@ -30,17 +30,28 @@ pub(crate) struct DeleteToken {
 
 pub(crate) struct AlreadyExists;
 
-#[async_trait::async_trait(?Send)]
-pub(crate) trait SettingsRepo {
+pub(crate) trait BaseRepo {
     type Bytes: AsRef<[u8]> + From<Vec<u8>>;
+}
 
+#[async_trait::async_trait(?Send)]
+pub(crate) trait QueueRepo: BaseRepo {
+    async fn in_progress(&self, worker_id: Vec<u8>) -> Result<Option<Self::Bytes>, Error>;
+
+    async fn push(&self, job: Self::Bytes) -> Result<(), Error>;
+
+    async fn pop(&self, worker_id: Vec<u8>) -> Result<Self::Bytes, Error>;
+}
+
+#[async_trait::async_trait(?Send)]
+pub(crate) trait SettingsRepo: BaseRepo {
     async fn set(&self, key: &'static [u8], value: Self::Bytes) -> Result<(), Error>;
     async fn get(&self, key: &'static [u8]) -> Result<Option<Self::Bytes>, Error>;
     async fn remove(&self, key: &'static [u8]) -> Result<(), Error>;
 }
 
 #[async_trait::async_trait(?Send)]
-pub(crate) trait IdentifierRepo {
+pub(crate) trait IdentifierRepo: BaseRepo {
     async fn relate_details<I: Identifier>(
         &self,
         identifier: &I,
@@ -52,8 +63,7 @@ pub(crate) trait IdentifierRepo {
 }
 
 #[async_trait::async_trait(?Send)]
-pub(crate) trait HashRepo {
-    type Bytes: AsRef<[u8]> + From<Vec<u8>>;
+pub(crate) trait HashRepo: BaseRepo {
     type Stream: Stream<Item = Result<Self::Bytes, Error>>;
 
     async fn hashes(&self) -> Self::Stream;
@@ -101,9 +111,7 @@ pub(crate) trait HashRepo {
 }
 
 #[async_trait::async_trait(?Send)]
-pub(crate) trait AliasRepo {
-    type Bytes: AsRef<[u8]> + From<Vec<u8>>;
-
+pub(crate) trait AliasRepo: BaseRepo {
     async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Error>;
 
     async fn relate_delete_token(

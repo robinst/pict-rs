@@ -39,6 +39,7 @@ mod middleware;
 mod migrate;
 mod process;
 mod processor;
+mod queue;
 mod range;
 mod repo;
 mod serde_str;
@@ -246,9 +247,8 @@ async fn download<S: Store>(
 
 /// Delete aliases and files
 #[instrument(name = "Deleting file", skip(manager))]
-async fn delete<S: Store>(
+async fn delete(
     manager: web::Data<UploadManager>,
-    store: web::Data<S>,
     path_entries: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
     let (token, alias) = path_entries.into_inner();
@@ -256,7 +256,7 @@ async fn delete<S: Store>(
     let token = DeleteToken::from_existing(&token);
     let alias = Alias::from_existing(&alias);
 
-    manager.delete((**store).clone(), alias, token).await?;
+    manager.delete(alias, token).await?;
 
     Ok(HttpResponse::NoContent().finish())
 }
@@ -308,7 +308,6 @@ async fn process_details<S: Store>(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
-    store: web::Data<S>,
     filters: web::Data<BTreeSet<String>>,
 ) -> Result<HttpResponse, Error> {
     let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str(), &filters)?;
@@ -581,17 +580,16 @@ struct AliasQuery {
 }
 
 #[instrument(name = "Purging file", skip(upload_manager))]
-async fn purge<S: Store>(
+async fn purge(
     query: web::Query<AliasQuery>,
     upload_manager: web::Data<UploadManager>,
-    store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let alias = Alias::from_existing(&query.alias);
     let aliases = upload_manager.aliases_by_alias(&alias).await?;
 
     for alias in aliases.iter() {
         upload_manager
-            .delete_without_token((**store).clone(), alias.to_owned())
+            .delete_without_token(alias.to_owned())
             .await?;
     }
 
@@ -602,10 +600,9 @@ async fn purge<S: Store>(
 }
 
 #[instrument(name = "Fetching aliases", skip(upload_manager))]
-async fn aliases<S: Store>(
+async fn aliases(
     query: web::Query<AliasQuery>,
     upload_manager: web::Data<UploadManager>,
-    store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let alias = Alias::from_existing(&query.alias);
     let aliases = upload_manager.aliases_by_alias(&alias).await?;
@@ -639,6 +636,14 @@ async fn launch<S: Store + Clone + 'static>(
     manager: UploadManager,
     store: S,
 ) -> color_eyre::Result<()> {
+    let repo = manager.repo().clone();
+
+    actix_rt::spawn(queue::process_jobs(
+        repo,
+        store.clone(),
+        CONFIG.server.worker_id.as_bytes().to_vec(),
+    ));
+
     // Create a new Multipart Form validator
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
@@ -730,8 +735,8 @@ async fn launch<S: Store + Clone + 'static>(
                     .service(web::resource("/download").route(web::get().to(download::<S>)))
                     .service(
                         web::resource("/delete/{delete_token}/{filename}")
-                            .route(web::delete().to(delete::<S>))
-                            .route(web::get().to(delete::<S>)),
+                            .route(web::delete().to(delete))
+                            .route(web::get().to(delete)),
                     )
                     .service(web::resource("/original/{filename}").route(web::get().to(serve::<S>)))
                     .service(web::resource("/process.{ext}").route(web::get().to(process::<S>)))
@@ -757,8 +762,8 @@ async fn launch<S: Store + Clone + 'static>(
                             .wrap(import_form.clone())
                             .route(web::post().to(upload::<S>)),
                     )
-                    .service(web::resource("/purge").route(web::post().to(purge::<S>)))
-                    .service(web::resource("/aliases").route(web::get().to(aliases::<S>))),
+                    .service(web::resource("/purge").route(web::post().to(purge)))
+                    .service(web::resource("/aliases").route(web::get().to(aliases))),
             )
     })
     .bind(CONFIG.server.address)?
