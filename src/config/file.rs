@@ -2,7 +2,7 @@ use crate::{
     config::primitives::{ImageFormat, LogFormat, Store, Targets},
     serde_str::Serde,
 };
-use std::{collections::HashSet, net::SocketAddr, path::PathBuf};
+use std::{collections::BTreeSet, net::SocketAddr, path::PathBuf};
 use url::Url;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -94,7 +94,7 @@ pub(crate) struct Media {
 
     pub(crate) enable_silent_video: bool,
 
-    pub(crate) filters: HashSet<String>,
+    pub(crate) filters: BTreeSet<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) format: Option<ImageFormat>,

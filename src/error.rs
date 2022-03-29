@@ -1,50 +1,31 @@
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
-use tracing_error::SpanTrace;
+use color_eyre::Report;
 
 pub(crate) struct Error {
-    context: SpanTrace,
-    kind: UploadError,
+    inner: color_eyre::Report,
+}
+
+impl Error {
+    fn kind(&self) -> Option<&UploadError> {
+        self.inner.downcast_ref()
+    }
 }
 
 impl std::fmt::Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self.kind)
+        std::fmt::Debug::fmt(&self.inner, f)
     }
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self.kind)?;
-        writeln!(f)?;
-
-        writeln!(f, "Chain:")?;
-        fmt_chain(f, &self.kind)?;
-
-        writeln!(f)?;
-        writeln!(f, "Spantrace:")?;
-        std::fmt::Display::fmt(&self.context, f)
+        std::fmt::Display::fmt(&self.inner, f)
     }
-}
-
-fn fmt_chain(
-    f: &mut std::fmt::Formatter<'_>,
-    err: &dyn std::error::Error,
-) -> Result<usize, std::fmt::Error> {
-    let count = if let Some(source) = std::error::Error::source(err) {
-        fmt_chain(f, source)?
-    } else {
-        0
-    };
-
-    write!(f, "\t{}. ", count)?;
-    writeln!(f, "{}", err)?;
-
-    Ok(count + 1)
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.kind.source()
+        self.inner.source()
     }
 }
 
@@ -54,8 +35,7 @@ where
 {
     fn from(error: T) -> Self {
         Error {
-            kind: UploadError::from(error),
-            context: SpanTrace::capture(),
+            inner: Report::from(UploadError::from(error)),
         }
     }
 }
@@ -158,25 +138,38 @@ impl From<tokio::sync::AcquireError> for UploadError {
 
 impl ResponseError for Error {
     fn status_code(&self) -> StatusCode {
-        match self.kind {
-            UploadError::DuplicateAlias
-            | UploadError::Limit(_)
-            | UploadError::NoFiles
-            | UploadError::Upload(_) => StatusCode::BAD_REQUEST,
-            UploadError::Sled(crate::repo::sled::SledError::Missing)
-            | UploadError::MissingAlias => StatusCode::NOT_FOUND,
-            UploadError::InvalidToken => StatusCode::FORBIDDEN,
-            UploadError::Range => StatusCode::RANGE_NOT_SATISFIABLE,
+        match self.kind() {
+            Some(
+                UploadError::DuplicateAlias
+                | UploadError::Limit(_)
+                | UploadError::NoFiles
+                | UploadError::Upload(_),
+            ) => StatusCode::BAD_REQUEST,
+            Some(
+                UploadError::Sled(crate::repo::sled::SledError::Missing)
+                | UploadError::MissingAlias,
+            ) => StatusCode::NOT_FOUND,
+            Some(UploadError::InvalidToken) => StatusCode::FORBIDDEN,
+            Some(UploadError::Range) => StatusCode::RANGE_NOT_SATISFIABLE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
     fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code())
-            .content_type("application/json")
-            .body(
-                serde_json::to_string(&serde_json::json!({ "msg": self.kind.to_string() }))
-                    .unwrap_or_else(|_| r#"{"msg":"Request failed"}"#.to_string()),
-            )
+        if let Some(kind) = self.kind() {
+            HttpResponse::build(self.status_code())
+                .content_type("application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({ "msg": kind.to_string() }))
+                        .unwrap_or_else(|_| r#"{"msg":"Request failed"}"#.to_string()),
+                )
+        } else {
+            HttpResponse::build(self.status_code())
+                .content_type("application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({ "msg": "Unknown error" }))
+                        .unwrap_or_else(|_| r#"{"msg":"Request failed"}"#.to_string()),
+                )
+        }
     }
 }

@@ -1,14 +1,14 @@
-use crate::UploadError;
+use crate::Error;
 use std::path::PathBuf;
 
 mod s034;
 
-type SledIter = Box<dyn Iterator<Item = Result<(Vec<u8>, Vec<u8>), UploadError>>>;
+type SledIter = Box<dyn Iterator<Item = Result<(Vec<u8>, Vec<u8>), Error>>>;
 
 trait SledDb {
     type SledTree: SledTree;
 
-    fn open_tree(&self, name: &str) -> Result<Self::SledTree, UploadError>;
+    fn open_tree(&self, name: &str) -> Result<Self::SledTree, Error>;
 
     fn self_tree(&self) -> &Self::SledTree;
 }
@@ -19,7 +19,7 @@ where
 {
     type SledTree = T::SledTree;
 
-    fn open_tree(&self, name: &str) -> Result<Self::SledTree, UploadError> {
+    fn open_tree(&self, name: &str) -> Result<Self::SledTree, Error> {
         (*self).open_tree(name)
     }
 
@@ -29,11 +29,11 @@ where
 }
 
 trait SledTree {
-    fn get<K>(&self, key: K) -> Result<Option<Vec<u8>>, UploadError>
+    fn get<K>(&self, key: K) -> Result<Option<Vec<u8>>, Error>
     where
         K: AsRef<[u8]>;
 
-    fn insert<K, V>(&self, key: K, value: V) -> Result<(), UploadError>
+    fn insert<K, V>(&self, key: K, value: V) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
         V: AsRef<[u8]>;
@@ -45,7 +45,7 @@ trait SledTree {
         K: AsRef<[u8]>,
         R: std::ops::RangeBounds<K>;
 
-    fn flush(&self) -> Result<(), UploadError>;
+    fn flush(&self) -> Result<(), Error>;
 }
 
 pub(crate) struct LatestDb {
@@ -60,7 +60,7 @@ impl LatestDb {
         LatestDb { root_dir, version }
     }
 
-    pub(crate) fn migrate(self) -> Result<sled::Db, UploadError> {
+    pub(crate) fn migrate(self) -> Result<sled::Db, Error> {
         let LatestDb { root_dir, version } = self;
 
         loop {
@@ -89,7 +89,7 @@ impl DbVersion {
         DbVersion::Fresh
     }
 
-    fn migrate(self, root: PathBuf) -> Result<sled::Db, UploadError> {
+    fn migrate(self, root: PathBuf) -> Result<sled::Db, Error> {
         match self {
             DbVersion::Sled034 | DbVersion::Fresh => s034::open(root),
         }

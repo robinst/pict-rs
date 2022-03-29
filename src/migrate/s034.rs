@@ -1,6 +1,6 @@
 use crate::{
+    error::Error,
     migrate::{SledDb, SledIter, SledTree},
-    UploadError,
 };
 use sled as sled034;
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ pub(crate) fn migrating(base: PathBuf) -> bool {
     true
 }
 
-pub(crate) fn open(mut base: PathBuf) -> Result<sled034::Db, UploadError> {
+pub(crate) fn open(mut base: PathBuf) -> Result<sled034::Db, Error> {
     base.push("sled");
     base.push(SLED_034);
 
@@ -41,7 +41,7 @@ pub(crate) fn open(mut base: PathBuf) -> Result<sled034::Db, UploadError> {
 impl SledDb for sled034::Db {
     type SledTree = sled034::Tree;
 
-    fn open_tree(&self, name: &str) -> Result<Self::SledTree, UploadError> {
+    fn open_tree(&self, name: &str) -> Result<Self::SledTree, Error> {
         Ok(sled034::Db::open_tree(self, name)?)
     }
 
@@ -51,14 +51,14 @@ impl SledDb for sled034::Db {
 }
 
 impl SledTree for sled034::Tree {
-    fn get<K>(&self, key: K) -> Result<Option<Vec<u8>>, UploadError>
+    fn get<K>(&self, key: K) -> Result<Option<Vec<u8>>, Error>
     where
         K: AsRef<[u8]>,
     {
         Ok(sled034::Tree::get(self, key)?.map(|v| Vec::from(v.as_ref())))
     }
 
-    fn insert<K, V>(&self, key: K, value: V) -> Result<(), UploadError>
+    fn insert<K, V>(&self, key: K, value: V) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
@@ -69,7 +69,7 @@ impl SledTree for sled034::Tree {
     fn iter(&self) -> SledIter {
         Box::new(sled034::Tree::iter(self).map(|res| {
             res.map(|(k, v)| (k.as_ref().to_vec(), v.as_ref().to_vec()))
-                .map_err(UploadError::from)
+                .map_err(Error::from)
         }))
     }
 
@@ -80,13 +80,11 @@ impl SledTree for sled034::Tree {
     {
         Box::new(sled034::Tree::range(self, range).map(|res| {
             res.map(|(k, v)| (k.as_ref().to_vec(), v.as_ref().to_vec()))
-                .map_err(UploadError::from)
+                .map_err(Error::from)
         }))
     }
 
-    fn flush(&self) -> Result<(), UploadError> {
-        sled034::Tree::flush(self)
-            .map(|_| ())
-            .map_err(UploadError::from)
+    fn flush(&self) -> Result<(), Error> {
+        sled034::Tree::flush(self).map(|_| ()).map_err(Error::from)
     }
 }

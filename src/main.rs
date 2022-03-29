@@ -11,7 +11,7 @@ use futures_util::{
 };
 use once_cell::sync::Lazy;
 use std::{
-    collections::HashSet,
+    collections::BTreeSet,
     future::ready,
     path::PathBuf,
     pin::Pin,
@@ -263,7 +263,7 @@ type ProcessQuery = Vec<(String, String)>;
 fn prepare_process(
     query: web::Query<ProcessQuery>,
     ext: &str,
-    filters: &HashSet<String>,
+    filters: &BTreeSet<String>,
 ) -> Result<(ImageFormat, Alias, PathBuf, Vec<String>), Error> {
     let (alias, operations) =
         query
@@ -306,7 +306,7 @@ async fn process_details<S: Store>(
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
-    filters: web::Data<HashSet<String>>,
+    filters: web::Data<BTreeSet<String>>,
 ) -> Result<HttpResponse, Error> {
     let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str(), &filters)?;
 
@@ -330,7 +330,7 @@ async fn process<S: Store + 'static>(
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
-    filters: web::Data<HashSet<String>>,
+    filters: web::Data<BTreeSet<String>>,
 ) -> Result<HttpResponse, Error> {
     let (format, alias, thumbnail_path, thumbnail_args) =
         prepare_process(query, ext.as_str(), &filters)?;
@@ -635,7 +635,7 @@ fn build_reqwest_client() -> reqwest::Result<reqwest::Client> {
 async fn launch<S: Store + Clone + 'static>(
     manager: UploadManager,
     store: S,
-) -> anyhow::Result<()> {
+) -> color_eyre::Result<()> {
     // Create a new Multipart Form validator
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
@@ -769,7 +769,7 @@ async fn migrate_inner<S1>(
     repo: &Repo,
     from: S1,
     to: &config::Store,
-) -> anyhow::Result<()>
+) -> color_eyre::Result<()>
 where
     S1: Store,
 {
@@ -806,7 +806,7 @@ where
 }
 
 #[actix_rt::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> color_eyre::Result<()> {
     init_tracing(&CONFIG.tracing)?;
 
     let repo = Repo::open(CONFIG.repo.clone())?;

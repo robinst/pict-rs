@@ -120,7 +120,7 @@ pub(crate) trait AliasRepo {
 }
 
 impl Repo {
-    pub(crate) fn open(config: config::Repo) -> anyhow::Result<Self> {
+    pub(crate) fn open(config: config::Repo) -> color_eyre::Result<Self> {
         match config {
             config::Repo::Sled(config::Sled {
                 mut path,
@@ -139,7 +139,7 @@ impl Repo {
     }
 
     #[tracing::instrument(skip_all)]
-    pub(crate) async fn from_db(&self, db: ::sled::Db) -> anyhow::Result<()> {
+    pub(crate) async fn from_db(&self, db: ::sled::Db) -> color_eyre::Result<()> {
         if self.has_migrated().await? {
             return Ok(());
         }
@@ -161,13 +161,13 @@ impl Repo {
         Ok(())
     }
 
-    async fn has_migrated(&self) -> anyhow::Result<bool> {
+    async fn has_migrated(&self) -> color_eyre::Result<bool> {
         match self {
             Self::Sled(repo) => Ok(repo.get(REPO_MIGRATION_O1).await?.is_some()),
         }
     }
 
-    async fn mark_migrated(&self) -> anyhow::Result<()> {
+    async fn mark_migrated(&self) -> color_eyre::Result<()> {
         match self {
             Self::Sled(repo) => {
                 repo.set(REPO_MIGRATION_O1, b"1".to_vec().into()).await?;
@@ -182,7 +182,7 @@ const REPO_MIGRATION_O1: &[u8] = b"repo-migration-01";
 const STORE_MIGRATION_PROGRESS: &[u8] = b"store-migration-progress";
 const GENERATOR_KEY: &[u8] = b"last-path";
 
-async fn migrate_hash<T>(repo: &T, old: &old::Old, hash: ::sled::IVec) -> anyhow::Result<()>
+async fn migrate_hash<T>(repo: &T, old: &old::Old, hash: ::sled::IVec) -> color_eyre::Result<()>
 where
     T: IdentifierRepo + HashRepo + AliasRepo + SettingsRepo,
 {

@@ -13,7 +13,7 @@ pub(crate) use commandline::Operation;
 pub(crate) use file::{ConfigFile as Configuration, OpenTelemetry, Repo, Sled, Tracing};
 pub(crate) use primitives::{Filesystem, ImageFormat, LogFormat, ObjectStorage, Store};
 
-pub(crate) fn configure() -> anyhow::Result<(Configuration, Operation)> {
+pub(crate) fn configure() -> color_eyre::Result<(Configuration, Operation)> {
     let Output {
         config_format,
         operation,

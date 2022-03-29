@@ -12,7 +12,9 @@ use tracing_subscriber::{
     fmt::format::FmtSpan, layer::SubscriberExt, registry::LookupSpan, Layer, Registry,
 };
 
-pub(super) fn init_tracing(tracing: &Tracing) -> anyhow::Result<()> {
+pub(super) fn init_tracing(tracing: &Tracing) -> color_eyre::Result<()> {
+    color_eyre::install()?;
+
     LogTracer::init()?;
 
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
@@ -28,7 +30,7 @@ pub(super) fn init_tracing(tracing: &Tracing) -> anyhow::Result<()> {
     }
 }
 
-fn with_format<F>(format_layer: F, tracing: &Tracing) -> anyhow::Result<()>
+fn with_format<F>(format_layer: F, tracing: &Tracing) -> color_eyre::Result<()>
 where
     F: Layer<Registry> + Send + Sync,
 {
@@ -53,7 +55,7 @@ where
     }
 }
 
-fn with_subscriber<S>(subscriber: S, otel: &OpenTelemetry) -> anyhow::Result<()>
+fn with_subscriber<S>(subscriber: S, otel: &OpenTelemetry) -> color_eyre::Result<()>
 where
     S: SubscriberExt + Send + Sync,
     for<'a> S: LookupSpan<'a>,

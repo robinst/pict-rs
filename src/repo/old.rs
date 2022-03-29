@@ -17,9 +17,19 @@
 // - Settings Tree
 //   - store-migration-progress -> Path Tree Key
 
+use super::{Alias, DeleteToken, Details};
 use std::path::PathBuf;
 
-use super::{Alias, DeleteToken, Details};
+#[derive(Debug)]
+struct OldDbError(&'static str);
+
+impl std::fmt::Display for OldDbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for OldDbError {}
 
 pub(super) struct Old {
     alias_tree: ::sled::Tree,
@@ -32,7 +42,7 @@ pub(super) struct Old {
 }
 
 impl Old {
-    pub(super) fn open(db: sled::Db) -> anyhow::Result<Self> {
+    pub(super) fn open(db: sled::Db) -> color_eyre::Result<Self> {
         Ok(Self {
             alias_tree: db.open_tree("alias")?,
             filename_tree: db.open_tree("filename")?,
@@ -44,7 +54,7 @@ impl Old {
         })
     }
 
-    pub(super) fn setting(&self, key: &[u8]) -> anyhow::Result<Option<sled::IVec>> {
+    pub(super) fn setting(&self, key: &[u8]) -> color_eyre::Result<Option<sled::IVec>> {
         Ok(self.settings_tree.get(key)?)
     }
 
@@ -55,11 +65,14 @@ impl Old {
             .filter_map(|res| res.ok())
     }
 
-    pub(super) fn details(&self, hash: &sled::IVec) -> anyhow::Result<Vec<(sled::IVec, Details)>> {
+    pub(super) fn details(
+        &self,
+        hash: &sled::IVec,
+    ) -> color_eyre::Result<Vec<(sled::IVec, Details)>> {
         let filename = self
             .main_tree
             .get(hash)?
-            .ok_or_else(|| anyhow::anyhow!("missing filename"))?;
+            .ok_or(OldDbError("Missing filename"))?;
 
         let filename = String::from_utf8_lossy(&filename);
 
@@ -81,22 +94,26 @@ impl Old {
             .collect())
     }
 
-    pub(super) fn main_identifier(&self, hash: &sled::IVec) -> anyhow::Result<sled::IVec> {
+    pub(super) fn main_identifier(&self, hash: &sled::IVec) -> color_eyre::Result<sled::IVec> {
         let filename = self
             .main_tree
             .get(hash)?
-            .ok_or_else(|| anyhow::anyhow!("Missing filename"))?;
+            .ok_or(OldDbError("Missing filename"))?;
 
-        self.identifier_tree
+        Ok(self
+            .identifier_tree
             .get(filename)?
-            .ok_or_else(|| anyhow::anyhow!("Missing identifier"))
+            .ok_or(OldDbError("Missing identifier"))?)
     }
 
-    pub(super) fn variants(&self, hash: &sled::IVec) -> anyhow::Result<Vec<(PathBuf, sled::IVec)>> {
+    pub(super) fn variants(
+        &self,
+        hash: &sled::IVec,
+    ) -> color_eyre::Result<Vec<(PathBuf, sled::IVec)>> {
         let filename = self
             .main_tree
             .get(hash)?
-            .ok_or_else(|| anyhow::anyhow!("Missing filename"))?;
+            .ok_or(OldDbError("Missing filename"))?;
 
         let filename_string = String::from_utf8_lossy(&filename);
 
@@ -126,11 +143,11 @@ impl Old {
     pub(super) fn motion_identifier(
         &self,
         hash: &sled::IVec,
-    ) -> anyhow::Result<Option<sled::IVec>> {
+    ) -> color_eyre::Result<Option<sled::IVec>> {
         let filename = self
             .main_tree
             .get(hash)?
-            .ok_or_else(|| anyhow::anyhow!("Missing filename"))?;
+            .ok_or(OldDbError("Missing filename"))?;
 
         let filename_string = String::from_utf8_lossy(&filename);
 
@@ -151,7 +168,7 @@ impl Old {
             .collect()
     }
 
-    pub(super) fn delete_token(&self, alias: &Alias) -> anyhow::Result<Option<DeleteToken>> {
+    pub(super) fn delete_token(&self, alias: &Alias) -> color_eyre::Result<Option<DeleteToken>> {
         let key = format!("{}/delete", alias);
 
         if let Some(ivec) = self.alias_tree.get(key)? {

@@ -122,6 +122,9 @@ impl Store for ObjectStore {
 
         let request_span = tracing::info_span!(parent: None, "Get Object");
 
+        // NOTE: isolating reqwest in it's own span is to prevent the request's span from getting
+        // smuggled into a long-lived task. Unfortunately, I am unable to create a minimal
+        // reproduction of this problem so I can't open a bug about it.
         let request = request_span.in_scope(|| {
             Client::request(
                 &self.client,
