@@ -7,7 +7,7 @@ use actix_web::{
 use awc::Client;
 use futures_util::{
     stream::{empty, once},
-    Stream,
+    Stream, TryStreamExt,
 };
 use once_cell::sync::Lazy;
 use std::{
@@ -35,7 +35,6 @@ mod ffmpeg;
 mod file;
 mod init_tracing;
 mod magick;
-mod map_error;
 mod middleware;
 mod migrate;
 mod process;
@@ -207,7 +206,7 @@ async fn download<S: Store>(
     }
 
     let stream = Limit::new(
-        map_error::map_crate_error(res),
+        res.map_err(Error::from),
         (CONFIG.media.max_file_size * MEGABYTES) as u64,
     );
 
@@ -495,9 +494,11 @@ async fn ranged_file_resp<S: Store>(
                 builder.insert_header(content_range);
                 (
                     builder,
-                    Either::left(Either::left(map_error::map_crate_error(
-                        range::chop_store(range, store, &identifier, len).await?,
-                    ))),
+                    Either::left(Either::left(
+                        range::chop_store(range, store, &identifier, len)
+                            .await?
+                            .map_err(Error::from),
+                    )),
                 )
             } else {
                 (
@@ -510,7 +511,10 @@ async fn ranged_file_resp<S: Store>(
         }
     } else {
         //No Range header in the request - return the entire document
-        let stream = map_error::map_crate_error(store.to_stream(&identifier, None, None).await?);
+        let stream = store
+            .to_stream(&identifier, None, None)
+            .await?
+            .map_err(Error::from);
         (HttpResponse::Ok(), Either::right(stream))
     };
 
@@ -642,7 +646,7 @@ async fn launch<S: Store + Clone + 'static>(
                         .session(store)
                         .upload(
                             CONFIG.media.enable_silent_video,
-                            map_error::map_crate_error(stream),
+                            stream.map_err(Error::from),
                         )
                         .await;
 
@@ -679,7 +683,7 @@ async fn launch<S: Store + Clone + 'static>(
                             filename,
                             !CONFIG.media.skip_validate_imports,
                             CONFIG.media.enable_silent_video,
-                            map_error::map_crate_error(stream),
+                            stream.map_err(Error::from),
                         )
                         .await;
 

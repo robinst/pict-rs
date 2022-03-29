@@ -5,7 +5,7 @@ use crate::{
 };
 use actix_rt::time::Sleep;
 use actix_web::web::Bytes;
-use futures_util::stream::Stream;
+use futures_util::{stream::Stream, TryStreamExt};
 use s3::{
     client::Client, command::Command, creds::Credentials, request_trait::Request, Bucket, Region,
 };
@@ -56,13 +56,6 @@ pub(crate) struct ObjectStore {
     repo: Repo,
     bucket: Bucket,
     client: reqwest::Client,
-}
-
-pin_project_lite::pin_project! {
-    struct IoError<S> {
-        #[pin]
-        inner: S,
-    }
 }
 
 pin_project_lite::pin_project! {
@@ -146,10 +139,11 @@ impl Store for ObjectStore {
 
         let allotted = allotted.saturating_sub(now.elapsed());
 
-        Ok(
-            request_span
-                .in_scope(|| Box::pin(timeout(allotted, io_error(response.bytes_stream())))),
-        )
+        let stream = response
+            .bytes_stream()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+
+        Ok(request_span.in_scope(|| Box::pin(timeout(allotted, stream))))
     }
 
     #[tracing::instrument(skip(writer))]
@@ -272,14 +266,6 @@ async fn init_generator(repo: &Repo) -> Result<Generator, Error> {
     }
 }
 
-fn io_error<S, T, E>(stream: S) -> impl Stream<Item = std::io::Result<T>>
-where
-    S: Stream<Item = Result<T, E>>,
-    E: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    IoError { inner: stream }
-}
-
 fn timeout<S, T>(duration: Duration, stream: S) -> impl Stream<Item = std::io::Result<T>>
 where
     S: Stream<Item = std::io::Result<T>>,
@@ -288,22 +274,6 @@ where
         sleep: Some(Box::pin(actix_rt::time::sleep(duration))),
         woken: Arc::new(AtomicBool::new(true)),
         inner: stream,
-    }
-}
-
-impl<S, T, E> Stream for IoError<S>
-where
-    S: Stream<Item = Result<T, E>>,
-    E: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    type Item = std::io::Result<T>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.as_mut().project();
-
-        this.inner.poll_next(cx).map(|opt| {
-            opt.map(|res| res.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
-        })
     }
 }
 
