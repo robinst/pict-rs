@@ -2,18 +2,13 @@ use crate::{
     error::Error,
     repo::{Repo, SettingsRepo},
     store::Store,
-    stream::StreamTimeout,
 };
 use actix_web::web::Bytes;
-use futures_util::{Stream, StreamExt};
+use futures_util::{Stream, TryStreamExt};
 use s3::{
     client::Client, command::Command, creds::Credentials, request_trait::Request, Bucket, Region,
 };
-use std::{
-    pin::Pin,
-    string::FromUtf8Error,
-    time::{Duration, Instant},
-};
+use std::{pin::Pin, string::FromUtf8Error};
 use storage_path_generator::{Generator, Path};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::Instrument;
@@ -30,9 +25,6 @@ const GENERATOR_KEY: &[u8] = b"last-path";
 pub(crate) enum ObjectError {
     #[error("Failed to generate path")]
     PathGenerator(#[from] storage_path_generator::PathError),
-
-    #[error("Timeout")]
-    Elapsed,
 
     #[error("Failed to parse string")]
     Utf8(#[from] FromUtf8Error),
@@ -110,24 +102,19 @@ impl Store for ObjectStore {
             )
         });
 
-        let now = Instant::now();
-        let allotted = Duration::from_secs(5);
-
         let response = request_span
-            .in_scope(|| tokio::time::timeout(allotted, request.response()))
+            .in_scope(|| request.response())
             .instrument(request_span.clone())
             .await
-            .map_err(|_| ObjectError::Elapsed)?
             .map_err(ObjectError::from)?;
 
-        let allotted = allotted.saturating_sub(now.elapsed());
-
-        let stream = response.bytes_stream().timeout(allotted).map(|res| {
-            res.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                .and_then(|res| res.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+        let stream = request_span.in_scope(|| {
+            response
+                .bytes_stream()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         });
 
-        Ok(request_span.in_scope(|| Box::pin(stream)))
+        Ok(Box::pin(stream))
     }
 
     #[tracing::instrument(skip(writer))]

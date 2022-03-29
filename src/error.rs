@@ -119,6 +119,9 @@ pub(crate) enum UploadError {
 
     #[error("Hit limit")]
     Limit(#[from] crate::stream::LimitError),
+
+    #[error("Response timeout")]
+    Timeout(#[from] crate::stream::TimeoutError),
 }
 
 impl From<awc::error::SendRequestError> for UploadError {

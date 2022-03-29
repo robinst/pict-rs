@@ -7,7 +7,7 @@ use actix_web::{
 use awc::Client;
 use futures_util::{
     stream::{empty, once},
-    Stream, TryStreamExt,
+    Stream, StreamExt, TryStreamExt,
 };
 use once_cell::sync::Lazy;
 use std::{
@@ -15,7 +15,7 @@ use std::{
     future::ready,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 use tokio::{io::AsyncReadExt, sync::Semaphore};
 use tracing::{debug, info, instrument};
@@ -46,6 +46,8 @@ mod stream;
 mod tmp_file;
 mod upload_manager;
 mod validate;
+
+use crate::stream::StreamTimeout;
 
 use self::{
     concurrent_processor::CancelSafeProcessor,
@@ -486,6 +488,12 @@ where
     E: std::error::Error + 'static,
     actix_web::Error: From<E>,
 {
+    let stream = stream.timeout(Duration::from_secs(5)).map(|res| match res {
+        Ok(Ok(item)) => Ok(item),
+        Ok(Err(e)) => Err(actix_web::Error::from(e)),
+        Err(e) => Err(Error::from(e).into()),
+    });
+
     builder
         .insert_header(LastModified(modified.into()))
         .insert_header(CacheControl(vec![
