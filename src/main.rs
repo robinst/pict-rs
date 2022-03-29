@@ -14,13 +14,11 @@ use std::{
     collections::BTreeSet,
     future::ready,
     path::PathBuf,
-    pin::Pin,
     sync::atomic::{AtomicU64, Ordering},
-    task::{Context, Poll},
     time::SystemTime,
 };
 use tokio::{io::AsyncReadExt, sync::Semaphore};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, info, instrument};
 use tracing_actix_web::TracingLogger;
 use tracing_awc::Tracing;
 use tracing_futures::Instrument;
@@ -44,6 +42,7 @@ mod range;
 mod repo;
 mod serde_str;
 mod store;
+mod stream;
 mod tmp_file;
 mod upload_manager;
 mod validate;
@@ -61,6 +60,7 @@ use self::{
     repo::{Alias, DeleteToken, Repo},
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Store},
+    stream::StreamLimit,
     upload_manager::{UploadManager, UploadManagerSession},
 };
 
@@ -138,59 +138,6 @@ struct UrlQuery {
     url: String,
 }
 
-pin_project_lite::pin_project! {
-    struct Limit<S> {
-        #[pin]
-        inner: S,
-
-        count: u64,
-        limit: u64,
-    }
-}
-
-impl<S> Limit<S> {
-    fn new(inner: S, limit: u64) -> Self {
-        Limit {
-            inner,
-            count: 0,
-            limit,
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Resonse body larger than size limit")]
-struct LimitError;
-
-impl<S, E> Stream for Limit<S>
-where
-    S: Stream<Item = Result<web::Bytes, E>>,
-    E: From<LimitError>,
-{
-    type Item = Result<web::Bytes, E>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.as_mut().project();
-
-        let limit = this.limit;
-        let count = this.count;
-        let inner = this.inner;
-
-        inner.poll_next(cx).map(|opt| {
-            opt.map(|res| match res {
-                Ok(bytes) => {
-                    *count += bytes.len() as u64;
-                    if *count > *limit {
-                        return Err(LimitError.into());
-                    }
-                    Ok(bytes)
-                }
-                Err(e) => Err(e),
-            })
-        })
-    }
-}
-
 /// download an image from a URL
 #[instrument(name = "Downloading file", skip(client, manager))]
 async fn download<S: Store>(
@@ -205,10 +152,9 @@ async fn download<S: Store>(
         return Err(UploadError::Download(res.status()).into());
     }
 
-    let stream = Limit::new(
-        res.map_err(Error::from),
-        (CONFIG.media.max_file_size * MEGABYTES) as u64,
-    );
+    let stream = res
+        .map_err(Error::from)
+        .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
 
     futures_util::pin_mut!(stream);
 

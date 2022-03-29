@@ -118,7 +118,7 @@ pub(crate) enum UploadError {
     Range,
 
     #[error("Hit limit")]
-    Limit(#[from] super::LimitError),
+    Limit(#[from] crate::stream::LimitError),
 }
 
 impl From<awc::error::SendRequestError> for UploadError {

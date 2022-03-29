@@ -4,9 +4,11 @@ use crate::{
         Alias, AliasRepo, AlreadyExists, DeleteToken, Details, HashRepo, Identifier,
         IdentifierRepo, QueueRepo, SettingsRepo,
     },
+    stream::from_iterator,
 };
+use futures_util::Stream;
 use sled::{Db, IVec, Tree};
-use std::sync::Arc;
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::Notify;
 
 use super::BaseRepo;
@@ -205,65 +207,8 @@ impl IdentifierRepo for SledRepo {
     }
 }
 
-type BoxIterator<'a, T> = Box<dyn std::iter::Iterator<Item = T> + Send + 'a>;
-
-type HashIterator = BoxIterator<'static, Result<IVec, sled::Error>>;
-
 type StreamItem = Result<IVec, Error>;
-
-type NextFutResult = Result<(HashIterator, Option<StreamItem>), Error>;
-
-pub(crate) struct HashStream {
-    hashes: Option<HashIterator>,
-    next_fut: Option<futures_util::future::LocalBoxFuture<'static, NextFutResult>>,
-}
-
-impl futures_util::Stream for HashStream {
-    type Item = StreamItem;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-
-        if let Some(mut fut) = this.next_fut.take() {
-            match fut.as_mut().poll(cx) {
-                std::task::Poll::Ready(Ok((iter, opt))) => {
-                    this.hashes = Some(iter);
-                    std::task::Poll::Ready(opt)
-                }
-                std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Some(Err(e))),
-                std::task::Poll::Pending => {
-                    this.next_fut = Some(fut);
-                    std::task::Poll::Pending
-                }
-            }
-        } else if let Some(mut iter) = this.hashes.take() {
-            let fut = Box::pin(async move {
-                actix_rt::task::spawn_blocking(move || {
-                    let opt = iter.next();
-
-                    (iter, opt)
-                })
-                .await
-                .map(|(iter, opt)| {
-                    (
-                        iter,
-                        opt.map(|res| res.map_err(SledError::from).map_err(Error::from)),
-                    )
-                })
-                .map_err(SledError::from)
-                .map_err(Error::from)
-            });
-
-            this.next_fut = Some(fut);
-            std::pin::Pin::new(this).poll_next(cx)
-        } else {
-            std::task::Poll::Ready(None)
-        }
-    }
-}
+type LocalBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + 'a>>;
 
 fn hash_alias_key(hash: &IVec, alias: &Alias) -> Vec<u8> {
     let mut v = hash.to_vec();
@@ -273,15 +218,16 @@ fn hash_alias_key(hash: &IVec, alias: &Alias) -> Vec<u8> {
 
 #[async_trait::async_trait(?Send)]
 impl HashRepo for SledRepo {
-    type Stream = HashStream;
+    type Stream = LocalBoxStream<'static, StreamItem>;
 
     async fn hashes(&self) -> Self::Stream {
-        let iter = self.hashes.iter().keys();
+        let iter = self
+            .hashes
+            .iter()
+            .keys()
+            .map(|res| res.map_err(Error::from));
 
-        HashStream {
-            hashes: Some(Box::new(iter)),
-            next_fut: None,
-        }
+        Box::pin(from_iterator(iter))
     }
 
     #[tracing::instrument]
