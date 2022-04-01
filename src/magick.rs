@@ -140,7 +140,7 @@ pub(crate) async fn details_bytes(
 }
 
 #[tracing::instrument(skip(store))]
-pub(crate) async fn details_store<S: Store>(
+pub(crate) async fn details_store<S: Store + 'static>(
     store: S,
     identifier: S::Identifier,
     hint: Option<ValidInputType>,
@@ -255,7 +255,7 @@ pub(crate) async fn input_type_bytes(input: Bytes) -> Result<ValidInputType, Err
 }
 
 #[instrument(name = "Spawning process command")]
-pub(crate) fn process_image_store_read<S: Store>(
+pub(crate) fn process_image_store_read<S: Store + 'static>(
     store: S,
     identifier: S::Identifier,
     args: Vec<String>,

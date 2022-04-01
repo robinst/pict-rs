@@ -11,7 +11,6 @@ use futures_util::{
 };
 use once_cell::sync::Lazy;
 use std::{
-    collections::BTreeSet,
     future::ready,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
@@ -142,7 +141,7 @@ struct UrlQuery {
 
 /// download an image from a URL
 #[instrument(name = "Downloading file", skip(client, manager))]
-async fn download<S: Store>(
+async fn download<S: Store + 'static>(
     client: web::Data<Client>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
@@ -214,7 +213,6 @@ type ProcessQuery = Vec<(String, String)>;
 fn prepare_process(
     query: web::Query<ProcessQuery>,
     ext: &str,
-    filters: &BTreeSet<String>,
 ) -> Result<(ImageFormat, Alias, PathBuf, Vec<String>), Error> {
     let (alias, operations) =
         query
@@ -237,7 +235,7 @@ fn prepare_process(
 
     let operations = operations
         .into_iter()
-        .filter(|(k, _)| filters.contains(&k.to_lowercase()))
+        .filter(|(k, _)| CONFIG.media.filters.contains(&k.to_lowercase()))
         .collect::<Vec<_>>();
 
     let format = ext
@@ -251,14 +249,13 @@ fn prepare_process(
     Ok((format, alias, thumbnail_path, thumbnail_args))
 }
 
-#[instrument(name = "Fetching derived details", skip(manager, filters))]
+#[instrument(name = "Fetching derived details", skip(manager))]
 async fn process_details<S: Store>(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
-    filters: web::Data<BTreeSet<String>>,
 ) -> Result<HttpResponse, Error> {
-    let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str(), &filters)?;
+    let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
 
     let identifier = manager
         .variant_identifier::<S>(&alias, &thumbnail_path)
@@ -273,17 +270,15 @@ async fn process_details<S: Store>(
 }
 
 /// Process files
-#[instrument(name = "Serving processed image", skip(manager, filters))]
+#[instrument(name = "Serving processed image", skip(manager))]
 async fn process<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
-    filters: web::Data<BTreeSet<String>>,
 ) -> Result<HttpResponse, Error> {
-    let (format, alias, thumbnail_path, thumbnail_args) =
-        prepare_process(query, ext.as_str(), &filters)?;
+    let (format, alias, thumbnail_path, thumbnail_args) = prepare_process(query, ext.as_str())?;
 
     let identifier_opt = manager
         .variant_identifier::<S>(&alias, &thumbnail_path)
@@ -376,7 +371,7 @@ async fn process<S: Store + 'static>(
 
 /// Fetch file details
 #[instrument(name = "Fetching details", skip(manager))]
-async fn details<S: Store>(
+async fn details<S: Store + 'static>(
     alias: web::Path<String>,
     manager: web::Data<UploadManager>,
     store: web::Data<S>,
@@ -402,7 +397,7 @@ async fn details<S: Store>(
 
 /// Serve files
 #[instrument(name = "Serving file", skip(manager))]
-async fn serve<S: Store>(
+async fn serve<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<String>,
     manager: web::Data<UploadManager>,
@@ -426,7 +421,7 @@ async fn serve<S: Store>(
     ranged_file_resp(&**store, identifier, range, details).await
 }
 
-async fn ranged_file_resp<S: Store>(
+async fn ranged_file_resp<S: Store + 'static>(
     store: &S,
     identifier: S::Identifier,
     range: Option<web::Header<Range>>,
@@ -652,7 +647,12 @@ async fn launch<S: Store + Clone + 'static>(
         let manager = manager.clone();
         let store = store.clone();
 
-        actix_rt::spawn(queue::process_jobs(
+        actix_rt::spawn(queue::process_cleanup(
+            manager.repo().clone(),
+            store.clone(),
+            next_worker_id(),
+        ));
+        actix_rt::spawn(queue::process_images(
             manager.repo().clone(),
             store.clone(),
             next_worker_id(),
@@ -664,7 +664,6 @@ async fn launch<S: Store + Clone + 'static>(
             .app_data(web::Data::new(store))
             .app_data(web::Data::new(manager))
             .app_data(web::Data::new(build_client()))
-            .app_data(web::Data::new(CONFIG.media.filters.clone()))
             .service(
                 web::scope("/image")
                     .service(

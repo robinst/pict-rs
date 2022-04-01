@@ -16,9 +16,9 @@ pub(crate) trait Identifier: Send + Sync + Clone + Debug {
 }
 
 #[async_trait::async_trait(?Send)]
-pub(crate) trait Store: Send + Sync + Clone + Debug + 'static {
-    type Identifier: Identifier;
-    type Stream: Stream<Item = std::io::Result<Bytes>>;
+pub(crate) trait Store: Send + Sync + Clone + Debug {
+    type Identifier: Identifier + 'static;
+    type Stream: Stream<Item = std::io::Result<Bytes>> + 'static;
 
     async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
     where
@@ -44,4 +44,52 @@ pub(crate) trait Store: Send + Sync + Clone + Debug + 'static {
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error>;
 
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait(?Send)]
+impl<'a, T> Store for &'a T
+where
+    T: Store,
+{
+    type Identifier = T::Identifier;
+    type Stream = T::Stream;
+
+    async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
+    where
+        Reader: AsyncRead + Unpin,
+    {
+        T::save_async_read(self, reader).await
+    }
+
+    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
+        T::save_bytes(self, bytes).await
+    }
+
+    async fn to_stream(
+        &self,
+        identifier: &Self::Identifier,
+        from_start: Option<u64>,
+        len: Option<u64>,
+    ) -> Result<Self::Stream, Error> {
+        T::to_stream(self, identifier, from_start, len).await
+    }
+
+    async fn read_into<Writer>(
+        &self,
+        identifier: &Self::Identifier,
+        writer: &mut Writer,
+    ) -> Result<(), std::io::Error>
+    where
+        Writer: AsyncWrite + Send + Unpin,
+    {
+        T::read_into(self, identifier, writer).await
+    }
+
+    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
+        T::len(self, identifier).await
+    }
+
+    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
+        T::remove(self, identifier).await
+    }
 }

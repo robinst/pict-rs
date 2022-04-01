@@ -30,7 +30,7 @@ impl Details {
     }
 
     #[tracing::instrument("Details from store")]
-    pub(crate) async fn from_store<S: Store>(
+    pub(crate) async fn from_store<S: Store + 'static>(
         store: S,
         identifier: S::Identifier,
         expected_format: Option<ValidInputType>,

@@ -144,7 +144,7 @@ impl Process {
         })
     }
 
-    pub(crate) fn store_read<S: Store>(
+    pub(crate) fn store_read<S: Store + 'static>(
         mut self,
         store: S,
         identifier: S::Identifier,

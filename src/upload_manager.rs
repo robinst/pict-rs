@@ -61,7 +61,7 @@ impl UploadManager {
         }
     }
 
-    pub(crate) async fn still_identifier_from_alias<S: Store + Clone>(
+    pub(crate) async fn still_identifier_from_alias<S: Store + Clone + 'static>(
         &self,
         store: S,
         alias: &Alias,

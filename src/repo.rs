@@ -30,8 +30,27 @@ pub(crate) struct DeleteToken {
 
 pub(crate) struct AlreadyExists;
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct UploadId {
+    id: Uuid,
+}
+
+pub(crate) enum UploadResult {
+    Success { alias: Alias, token: DeleteToken },
+    Failure { message: String },
+}
+
 pub(crate) trait BaseRepo {
     type Bytes: AsRef<[u8]> + From<Vec<u8>>;
+}
+
+#[async_trait::async_trait(?Send)]
+pub(crate) trait UploadRepo: BaseRepo {
+    async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, Error>;
+
+    async fn claim(&self, upload_id: UploadId) -> Result<(), Error>;
+
+    async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), Error>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -362,6 +381,21 @@ impl DeleteToken {
     }
 }
 
+impl UploadId {
+    pub(crate) fn generate() -> Self {
+        Self { id: Uuid::new_v4() }
+    }
+
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.id.as_bytes()[..]
+    }
+
+    pub(crate) fn from_bytes(&self, bytes: &[u8]) -> Option<Self> {
+        let id = Uuid::from_slice(bytes).ok()?;
+        Some(Self { id })
+    }
+}
+
 impl std::fmt::Display for MaybeUuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -374,6 +408,14 @@ impl std::fmt::Display for MaybeUuid {
 impl std::fmt::Display for DeleteToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.id)
+    }
+}
+
+impl std::str::FromStr for Alias {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Alias::from_existing(s))
     }
 }
 

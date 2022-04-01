@@ -1,83 +1,135 @@
 use crate::{
+    config::ImageFormat,
     error::Error,
-    repo::{AliasRepo, HashRepo, IdentifierRepo, QueueRepo, Repo},
+    repo::{Alias, AliasRepo, HashRepo, IdentifierRepo, QueueRepo, Repo},
+    serde_str::Serde,
     store::Store,
 };
+use std::{future::Future, path::PathBuf, pin::Pin};
+use uuid::Uuid;
 
 mod cleanup;
+mod process;
 
 const CLEANUP_QUEUE: &str = "cleanup";
+const PROCESS_QUEUE: &str = "process";
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-enum Job {
+enum Cleanup {
     CleanupHash { hash: Vec<u8> },
     CleanupIdentifier { identifier: Vec<u8> },
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+enum Process {
+    Ingest {
+        identifier: Vec<u8>,
+        upload_id: Uuid,
+        declared_alias: Option<Serde<Alias>>,
+        should_validate: bool,
+    },
+    Generate {
+        target_format: ImageFormat,
+        source: Serde<Alias>,
+        process_path: PathBuf,
+        process_args: Vec<String>,
+    },
+}
+
 pub(crate) async fn queue_cleanup<R: QueueRepo>(repo: &R, hash: R::Bytes) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Job::CleanupHash {
+    let job = serde_json::to_vec(&Cleanup::CleanupHash {
         hash: hash.as_ref().to_vec(),
     })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
 
-pub(crate) async fn process_jobs<S: Store>(repo: Repo, store: S, worker_id: String) {
+pub(crate) async fn queue_ingest<R: QueueRepo>(
+    repo: &R,
+    identifier: Vec<u8>,
+    upload_id: Uuid,
+    declared_alias: Option<Alias>,
+    should_validate: bool,
+) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Process::Ingest {
+        identifier,
+        declared_alias: declared_alias.map(Serde::new),
+        upload_id,
+        should_validate,
+    })?;
+    repo.push(PROCESS_QUEUE, job.into()).await?;
+    Ok(())
+}
+
+pub(crate) async fn queue_generate<R: QueueRepo>(
+    repo: &R,
+    target_format: ImageFormat,
+    source: Alias,
+    process_path: PathBuf,
+    process_args: Vec<String>,
+) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Process::Generate {
+        target_format,
+        source: Serde::new(source),
+        process_path,
+        process_args,
+    })?;
+    repo.push(PROCESS_QUEUE, job.into()).await?;
+    Ok(())
+}
+
+pub(crate) async fn process_cleanup<S: Store>(repo: Repo, store: S, worker_id: String) {
     match repo {
-        Repo::Sled(ref repo) => {
-            if let Ok(Some(job)) = repo.in_progress(worker_id.as_bytes().to_vec()).await {
-                if let Err(e) = run_job(repo, &store, &job).await {
-                    tracing::warn!("Failed to run previously dropped job: {}", e);
-                    tracing::warn!("{:?}", e);
-                }
-            }
-            loop {
-                let res = job_loop(repo, &store, worker_id.clone()).await;
-
-                if let Err(e) = res {
-                    tracing::warn!("Error processing jobs: {}", e);
-                    tracing::warn!("{:?}", e);
-                    continue;
-                }
-
-                break;
-            }
-        }
+        Repo::Sled(repo) => process_jobs(&repo, &store, worker_id, cleanup::perform).await,
     }
 }
 
-async fn job_loop<R, S>(repo: &R, store: &S, worker_id: String) -> Result<(), Error>
+pub(crate) async fn process_images<S: Store>(repo: Repo, store: S, worker_id: String) {
+    match repo {
+        Repo::Sled(repo) => process_jobs(&repo, &store, worker_id, process::perform).await,
+    }
+}
+
+type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+
+async fn process_jobs<R, S, F>(repo: &R, store: &S, worker_id: String, callback: F)
 where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
     R::Bytes: Clone,
     S: Store,
+    for<'a> F: Fn(&'a R, &'a S, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
+{
+    if let Ok(Some(job)) = repo.in_progress(worker_id.as_bytes().to_vec()).await {
+        if let Err(e) = (callback)(repo, store, job.as_ref()).await {
+            tracing::warn!("Failed to run previously dropped job: {}", e);
+            tracing::warn!("{:?}", e);
+        }
+    }
+    loop {
+        let res = job_loop(repo, store, worker_id.clone(), callback).await;
+
+        if let Err(e) = res {
+            tracing::warn!("Error processing jobs: {}", e);
+            tracing::warn!("{:?}", e);
+            continue;
+        }
+
+        break;
+    }
+}
+
+async fn job_loop<R, S, F>(repo: &R, store: &S, worker_id: String, callback: F) -> Result<(), Error>
+where
+    R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
+    R::Bytes: Clone,
+    S: Store,
+    for<'a> F: Fn(&'a R, &'a S, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
 {
     loop {
         let bytes = repo
             .pop(CLEANUP_QUEUE, worker_id.as_bytes().to_vec())
             .await?;
 
-        run_job(repo, store, bytes.as_ref()).await?;
+        (callback)(repo, store, bytes.as_ref()).await?;
     }
-}
-
-async fn run_job<R, S>(repo: &R, store: &S, job: &[u8]) -> Result<(), Error>
-where
-    R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
-    S: Store,
-{
-    match serde_json::from_slice(job) {
-        Ok(job) => match job {
-            Job::CleanupHash { hash } => cleanup::hash::<R, S>(repo, hash).await?,
-            Job::CleanupIdentifier { identifier } => {
-                cleanup::identifier(repo, store, identifier).await?
-            }
-        },
-        Err(e) => {
-            tracing::warn!("Invalid job: {}", e);
-        }
-    }
-
-    Ok(())
 }
