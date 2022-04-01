@@ -38,16 +38,16 @@ pub(crate) trait BaseRepo {
 pub(crate) trait QueueRepo: BaseRepo {
     async fn in_progress(&self, worker_id: Vec<u8>) -> Result<Option<Self::Bytes>, Error>;
 
-    async fn push(&self, job: Self::Bytes) -> Result<(), Error>;
+    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), Error>;
 
-    async fn pop(&self, worker_id: Vec<u8>) -> Result<Self::Bytes, Error>;
+    async fn pop(&self, queue: &'static str, worker_id: Vec<u8>) -> Result<Self::Bytes, Error>;
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait SettingsRepo: BaseRepo {
-    async fn set(&self, key: &'static [u8], value: Self::Bytes) -> Result<(), Error>;
-    async fn get(&self, key: &'static [u8]) -> Result<Option<Self::Bytes>, Error>;
-    async fn remove(&self, key: &'static [u8]) -> Result<(), Error>;
+    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), Error>;
+    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, Error>;
+    async fn remove(&self, key: &'static str) -> Result<(), Error>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -186,9 +186,9 @@ impl Repo {
     }
 }
 
-const REPO_MIGRATION_O1: &[u8] = b"repo-migration-01";
-const STORE_MIGRATION_PROGRESS: &[u8] = b"store-migration-progress";
-const GENERATOR_KEY: &[u8] = b"last-path";
+const REPO_MIGRATION_O1: &str = "repo-migration-01";
+const STORE_MIGRATION_PROGRESS: &str = "store-migration-progress";
+const GENERATOR_KEY: &str = "last-path";
 
 async fn migrate_hash<T>(repo: &T, old: &old::Old, hash: ::sled::IVec) -> color_eyre::Result<()>
 where
@@ -233,12 +233,12 @@ where
         let _ = repo.relate_details(&identifier.to_vec(), &details).await;
     }
 
-    if let Ok(Some(value)) = old.setting(STORE_MIGRATION_PROGRESS) {
+    if let Ok(Some(value)) = old.setting(STORE_MIGRATION_PROGRESS.as_bytes()) {
         repo.set(STORE_MIGRATION_PROGRESS, value.to_vec().into())
             .await?;
     }
 
-    if let Ok(Some(value)) = old.setting(GENERATOR_KEY) {
+    if let Ok(Some(value)) = old.setting(GENERATOR_KEY.as_bytes()) {
         repo.set(GENERATOR_KEY, value.to_vec().into()).await?;
     }
 

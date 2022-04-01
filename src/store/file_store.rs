@@ -20,7 +20,7 @@ pub(crate) use file_id::FileId;
 // - Settings Tree
 //   - last-path -> last generated path
 
-const GENERATOR_KEY: &[u8] = b"last-path";
+const GENERATOR_KEY: &str = "last-path";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FileError {

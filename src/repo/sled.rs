@@ -8,7 +8,11 @@ use crate::{
 };
 use futures_util::Stream;
 use sled::{Db, IVec, Tree};
-use std::{pin::Pin, sync::Arc};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    sync::{Arc, RwLock},
+};
 use tokio::sync::Notify;
 
 use super::BaseRepo;
@@ -52,7 +56,7 @@ pub(crate) struct SledRepo {
     alias_delete_tokens: Tree,
     queue: Tree,
     in_progress_queue: Tree,
-    queue_notifier: Arc<Notify>,
+    queue_notifier: Arc<RwLock<HashMap<&'static str, Arc<Notify>>>>,
     db: Db,
 }
 
@@ -71,7 +75,7 @@ impl SledRepo {
             alias_delete_tokens: db.open_tree("pict-rs-alias-delete-tokens-tree")?,
             queue: db.open_tree("pict-rs-queue-tree")?,
             in_progress_queue: db.open_tree("pict-rs-in-progress-queue-tree")?,
-            queue_notifier: Arc::new(Notify::new()),
+            queue_notifier: Arc::new(RwLock::new(HashMap::new())),
             db,
         })
     }
@@ -89,16 +93,33 @@ impl QueueRepo for SledRepo {
         Ok(opt)
     }
 
-    async fn push(&self, job: Self::Bytes) -> Result<(), Error> {
+    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), Error> {
         let id = self.db.generate_id()?;
-        b!(self.queue, queue.insert(id.to_be_bytes(), job));
-        self.queue_notifier.notify_one();
+        let mut key = queue.as_bytes().to_vec();
+        key.extend(id.to_be_bytes());
+
+        b!(self.queue, queue.insert(key, job));
+
+        if let Some(notifier) = self.queue_notifier.read().unwrap().get(&queue) {
+            notifier.notify_one();
+            return Ok(());
+        }
+
+        self.queue_notifier
+            .write()
+            .unwrap()
+            .entry(queue)
+            .or_insert_with(|| Arc::new(Notify::new()))
+            .notify_one();
+
         Ok(())
     }
 
-    async fn pop(&self, worker_id: Vec<u8>) -> Result<Self::Bytes, Error> {
-        let notify = Arc::clone(&self.queue_notifier);
-
+    async fn pop(
+        &self,
+        queue_name: &'static str,
+        worker_id: Vec<u8>,
+    ) -> Result<Self::Bytes, Error> {
         loop {
             let in_progress_queue = self.in_progress_queue.clone();
 
@@ -106,7 +127,10 @@ impl QueueRepo for SledRepo {
             let job = b!(self.queue, {
                 in_progress_queue.remove(&worker_id)?;
 
-                while let Some((key, job)) = queue.iter().find_map(Result::ok) {
+                while let Some((key, job)) = queue
+                    .scan_prefix(queue_name.as_bytes())
+                    .find_map(Result::ok)
+                {
                     in_progress_queue.insert(&worker_id, &job)?;
 
                     if queue.remove(key)?.is_some() {
@@ -123,6 +147,23 @@ impl QueueRepo for SledRepo {
                 return Ok(job);
             }
 
+            let opt = self
+                .queue_notifier
+                .read()
+                .unwrap()
+                .get(&queue_name)
+                .map(Arc::clone);
+
+            let notify = if let Some(notify) = opt {
+                notify
+            } else {
+                let mut guard = self.queue_notifier.write().unwrap();
+                let entry = guard
+                    .entry(queue_name)
+                    .or_insert_with(|| Arc::new(Notify::new()));
+                Arc::clone(entry)
+            };
+
             notify.notified().await
         }
     }
@@ -131,21 +172,21 @@ impl QueueRepo for SledRepo {
 #[async_trait::async_trait(?Send)]
 impl SettingsRepo for SledRepo {
     #[tracing::instrument(skip(value))]
-    async fn set(&self, key: &'static [u8], value: Self::Bytes) -> Result<(), Error> {
+    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), Error> {
         b!(self.settings, settings.insert(key, value));
 
         Ok(())
     }
 
     #[tracing::instrument]
-    async fn get(&self, key: &'static [u8]) -> Result<Option<Self::Bytes>, Error> {
+    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, Error> {
         let opt = b!(self.settings, settings.get(key));
 
         Ok(opt)
     }
 
     #[tracing::instrument]
-    async fn remove(&self, key: &'static [u8]) -> Result<(), Error> {
+    async fn remove(&self, key: &'static str) -> Result<(), Error> {
         b!(self.settings, settings.remove(key));
 
         Ok(())

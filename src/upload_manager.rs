@@ -20,7 +20,7 @@ mod session;
 
 pub(super) use session::UploadManagerSession;
 
-const STORE_MIGRATION_PROGRESS: &[u8] = b"store-migration-progress";
+const STORE_MIGRATION_PROGRESS: &str = "store-migration-progress";
 
 #[derive(Clone)]
 pub(crate) struct UploadManager {
