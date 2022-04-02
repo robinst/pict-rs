@@ -431,11 +431,6 @@ impl UploadId {
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.id.as_bytes()[..]
     }
-
-    pub(crate) fn from_bytes(&self, bytes: &[u8]) -> Option<Self> {
-        let id = Uuid::from_slice(bytes).ok()?;
-        Some(Self { id })
-    }
 }
 
 impl From<Uuid> for UploadId {
