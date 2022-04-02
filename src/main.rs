@@ -16,7 +16,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime},
 };
-use tokio::{io::AsyncReadExt, sync::Semaphore};
+use tokio::sync::Semaphore;
 use tracing::{debug, info, instrument};
 use tracing_actix_web::TracingLogger;
 use tracing_awc::Tracing;
@@ -30,6 +30,7 @@ mod error;
 mod exiftool;
 mod ffmpeg;
 mod file;
+mod generate;
 mod ingest;
 mod init_tracing;
 mod magick;
@@ -47,12 +48,10 @@ mod tmp_file;
 mod validate;
 
 use self::{
-    concurrent_processor::CancelSafeProcessor,
     config::{Configuration, ImageFormat, Operation},
     details::Details,
     either::Either,
     error::{Error, UploadError},
-    ffmpeg::{InputFormat, ThumbnailFormat},
     ingest::Session,
     init_tracing::init_tracing,
     magick::details_hint,
@@ -94,6 +93,7 @@ async fn upload<R: FullRepo, S: Store + 'static>(
         .into_iter()
         .filter_map(|i| i.file())
         .collect::<Vec<_>>();
+
     for image in &images {
         if let Some(alias) = image.result.alias() {
             info!("Uploaded {} as {:?}", image.filename, alias);
@@ -295,66 +295,16 @@ async fn process<R: FullRepo, S: Store + 'static>(
         return ranged_file_resp(&**store, identifier, range, details).await;
     }
 
-    let identifier = if let Some(identifier) = repo
-        .still_identifier_from_alias::<S::Identifier>(&alias)
-        .await?
-    {
-        identifier
-    } else {
-        let identifier = repo.identifier(hash.clone()).await?;
-        let permit = PROCESS_SEMAPHORE.acquire().await;
-        let mut reader = crate::ffmpeg::thumbnail(
-            (**store).clone(),
-            identifier,
-            InputFormat::Mp4,
-            ThumbnailFormat::Jpeg,
-        )
-        .await?;
-        let motion_identifier = store.save_async_read(&mut reader).await?;
-        drop(permit);
-
-        repo.relate_motion_identifier(hash.clone(), &motion_identifier)
-            .await?;
-
-        motion_identifier
-    };
-
-    let thumbnail_path2 = thumbnail_path.clone();
-    let identifier2 = identifier.clone();
-    let process_fut = async {
-        let thumbnail_path = thumbnail_path2;
-
-        let permit = PROCESS_SEMAPHORE.acquire().await?;
-
-        let mut processed_reader = crate::magick::process_image_store_read(
-            (**store).clone(),
-            identifier2,
-            thumbnail_args,
-            format,
-        )?;
-
-        let mut vec = Vec::new();
-        processed_reader.read_to_end(&mut vec).await?;
-        let bytes = web::Bytes::from(vec);
-
-        drop(permit);
-
-        let details = Details::from_bytes(bytes.clone(), format.as_hint()).await?;
-
-        let identifier = store.save_bytes(bytes.clone()).await?;
-        repo.relate_details(&identifier, &details).await?;
-        repo.relate_variant_identifier(
-            hash,
-            thumbnail_path.to_string_lossy().to_string(),
-            &identifier,
-        )
-        .await?;
-
-        Ok((details, bytes)) as Result<(Details, web::Bytes), Error>
-    };
-
-    let (details, bytes) =
-        CancelSafeProcessor::new(identifier, thumbnail_path.clone(), process_fut)?.await?;
+    let (details, bytes) = generate::generate(
+        &**repo,
+        &**store,
+        format,
+        alias,
+        thumbnail_path,
+        thumbnail_args,
+        hash,
+    )
+    .await?;
 
     let (builder, stream) = if let Some(web::Header(range_header)) = range {
         if let Some(range) = range::single_bytes_range(&range_header) {

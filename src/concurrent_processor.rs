@@ -1,7 +1,6 @@
 use crate::{
     details::Details,
     error::{Error, UploadError},
-    store::Identifier,
 };
 use actix_web::web;
 use dashmap::{mapref::entry::Entry, DashMap};
@@ -42,10 +41,8 @@ impl<F> CancelSafeProcessor<F>
 where
     F: Future<Output = Result<(Details, web::Bytes), Error>>,
 {
-    pub(super) fn new<I: Identifier>(identifier: I, path: PathBuf, fut: F) -> Result<Self, Error> {
-        let id_bytes = identifier.to_bytes()?;
-
-        let key = (id_bytes, path.clone());
+    pub(super) fn new(hash: &[u8], path: PathBuf, fut: F) -> Self {
+        let key = (hash.to_vec(), path.clone());
 
         let entry = PROCESS_MAP.entry(key.clone());
 
@@ -54,7 +51,7 @@ where
                 vacant.insert(Vec::new());
                 let span = tracing::info_span!(
                     "Processing image",
-                    identifier = &tracing::field::debug(&identifier),
+                    hash = &tracing::field::debug(&hash),
                     path = &tracing::field::debug(&path),
                     completed = &tracing::field::Empty,
                 );
@@ -65,21 +62,21 @@ where
                 occupied.get_mut().push(tx);
                 let span = tracing::info_span!(
                     "Waiting for processed image",
-                    identifier = &tracing::field::debug(&identifier),
+                    hash = &tracing::field::debug(&hash),
                     path = &tracing::field::debug(&path),
                 );
                 (Some(rx), span)
             }
         };
 
-        Ok(CancelSafeProcessor {
+        CancelSafeProcessor {
             cancel_token: CancelToken {
                 span,
                 key,
                 receiver,
             },
             fut,
-        })
+        }
     }
 }
 

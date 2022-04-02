@@ -114,7 +114,7 @@ pub(crate) async fn process_cleanup<R: FullRepo, S: Store>(repo: R, store: S, wo
     process_jobs(&repo, &store, worker_id, cleanup::perform).await
 }
 
-pub(crate) async fn process_images<R: FullRepo + 'static, S: Store>(
+pub(crate) async fn process_images<R: FullRepo + 'static, S: Store + 'static>(
     repo: R,
     store: S,
     worker_id: String,

@@ -17,7 +17,7 @@ pub(super) fn perform<'a, R, S>(
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
     R: FullRepo + 'static,
-    S: Store,
+    S: Store + 'static,
 {
     Box::pin(async move {
         match serde_json::from_slice(job) {
@@ -114,7 +114,7 @@ where
     Ok(())
 }
 
-async fn generate<R, S>(
+async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
     target_format: ImageFormat,
@@ -122,5 +122,27 @@ async fn generate<R, S>(
     process_path: PathBuf,
     process_args: Vec<String>,
 ) -> Result<(), Error> {
-    unimplemented!("do this")
+    let hash = repo.hash(&source).await?;
+
+    let path_string = process_path.to_string_lossy().to_string();
+    let identifier_opt = repo
+        .variant_identifier::<S::Identifier>(hash.clone(), path_string)
+        .await?;
+
+    if identifier_opt.is_some() {
+        return Ok(());
+    }
+
+    crate::generate::generate(
+        repo,
+        store,
+        target_format,
+        source,
+        process_path,
+        process_args,
+        hash,
+    )
+    .await?;
+
+    Ok(())
 }

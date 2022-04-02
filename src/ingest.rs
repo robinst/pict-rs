@@ -7,15 +7,11 @@ use crate::{
 };
 use actix_web::web::{Bytes, BytesMut};
 use futures_util::{Stream, StreamExt};
-use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
-use tokio::sync::Semaphore;
 use tracing::debug;
 
 mod hasher;
 use hasher::Hasher;
-
-static PROCESS_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(num_cpus::get()));
 
 pub(crate) struct Session<R, S>
 where
@@ -39,7 +35,7 @@ where
     R: FullRepo + 'static,
     S: Store,
 {
-    let permit = PROCESS_SEMAPHORE.acquire().await;
+    let permit = crate::PROCESS_SEMAPHORE.acquire().await;
 
     let mut bytes_mut = BytesMut::new();
 
