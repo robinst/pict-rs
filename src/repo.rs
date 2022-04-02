@@ -1,5 +1,6 @@
 use crate::{config, details::Details, error::Error, store::Identifier};
 use futures_util::Stream;
+use std::fmt::Debug;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -40,8 +41,49 @@ pub(crate) enum UploadResult {
     Failure { message: String },
 }
 
+#[async_trait::async_trait(?Send)]
+pub(crate) trait FullRepo:
+    UploadRepo
+    + SettingsRepo
+    + IdentifierRepo
+    + AliasRepo
+    + QueueRepo
+    + HashRepo
+    + Send
+    + Sync
+    + Clone
+    + Debug
+{
+    async fn identifier_from_alias<I: Identifier + 'static>(
+        &self,
+        alias: &Alias,
+    ) -> Result<I, Error> {
+        let hash = self.hash(alias).await?;
+        self.identifier(hash).await
+    }
+
+    async fn aliases_from_alias(&self, alias: &Alias) -> Result<Vec<Alias>, Error> {
+        let hash = self.hash(alias).await?;
+        self.aliases(hash).await
+    }
+
+    async fn still_identifier_from_alias<I: Identifier + 'static>(
+        &self,
+        alias: &Alias,
+    ) -> Result<Option<I>, Error> {
+        let hash = self.hash(alias).await?;
+        let identifier = self.identifier::<I>(hash.clone()).await?;
+
+        match self.details(&identifier).await? {
+            Some(details) if details.is_motion() => self.motion_identifier::<I>(hash).await,
+            Some(_) => Ok(Some(identifier)),
+            None => Ok(None),
+        }
+    }
+}
+
 pub(crate) trait BaseRepo {
-    type Bytes: AsRef<[u8]> + From<Vec<u8>>;
+    type Bytes: AsRef<[u8]> + From<Vec<u8>> + Clone;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -396,12 +438,26 @@ impl UploadId {
     }
 }
 
+impl From<Uuid> for UploadId {
+    fn from(id: Uuid) -> Self {
+        Self { id }
+    }
+}
+
 impl std::fmt::Display for MaybeUuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Uuid(id) => write!(f, "{}", id),
             Self::Name(name) => write!(f, "{}", name),
         }
+    }
+}
+
+impl std::str::FromStr for DeleteToken {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(DeleteToken::from_existing(s))
     }
 }
 

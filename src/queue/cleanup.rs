@@ -1,7 +1,8 @@
 use crate::{
-    error::Error,
-    queue::{Cleanup, LocalBoxFuture, CLEANUP_QUEUE},
-    repo::{AliasRepo, HashRepo, IdentifierRepo, QueueRepo},
+    error::{Error, UploadError},
+    queue::{Cleanup, LocalBoxFuture},
+    repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo},
+    serde_str::Serde,
     store::{Identifier, Store},
 };
 use tracing::error;
@@ -12,17 +13,27 @@ pub(super) fn perform<'a, R, S>(
     job: &'a [u8],
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
-    R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
+    R: FullRepo,
     S: Store,
 {
     Box::pin(async move {
         match serde_json::from_slice(job) {
             Ok(job) => match job {
-                Cleanup::CleanupHash { hash: in_hash } => hash::<R, S>(repo, in_hash).await?,
-                Cleanup::CleanupIdentifier {
+                Cleanup::Hash { hash: in_hash } => hash::<R, S>(repo, in_hash).await?,
+                Cleanup::Identifier {
                     identifier: in_identifier,
                 } => identifier(repo, &store, in_identifier).await?,
+                Cleanup::Alias {
+                    alias: stored_alias,
+                    token,
+                } => {
+                    alias(
+                        repo,
+                        Serde::into_inner(stored_alias),
+                        Serde::into_inner(token),
+                    )
+                    .await?
+                }
             },
             Err(e) => {
                 tracing::warn!("Invalid job: {}", e);
@@ -36,8 +47,7 @@ where
 #[tracing::instrument(skip(repo, store))]
 async fn identifier<R, S>(repo: &R, store: &S, identifier: Vec<u8>) -> Result<(), Error>
 where
-    R: QueueRepo + HashRepo + IdentifierRepo,
-    R::Bytes: Clone,
+    R: FullRepo,
     S: Store,
 {
     let identifier = S::Identifier::from_bytes(identifier)?;
@@ -67,8 +77,7 @@ where
 #[tracing::instrument(skip(repo))]
 async fn hash<R, S>(repo: &R, hash: Vec<u8>) -> Result<(), Error>
 where
-    R: QueueRepo + AliasRepo + HashRepo + IdentifierRepo,
-    R::Bytes: Clone,
+    R: FullRepo,
     S: Store,
 {
     let hash: R::Bytes = hash.into();
@@ -89,13 +98,31 @@ where
     idents.extend(repo.motion_identifier(hash.clone()).await?);
 
     for identifier in idents {
-        if let Ok(identifier) = identifier.to_bytes() {
-            let job = serde_json::to_vec(&Cleanup::CleanupIdentifier { identifier })?;
-            repo.push(CLEANUP_QUEUE, job.into()).await?;
-        }
+        let _ = crate::queue::cleanup_identifier(repo, identifier).await;
     }
 
     HashRepo::cleanup(repo, hash).await?;
+
+    Ok(())
+}
+
+async fn alias<R>(repo: &R, alias: Alias, token: DeleteToken) -> Result<(), Error>
+where
+    R: FullRepo,
+{
+    let saved_delete_token = repo.delete_token(&alias).await?;
+    if saved_delete_token != token {
+        return Err(UploadError::InvalidToken.into());
+    }
+
+    let hash = repo.hash(&alias).await?;
+
+    AliasRepo::cleanup(repo, &alias).await?;
+    repo.remove_alias(hash.clone(), &alias).await?;
+
+    if repo.aliases(hash.clone()).await?.is_empty() {
+        crate::queue::cleanup_hash(repo, hash).await?;
+    }
 
     Ok(())
 }

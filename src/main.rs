@@ -30,6 +30,7 @@ mod error;
 mod exiftool;
 mod ffmpeg;
 mod file;
+mod ingest;
 mod init_tracing;
 mod magick;
 mod middleware;
@@ -43,10 +44,7 @@ mod serde_str;
 mod store;
 mod stream;
 mod tmp_file;
-mod upload_manager;
 mod validate;
-
-use crate::stream::StreamTimeout;
 
 use self::{
     concurrent_processor::CancelSafeProcessor,
@@ -54,15 +52,16 @@ use self::{
     details::Details,
     either::Either,
     error::{Error, UploadError},
+    ffmpeg::{InputFormat, ThumbnailFormat},
+    ingest::Session,
     init_tracing::init_tracing,
     magick::details_hint,
     middleware::{Deadline, Internal},
     migrate::LatestDb,
-    repo::{Alias, DeleteToken, Repo},
+    repo::{Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, Repo, SettingsRepo},
     serde_str::Serde,
-    store::{file_store::FileStore, object_store::ObjectStore, Store},
-    stream::StreamLimit,
-    upload_manager::{UploadManager, UploadManagerSession},
+    store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
+    stream::{StreamLimit, StreamTimeout},
 };
 
 const MEGABYTES: usize = 1024 * 1024;
@@ -78,10 +77,10 @@ static PROCESS_SEMAPHORE: Lazy<Semaphore> =
     Lazy::new(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
 
 /// Handle responding to succesful uploads
-#[instrument(name = "Uploaded files", skip(value, manager))]
-async fn upload<S: Store>(
-    value: Value<UploadManagerSession<S>>,
-    manager: web::Data<UploadManager>,
+#[instrument(name = "Uploaded files", skip(value))]
+async fn upload<R: FullRepo, S: Store + 'static>(
+    value: Value<Session<R, S>>,
+    repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let images = value
@@ -100,8 +99,8 @@ async fn upload<S: Store>(
             info!("Uploaded {} as {:?}", image.filename, alias);
             let delete_token = image.result.delete_token().await?;
 
-            let identifier = manager.identifier_from_alias::<S>(alias).await?;
-            let details = manager.details(&identifier).await?;
+            let identifier = repo.identifier_from_alias::<S::Identifier>(alias).await?;
+            let details = repo.details(&identifier).await?;
 
             let details = if let Some(details) = details {
                 debug!("details exist");
@@ -112,7 +111,7 @@ async fn upload<S: Store>(
                 let new_details =
                     Details::from_store((**store).clone(), identifier.clone(), hint).await?;
                 debug!("storing details for {:?}", identifier);
-                manager.store_details(&identifier, &new_details).await?;
+                repo.relate_details(&identifier, &new_details).await?;
                 debug!("stored");
                 new_details
             };
@@ -125,8 +124,8 @@ async fn upload<S: Store>(
         }
     }
 
-    for image in images {
-        image.result.succeed();
+    for mut image in images {
+        image.result.disarm();
     }
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
@@ -140,10 +139,10 @@ struct UrlQuery {
 }
 
 /// download an image from a URL
-#[instrument(name = "Downloading file", skip(client, manager))]
-async fn download<S: Store + 'static>(
+#[instrument(name = "Downloading file", skip(client, repo))]
+async fn download<R: FullRepo + 'static, S: Store + 'static>(
     client: web::Data<Client>,
-    manager: web::Data<UploadManager>,
+    repo: web::Data<R>,
     store: web::Data<S>,
     query: web::Query<UrlQuery>,
 ) -> Result<HttpResponse, Error> {
@@ -157,31 +156,25 @@ async fn download<S: Store + 'static>(
         .map_err(Error::from)
         .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
 
-    futures_util::pin_mut!(stream);
+    let mut session = ingest::ingest(&**repo, &**store, stream, None, true).await?;
 
-    let permit = PROCESS_SEMAPHORE.acquire().await?;
-    let session = manager
-        .session((**store).clone())
-        .upload(CONFIG.media.enable_silent_video, stream)
-        .await?;
-    let alias = session.alias().unwrap().to_owned();
-    drop(permit);
+    let alias = session.alias().expect("alias should exist").to_owned();
     let delete_token = session.delete_token().await?;
 
-    let identifier = manager.identifier_from_alias::<S>(&alias).await?;
+    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 
-    let details = manager.details(&identifier).await?;
+    let details = repo.details(&identifier).await?;
 
     let details = if let Some(details) = details {
         details
     } else {
         let hint = details_hint(&alias);
         let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        manager.store_details(&identifier, &new_details).await?;
+        repo.relate_details(&identifier, &new_details).await?;
         new_details
     };
 
-    session.succeed();
+    session.disarm();
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
         "files": [{
@@ -193,9 +186,9 @@ async fn download<S: Store + 'static>(
 }
 
 /// Delete aliases and files
-#[instrument(name = "Deleting file", skip(manager))]
-async fn delete(
-    manager: web::Data<UploadManager>,
+#[instrument(name = "Deleting file", skip(repo))]
+async fn delete<R: FullRepo>(
+    repo: web::Data<R>,
     path_entries: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
     let (token, alias) = path_entries.into_inner();
@@ -203,7 +196,7 @@ async fn delete(
     let token = DeleteToken::from_existing(&token);
     let alias = Alias::from_existing(&alias);
 
-    manager.delete(alias, token).await?;
+    queue::cleanup_alias(&**repo, alias, token).await?;
 
     Ok(HttpResponse::NoContent().finish())
 }
@@ -249,20 +242,21 @@ fn prepare_process(
     Ok((format, alias, thumbnail_path, thumbnail_args))
 }
 
-#[instrument(name = "Fetching derived details", skip(manager))]
-async fn process_details<S: Store>(
+#[instrument(name = "Fetching derived details", skip(repo))]
+async fn process_details<R: FullRepo, S: Store>(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    manager: web::Data<UploadManager>,
+    repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
     let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
 
-    let identifier = manager
-        .variant_identifier::<S>(&alias, &thumbnail_path)
+    let hash = repo.hash(&alias).await?;
+    let identifier = repo
+        .variant_identifier::<S::Identifier>(hash, thumbnail_path.to_string_lossy().to_string())
         .await?
         .ok_or(UploadError::MissingAlias)?;
 
-    let details = manager.details(&identifier).await?;
+    let details = repo.details(&identifier).await?;
 
     let details = details.ok_or(UploadError::NoFiles)?;
 
@@ -270,38 +264,60 @@ async fn process_details<S: Store>(
 }
 
 /// Process files
-#[instrument(name = "Serving processed image", skip(manager))]
-async fn process<S: Store + 'static>(
+#[instrument(name = "Serving processed image", skip(repo))]
+async fn process<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    manager: web::Data<UploadManager>,
+    repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let (format, alias, thumbnail_path, thumbnail_args) = prepare_process(query, ext.as_str())?;
 
-    let identifier_opt = manager
-        .variant_identifier::<S>(&alias, &thumbnail_path)
+    let path_string = thumbnail_path.to_string_lossy().to_string();
+    let hash = repo.hash(&alias).await?;
+    let identifier_opt = repo
+        .variant_identifier::<S::Identifier>(hash.clone(), path_string)
         .await?;
 
     if let Some(identifier) = identifier_opt {
-        let details_opt = manager.details(&identifier).await?;
+        let details_opt = repo.details(&identifier).await?;
 
         let details = if let Some(details) = details_opt {
             details
         } else {
             let hint = details_hint(&alias);
             let details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-            manager.store_details(&identifier, &details).await?;
+            repo.relate_details(&identifier, &details).await?;
             details
         };
 
         return ranged_file_resp(&**store, identifier, range, details).await;
     }
 
-    let identifier = manager
-        .still_identifier_from_alias((**store).clone(), &alias)
+    let identifier = if let Some(identifier) = repo
+        .still_identifier_from_alias::<S::Identifier>(&alias)
+        .await?
+    {
+        identifier
+    } else {
+        let identifier = repo.identifier(hash.clone()).await?;
+        let permit = PROCESS_SEMAPHORE.acquire().await;
+        let mut reader = crate::ffmpeg::thumbnail(
+            (**store).clone(),
+            identifier,
+            InputFormat::Mp4,
+            ThumbnailFormat::Jpeg,
+        )
         .await?;
+        let motion_identifier = store.save_async_read(&mut reader).await?;
+        drop(permit);
+
+        repo.relate_motion_identifier(hash.clone(), &motion_identifier)
+            .await?;
+
+        motion_identifier
+    };
 
     let thumbnail_path2 = thumbnail_path.clone();
     let identifier2 = identifier.clone();
@@ -326,10 +342,13 @@ async fn process<S: Store + 'static>(
         let details = Details::from_bytes(bytes.clone(), format.as_hint()).await?;
 
         let identifier = store.save_bytes(bytes.clone()).await?;
-        manager.store_details(&identifier, &details).await?;
-        manager
-            .store_variant(&alias, &thumbnail_path, &identifier)
-            .await?;
+        repo.relate_details(&identifier, &details).await?;
+        repo.relate_variant_identifier(
+            hash,
+            thumbnail_path.to_string_lossy().to_string(),
+            &identifier,
+        )
+        .await?;
 
         Ok((details, bytes)) as Result<(Details, web::Bytes), Error>
     };
@@ -370,25 +389,25 @@ async fn process<S: Store + 'static>(
 }
 
 /// Fetch file details
-#[instrument(name = "Fetching details", skip(manager))]
-async fn details<S: Store + 'static>(
+#[instrument(name = "Fetching details", skip(repo))]
+async fn details<R: FullRepo, S: Store + 'static>(
     alias: web::Path<String>,
-    manager: web::Data<UploadManager>,
+    repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
     let alias = Alias::from_existing(&alias);
 
-    let identifier = manager.identifier_from_alias::<S>(&alias).await?;
+    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 
-    let details = manager.details(&identifier).await?;
+    let details = repo.details(&identifier).await?;
 
     let details = if let Some(details) = details {
         details
     } else {
         let hint = details_hint(&alias);
         let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        manager.store_details(&identifier, &new_details).await?;
+        repo.relate_details(&identifier, &new_details).await?;
         new_details
     };
 
@@ -396,25 +415,25 @@ async fn details<S: Store + 'static>(
 }
 
 /// Serve files
-#[instrument(name = "Serving file", skip(manager))]
-async fn serve<S: Store + 'static>(
+#[instrument(name = "Serving file", skip(repo))]
+async fn serve<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<String>,
-    manager: web::Data<UploadManager>,
+    repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
     let alias = Alias::from_existing(&alias);
-    let identifier = manager.identifier_from_alias::<S>(&alias).await?;
+    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 
-    let details = manager.details(&identifier).await?;
+    let details = repo.details(&identifier).await?;
 
     let details = if let Some(details) = details {
         details
     } else {
         let hint = details_hint(&alias);
         let details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        manager.store_details(&identifier, &details).await?;
+        repo.relate_details(&identifier, &details).await?;
         details
     };
 
@@ -506,18 +525,17 @@ struct AliasQuery {
     alias: String,
 }
 
-#[instrument(name = "Purging file", skip(upload_manager))]
-async fn purge(
+#[instrument(name = "Purging file", skip(repo))]
+async fn purge<R: FullRepo>(
     query: web::Query<AliasQuery>,
-    upload_manager: web::Data<UploadManager>,
+    repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
     let alias = Alias::from_existing(&query.alias);
-    let aliases = upload_manager.aliases_by_alias(&alias).await?;
+    let aliases = repo.aliases_from_alias(&alias).await?;
 
     for alias in aliases.iter() {
-        upload_manager
-            .delete_without_token(alias.to_owned())
-            .await?;
+        let token = repo.delete_token(alias).await?;
+        queue::cleanup_alias(&**repo, alias.clone(), token).await?;
     }
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
@@ -526,13 +544,13 @@ async fn purge(
     })))
 }
 
-#[instrument(name = "Fetching aliases", skip(upload_manager))]
-async fn aliases(
+#[instrument(name = "Fetching aliases", skip(repo))]
+async fn aliases<R: FullRepo>(
     query: web::Query<AliasQuery>,
-    upload_manager: web::Data<UploadManager>,
+    repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
     let alias = Alias::from_existing(&query.alias);
-    let aliases = upload_manager.aliases_by_alias(&alias).await?;
+    let aliases = repo.aliases_from_alias(&alias).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",
@@ -567,14 +585,14 @@ fn next_worker_id() -> String {
     format!("{}-{}", CONFIG.server.worker_id, next_id)
 }
 
-async fn launch<S: Store + Clone + 'static>(
-    manager: UploadManager,
+async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
+    repo: R,
     store: S,
 ) -> color_eyre::Result<()> {
     // Create a new Multipart Form validator
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
-    let manager2 = manager.clone();
+    let repo2 = repo.clone();
     let store2 = store.clone();
     let form = Form::new()
         .max_files(10)
@@ -583,33 +601,24 @@ async fn launch<S: Store + Clone + 'static>(
         .field(
             "images",
             Field::array(Field::file(move |filename, _, stream| {
+                let repo = repo2.clone();
                 let store = store2.clone();
-                let manager = manager2.clone();
 
                 let span = tracing::info_span!("file-upload", ?filename);
 
-                async move {
-                    let permit = PROCESS_SEMAPHORE.acquire().await?;
+                let stream = stream.map_err(Error::from);
 
-                    let res = manager
-                        .session(store)
-                        .upload(
-                            CONFIG.media.enable_silent_video,
-                            stream.map_err(Error::from),
-                        )
-                        .await;
-
-                    drop(permit);
-                    res
-                }
-                .instrument(span)
+                Box::pin(
+                    async move { ingest::ingest(&repo, &store, stream, None, true).await }
+                        .instrument(span),
+                )
             })),
         );
 
     // Create a new Multipart Form validator for internal imports
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it
-    let manager2 = manager.clone();
+    let repo2 = repo.clone();
     let store2 = store.clone();
     let import_form = Form::new()
         .max_files(10)
@@ -618,42 +627,40 @@ async fn launch<S: Store + Clone + 'static>(
         .field(
             "images",
             Field::array(Field::file(move |filename, _, stream| {
+                let repo = repo2.clone();
                 let store = store2.clone();
-                let manager = manager2.clone();
 
                 let span = tracing::info_span!("file-import", ?filename);
 
-                async move {
-                    let permit = PROCESS_SEMAPHORE.acquire().await?;
+                let stream = stream.map_err(Error::from);
 
-                    let res = manager
-                        .session(store)
-                        .import(
-                            filename,
+                Box::pin(
+                    async move {
+                        ingest::ingest(
+                            &repo,
+                            &store,
+                            stream,
+                            Some(Alias::from_existing(&filename)),
                             !CONFIG.media.skip_validate_imports,
-                            CONFIG.media.enable_silent_video,
-                            stream.map_err(Error::from),
                         )
-                        .await;
-
-                    drop(permit);
-                    res
-                }
-                .instrument(span)
+                        .await
+                    }
+                    .instrument(span),
+                )
             })),
         );
 
     HttpServer::new(move || {
-        let manager = manager.clone();
         let store = store.clone();
+        let repo = repo.clone();
 
         actix_rt::spawn(queue::process_cleanup(
-            manager.repo().clone(),
+            repo.clone(),
             store.clone(),
             next_worker_id(),
         ));
         actix_rt::spawn(queue::process_images(
-            manager.repo().clone(),
+            repo.clone(),
             store.clone(),
             next_worker_id(),
         ));
@@ -661,8 +668,8 @@ async fn launch<S: Store + Clone + 'static>(
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
+            .app_data(web::Data::new(repo))
             .app_data(web::Data::new(store))
-            .app_data(web::Data::new(manager))
             .app_data(web::Data::new(build_client()))
             .service(
                 web::scope("/image")
@@ -670,25 +677,27 @@ async fn launch<S: Store + Clone + 'static>(
                         web::resource("")
                             .guard(guard::Post())
                             .wrap(form.clone())
-                            .route(web::post().to(upload::<S>)),
+                            .route(web::post().to(upload::<R, S>)),
                     )
-                    .service(web::resource("/download").route(web::get().to(download::<S>)))
+                    .service(web::resource("/download").route(web::get().to(download::<R, S>)))
                     .service(
                         web::resource("/delete/{delete_token}/{filename}")
-                            .route(web::delete().to(delete))
-                            .route(web::get().to(delete)),
+                            .route(web::delete().to(delete::<R>))
+                            .route(web::get().to(delete::<R>)),
                     )
-                    .service(web::resource("/original/{filename}").route(web::get().to(serve::<S>)))
-                    .service(web::resource("/process.{ext}").route(web::get().to(process::<S>)))
+                    .service(
+                        web::resource("/original/{filename}").route(web::get().to(serve::<R, S>)),
+                    )
+                    .service(web::resource("/process.{ext}").route(web::get().to(process::<R, S>)))
                     .service(
                         web::scope("/details")
                             .service(
                                 web::resource("/original/{filename}")
-                                    .route(web::get().to(details::<S>)),
+                                    .route(web::get().to(details::<R, S>)),
                             )
                             .service(
                                 web::resource("/process.{ext}")
-                                    .route(web::get().to(process_details::<S>)),
+                                    .route(web::get().to(process_details::<R, S>)),
                             ),
                     ),
             )
@@ -700,10 +709,10 @@ async fn launch<S: Store + Clone + 'static>(
                     .service(
                         web::resource("/import")
                             .wrap(import_form.clone())
-                            .route(web::post().to(upload::<S>)),
+                            .route(web::post().to(upload::<R, S>)),
                     )
-                    .service(web::resource("/purge").route(web::post().to(purge)))
-                    .service(web::resource("/aliases").route(web::get().to(aliases))),
+                    .service(web::resource("/purge").route(web::post().to(purge::<R>)))
+                    .service(web::resource("/aliases").route(web::get().to(aliases::<R>))),
             )
     })
     .bind(CONFIG.server.address)?
@@ -715,19 +724,16 @@ async fn launch<S: Store + Clone + 'static>(
     Ok(())
 }
 
-async fn migrate_inner<S1>(
-    manager: &UploadManager,
-    repo: &Repo,
-    from: S1,
-    to: &config::Store,
-) -> color_eyre::Result<()>
+async fn migrate_inner<S1>(repo: &Repo, from: S1, to: &config::Store) -> color_eyre::Result<()>
 where
     S1: Store,
 {
     match to {
         config::Store::Filesystem(config::Filesystem { path }) => {
             let to = FileStore::build(path.clone(), repo.clone()).await?;
-            manager.migrate_store::<S1, FileStore>(from, to).await?;
+            match repo {
+                Repo::Sled(repo) => migrate_store(repo, from, to).await?,
+            }
         }
         config::Store::ObjectStorage(config::ObjectStorage {
             bucket_name,
@@ -749,7 +755,9 @@ where
             )
             .await?;
 
-            manager.migrate_store::<S1, ObjectStore>(from, to).await?;
+            match repo {
+                Repo::Sled(repo) => migrate_store(repo, from, to).await?,
+            }
         }
     }
 
@@ -765,15 +773,13 @@ async fn main() -> color_eyre::Result<()> {
     let db = LatestDb::exists(CONFIG.old_db.path.clone()).migrate()?;
     repo.from_db(db).await?;
 
-    let manager = UploadManager::new(repo.clone(), CONFIG.media.format).await?;
-
     match (*OPERATION).clone() {
         Operation::Run => (),
         Operation::MigrateStore { from, to } => {
             match from {
                 config::Store::Filesystem(config::Filesystem { path }) => {
                     let from = FileStore::build(path.clone(), repo.clone()).await?;
-                    migrate_inner(&manager, &repo, from, &to).await?;
+                    migrate_inner(&repo, from, &to).await?;
                 }
                 config::Store::ObjectStorage(config::ObjectStorage {
                     bucket_name,
@@ -795,7 +801,7 @@ async fn main() -> color_eyre::Result<()> {
                     )
                     .await?;
 
-                    migrate_inner(&manager, &repo, from, &to).await?;
+                    migrate_inner(&repo, from, &to).await?;
                 }
             }
 
@@ -805,8 +811,10 @@ async fn main() -> color_eyre::Result<()> {
 
     match CONFIG.store.clone() {
         config::Store::Filesystem(config::Filesystem { path }) => {
-            let store = FileStore::build(path, repo).await?;
-            launch(manager, store).await
+            let store = FileStore::build(path, repo.clone()).await?;
+            match repo {
+                Repo::Sled(sled_repo) => launch(sled_repo, store).await,
+            }
         }
         config::Store::ObjectStorage(config::ObjectStorage {
             bucket_name,
@@ -823,12 +831,92 @@ async fn main() -> color_eyre::Result<()> {
                 Some(secret_key),
                 security_token,
                 session_token,
-                repo,
+                repo.clone(),
                 build_reqwest_client()?,
             )
             .await?;
 
-            launch(manager, store).await
+            match repo {
+                Repo::Sled(sled_repo) => launch(sled_repo, store).await,
+            }
         }
     }
+}
+
+const STORE_MIGRATION_PROGRESS: &str = "store-migration-progress";
+
+async fn migrate_store<R, S1, S2>(repo: &R, from: S1, to: S2) -> Result<(), Error>
+where
+    S1: Store,
+    S2: Store,
+    R: IdentifierRepo + HashRepo + SettingsRepo,
+{
+    let stream = repo.hashes().await;
+    let mut stream = Box::pin(stream);
+
+    while let Some(hash) = stream.next().await {
+        let hash = hash?;
+        if let Some(identifier) = repo
+            .motion_identifier(hash.as_ref().to_vec().into())
+            .await?
+        {
+            let new_identifier = migrate_file(&from, &to, &identifier).await?;
+            migrate_details(repo, identifier, &new_identifier).await?;
+            repo.relate_motion_identifier(hash.as_ref().to_vec().into(), &new_identifier)
+                .await?;
+        }
+
+        for (variant, identifier) in repo.variants(hash.as_ref().to_vec().into()).await? {
+            let new_identifier = migrate_file(&from, &to, &identifier).await?;
+            migrate_details(repo, identifier, &new_identifier).await?;
+            repo.relate_variant_identifier(hash.as_ref().to_vec().into(), variant, &new_identifier)
+                .await?;
+        }
+
+        let identifier = repo.identifier(hash.as_ref().to_vec().into()).await?;
+        let new_identifier = migrate_file(&from, &to, &identifier).await?;
+        migrate_details(repo, identifier, &new_identifier).await?;
+        repo.relate_identifier(hash.as_ref().to_vec().into(), &new_identifier)
+            .await?;
+
+        repo.set(STORE_MIGRATION_PROGRESS, hash.as_ref().to_vec().into())
+            .await?;
+    }
+
+    // clean up the migration key to avoid interfering with future migrations
+    repo.remove(STORE_MIGRATION_PROGRESS).await?;
+
+    Ok(())
+}
+
+async fn migrate_file<S1, S2>(
+    from: &S1,
+    to: &S2,
+    identifier: &S1::Identifier,
+) -> Result<S2::Identifier, Error>
+where
+    S1: Store,
+    S2: Store,
+{
+    let stream = from.to_stream(identifier, None, None).await?;
+    futures_util::pin_mut!(stream);
+    let mut reader = tokio_util::io::StreamReader::new(stream);
+
+    let new_identifier = to.save_async_read(&mut reader).await?;
+
+    Ok(new_identifier)
+}
+
+async fn migrate_details<R, I1, I2>(repo: &R, from: I1, to: &I2) -> Result<(), Error>
+where
+    R: IdentifierRepo,
+    I1: Identifier,
+    I2: Identifier,
+{
+    if let Some(details) = repo.details(&from).await? {
+        repo.relate_details(to, &details).await?;
+        repo.cleanup(&from).await?;
+    }
+
+    Ok(())
 }

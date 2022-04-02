@@ -1,8 +1,8 @@
 use crate::{
     error::Error,
     repo::{
-        Alias, AliasRepo, AlreadyExists, DeleteToken, Details, HashRepo, Identifier,
-        IdentifierRepo, QueueRepo, SettingsRepo,
+        Alias, AliasRepo, AlreadyExists, BaseRepo, DeleteToken, Details, FullRepo, HashRepo,
+        Identifier, IdentifierRepo, QueueRepo, SettingsRepo, UploadId, UploadRepo, UploadResult,
     },
     stream::from_iterator,
 };
@@ -14,8 +14,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tokio::sync::Notify;
-
-use super::BaseRepo;
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -83,6 +81,23 @@ impl SledRepo {
 
 impl BaseRepo for SledRepo {
     type Bytes = IVec;
+}
+
+impl FullRepo for SledRepo {}
+
+#[async_trait::async_trait(?Send)]
+impl UploadRepo for SledRepo {
+    async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, Error> {
+        unimplemented!("DO THIS")
+    }
+
+    async fn claim(&self, upload_id: UploadId) -> Result<(), Error> {
+        unimplemented!("DO THIS")
+    }
+
+    async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), Error> {
+        unimplemented!("DO THIS")
+    }
 }
 
 #[async_trait::async_trait(?Send)]

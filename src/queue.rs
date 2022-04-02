@@ -1,9 +1,9 @@
 use crate::{
     config::ImageFormat,
     error::Error,
-    repo::{Alias, AliasRepo, HashRepo, IdentifierRepo, QueueRepo, Repo},
+    repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, QueueRepo},
     serde_str::Serde,
-    store::Store,
+    store::{Identifier, Store},
 };
 use std::{future::Future, path::PathBuf, pin::Pin};
 use uuid::Uuid;
@@ -16,8 +16,16 @@ const PROCESS_QUEUE: &str = "process";
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 enum Cleanup {
-    CleanupHash { hash: Vec<u8> },
-    CleanupIdentifier { identifier: Vec<u8> },
+    Hash {
+        hash: Vec<u8>,
+    },
+    Identifier {
+        identifier: Vec<u8>,
+    },
+    Alias {
+        alias: Serde<Alias>,
+        token: Serde<DeleteToken>,
+    },
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -36,9 +44,33 @@ enum Process {
     },
 }
 
-pub(crate) async fn queue_cleanup<R: QueueRepo>(repo: &R, hash: R::Bytes) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::CleanupHash {
+pub(crate) async fn cleanup_alias<R: QueueRepo>(
+    repo: &R,
+    alias: Alias,
+    token: DeleteToken,
+) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Cleanup::Alias {
+        alias: Serde::new(alias),
+        token: Serde::new(token),
+    })?;
+    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    Ok(())
+}
+
+pub(crate) async fn cleanup_hash<R: QueueRepo>(repo: &R, hash: R::Bytes) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Cleanup::Hash {
         hash: hash.as_ref().to_vec(),
+    })?;
+    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    Ok(())
+}
+
+pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
+    repo: &R,
+    identifier: I,
+) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Cleanup::Identifier {
+        identifier: identifier.to_bytes()?,
     })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
@@ -78,16 +110,16 @@ pub(crate) async fn queue_generate<R: QueueRepo>(
     Ok(())
 }
 
-pub(crate) async fn process_cleanup<S: Store>(repo: Repo, store: S, worker_id: String) {
-    match repo {
-        Repo::Sled(repo) => process_jobs(&repo, &store, worker_id, cleanup::perform).await,
-    }
+pub(crate) async fn process_cleanup<R: FullRepo, S: Store>(repo: R, store: S, worker_id: String) {
+    process_jobs(&repo, &store, worker_id, cleanup::perform).await
 }
 
-pub(crate) async fn process_images<S: Store>(repo: Repo, store: S, worker_id: String) {
-    match repo {
-        Repo::Sled(repo) => process_jobs(&repo, &store, worker_id, process::perform).await,
-    }
+pub(crate) async fn process_images<R: FullRepo + 'static, S: Store>(
+    repo: R,
+    store: S,
+    worker_id: String,
+) {
+    process_jobs(&repo, &store, worker_id, process::perform).await
 }
 
 type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
