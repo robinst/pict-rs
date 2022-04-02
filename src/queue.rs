@@ -6,6 +6,7 @@ use crate::{
     store::{Identifier, Store},
 };
 use std::{future::Future, path::PathBuf, pin::Pin};
+use tracing::Instrument;
 use uuid::Uuid;
 
 mod cleanup;
@@ -111,7 +112,7 @@ pub(crate) async fn queue_generate<R: QueueRepo>(
 }
 
 pub(crate) async fn process_cleanup<R: FullRepo, S: Store>(repo: R, store: S, worker_id: String) {
-    process_jobs(&repo, &store, worker_id, cleanup::perform).await
+    process_jobs(&repo, &store, worker_id, CLEANUP_QUEUE, cleanup::perform).await
 }
 
 pub(crate) async fn process_images<R: FullRepo + 'static, S: Store + 'static>(
@@ -119,26 +120,25 @@ pub(crate) async fn process_images<R: FullRepo + 'static, S: Store + 'static>(
     store: S,
     worker_id: String,
 ) {
-    process_jobs(&repo, &store, worker_id, process::perform).await
+    process_jobs(&repo, &store, worker_id, PROCESS_QUEUE, process::perform).await
 }
 
 type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-async fn process_jobs<R, S, F>(repo: &R, store: &S, worker_id: String, callback: F)
-where
+async fn process_jobs<R, S, F>(
+    repo: &R,
+    store: &S,
+    worker_id: String,
+    queue: &'static str,
+    callback: F,
+) where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
     R::Bytes: Clone,
     S: Store,
     for<'a> F: Fn(&'a R, &'a S, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
 {
-    if let Ok(Some(job)) = repo.in_progress(worker_id.as_bytes().to_vec()).await {
-        if let Err(e) = (callback)(repo, store, job.as_ref()).await {
-            tracing::warn!("Failed to run previously dropped job: {}", e);
-            tracing::warn!("{:?}", e);
-        }
-    }
     loop {
-        let res = job_loop(repo, store, worker_id.clone(), callback).await;
+        let res = job_loop(repo, store, worker_id.clone(), queue, callback).await;
 
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", e);
@@ -150,7 +150,13 @@ where
     }
 }
 
-async fn job_loop<R, S, F>(repo: &R, store: &S, worker_id: String, callback: F) -> Result<(), Error>
+async fn job_loop<R, S, F>(
+    repo: &R,
+    store: &S,
+    worker_id: String,
+    queue: &'static str,
+    callback: F,
+) -> Result<(), Error>
 where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
     R::Bytes: Clone,
@@ -158,10 +164,12 @@ where
     for<'a> F: Fn(&'a R, &'a S, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
 {
     loop {
-        let bytes = repo
-            .pop(CLEANUP_QUEUE, worker_id.as_bytes().to_vec())
-            .await?;
+        let bytes = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
 
-        (callback)(repo, store, bytes.as_ref()).await?;
+        let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
+
+        span.in_scope(|| (callback)(repo, store, bytes.as_ref()))
+            .instrument(span)
+            .await?;
     }
 }

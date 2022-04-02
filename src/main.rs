@@ -127,6 +127,7 @@ async fn upload<R: FullRepo, S: Store + 'static>(
     for mut image in images {
         image.result.disarm();
     }
+
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
         "files": files
@@ -539,6 +540,8 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
     repo: R,
     store: S,
 ) -> color_eyre::Result<()> {
+    repo.requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
+        .await?;
     // Create a new Multipart Form validator
     //
     // This form is expecting a single array field, 'images' with at most 10 files in it

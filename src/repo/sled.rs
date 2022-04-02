@@ -155,20 +155,60 @@ impl UploadRepo for SledRepo {
 
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for SledRepo {
-    async fn in_progress(&self, worker_id: Vec<u8>) -> Result<Option<Self::Bytes>, Error> {
-        let opt = b!(self.in_progress_queue, in_progress_queue.get(worker_id));
+    #[tracing::instrument(skip_all, fields(worker_id = %String::from_utf8_lossy(&worker_prefix)))]
+    async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), Error> {
+        let vec: Vec<(String, IVec)> = b!(self.in_progress_queue, {
+            let vec = in_progress_queue
+                .scan_prefix(worker_prefix)
+                .values()
+                .filter_map(Result::ok)
+                .filter_map(|ivec| {
+                    let index = ivec.as_ref().iter().enumerate().find_map(|(index, byte)| {
+                        if *byte == 0 {
+                            Some(index)
+                        } else {
+                            None
+                        }
+                    })?;
 
-        Ok(opt)
+                    let (queue, job) = ivec.split_at(index);
+                    if queue.is_empty() || job.len() <= 1 {
+                        return None;
+                    }
+                    let job = &job[1..];
+
+                    Some((String::from_utf8_lossy(queue).to_string(), IVec::from(job)))
+                })
+                .collect::<Vec<(String, IVec)>>();
+
+            Ok(vec) as Result<_, Error>
+        });
+
+        let db = self.db.clone();
+        b!(self.queue, {
+            for (queue_name, job) in vec {
+                let id = db.generate_id()?;
+                let mut key = queue_name.as_bytes().to_vec();
+                key.extend(id.to_be_bytes());
+
+                queue.insert(key, job)?;
+            }
+
+            Ok(()) as Result<(), Error>
+        });
+
+        Ok(())
     }
 
-    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), Error> {
+    #[tracing::instrument(skip(self, job), fields(worker_id = %String::from_utf8_lossy(&job)))]
+    async fn push(&self, queue_name: &'static str, job: Self::Bytes) -> Result<(), Error> {
         let id = self.db.generate_id()?;
-        let mut key = queue.as_bytes().to_vec();
+        let mut key = queue_name.as_bytes().to_vec();
         key.extend(id.to_be_bytes());
 
         b!(self.queue, queue.insert(key, job));
 
-        if let Some(notifier) = self.queue_notifier.read().unwrap().get(&queue) {
+        if let Some(notifier) = self.queue_notifier.read().unwrap().get(&queue_name) {
             notifier.notify_one();
             return Ok(());
         }
@@ -176,13 +216,14 @@ impl QueueRepo for SledRepo {
         self.queue_notifier
             .write()
             .unwrap()
-            .entry(queue)
+            .entry(queue_name)
             .or_insert_with(|| Arc::new(Notify::new()))
             .notify_one();
 
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, worker_id), fields(worker_id = %String::from_utf8_lossy(&worker_id)))]
     async fn pop(
         &self,
         queue_name: &'static str,
@@ -199,7 +240,11 @@ impl QueueRepo for SledRepo {
                     .scan_prefix(queue_name.as_bytes())
                     .find_map(Result::ok)
                 {
-                    in_progress_queue.insert(&worker_id, &job)?;
+                    let mut in_progress_value = queue_name.as_bytes().to_vec();
+                    in_progress_value.push(0);
+                    in_progress_value.extend_from_slice(&job);
+
+                    in_progress_queue.insert(&worker_id, in_progress_value)?;
 
                     if queue.remove(key)?.is_some() {
                         return Ok(Some(job));

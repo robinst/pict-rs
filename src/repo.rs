@@ -97,7 +97,7 @@ pub(crate) trait UploadRepo: BaseRepo {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn in_progress(&self, worker_id: Vec<u8>) -> Result<Option<Self::Bytes>, Error>;
+    async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), Error>;
 
     async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), Error>;
 
