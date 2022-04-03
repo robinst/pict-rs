@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.3.0-rc.9"
+version = "0.3.0"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -28,7 +28,7 @@ anyhow = "1.0"
 async-trait = "0.1.51"
 awc = { version = "3.0.0", default-features = false, features = ["rustls"] }
 base64 = "0.13.0"
-config = "0.12.0"
+config = "0.13.0"
 console-subscriber = "0.1"
 dashmap = "5.1.0"
 futures-util = "0.3.17"
