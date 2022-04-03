@@ -16,10 +16,6 @@ pin_project_lite::pin_project! {
     }
 }
 
-pub(super) struct Hash {
-    inner: Vec<u8>,
-}
-
 impl<I, D> Hasher<I, D>
 where
     D: Digest + FixedOutputReset + Send + 'static,
@@ -31,24 +27,10 @@ where
         }
     }
 
-    pub(super) async fn finalize_reset(self) -> Result<Hash, Error> {
+    pub(super) async fn finalize_reset(self) -> Result<Vec<u8>, Error> {
         let mut hasher = self.hasher;
-        let hash = web::block(move || Hash::new(hasher.finalize_reset().to_vec())).await?;
+        let hash = web::block(move || hasher.finalize_reset().to_vec()).await?;
         Ok(hash)
-    }
-}
-
-impl Hash {
-    fn new(inner: Vec<u8>) -> Self {
-        Hash { inner }
-    }
-
-    pub(super) fn as_slice(&self) -> &[u8] {
-        &self.inner
-    }
-
-    pub(super) fn into_inner(self) -> Vec<u8> {
-        self.inner
     }
 }
 
@@ -74,12 +56,6 @@ where
             hasher.update(&buf.filled()[before_len..after_len]);
         }
         poll_res
-    }
-}
-
-impl std::fmt::Debug for Hash {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", base64::encode(&self.inner))
     }
 }
 
@@ -127,6 +103,6 @@ mod test {
         hasher.update(vec);
         let correct_hash = hasher.finalize_reset().to_vec();
 
-        assert_eq!(hash.inner, correct_hash);
+        assert_eq!(hash, correct_hash);
     }
 }

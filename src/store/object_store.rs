@@ -1,16 +1,17 @@
-use crate::store::Store;
+use crate::{
+    error::Error,
+    repo::{Repo, SettingsRepo},
+    store::Store,
+};
 use actix_web::web::Bytes;
-use futures_util::stream::Stream;
+use futures_util::{Stream, TryStreamExt};
 use s3::{
     client::Client, command::Command, creds::Credentials, request_trait::Request, Bucket, Region,
 };
-use std::{
-    pin::Pin,
-    string::FromUtf8Error,
-    task::{Context, Poll},
-};
+use std::{pin::Pin, string::FromUtf8Error};
 use storage_path_generator::{Generator, Path};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::Instrument;
 
 mod object_id;
 pub(crate) use object_id::ObjectId;
@@ -18,74 +19,59 @@ pub(crate) use object_id::ObjectId;
 // - Settings Tree
 //   - last-path -> last generated path
 
-const GENERATOR_KEY: &[u8] = b"last-path";
+const GENERATOR_KEY: &str = "last-path";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ObjectError {
-    #[error(transparent)]
+    #[error("Failed to generate path")]
     PathGenerator(#[from] storage_path_generator::PathError),
 
-    #[error(transparent)]
-    Sled(#[from] sled::Error),
-
-    #[error(transparent)]
+    #[error("Failed to parse string")]
     Utf8(#[from] FromUtf8Error),
 
     #[error("Invalid length")]
     Length,
 
-    #[error("Storage error: {0}")]
+    #[error("Storage error")]
     Anyhow(#[from] anyhow::Error),
 }
 
 #[derive(Clone)]
 pub(crate) struct ObjectStore {
     path_gen: Generator,
-    settings_tree: sled::Tree,
+    repo: Repo,
     bucket: Bucket,
     client: reqwest::Client,
 }
 
-pin_project_lite::pin_project! {
-    struct IoError<S> {
-        #[pin]
-        inner: S,
-    }
-}
-
 #[async_trait::async_trait(?Send)]
 impl Store for ObjectStore {
-    type Error = ObjectError;
     type Identifier = ObjectId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
     #[tracing::instrument(skip(reader))]
-    async fn save_async_read<Reader>(
-        &self,
-        reader: &mut Reader,
-        filename: &str,
-    ) -> Result<Self::Identifier, Self::Error>
+    async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
     where
         Reader: AsyncRead + Unpin,
     {
-        let path = self.next_file(filename)?;
+        let path = self.next_file().await?;
 
         self.bucket
             .put_object_stream(&self.client, reader, &path)
-            .await?;
+            .await
+            .map_err(ObjectError::from)?;
 
         Ok(ObjectId::from_string(path))
     }
 
     #[tracing::instrument(skip(bytes))]
-    async fn save_bytes(
-        &self,
-        bytes: Bytes,
-        filename: &str,
-    ) -> Result<Self::Identifier, Self::Error> {
-        let path = self.next_file(filename)?;
+    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
+        let path = self.next_file().await?;
 
-        self.bucket.put_object(&self.client, &path, &bytes).await?;
+        self.bucket
+            .put_object(&self.client, &path, &bytes)
+            .await
+            .map_err(ObjectError::from)?;
 
         Ok(ObjectId::from_string(path))
     }
@@ -96,22 +82,39 @@ impl Store for ObjectStore {
         identifier: &Self::Identifier,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, Self::Error> {
+    ) -> Result<Self::Stream, Error> {
         let path = identifier.as_str();
 
         let start = from_start.unwrap_or(0);
-        let end = len.map(|len| start + len);
+        let end = len.map(|len| start + len - 1);
 
-        let request = Client::request(
-            &self.client,
-            &self.bucket,
-            path,
-            Command::GetObjectRange { start, end },
-        );
+        let request_span = tracing::info_span!(parent: None, "Get Object");
 
-        let response = request.response().await?;
+        // NOTE: isolating reqwest in it's own span is to prevent the request's span from getting
+        // smuggled into a long-lived task. Unfortunately, I am unable to create a minimal
+        // reproduction of this problem so I can't open a bug about it.
+        let request = request_span.in_scope(|| {
+            Client::request(
+                &self.client,
+                &self.bucket,
+                path,
+                Command::GetObjectRange { start, end },
+            )
+        });
 
-        Ok(Box::pin(io_error(response.bytes_stream())))
+        let response = request_span
+            .in_scope(|| request.response())
+            .instrument(request_span.clone())
+            .await
+            .map_err(ObjectError::from)?;
+
+        let stream = request_span.in_scope(|| {
+            response
+                .bytes_stream()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        });
+
+        Ok(Box::pin(stream))
     }
 
     #[tracing::instrument(skip(writer))]
@@ -128,49 +131,55 @@ impl Store for ObjectStore {
         self.bucket
             .get_object_stream(&self.client, path, writer)
             .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, Self::Error::from(e)))?;
+            .map_err(ObjectError::from)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, Error::from(e)))?;
 
         Ok(())
     }
 
     #[tracing::instrument]
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Self::Error> {
+    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
         let path = identifier.as_str();
 
-        let (head, _) = self.bucket.head_object(&self.client, path).await?;
+        let (head, _) = self
+            .bucket
+            .head_object(&self.client, path)
+            .await
+            .map_err(ObjectError::from)?;
         let length = head.content_length.ok_or(ObjectError::Length)?;
 
         Ok(length as u64)
     }
 
     #[tracing::instrument]
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Self::Error> {
+    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
         let path = identifier.as_str();
 
-        self.bucket.delete_object(&self.client, path).await?;
+        self.bucket
+            .delete_object(&self.client, path)
+            .await
+            .map_err(ObjectError::from)?;
         Ok(())
     }
 }
 
 impl ObjectStore {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn build(
+    pub(crate) async fn build(
         bucket_name: &str,
         region: Region,
         access_key: Option<String>,
         secret_key: Option<String>,
         security_token: Option<String>,
         session_token: Option<String>,
-        db: &sled::Db,
+        repo: Repo,
         client: reqwest::Client,
-    ) -> Result<ObjectStore, ObjectError> {
-        let settings_tree = db.open_tree("settings")?;
-
-        let path_gen = init_generator(&settings_tree)?;
+    ) -> Result<ObjectStore, Error> {
+        let path_gen = init_generator(&repo).await?;
 
         Ok(ObjectStore {
             path_gen,
-            settings_tree,
+            repo,
             bucket: Bucket::new_with_path_style(
                 bucket_name,
                 match region {
@@ -186,65 +195,52 @@ impl ObjectStore {
                     security_token,
                     session_token,
                 },
-            )?,
+            )
+            .map_err(ObjectError::from)?,
             client,
         })
     }
 
-    fn next_directory(&self) -> Result<Path, ObjectError> {
+    async fn next_directory(&self) -> Result<Path, Error> {
         let path = self.path_gen.next();
 
-        self.settings_tree
-            .insert(GENERATOR_KEY, path.to_be_bytes())?;
+        match self.repo {
+            Repo::Sled(ref sled_repo) => {
+                sled_repo
+                    .set(GENERATOR_KEY, path.to_be_bytes().into())
+                    .await?;
+            }
+        }
 
         Ok(path)
     }
 
-    fn next_file(&self, filename: &str) -> Result<String, ObjectError> {
-        let path = self.next_directory()?.to_strings().join("/");
+    async fn next_file(&self) -> Result<String, Error> {
+        let path = self.next_directory().await?.to_strings().join("/");
+        let filename = uuid::Uuid::new_v4().to_string();
 
         Ok(format!("{}/{}", path, filename))
     }
 }
 
-fn init_generator(settings: &sled::Tree) -> Result<Generator, ObjectError> {
-    if let Some(ivec) = settings.get(GENERATOR_KEY)? {
-        Ok(Generator::from_existing(
-            storage_path_generator::Path::from_be_bytes(ivec.to_vec())?,
-        ))
-    } else {
-        Ok(Generator::new())
-    }
-}
-
-fn io_error<S, T, E>(stream: S) -> impl Stream<Item = std::io::Result<T>>
-where
-    S: Stream<Item = Result<T, E>>,
-    E: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    IoError { inner: stream }
-}
-
-impl<S, T, E> Stream for IoError<S>
-where
-    S: Stream<Item = Result<T, E>>,
-    E: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    type Item = std::io::Result<T>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.as_mut().project();
-
-        this.inner.poll_next(cx).map(|opt| {
-            opt.map(|res| res.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
-        })
+async fn init_generator(repo: &Repo) -> Result<Generator, Error> {
+    match repo {
+        Repo::Sled(sled_repo) => {
+            if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {
+                Ok(Generator::from_existing(
+                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())?,
+                ))
+            } else {
+                Ok(Generator::new())
+            }
+        }
     }
 }
 
 impl std::fmt::Debug for ObjectStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ObjectStore")
-            .field("path_gen", &self.path_gen)
+            .field("path_gen", &"generator")
             .field("bucket", &self.bucket.name)
             .field("region", &self.bucket.region)
             .finish()

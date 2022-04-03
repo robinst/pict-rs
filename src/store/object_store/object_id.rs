@@ -1,17 +1,20 @@
-use crate::store::{object_store::ObjectError, Identifier};
+use crate::{
+    error::Error,
+    store::{object_store::ObjectError, Identifier},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ObjectId(String);
 
 impl Identifier for ObjectId {
-    type Error = ObjectError;
-
-    fn to_bytes(&self) -> Result<Vec<u8>, Self::Error> {
+    fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         Ok(self.0.as_bytes().to_vec())
     }
 
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        Ok(ObjectId(String::from_utf8(bytes)?))
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+        Ok(ObjectId(
+            String::from_utf8(bytes).map_err(ObjectError::from)?,
+        ))
     }
 }
 

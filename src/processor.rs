@@ -22,9 +22,9 @@ pub(crate) struct Blur(f64);
 #[instrument]
 pub(crate) fn build_chain(
     args: &[(String, String)],
-    filename: String,
+    ext: &str,
 ) -> Result<(PathBuf, Vec<String>), Error> {
-    fn parse<P: Processor>(key: &str, value: &str) -> Result<Option<P>, UploadError> {
+    fn parse<P: Processor>(key: &str, value: &str) -> Result<Option<P>, Error> {
         if key == P::NAME {
             return Ok(Some(P::parse(key, value).ok_or(UploadError::ParsePath)?));
         }
@@ -40,7 +40,7 @@ pub(crate) fn build_chain(
         }};
     }
 
-    let (path, args) =
+    let (mut path, args) =
         args.iter()
             .fold(Ok((PathBuf::default(), vec![])), |inner, (name, value)| {
                 if let Ok(inner) = inner {
@@ -56,7 +56,9 @@ pub(crate) fn build_chain(
                 }
             })?;
 
-    Ok((path.join(filename), args))
+    path.push(ext);
+
+    Ok((path, args))
 }
 
 impl Processor for Identity {

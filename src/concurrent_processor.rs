@@ -1,6 +1,6 @@
 use crate::{
+    details::Details,
     error::{Error, UploadError},
-    upload_manager::Details,
 };
 use actix_web::web;
 use dashmap::{mapref::entry::Entry, DashMap};
@@ -16,13 +16,15 @@ use tracing::Span;
 
 type OutcomeSender = Sender<(Details, web::Bytes)>;
 
-type ProcessMap = DashMap<PathBuf, Vec<OutcomeSender>>;
+type ProcessMapKey = (Vec<u8>, PathBuf);
+
+type ProcessMap = DashMap<ProcessMapKey, Vec<OutcomeSender>>;
 
 static PROCESS_MAP: Lazy<ProcessMap> = Lazy::new(DashMap::new);
 
 struct CancelToken {
     span: Span,
-    path: PathBuf,
+    key: ProcessMapKey,
     receiver: Option<Receiver<(Details, web::Bytes)>>,
 }
 
@@ -39,14 +41,17 @@ impl<F> CancelSafeProcessor<F>
 where
     F: Future<Output = Result<(Details, web::Bytes), Error>>,
 {
-    pub(super) fn new(path: PathBuf, fut: F) -> Self {
-        let entry = PROCESS_MAP.entry(path.clone());
+    pub(super) fn new(hash: &[u8], path: PathBuf, fut: F) -> Self {
+        let key = (hash.to_vec(), path.clone());
+
+        let entry = PROCESS_MAP.entry(key.clone());
 
         let (receiver, span) = match entry {
             Entry::Vacant(vacant) => {
                 vacant.insert(Vec::new());
                 let span = tracing::info_span!(
                     "Processing image",
+                    hash = &tracing::field::debug(&hash),
                     path = &tracing::field::debug(&path),
                     completed = &tracing::field::Empty,
                 );
@@ -57,6 +62,7 @@ where
                 occupied.get_mut().push(tx);
                 let span = tracing::info_span!(
                     "Waiting for processed image",
+                    hash = &tracing::field::debug(&hash),
                     path = &tracing::field::debug(&path),
                 );
                 (Some(rx), span)
@@ -66,7 +72,7 @@ where
         CancelSafeProcessor {
             cancel_token: CancelToken {
                 span,
-                path,
+                key,
                 receiver,
             },
             fut,
@@ -85,7 +91,7 @@ where
 
         let span = &this.cancel_token.span;
         let receiver = &mut this.cancel_token.receiver;
-        let path = &this.cancel_token.path;
+        let key = &this.cancel_token.key;
         let fut = this.fut;
 
         span.in_scope(|| {
@@ -95,7 +101,7 @@ where
                     .map(|res| res.map_err(|_| UploadError::Canceled.into()))
             } else {
                 fut.poll(cx).map(|res| {
-                    let opt = PROCESS_MAP.remove(path);
+                    let opt = PROCESS_MAP.remove(key);
                     res.map(|tup| {
                         if let Some((_, vec)) = opt {
                             for sender in vec {
@@ -113,7 +119,7 @@ where
 impl Drop for CancelToken {
     fn drop(&mut self) {
         if self.receiver.is_none() {
-            let completed = PROCESS_MAP.remove(&self.path).is_none();
+            let completed = PROCESS_MAP.remove(&self.key).is_none();
             self.span.record("completed", &completed);
         }
     }

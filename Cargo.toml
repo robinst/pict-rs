@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -10,8 +10,7 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["object-storage"]
-object-storage = ["reqwest", "rust-s3"]
+default = []
 io-uring = [
   "actix-rt/io-uring",
   "actix-server/io-uring",
@@ -28,6 +27,8 @@ anyhow = "1.0"
 async-trait = "0.1.51"
 awc = { version = "3.0.0", default-features = false, features = ["rustls"] }
 base64 = "0.13.0"
+clap = { version = "3.1.6", features = ["derive"] }
+color-eyre = "0.6"
 config = "0.13.0"
 console-subscriber = "0.1"
 dashmap = "5.1.0"
@@ -41,30 +42,33 @@ pin-project-lite = "0.2.7"
 reqwest = { version = "0.11.5", default-features = false, features = [
   "rustls-tls",
   "stream",
-], optional = true }
+] }
 rust-s3 = { version = "0.29.0", default-features = false, features = [
   "fail-on-err",
   "with-reqwest",
-], optional = true, git = "https://github.com/asonix/rust-s3", branch = "asonix/generic-client" }
+], git = "https://github.com/asonix/rust-s3", branch = "asonix/generic-client" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10.0"
 sled = { version = "0.34.7" }
 storage-path-generator = "0.1.0"
-structopt = "0.3.14"
 thiserror = "1.0"
 time = { version = "0.3.0", features = ["serde"] }
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-uring = { version = "0.3", optional = true, features = ["bytes"] }
 tokio-util = { version = "0.7", default-features = false, features = ["codec"] }
+toml = "0.5.8"
 tracing = "0.1.15"
 tracing-error = "0.2.0"
 tracing-futures = "0.2.4"
 tracing-log = "0.1.2"
 tracing-opentelemetry = "0.17"
 tracing-subscriber = { version = "0.3.0", features = [
+  "ansi",
   "env-filter",
   "fmt",
+  "json",
+  "registry",
   "tracing-log",
 ] }
 url = { version = "2.2", features = ["serde"] }
@@ -73,9 +77,9 @@ uuid = { version = "0.8.2", features = ["v4", "serde"] }
 [dependencies.tracing-actix-web]
 version = "0.5.0"
 default-features = false
-features = ["emit_event_on_error", "opentelemetry_0_17"]
+features = ["opentelemetry_0_17"]
 
 [dependencies.tracing-awc]
 version = "0.1.0"
 default-features = false
-features = ["emit_event_on_error", "opentelemetry_0_17"]
+features = ["opentelemetry_0_17"]

@@ -17,7 +17,7 @@ pub(crate) fn chop_bytes(
     if let Some((start, end)) = byte_range.to_satisfiable_range(length) {
         // END IS INCLUSIVE
         let end = end as usize + 1;
-        return Ok(once(ready(Ok(bytes.slice(start as usize..end as usize)))));
+        return Ok(once(ready(Ok(bytes.slice(start as usize..end)))));
     }
 
     Err(UploadError::Range.into())
@@ -28,16 +28,13 @@ pub(crate) async fn chop_store<S: Store>(
     store: &S,
     identifier: &S::Identifier,
     length: u64,
-) -> Result<impl Stream<Item = std::io::Result<Bytes>>, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<impl Stream<Item = std::io::Result<Bytes>>, Error> {
     if let Some((start, end)) = byte_range.to_satisfiable_range(length) {
         // END IS INCLUSIVE
         let end = end + 1;
-        return Ok(store
+        return store
             .to_stream(identifier, Some(start), Some(end.saturating_sub(start)))
-            .await?);
+            .await;
     }
 
     Err(UploadError::Range.into())

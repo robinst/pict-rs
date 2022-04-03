@@ -101,10 +101,7 @@ pub(crate) async fn thumbnail<S: Store>(
     from: S::Identifier,
     input_format: InputFormat,
     format: ThumbnailFormat,
-) -> Result<impl AsyncRead + Unpin, Error>
-where
-    Error: From<S::Error>,
-{
+) -> Result<impl AsyncRead + Unpin, Error> {
     let input_file = crate::tmp_file::tmp_file(Some(input_format.to_ext()));
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file).await?;

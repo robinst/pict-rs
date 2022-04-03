@@ -8,7 +8,7 @@ pub(crate) use tokio_file::File;
 mod tokio_file {
     use crate::{store::file_store::FileError, Either};
     use actix_web::web::{Bytes, BytesMut};
-    use futures_util::stream::{Stream, StreamExt};
+    use futures_util::{Stream, StreamExt, TryStreamExt};
     use std::{io::SeekFrom, path::Path};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
     use tokio_util::codec::{BytesCodec, FramedRead};
@@ -91,38 +91,7 @@ mod tokio_file {
                 (None, None) => Either::right(self.inner),
             };
 
-            Ok(BytesFreezer::new(FramedRead::new(obj, BytesCodec::new())))
-        }
-    }
-
-    pin_project_lite::pin_project! {
-        struct BytesFreezer<S> {
-            #[pin]
-            inner: S,
-        }
-    }
-
-    impl<S> BytesFreezer<S> {
-        fn new(inner: S) -> Self {
-            BytesFreezer { inner }
-        }
-    }
-
-    impl<S, E> Stream for BytesFreezer<S>
-    where
-        S: Stream<Item = Result<BytesMut, E>> + Unpin,
-    {
-        type Item = Result<Bytes, E>;
-
-        fn poll_next(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Option<Self::Item>> {
-            let this = self.as_mut().project();
-
-            this.inner
-                .poll_next(cx)
-                .map(|opt| opt.map(|res| res.map(BytesMut::freeze)))
+            Ok(FramedRead::new(obj, BytesCodec::new()).map_ok(BytesMut::freeze))
         }
     }
 }

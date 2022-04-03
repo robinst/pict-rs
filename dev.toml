@@ -13,7 +13,7 @@ service_name = 'pict-rs'
 targets = 'info'
 
 [old_db]
-path = '/mnt'
+path = 'data/'
 
 [media]
 max_width = 10000
@@ -32,12 +32,9 @@ skip_validate_imports = false
 
 [repo]
 type = 'sled'
-path = '/mnt/sled-repo'
+path = 'data/sled-repo'
 cache_capacity = 67108864
 
 [store]
-type = 'object_storage'
-bucket_name = 'pict-rs'
-region = 'http://minio:9000'
-access_key = 'Q7Z3AY3JO01N27UNH5IR'
-secret_key = 'bH3Kj6UVJF+btBtWsExVurN3ukEilC3saECsupzi'
+type = 'filesystem'
+path = 'data/files'

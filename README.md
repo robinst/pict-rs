@@ -9,109 +9,142 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.3.0
+pict-rs 0.4.0-alpha.1
+asonix <asonix@asonix.dog>
+A simple image hosting service
 
 USAGE:
-    pict-rs [FLAGS] [OPTIONS] [SUBCOMMAND]
-
-FLAGS:
-    -h, --help                     Prints help information
-    -s, --skip-validate-imports    Whether to skip validating images uploaded via the internal import API
-    -V, --version                  Prints version information
+    pict-rs [OPTIONS] <SUBCOMMAND>
 
 OPTIONS:
-    -a, --addr <addr>                                          The address and port the server binds to.
-        --api-key <api-key>
-            An optional string to be checked on requests to privileged endpoints
+    -c, --config-file <CONFIG_FILE>
+            Path to the pict-rs configuration file
 
-    -c, --config-file <config-file>                            Path to the pict-rs configuration file
-        --console-buffer-capacity <console-buffer-capacity>
-            Specify the number of events the console subscriber is allowed to buffer
+        --console-address <CONSOLE_ADDRESS>
+            Address and port to expose tokio-console metrics
 
-    -f, --filters <filters>...
-            An optional list of filters to permit, supports 'identity', 'thumbnail', 'resize', 'crop', and 'blur'
+        --console-buffer-capacity <CONSOLE_BUFFER_CAPACITY>
+            Capacity of the console-subscriber Event Buffer
 
-    -i, --image-format <image-format>
-            An optional image format to convert all uploaded files into, supports 'jpg', 'png', and 'webp'
+    -h, --help
+            Print help information
 
-    -m, --max-file-size <max-file-size>
-            Specify the maximum allowed uploaded file size (in Megabytes)
+        --log-format <LOG_FORMAT>
+            Format of logs printed to stdout
 
-        --max-image-area <max-image-area>                      Specify the maximum area in pixels allowed in an image
-        --max-image-height <max-image-height>                  Specify the maximum width in pixels allowed on an image
-        --max-image-width <max-image-width>                    Specify the maximum width in pixels allowed on an image
-        --migrate-file <migrate-file>                          Path to a file defining a store migration
-    -o, --opentelemetry-url <opentelemetry-url>
-            Enable OpenTelemetry Tracing exports to the given OpenTelemetry collector
+        --log-targets <LOG_TARGETS>
+            Log levels to print to stdout, respects RUST_LOG formatting
 
-    -p, --path <path>                                          The path to the data directory, e.g. data/
-        --sled-cache-capacity <sled-cache-capacity>
-            Specify the number of bytes sled is allowed to use for it's cache
+        --old-db-path <OLD_DB_PATH>
+            Path to the old pict-rs sled database
 
+        --opentelemetry-service-name <OPENTELEMETRY_SERVICE_NAME>
+            Service Name to use for OpenTelemetry
+
+        --opentelemetry-targets <OPENTELEMETRY_TARGETS>
+            Log levels to use for OpenTelemetry, respects RUST_LOG formatting
+
+        --opentelemetry-url <OPENTELEMETRY_URL>
+            URL to send OpenTelemetry metrics
+
+        --save-to <SAVE_TO>
+            File to save the current configuration for reproducible runs
+
+    -V, --version
+            Print version information
 
 SUBCOMMANDS:
-    file-store    
-    help          Prints this message or the help of the given subcommand(s)
-    s3-store
+    filesystem        Migrate from the provided filesystem storage
+    help              Print this message or the help of the given subcommand(s)
+    object-storage    Migrate from the provided object storage
+    run               Runs the pict-rs web server
 ```
 
 ```
-pict-rs-file-store 0.3.0
+pict-rs-run 
+Runs the pict-rs web server
 
 USAGE:
-    pict-rs file-store [OPTIONS]
-
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
+    pict-rs run [OPTIONS] [SUBCOMMAND]
 
 OPTIONS:
-        --path <path>    Path in which pict-rs will create it's 'files' directory
+    -a, --address <ADDRESS>
+            The address and port to bind the pict-rs web server
+
+        --api-key <API_KEY>
+            The API KEY required to access restricted routes
+
+    -h, --help
+            Print help information
+
+        --media-enable-silent-video <MEDIA_ENABLE_SILENT_VIDEO>
+            Whether to enable GIF and silent MP4 uploads. Full videos are unsupported
+
+        --media-filters <MEDIA_FILTERS>
+            Which media filters should be enabled on the `process` endpoint
+
+        --media-format <MEDIA_FORMAT>
+            Enforce uploaded media is transcoded to the provided format
+
+        --media-max-area <MEDIA_MAX_AREA>
+            The maximum area, in pixels, for uploaded media
+
+        --media-max-file-size <MEDIA_MAX_FILE_SIZE>
+            The maximum size, in megabytes, for uploaded media
+
+        --media-max-height <MEDIA_MAX_HEIGHT>
+            The maximum height, in pixels, for uploaded media
+
+        --media-max-width <MEDIA_MAX_WIDTH>
+            The maximum width, in pixels, for uploaded media
+
+        --media-skip-validate-imports <MEDIA_SKIP_VALIDATE_IMPORTS>
+            Whether to validate media on the "import" endpoint
+
+        --worker-id <WORKER_ID>
+            
+
+SUBCOMMANDS:
+    filesystem        Run pict-rs with filesystem storage
+    help              Print this message or the help of the given subcommand(s)
+    object-storage    Run pict-rs with object storage
 ```
 
+Try running `help` commands for more runtime configuration options
 ```
-pict-rs-s3-store 0.3.0
-
-USAGE:
-    pict-rs s3-store [OPTIONS] --bucket-name <bucket-name> --region <region>
-
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
-OPTIONS:
-        --access-key <access-key>            
-        --bucket-name <bucket-name>          Name of the bucket in which pict-rs will store images
-        --region <region>                    Region in which the bucket exists, can be an http endpoint
-        --secret-key <secret-key>            
-        --security-token <security-token>    
-        --session-token <session-token>
+$ pict-rs run filesystem -h
+$ pict-rs run object-storage -h
+$ pict-rs run filesystem sled -h
+$ pict-rs run object-storage sled -h
 ```
 
-See [`pict-rs.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/pict-rs.toml) and 
-[`migrate.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/migrate.toml) for more
+See [`pict-rs.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/pict-rs.toml) for more
 configuration
 
 #### Example:
 Running on all interfaces, port 8080, storing data in /opt/data
 ```
-$ ./pict-rs -a 0.0.0.0:8080 -p /opt/data
+$ ./pict-rs -a 0.0.0.0:8080 -p /opt/data run
 ```
 Running locally, port 9000, storing data in data/, and converting all uploads to PNG
 ```
-$ ./pict-rs -a 127.0.0.1:9000 -p data/ -f png
+$ ./pict-rs -a 127.0.0.1:9000 -p data/ -f png run
 ```
 Running locally, port 8080, storing data in data/, and only allowing the `thumbnail` and `identity` filters
 ```
-$ ./pict-rs -a 127.0.0.1:8080 -p data/ -w thumbnail identity
+$ ./pict-rs -a 127.0.0.1:8080 -p data/ -w thumbnail identity run
 ```
 Running from a configuration file
 ```
-$ ./pict-rs -c ./pict-rs.toml
+$ ./pict-rs -c ./pict-rs.toml run
 ```
-Migrating between storage backends
+Migrating to object storage from filesystem storage (both storages must be configured in pict-rs.toml)
 ```
-$ ./pict-rs -p ./data --migrate-file ./migrate.toml
+$ ./pict-rs -c ./pict-rs.toml --store filesystem migrate-store object-storage
+```
+Dumping commandline flags to a toml file
+```
+$ ./pict-rs -p data/ --store object-storage --object-storage-bucket-name pict-rs --object-storage-region us-east-1 dump pict-rs.toml
 ```
 
 #### Docker

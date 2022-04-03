@@ -43,13 +43,6 @@ max_image_area = 40_000_000 # in Pixels
 # default: false
 skip_validate_imports = false
 
-## Optional: set sled's cache capacity to a given number of bytes
-# environment variable: PICTRS_SLED_CACHE_CAPACITY
-# default: 67_108_864 (1024 * 1024 * 64) e.g. 64MB
-#
-# Increasing this value can improve performance by keeping more of the database in RAM
-sled_cache_capacity = 67_108_864 # in bytes
-
 ## Optional: enable tokio-console and set the event buffer size
 # environment variable: PICTRS_CONSOLE_BUFFER_CAPACITY
 # default: empty
@@ -95,58 +88,65 @@ api_key = 'API_KEY'
 # Not specifying opentelemetry_url means no traces will be exported
 opentelemetry_url = 'http://localhost:4317/'
 
-## Optional: store definition
-# default store: file_store
-#
-# Not specifying a store means a file_store will be used with the top-level pict-rs' path
-[store]
-type = "file_store"
+## Optional: the data repository to use
+# environment variable: PICTRS_REPO
+# default: 'sled'
+# available options: 'sled'
+repo = 'sled'
 
-## Example file store
-# [store]
-#
-# # environment variable: PICTRS_STORE__TYPE
-# type = 'file_store'
-#
-# # Optional: file path
-# # environment variable: PICTRS_STORE__PATH
-# # default: empty
-# #
-# # Not specifying path means pict-rs' top-level `path` config is used
-# path = './data'
+## Optional: the file storage to use
+# environment variable: PICTRS_STORE
+# default: 'filesystem'
+# available options: 'filesystem', 'object_storage'
+store = 'filesystem'
 
-## Example s3 store
-# [store]
+
+## Optional: Sled store configration definition
+[sled]
+## Optional: set sled's cache capacity to a given number of bytes
+# environment variable: PICTRS_SLED__SLED_CACHE_CAPACITY
+# default: 67_108_864 (1024 * 1024 * 64) e.g. 64MB
 #
-# # environment variable: PICTRS_STORE__TYPE
-# type = 's3_store'
+# Increasing this value can improve performance by keeping more of the database in RAM
+sled_cache_capacity = 67_108_864 # in bytes
+
+
+## Optional: Filesystem storage configuration
+[filesystem_storage]
+## Optional: set the path for pict-rs filesystem file storage
+# environment variable: PICTRS_FILESYSTEM_STORAGE__FILESYSTEM_STORAGE_PATH
+# default '${path}/files'
+filesystem_storage_path = 'data/files'
+
+
+## Optional: Object Storage configuration
+[object_storage]
+## Required: bucket name
+# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_BUCKET_NAME
+object_store_bucket_name = 'pict-rs'
+
+## Required: bucket region
+# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_REGION
 #
-# # Required: bucket name
-# # environment variable: PICTRS_STORE__BUCKET_NAME
-# bucket_name = 'rust_s3'
-#
-# # Required: bucket region
-# # environment variable: PICTRS_STORE__REGION
-# #
-# # can also be endpoint of local s3 store, e.g. 'http://minio:9000'
-# region = 'eu-central-1'
-#
-# # Optional: bucket access key
-# # environment variable: PICTRS_STORE__ACCESS_KEY
-# # default: empty
-# access_key = 'ACCESS_KEY'
-#
-# # Optional: bucket secret key
-# # environment variable: PICTRS_STORE__SECRET_KEY
-# # default: empty
-# secret_key = 'SECRET_KEY'
-#
-# # Optional: bucket security token
-# # environment variable: PICTRS_STORE__SECURITY_TOKEN
-# # default: empty
-# security_token = 'SECURITY_TOKEN'
-#
-# # Optional: bucket session token
-# # environment variable: PICTRS_STORE__SESSION_TOKEN
-# # default: empty
-# session_token = 'SESSION_TOKEN'
+# can also be endpoint of local s3 store, e.g. 'http://minio:9000'
+object_store_region = 'eu-central-1'
+
+## Optional: bucket access key
+# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_ACCESS_KEY
+# default: empty
+object_store_access_key = '09ODZ3BGBISV4U92JLIM'
+
+## Optional: bucket secret key
+# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_SECRET_KEY
+# default: empty
+object_store_secret_key = 'j35YE9RrxhBP0dpiD5mmdXRXvPkEJR4k6zK12q3o'
+
+## Optional: bucket security token
+# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_SECURITY_TOKEN
+# default: empty
+object_store_security_token = 'SECURITY_TOKEN'
+
+## Optional: bucket session token
+# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_SESSION_TOKEN
+# default: empty
+object_store_session_token = 'SESSION_TOKEN'

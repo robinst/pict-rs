@@ -12,6 +12,22 @@ impl<T> Serde<T> {
     pub(crate) fn new(inner: T) -> Self {
         Serde { inner }
     }
+
+    pub(crate) fn into_inner(this: Self) -> T {
+        this.inner
+    }
+}
+
+impl<T> AsRef<T> for Serde<T> {
+    fn as_ref(&self) -> &T {
+        &self.inner
+    }
+}
+
+impl<T> AsMut<T> for Serde<T> {
+    fn as_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
 }
 
 impl<T> Deref for Serde<T> {
