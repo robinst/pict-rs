@@ -1,56 +1,53 @@
-## Required: path to store pict-rs database
-# environment variable: PICTRS_PATH
-path = './data'
-
+## Server configuration
+[server]
 ## Optional: pict-rs binding address
-# environment variable: PICTRS_ADDR
+# environment variable: PICTRS_ADDRESS
 # default: 0.0.0.0:8080
-addr = '0.0.0.0:8080'
+address = '0.0.0.0:8080'
 
-## Optional: format to transcode all uploaded images
-# environment variable: PICTRS_IMAGE_FORMAT
-# valid options: 'jpeg', 'png', 'webp'
+## Optional: pict-rs worker id
+# environment variable PICTRS_WORKER_ID
+# default: pict-rs-1
+#
+# This is used for the internal job queue. It will have more meaning once a shared metadata
+# repository (like postgres) can be defined.
+worker_id = 'pict-rs-1'
+
+## Optional: shared secret for internal endpoints
+# environment variable: PICTRS_API_KEY
 # default: empty
 #
-# Not specifying image_format means images will be stored in their original format
-# This does not affect gif or mp4 uploads
-image_format = 'jpeg'
+# Not specifying api_key disables internal endpoints
+api_key = 'API_KEY'
 
-## Optional: permitted image processing filters
-# environment variable: PICTRS_FILTERS
-# valid options: 'identity', 'thumbnail', 'resize', 'crop', 'blur'
+
+## Logging configuration
+[tracing.logging]
+## Optional: log format
+# environment variable: PICTRS_TRACING__LOGGING__FORMAT
+# default: normal
+#
+# available options: compact, json, normal, pretty
+format = 'normal'
+
+## Optional: log targets
+# environment variable: PICTRS_TRACING__LOGGING__TARGETS
+# default: warn,tracing_actix_web=info,actix_server=info,actix_web=info
+#
+# Dictates which traces should print to stdout
+# Follows the same format as RUST_LOG
+targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
+
+
+## Console configuration
+[tracing.console]
+## Optional: console address
+# environment variable: PICTRS_TRACING__CONSOLE__ADDRESS
 # default: empty
 #
-# Not specifying filters implies all filters are permitted
-filters = ['identity', 'thumbnail', 'resize', 'crop', 'blur']
+# Dictacts whether console should be enabled, and what address it should be exposed on.
 
-## Optional: image bounds
-# environment variable: PICTRS_MAX_FILE_SIZE
-# default: 40
-max_file_size = 40 # in Megabytes
-# environment variable: PICTRS_MAX_IMAGE_WIDTH
-# default: 10,000
-max_image_width = 10_000 # in Pixels
-# environment variable: PICTRS_MAX_IMAGE_HEIGHT
-# default: 10,000
-max_image_height = 10_000 # in Pixels
-# environment variable: PICTRS_MAX_IMAGE_AREA
-# default: 40,000,000
-max_image_area = 40_000_000 # in Pixels
-
-## Optional: skip image validation on the import endpoint
-# environment variable: PICTRS_SKIP_VALIDATE_IMPORTS
-# default: false
-skip_validate_imports = false
-
-## Optional: enable tokio-console and set the event buffer size
-# environment variable: PICTRS_CONSOLE_BUFFER_CAPACITY
-# default: empty
-#
-# NOTE: this is the number of _events_ to buffer, not the number of bytes. In reality, the amount of
-# RAM used will be significatnly larger (in bytes) than the buffer capacity (in events)
-#
-# When set, tokio-console can connect to the pict-rs service on port 6669
+# When set, tokio-console can connect to the pict-rs service
 #
 # Configure your container to expose the console port
 # ```
@@ -72,81 +69,162 @@ skip_validate_imports = false
 # ```
 # $ tokio-console localhost 6669
 # ```
-console_buffer_capacity = 102_400 # 102_400 (or 1024 * 100) is the default size used by console-subscriber
+address = '0.0.0.0:6669'
 
-## Optional: shared secret for internal endpoints
-# environment variable: PICTRS_API_KEY
-# default: empty
+## Optional: console buffer capacity
+# environment variable: PICTRS_TRACING__CONSOLE__BUFFER_CAPACITY
+# default: 102400
 #
-# Not specifying api_key disables internal endpoints
-api_key = 'API_KEY'
+# This is the number of _events_ to buffer, not the number of bytes. In reality, the amount of
+# RAM used will be significatnly larger (in bytes) than the buffer capacity (in events)
+buffer_capacity = 102400
 
+
+## OpenTelemetry configuration
+[tracing.opentelemetry]
 ## Optional: url for exporting otlp traces
-# environment variable: PICTRS_OPENTELEMETRY_URL
+# environment variable: PICTRS_TRACING__OPENTELEMETRY__URL
 # default: empty
 #
 # Not specifying opentelemetry_url means no traces will be exported
-opentelemetry_url = 'http://localhost:4317/'
+# When set, pict-rs will export OpenTelemetry traces to the provided URL. If the URL is
+# inaccessible, this can cause performance degredation in pict-rs, so it is best left unset unless
+# you have an OpenTelemetry collector
+url = 'http://localhost:4317/'
 
-## Optional: the data repository to use
-# environment variable: PICTRS_REPO
-# default: 'sled'
-# available options: 'sled'
-repo = 'sled'
+## Optional: name to relate OpenTelemetry traces
+# environment variable: PICTRS_TRACING__OPENTELEMETRY__SERVICE_NAME
+# default: pict-rs
+service_name = 'pict-rs'
 
-## Optional: the file storage to use
-# environment variable: PICTRS_STORE
-# default: 'filesystem'
-# available options: 'filesystem', 'object_storage'
-store = 'filesystem'
-
-
-## Optional: Sled store configration definition
-[sled]
-## Optional: set sled's cache capacity to a given number of bytes
-# environment variable: PICTRS_SLED__SLED_CACHE_CAPACITY
-# default: 67_108_864 (1024 * 1024 * 64) e.g. 64MB
+## Optional: trace level to export
+# environment variable: PICTRS_TRACING__OPENTELEMETRY__TARGETS
+# default: info
 #
-# Increasing this value can improve performance by keeping more of the database in RAM
-sled_cache_capacity = 67_108_864 # in bytes
+# Follows the same format as RUST_LOG
+targets = 'info'
 
 
-## Optional: Filesystem storage configuration
-[filesystem_storage]
-## Optional: set the path for pict-rs filesystem file storage
-# environment variable: PICTRS_FILESYSTEM_STORAGE__FILESYSTEM_STORAGE_PATH
-# default '${path}/files'
-filesystem_storage_path = 'data/files'
+## Configuration for migrating from pict-rs 0.2
+[old_db]
+## Optional: path to old pict-rs directory
+# environment variable: PICTRS_OLD_DB__PATH
+# default: /mnt
+path = '/mnt'
 
 
-## Optional: Object Storage configuration
-[object_storage]
-## Required: bucket name
-# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_BUCKET_NAME
-object_store_bucket_name = 'pict-rs'
+## Media Processing Configuration
+[media]
+## Optional: max media width (in pixels)
+# environment variable: PICTRS_MEDIA__MAX_WIDTH
+# default: 10,000
+max_width = 10000
 
-## Required: bucket region
-# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_REGION
+## Optional: max media height (in pixels)
+# environment variable: PICTRS_MEDIA__MAX_HEIGHT
+# default: 10,000
+max_height = 10000
+
+## Optional: max media area (in pixels)
+# environment variable: PICTRS_MEDIA__MAX_AREA
+# default: 40,000,000
+max_area = 40000000
+
+## Optional: max file size (in Megabytes)
+# environment variable: PICTRS_MEDIA__MAX_FILE_SIZE
+# default: 40
+max_file_size = 40
+
+## Optional: enable GIF and MP4 uploads (without sound)
+# environment variable: PICTRS_MEDIA__ENABLE_SILENT_VIDEO
+# default: true
 #
-# can also be endpoint of local s3 store, e.g. 'http://minio:9000'
-object_store_region = 'eu-central-1'
+# Set this to false to serve static images only
+enable_silent_video = true
 
-## Optional: bucket access key
-# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_ACCESS_KEY
-# default: empty
-object_store_access_key = '09ODZ3BGBISV4U92JLIM'
+## Optional: set allowed filters for image processing
+# environment variable: PICTRS_MEDIA__FILTERS
+# default: ['blur', 'crop', 'identity', 'resize', 'thumbnail']
+filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 
-## Optional: bucket secret key
-# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_SECRET_KEY
-# default: empty
-object_store_secret_key = 'j35YE9RrxhBP0dpiD5mmdXRXvPkEJR4k6zK12q3o'
+## Optional: whether to validate images uploaded through the `import` endpoint
+# environment variable: PICTRS_MEDIA__SKIP_VALIDATE_IMPORTS
+# default: false
+#
+# Set this to true if you want to avoid processing imported media
+skip_validate_imports = false
 
-## Optional: bucket security token
-# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_SECURITY_TOKEN
-# default: empty
-object_store_security_token = 'SECURITY_TOKEN'
 
-## Optional: bucket session token
-# environment variable: PICTRS_OBJECT_STORAGE__OBJECT_STORE_SESSION_TOKEN
+## Database configuration
+[repo]
+## Optional: database backend to use
+# environment variable: PICTRS_REPO__TYPE
+# default: sled
+#
+# available options: sled
+type = 'sled'
+
+## Optional: path to sled repository
+# environment variable: PICTRS_REPO__PATH
+# default: /mnt/sled-repo
+path = '/mnt/sled-repo'
+
+## Optional: in-memory cache capacity for sled data (in bytes)
+# environment variable: PICTRS_REPO__CACHE_CAPACITY
+# default: 67,108,864 (1024 * 1024 * 64, or 64MB)
+cache_capacity = 67108864
+
+
+## Media storage configuration
+[store]
+## Optional: type of media storage to use
+# environment variable: PICTRS_STORE__TYPE
+# default: filesystem
+#
+# available options: filesystem, object_storage
+type = 'object_storage'
+
+## Required: object storage bucket name
+# environment variable: PICTRS_STORE__BUCKET_NAME
 # default: empty
-object_store_session_token = 'SESSION_TOKEN'
+bucket_name = 'BUCKET_NAME'
+
+## Required: object storage region
+# environment variable: PICTRS_STORE__REGION
+# default: empty
+region = 'REGION'
+
+## Required: object storage access key
+# environment variable: PICTRS_STORE__ACCESS_KEY
+# default: empty
+access_key = 'ACCESS_KEY'
+
+## Required: object storage secret key
+# environment variable: PICTRS_STORE__SECRET_KEY
+# default: empty
+secret_key = 'SECRET_KEY'
+
+## Optional: object storage security token
+# environment variable: PICTRS_STORE__SECURITY_TOKEN
+# default: empty
+security_token = 'SECURITY_TOKEN'
+
+## Optional: object storage session token
+# environment variable: PICTRS_STORE__SESSION_TOKEN
+# default: empty
+session_token = 'SESSION_TOKEN'
+
+## Filesystem media storage example
+# ## Media storage configuration
+# [store]
+# ## Optional: type of media storage to use
+# # environment variable: PICTRS_STORE__TYPE
+# # default: filesystem
+# #
+# # available options: filesystem, object_storage
+# type = 'filesystem'
+#
+# ## Optional: path to uploaded media
+# # environment variable: PICTRS_STORE__PATH
+# # default: /mnt/files
+# path = '/mnt/files'
