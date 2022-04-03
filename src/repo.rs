@@ -435,18 +435,6 @@ impl UploadId {
     }
 }
 
-impl From<Uuid> for UploadId {
-    fn from(id: Uuid) -> Self {
-        Self { id }
-    }
-}
-
-impl From<UploadId> for Uuid {
-    fn from(uid: UploadId) -> Self {
-        uid.id
-    }
-}
-
 impl std::str::FromStr for UploadId {
     type Err = <Uuid as std::str::FromStr>::Err;
 
