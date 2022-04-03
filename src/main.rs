@@ -22,6 +22,7 @@ use tracing_actix_web::TracingLogger;
 use tracing_awc::Tracing;
 use tracing_futures::Instrument;
 
+mod backgrounded;
 mod concurrent_processor;
 mod config;
 mod details;
@@ -48,6 +49,7 @@ mod tmp_file;
 mod validate;
 
 use self::{
+    backgrounded::Backgrounded,
     config::{Configuration, ImageFormat, Operation},
     details::Details,
     either::Either,
@@ -57,6 +59,7 @@ use self::{
     magick::details_hint,
     middleware::{Deadline, Internal},
     migrate::LatestDb,
+    queue::queue_generate,
     repo::{Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, Repo, SettingsRepo},
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
@@ -125,6 +128,48 @@ async fn upload<R: FullRepo, S: Store + 'static>(
     }
 
     for mut image in images {
+        image.result.disarm();
+    }
+
+    Ok(HttpResponse::Created().json(&serde_json::json!({
+        "msg": "ok",
+        "files": files
+    })))
+}
+
+#[instrument(name = "Uploaded files", skip(value))]
+async fn upload_backgrounded<R: FullRepo, S: Store>(
+    value: Value<Backgrounded<R, S>>,
+    repo: web::Data<R>,
+) -> Result<HttpResponse, Error> {
+    let images = value
+        .map()
+        .and_then(|mut m| m.remove("images"))
+        .and_then(|images| images.array())
+        .ok_or(UploadError::NoFiles)?;
+
+    let mut files = Vec::new();
+    let images = images
+        .into_iter()
+        .filter_map(|i| i.file())
+        .collect::<Vec<_>>();
+
+    for image in &images {
+        let upload_id = image.result.upload_id().expect("Upload ID exists");
+        let identifier = image
+            .result
+            .identifier()
+            .expect("Identifier exists")
+            .to_bytes()?;
+
+        queue::queue_ingest(&**repo, identifier, upload_id, None, true).await?;
+
+        files.push(serde_json::json!({
+            "file": upload_id.to_string(),
+        }));
+    }
+
+    for image in images {
         image.result.disarm();
     }
 
@@ -337,6 +382,30 @@ async fn process<R: FullRepo, S: Store + 'static>(
         7 * DAYS,
         details.system_time(),
     ))
+}
+
+/// Process files
+#[instrument(name = "Spawning image process", skip(repo))]
+async fn process_backgrounded<R: FullRepo, S: Store>(
+    query: web::Query<ProcessQuery>,
+    ext: web::Path<String>,
+    repo: web::Data<R>,
+) -> Result<HttpResponse, Error> {
+    let (target_format, source, process_path, process_args) = prepare_process(query, ext.as_str())?;
+
+    let path_string = process_path.to_string_lossy().to_string();
+    let hash = repo.hash(&source).await?;
+    let identifier_opt = repo
+        .variant_identifier::<S::Identifier>(hash.clone(), path_string)
+        .await?;
+
+    if identifier_opt.is_some() {
+        return Ok(HttpResponse::Accepted().finish());
+    }
+
+    queue_generate(&**repo, target_format, source, process_path, process_args).await?;
+
+    Ok(HttpResponse::Accepted().finish())
 }
 
 /// Fetch file details
@@ -603,6 +672,31 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
             })),
         );
 
+    // Create a new Multipart Form validator for backgrounded uploads
+    //
+    // This form is expecting a single array field, 'images' with at most 10 files in it
+    let repo2 = repo.clone();
+    let store2 = store.clone();
+    let backgrounded_form = Form::new()
+        .max_files(10)
+        .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
+        .transform_error(transform_error)
+        .field(
+            "images",
+            Field::array(Field::file(move |filename, _, stream| {
+                let repo = repo2.clone();
+                let store = store2.clone();
+
+                let span = tracing::info_span!("file-proxy", ?filename);
+
+                let stream = stream.map_err(Error::from);
+
+                Box::pin(
+                    async move { Backgrounded::proxy(repo, store, stream).await }.instrument(span),
+                )
+            })),
+        );
+
     HttpServer::new(move || {
         let store = store.clone();
         let repo = repo.clone();
@@ -632,6 +726,11 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                             .wrap(form.clone())
                             .route(web::post().to(upload::<R, S>)),
                     )
+                    .service(
+                        web::resource("/backgrounded")
+                            .wrap(backgrounded_form.clone())
+                            .route(web::post().to(upload_backgrounded::<R, S>)),
+                    )
                     .service(web::resource("/download").route(web::get().to(download::<R, S>)))
                     .service(
                         web::resource("/delete/{delete_token}/{filename}")
@@ -642,6 +741,10 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                         web::resource("/original/{filename}").route(web::get().to(serve::<R, S>)),
                     )
                     .service(web::resource("/process.{ext}").route(web::get().to(process::<R, S>)))
+                    .service(
+                        web::resource("/process_backgrounded.{ext}")
+                            .route(web::get().to(process_backgrounded::<R, S>)),
+                    )
                     .service(
                         web::scope("/details")
                             .service(

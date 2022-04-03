@@ -1,13 +1,14 @@
 use crate::{
     config::ImageFormat,
     error::Error,
-    repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, QueueRepo},
+    repo::{
+        Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, QueueRepo, UploadId,
+    },
     serde_str::Serde,
     store::{Identifier, Store},
 };
 use std::{future::Future, path::PathBuf, pin::Pin};
 use tracing::Instrument;
-use uuid::Uuid;
 
 mod cleanup;
 mod process;
@@ -33,7 +34,7 @@ enum Cleanup {
 enum Process {
     Ingest {
         identifier: Vec<u8>,
-        upload_id: Uuid,
+        upload_id: Serde<UploadId>,
         declared_alias: Option<Serde<Alias>>,
         should_validate: bool,
     },
@@ -80,14 +81,14 @@ pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
 pub(crate) async fn queue_ingest<R: QueueRepo>(
     repo: &R,
     identifier: Vec<u8>,
-    upload_id: Uuid,
+    upload_id: UploadId,
     declared_alias: Option<Alias>,
     should_validate: bool,
 ) -> Result<(), Error> {
     let job = serde_json::to_vec(&Process::Ingest {
         identifier,
         declared_alias: declared_alias.map(Serde::new),
-        upload_id,
+        upload_id: Serde::new(upload_id),
         should_validate,
     })?;
     repo.push(PROCESS_QUEUE, job.into()).await?;

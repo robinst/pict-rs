@@ -31,7 +31,7 @@ pub(crate) struct DeleteToken {
 
 pub(crate) struct AlreadyExists;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct UploadId {
     id: Uuid,
 }
@@ -88,6 +88,8 @@ pub(crate) trait BaseRepo {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait UploadRepo: BaseRepo {
+    async fn create(&self, upload_id: UploadId) -> Result<(), Error>;
+
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, Error>;
 
     async fn claim(&self, upload_id: UploadId) -> Result<(), Error>;
@@ -436,6 +438,26 @@ impl UploadId {
 impl From<Uuid> for UploadId {
     fn from(id: Uuid) -> Self {
         Self { id }
+    }
+}
+
+impl From<UploadId> for Uuid {
+    fn from(uid: UploadId) -> Self {
+        uid.id
+    }
+}
+
+impl std::str::FromStr for UploadId {
+    type Err = <Uuid as std::str::FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(UploadId { id: s.parse()? })
+    }
+}
+
+impl std::fmt::Display for UploadId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.id, f)
     }
 }
 

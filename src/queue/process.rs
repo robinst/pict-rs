@@ -32,7 +32,7 @@ where
                         repo,
                         store,
                         identifier,
-                        upload_id.into(),
+                        Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
                         should_validate,
                     )

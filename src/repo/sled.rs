@@ -125,13 +125,37 @@ impl From<InnerUploadResult> for UploadResult {
 
 #[async_trait::async_trait(?Send)]
 impl UploadRepo for SledRepo {
+    async fn create(&self, upload_id: UploadId) -> Result<(), Error> {
+        b!(self.uploads, uploads.insert(upload_id.as_bytes(), b"1"));
+        Ok(())
+    }
+
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, Error> {
         let mut subscriber = self.uploads.watch_prefix(upload_id.as_bytes());
 
-        while let Some(event) = (&mut subscriber).await {
-            if let sled::Event::Insert { value, .. } = event {
-                let result: InnerUploadResult = serde_json::from_slice(&value)?;
+        let bytes = upload_id.as_bytes().to_vec();
+        let opt = b!(self.uploads, uploads.get(bytes));
+
+        if let Some(bytes) = opt {
+            if bytes != b"1" {
+                let result: InnerUploadResult = serde_json::from_slice(&bytes)?;
                 return Ok(result.into());
+            }
+        } else {
+            return Err(UploadError::NoFiles.into());
+        }
+
+        while let Some(event) = (&mut subscriber).await {
+            match event {
+                sled::Event::Remove { .. } => {
+                    return Err(UploadError::NoFiles.into());
+                }
+                sled::Event::Insert { value, .. } => {
+                    if value != b"1" {
+                        let result: InnerUploadResult = serde_json::from_slice(&value)?;
+                        return Ok(result.into());
+                    }
+                }
             }
         }
 
