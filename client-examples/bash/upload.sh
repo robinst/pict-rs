@@ -9,6 +9,9 @@ upload_ids=$(
     -F "images[]=@../scene.webp" \
     -F "images[]=@../test.png" \
     -F "images[]=@../earth.gif" \
+    -F "images[]=@../test.png" \
+    -F "images[]=@../cat.jpg" \
+    -F "images[]=@../scene.webp" \
     'http://localhost:8080/image/backgrounded' | \
   jq '.uploads[].upload_id' | \
   sed 's/"//g'
