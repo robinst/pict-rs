@@ -122,29 +122,33 @@ See [`pict-rs.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/pict-
 configuration
 
 #### Example:
+Run with the default configuration
+```
+$ ./pict-rs run
+```
 Running on all interfaces, port 8080, storing data in /opt/data
 ```
-$ ./pict-rs -a 0.0.0.0:8080 -p /opt/data run
+$ ./pict-rs run -a 0.0.0.0:8080 filesystem -p /opt/data/files sled -p /opt/data/sled-repo
 ```
 Running locally, port 9000, storing data in data/, and converting all uploads to PNG
 ```
-$ ./pict-rs -a 127.0.0.1:9000 -p data/ -f png run
+$ ./pict-rs run -a 127.0.0.1:9000 --media-format png filesystem -p data/files sled -p data/sled-repo
 ```
 Running locally, port 8080, storing data in data/, and only allowing the `thumbnail` and `identity` filters
 ```
-$ ./pict-rs -a 127.0.0.1:8080 -p data/ -w thumbnail identity run
+$ ./pict-rs run -a 127.0.0.1:8080 --media-filters thumbnail --media-filters identity filesystem -p data/files sled -p data/sled-repo
 ```
 Running from a configuration file
 ```
 $ ./pict-rs -c ./pict-rs.toml run
 ```
-Migrating to object storage from filesystem storage (both storages must be configured in pict-rs.toml)
+Migrating to object storage from filesystem storage
 ```
-$ ./pict-rs -c ./pict-rs.toml --store filesystem migrate-store object-storage
+$ ./pict-rs filesystem -p data/sled-repo object-storage -a ACCESS_KEY -b BUCKET_NAME -r REGION -s SECRET_KEY
 ```
-Dumping commandline flags to a toml file
+Dumping configuration overrides to a toml file
 ```
-$ ./pict-rs -p data/ --store object-storage --object-storage-bucket-name pict-rs --object-storage-region us-east-1 dump pict-rs.toml
+$ ./pict-rs --save-to pict-rs.toml run object-storage -a ACCESS_KEY -b pict-rs -r us-east-1 -s SECRET_KEY sled -p data/sled-repo
 ```
 
 #### Docker
@@ -188,16 +192,15 @@ I have been doing it:
 ```
 $ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" archlinux:latest
 # pacman -Syu imagemagick ffmepg perl-image-exiftool
-# ln -s /usr/bin/vendor_perl/exiftool /usr/bin/exiftool
-# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.0.11/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.0/config-Q16HDRI/
-# RUST_LOG=debug /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs -p /mnt/data
+# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.0/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.0/config-Q16HDRI/
+# PATH=$PATH:/usr/bin/vendor_perl RUST_LOG=debug /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs run
 ```
 ###### With Alpine
 ```
 $ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt alpine:3.14
 # apk add imagemagick ffmpeg exiftool
-# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.0.11/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.0.11/config-Q16HDRI/
-# RUST_LOG=debug /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs -p /mnt/data
+# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.0/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.0/config-Q16HDRI/
+# RUST_LOG=debug /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs RUN
 ```
 
 ### API
@@ -211,15 +214,48 @@ pict-rs offers the following endpoints:
         "files": [
             {
                 "delete_token": "JFvFhqJA98",
-                "file": "lkWZDRvugm.jpg"
+                "file": "lkWZDRvugm.jpg",
+                "details": {
+                    "width": 800,
+                    "height": 800,
+                    "content_type": "image/jpeg",
+                    "created_at": [
+                        2020,
+                        345,
+                        67376,
+                        394363487
+                    ]
+                }
             },
             {
                 "delete_token": "kAYy9nk2WK",
-                "file": "8qFS0QooAn.jpg"
+                "file": "8qFS0QooAn.jpg",
+                "details": {
+                    "width": 400,
+                    "height": 400,
+                    "content_type": "image/jpeg",
+                    "created_at": [
+                        2020,
+                        345,
+                        67376,
+                        394363487
+                    ]
+                }
             },
             {
                 "delete_token": "OxRpM3sf0Y",
-                "file": "1hJaYfGE01.jpg"
+                "file": "1hJaYfGE01.jpg",
+                "details": {
+                    "width": 400,
+                    "height": 400,
+                    "content_type": "image/jpeg",
+                    "created_at": [
+                        2020,
+                        345,
+                        67376,
+                        394363487
+                    ]
+                }
             }
         ],
         "msg": "ok"
@@ -227,6 +263,43 @@ pict-rs offers the following endpoints:
     ```
 - `GET /image/download?url=...` Download an image from a remote server, returning the same JSON
     payload as the `POST` endpoint
+- `POST /image/backgrounded` Upload an image, like the `/image` endpoint, but don't wait to validate and process it.
+    This endpoint returns the following JSON structure on success with a 202 Accepted status
+    ```json
+    {
+        "uploads": [
+            {
+                "upload_id": "c61422e1-9294-4f1f-977f-c696b7939467",
+            },
+            {
+                "upload_id": "62cc707f-725c-44b6-908f-2bd8946c3c29"
+            }
+        ],
+        "msg": "ok"
+    }
+    ```
+- `GET /image/backgrounded/claim?upload_id=` Wait for a backgrounded upload to complete, claiming it's result
+    Possible results:
+    - 200 Ok (validation and ingest complete):
+        ```json
+        {
+            "files": [
+                {
+                    "delete_token": "OxRpM3sf0Y",
+                    "file": "1hJaYfGE01.jpg"
+                }
+            ],
+            "msg": "ok"
+        }
+        ```
+    - 422 Unprocessable Entity (validation or otherwise failure):
+        ```json
+        {
+            "msg": "Error message about what went wrong with upload"
+        }
+        ```
+    - 204 No Content (Upload validation and ingest is not complete, and waiting timed out)
+        In this case, trying again is fine
 - `GET /image/original/{file}` for getting a full-resolution image. `file` here is the `file` key from the
     `/image` endpoint's JSON
 - `GET /image/details/original/{file}` for getting the details of a full-resolution image.
@@ -265,6 +338,7 @@ pict-rs offers the following endpoints:
     GET /image/process.jpg?src=asdf.png&thumbnail=256&blur=3.0
     ```
     which would create a 256x256px JPEG thumbnail and blur it
+- `GET /image/process_backgrounded.{ext}?src={file}&...` queue transformations to be applied to a given file. This accepts the same arguments as the `process.{ext}` endpoint, but does not wait for the processing to complete.
 - `GET /image/details/process.{ext}?src={file}&...` for getting the details of a processed image.
     The returned JSON is the same format as listed for the full-resolution details endpoint.
 - `DELETE /image/delete/{delete_token}/{file}` or `GET /image/delete/{delete_token}/{file}` to
