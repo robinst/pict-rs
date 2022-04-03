@@ -61,7 +61,7 @@ where
 
         let identifier = store.save_async_read(&mut reader).await?;
 
-        self.identifier = Some(identifier.clone());
+        self.identifier = Some(identifier);
 
         Ok(())
     }

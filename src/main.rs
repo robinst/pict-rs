@@ -48,6 +48,8 @@ mod stream;
 mod tmp_file;
 mod validate;
 
+use crate::repo::UploadResult;
+
 use self::{
     backgrounded::Backgrounded,
     config::{Configuration, ImageFormat, Operation},
@@ -60,7 +62,7 @@ use self::{
     middleware::{Deadline, Internal},
     migrate::LatestDb,
     queue::queue_generate,
-    repo::{Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, Repo, SettingsRepo},
+    repo::{Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, Repo, SettingsRepo, UploadId},
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
     stream::{StreamLimit, StreamTimeout},
@@ -165,7 +167,7 @@ async fn upload_backgrounded<R: FullRepo, S: Store>(
         queue::queue_ingest(&**repo, identifier, upload_id, None, true).await?;
 
         files.push(serde_json::json!({
-            "file": upload_id.to_string(),
+            "upload_id": upload_id.to_string(),
         }));
     }
 
@@ -173,10 +175,49 @@ async fn upload_backgrounded<R: FullRepo, S: Store>(
         image.result.disarm();
     }
 
-    Ok(HttpResponse::Created().json(&serde_json::json!({
+    Ok(HttpResponse::Accepted().json(&serde_json::json!({
         "msg": "ok",
-        "files": files
+        "uploads": files
     })))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ClaimQuery {
+    upload_id: Serde<UploadId>,
+}
+
+/// Claim a backgrounded upload
+#[instrument(name = "Waiting on upload", skip(repo))]
+async fn claim_upload<R: FullRepo>(
+    repo: web::Data<R>,
+    query: web::Query<ClaimQuery>,
+) -> Result<HttpResponse, Error> {
+    let upload_id = Serde::into_inner(query.into_inner().upload_id);
+
+    match actix_rt::time::timeout(Duration::from_secs(10), repo.wait(upload_id)).await {
+        Ok(wait_res) => {
+            let upload_result = wait_res?;
+            repo.claim(upload_id).await?;
+
+            match upload_result {
+                UploadResult::Success { alias, token } => {
+                    Ok(HttpResponse::Ok().json(&serde_json::json!({
+                        "msg": "ok",
+                        "files": [{
+                            "file": alias.to_string(),
+                            "delete_token": token.to_string(),
+                        }]
+                    })))
+                }
+                UploadResult::Failure { message } => Ok(HttpResponse::UnprocessableEntity().json(
+                    &serde_json::json!({
+                        "msg": message,
+                    }),
+                )),
+            }
+        }
+        Err(_) => Ok(HttpResponse::NoContent().finish()),
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -727,9 +768,16 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                             .route(web::post().to(upload::<R, S>)),
                     )
                     .service(
-                        web::resource("/backgrounded")
-                            .wrap(backgrounded_form.clone())
-                            .route(web::post().to(upload_backgrounded::<R, S>)),
+                        web::scope("/backgrounded")
+                            .service(
+                                web::resource("")
+                                    .guard(guard::Post())
+                                    .wrap(backgrounded_form.clone())
+                                    .route(web::post().to(upload_backgrounded::<R, S>)),
+                            )
+                            .service(
+                                web::resource("/claim").route(web::get().to(claim_upload::<R>)),
+                            ),
                     )
                     .service(web::resource("/download").route(web::get().to(download::<R, S>)))
                     .service(

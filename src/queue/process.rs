@@ -90,6 +90,8 @@ where
 
         let token = session.delete_token().await?;
 
+        store.remove(&unprocessed_identifier).await?;
+
         Ok((session, token)) as Result<(Session<R, S>, DeleteToken), Error>
     };
 
