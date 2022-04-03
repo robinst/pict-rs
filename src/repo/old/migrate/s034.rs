@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    migrate::{SledDb, SledIter, SledTree},
+    repo::old::migrate::{SledDb, SledIter, SledTree},
 };
 use sled as sled034;
 use std::path::PathBuf;

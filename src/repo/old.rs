@@ -20,6 +20,8 @@
 use super::{Alias, DeleteToken, Details};
 use std::path::PathBuf;
 
+mod migrate;
+
 #[derive(Debug)]
 struct OldDbError(&'static str);
 
@@ -42,7 +44,9 @@ pub(super) struct Old {
 }
 
 impl Old {
-    pub(super) fn open(db: sled::Db) -> color_eyre::Result<Self> {
+    pub(super) fn open(path: PathBuf) -> color_eyre::Result<Self> {
+        let db = migrate::LatestDb::exists(path).migrate()?;
+
         Ok(Self {
             alias_tree: db.open_tree("alias")?,
             filename_tree: db.open_tree("filename")?,

@@ -36,7 +36,6 @@ mod ingest;
 mod init_tracing;
 mod magick;
 mod middleware;
-mod migrate;
 mod process;
 mod processor;
 mod queue;
@@ -60,7 +59,6 @@ use self::{
     init_tracing::init_tracing,
     magick::details_hint,
     middleware::{Deadline, Internal},
-    migrate::LatestDb,
     queue::queue_generate,
     repo::{Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, Repo, SettingsRepo, UploadId},
     serde_str::Serde,
@@ -873,9 +871,7 @@ async fn main() -> color_eyre::Result<()> {
     init_tracing(&CONFIG.tracing)?;
 
     let repo = Repo::open(CONFIG.repo.clone())?;
-
-    let db = LatestDb::exists(CONFIG.old_db.path.clone()).migrate()?;
-    repo.from_db(db).await?;
+    repo.from_db(CONFIG.old_db.path.clone()).await?;
 
     match (*OPERATION).clone() {
         Operation::Run => (),

@@ -1,6 +1,7 @@
 use crate::{config, details::Details, error::Error, store::Identifier};
 use futures_util::Stream;
 use std::fmt::Debug;
+use std::path::PathBuf;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -210,12 +211,12 @@ impl Repo {
     }
 
     #[tracing::instrument(skip_all)]
-    pub(crate) async fn from_db(&self, db: ::sled::Db) -> color_eyre::Result<()> {
+    pub(crate) async fn from_db(&self, path: PathBuf) -> color_eyre::Result<()> {
         if self.has_migrated().await? {
             return Ok(());
         }
 
-        let old = self::old::Old::open(db)?;
+        let old = self::old::Old::open(path)?;
 
         for hash in old.hashes() {
             match self {
