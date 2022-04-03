@@ -168,36 +168,18 @@ $ sudo docker-compose up -d
     `/usr/lib/ImageMagick-$VERSION/config-Q16HDRI/policy.xml`
 
 #### Docker Development
-The development system loads a rust environment inside a docker container with the neccessary
-dependencies already present
-```
-$ git clone https://git.asonix.dog/asonix/pict-rs
-$ cd pict-rs/docker/dev
-$ ./dev.sh
-$ check # runs cargo check
-$ build # runs cargo build
-```
-Development environments are provided for amd64, arm32v7, and arm64v8. By default `dev.sh` will load
-into the contianer targetting amd64, but arch arguments can be passed to change the target.
-```
-$ ./dev.sh arm32v7
-$ build
-```
-##### Note
-Since moving to calling out to ffmpeg, imagemagick, and exiftool's binaries instead of binding
-directly, the dev environment now only contains enough to build static binaries, but not run the
-pict-rs program. I have personally been using alpine and arch linux to test the results. Here's how
-I have been doing it:
 ###### With Arch
 ```
+$ cargo build
 $ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" archlinux:latest
 # pacman -Syu imagemagick ffmepg perl-image-exiftool
 # cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.0/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.0/config-Q16HDRI/
-# PATH=$PATH:/usr/bin/vendor_perl RUST_LOG=debug /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs run
+# PATH=$PATH:/usr/bin/vendor_perl RUST_LOG=debug /mnt/target/debug/pict-rs run
 ```
 ###### With Alpine
 ```
-$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt alpine:3.14
+$ cross build --target=x86_64-unknown-linux-musl
+$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt alpine:3.15
 # apk add imagemagick ffmpeg exiftool
 # cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.0/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.0/config-Q16HDRI/
 # RUST_LOG=debug /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs RUN
