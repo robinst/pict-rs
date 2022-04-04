@@ -1,12 +1,12 @@
 ## Server configuration
 [server]
 ## Optional: pict-rs binding address
-# environment variable: PICTRS_ADDRESS
+# environment variable: PICTRS_SERVER__ADDRESS
 # default: 0.0.0.0:8080
 address = '0.0.0.0:8080'
 
 ## Optional: pict-rs worker id
-# environment variable PICTRS_WORKER_ID
+# environment variable PICTRS_SERVER__WORKER_ID
 # default: pict-rs-1
 #
 # This is used for the internal job queue. It will have more meaning once a shared metadata
@@ -14,7 +14,7 @@ address = '0.0.0.0:8080'
 worker_id = 'pict-rs-1'
 
 ## Optional: shared secret for internal endpoints
-# environment variable: PICTRS_API_KEY
+# environment variable: PICTRS_SERVER__API_KEY
 # default: empty
 #
 # Not specifying api_key disables internal endpoints
