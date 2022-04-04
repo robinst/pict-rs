@@ -15,4 +15,4 @@ EXPOSE 6669
 EXPOSE 8080
 VOLUME /mnt
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["/usr/local/bin/pict-rs", "-p", "/mnt"]
+CMD ["/usr/local/bin/pict-rs", "run"]
