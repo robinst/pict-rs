@@ -115,6 +115,7 @@ where
     S: Store,
 {
     pub(crate) fn disarm(&mut self) {
+        let _ = self.hash.take();
         let _ = self.alias.take();
         let _ = self.identifier.take();
     }

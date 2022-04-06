@@ -56,6 +56,7 @@ pub(crate) trait FullRepo:
     + Clone
     + Debug
 {
+    #[tracing::instrument]
     async fn identifier_from_alias<I: Identifier + 'static>(
         &self,
         alias: &Alias,
@@ -64,11 +65,13 @@ pub(crate) trait FullRepo:
         self.identifier(hash).await
     }
 
+    #[tracing::instrument]
     async fn aliases_from_alias(&self, alias: &Alias) -> Result<Vec<Alias>, Error> {
         let hash = self.hash(alias).await?;
         self.aliases(hash).await
     }
 
+    #[tracing::instrument]
     async fn still_identifier_from_alias<I: Identifier + 'static>(
         &self,
         alias: &Alias,
@@ -83,11 +86,13 @@ pub(crate) trait FullRepo:
         }
     }
 
+    #[tracing::instrument]
     async fn mark_cached(&self, alias: &Alias) -> Result<(), Error> {
         let hash = self.hash(alias).await?;
         CachedRepo::create(self, hash).await
     }
 
+    #[tracing::instrument]
     async fn check_cached(&self, alias: &Alias) -> Result<(), Error> {
         let hash = self.hash(alias).await?;
         let hashes = CachedRepo::update(self, hash).await?;
