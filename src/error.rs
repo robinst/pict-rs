@@ -114,6 +114,9 @@ pub(crate) enum UploadError {
     #[error("Error in json")]
     Json(#[from] serde_json::Error),
 
+    #[error("Error in cbor")]
+    Cbor(#[from] serde_cbor::Error),
+
     #[error("Range header not satisfiable")]
     Range,
 

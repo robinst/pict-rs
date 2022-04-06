@@ -154,6 +154,11 @@ filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 # Set this to true if you want to avoid processing imported media
 skip_validate_imports = false
 
+## Optional: The duration, in hours, to keep media ingested through the "cache" endpoint
+# environment variable: PICTRS_MEDIA__CACHE_DURATION
+# default: 168 (1 week)
+cache_duration = 168
+
 
 ## Database configuration
 [repo]

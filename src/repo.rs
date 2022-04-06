@@ -44,7 +44,8 @@ pub(crate) enum UploadResult {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait FullRepo:
-    UploadRepo
+    CachedRepo
+    + UploadRepo
     + SettingsRepo
     + IdentifierRepo
     + AliasRepo
@@ -81,10 +82,33 @@ pub(crate) trait FullRepo:
             None => Ok(None),
         }
     }
+
+    async fn mark_cached(&self, alias: &Alias) -> Result<(), Error> {
+        let hash = self.hash(alias).await?;
+        CachedRepo::create(self, hash).await
+    }
+
+    async fn check_cached(&self, alias: &Alias) -> Result<(), Error> {
+        let hash = self.hash(alias).await?;
+        let hashes = CachedRepo::update(self, hash).await?;
+
+        for hash in hashes {
+            crate::queue::cleanup_hash(self, hash).await?;
+        }
+
+        Ok(())
+    }
 }
 
 pub(crate) trait BaseRepo {
     type Bytes: AsRef<[u8]> + From<Vec<u8>> + Clone;
+}
+
+#[async_trait::async_trait(?Send)]
+pub(crate) trait CachedRepo: BaseRepo {
+    async fn create(&self, hash: Self::Bytes) -> Result<(), Error>;
+
+    async fn update(&self, hash: Self::Bytes) -> Result<Vec<Self::Bytes>, Error>;
 }
 
 #[async_trait::async_trait(?Send)]

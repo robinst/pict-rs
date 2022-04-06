@@ -1,20 +1,25 @@
 use crate::{
     error::{Error, UploadError},
     repo::{
-        Alias, AliasRepo, AlreadyExists, BaseRepo, DeleteToken, Details, FullRepo, HashRepo,
-        Identifier, IdentifierRepo, QueueRepo, SettingsRepo, UploadId, UploadRepo, UploadResult,
+        Alias, AliasRepo, AlreadyExists, BaseRepo, CachedRepo, DeleteToken, Details, FullRepo,
+        HashRepo, Identifier, IdentifierRepo, QueueRepo, SettingsRepo, UploadId, UploadRepo,
+        UploadResult,
     },
     serde_str::Serde,
     stream::from_iterator,
 };
 use futures_util::Stream;
-use sled::{Db, IVec, Tree};
+use sled::{CompareAndSwapError, Db, IVec, Tree};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     pin::Pin,
     sync::{Arc, RwLock},
 };
 use tokio::sync::Notify;
+
+mod datetime;
+
+use datetime::DateTime;
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -57,6 +62,8 @@ pub(crate) struct SledRepo {
     in_progress_queue: Tree,
     queue_notifier: Arc<RwLock<HashMap<&'static str, Arc<Notify>>>>,
     uploads: Tree,
+    cache: Tree,
+    cache_inverse: Tree,
     db: Db,
 }
 
@@ -77,6 +84,8 @@ impl SledRepo {
             in_progress_queue: db.open_tree("pict-rs-in-progress-queue-tree")?,
             queue_notifier: Arc::new(RwLock::new(HashMap::new())),
             uploads: db.open_tree("pict-rs-uploads-tree")?,
+            cache: db.open_tree("pict-rs-cache-tree")?,
+            cache_inverse: db.open_tree("pict-rs-cache-inverse-tree")?,
             db,
         })
     }
@@ -120,6 +129,111 @@ impl From<InnerUploadResult> for UploadResult {
             },
             InnerUploadResult::Failure { message } => UploadResult::Failure { message },
         }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Bucket {
+    inner: HashSet<Vec<u8>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl CachedRepo for SledRepo {
+    async fn create(&self, hash: Self::Bytes) -> Result<(), Error> {
+        let now = DateTime::now();
+        let bytes = serde_json::to_vec(&now)?;
+
+        let cache_inverse = self.cache_inverse.clone();
+        b!(self.cache, {
+            cache.insert(hash.clone(), bytes.clone())?;
+
+            let mut old = cache_inverse.get(bytes.clone())?;
+            loop {
+                let new: Option<Vec<u8>> = if let Some(old) = old.as_ref() {
+                    let mut bucket = serde_cbor::from_slice::<Bucket>(old)?;
+                    bucket.inner.insert(hash.as_ref().to_vec());
+                    let vec = serde_cbor::to_vec(&bucket)?;
+                    Some(vec)
+                } else {
+                    let mut bucket = Bucket {
+                        inner: HashSet::new(),
+                    };
+                    bucket.inner.insert(hash.as_ref().to_vec());
+                    let vec = serde_cbor::to_vec(&bucket)?;
+                    Some(vec)
+                };
+
+                let res = cache_inverse.compare_and_swap(bytes.clone(), old, new)?;
+
+                if let Err(CompareAndSwapError { current, .. }) = res {
+                    old = current;
+                } else {
+                    break;
+                }
+            }
+
+            Ok(()) as Result<(), Error>
+        });
+        Ok(())
+    }
+
+    async fn update(&self, hash: Self::Bytes) -> Result<Vec<Self::Bytes>, Error> {
+        let now = DateTime::now();
+        let bytes = serde_json::to_vec(&now)?;
+
+        let to_clean = now.min_cache_date();
+        let to_clean_bytes = serde_json::to_vec(&to_clean)?;
+
+        let cache_inverse = self.cache_inverse.clone();
+        let hashes = b!(self.cache, {
+            let prev_value = cache
+                .fetch_and_update(hash.clone(), |prev_value| prev_value.map(|_| bytes.clone()))?;
+
+            if let Some(prev_value) = prev_value {
+                let mut old = cache_inverse.get(prev_value.clone())?;
+                loop {
+                    let new = if let Some(bucket_bytes) = old.as_ref() {
+                        if let Ok(mut bucket) = serde_cbor::from_slice::<Bucket>(bucket_bytes) {
+                            bucket.inner.remove(hash.as_ref());
+                            let bucket_bytes = serde_cbor::to_vec(&bucket)?;
+                            Some(bucket_bytes)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Err(CompareAndSwapError { current, .. }) =
+                        cache_inverse.compare_and_swap(prev_value.clone(), old, new)?
+                    {
+                        old = current;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            let mut hashes: Vec<Self::Bytes> = Vec::new();
+
+            for (date_bytes, bucket_bytes) in
+                cache_inverse.range(..to_clean_bytes).filter_map(Result::ok)
+            {
+                if let Ok(bucket) = serde_cbor::from_slice::<Bucket>(&bucket_bytes) {
+                    for hash in bucket.inner {
+                        // Best effort cleanup
+                        let _ = cache.remove(&hash);
+                        hashes.push(hash.into());
+                    }
+                }
+
+                cache_inverse.remove(date_bytes)?;
+            }
+
+            Ok(hashes) as Result<_, Error>
+        });
+
+        Ok(hashes)
     }
 }
 

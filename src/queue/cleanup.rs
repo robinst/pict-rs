@@ -85,6 +85,11 @@ where
     let aliases = repo.aliases(hash.clone()).await?;
 
     if !aliases.is_empty() {
+        for alias in aliases {
+            let token = repo.delete_token(&alias).await?;
+            crate::queue::cleanup_alias(repo, alias, token).await?;
+        }
+        // Return after queueing cleanup alias, since we will be requeued when the last alias is cleaned
         return Ok(());
     }
 

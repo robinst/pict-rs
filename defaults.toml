@@ -29,6 +29,7 @@ filters = [
     'thumbnail',
 ]
 skip_validate_imports = false
+cache_duration = 168
 
 [repo]
 type = 'sled'

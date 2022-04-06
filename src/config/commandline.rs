@@ -53,6 +53,7 @@ impl Args {
                 media_enable_silent_video,
                 media_filters,
                 media_format,
+                media_cache_duration,
                 store,
             }) => {
                 let server = Server {
@@ -69,6 +70,7 @@ impl Args {
                     enable_silent_video: media_enable_silent_video,
                     filters: media_filters,
                     format: media_format,
+                    cache_duration: media_cache_duration,
                 };
                 let operation = Operation::Run;
 
@@ -313,6 +315,8 @@ struct Media {
     format: Option<ImageFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
     skip_validate_imports: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_duration: Option<i64>,
 }
 
 /// Run the pict-rs application
@@ -406,6 +410,10 @@ struct Run {
     /// Enforce uploaded media is transcoded to the provided format
     #[clap(long)]
     media_format: Option<ImageFormat>,
+
+    /// How long, in hours, to keep media ingested through the "cached" endpoint
+    #[clap(long)]
+    media_cache_duration: Option<i64>,
 
     #[clap(subcommand)]
     store: Option<RunStore>,

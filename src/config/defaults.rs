@@ -68,6 +68,7 @@ struct MediaDefaults {
     enable_silent_video: bool,
     filters: Vec<String>,
     skip_validate_imports: bool,
+    cache_duration: i64,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -151,13 +152,15 @@ impl Default for MediaDefaults {
             max_file_size: 40,
             enable_silent_video: true,
             filters: vec![
-                "identity".into(),
-                "thumbnail".into(),
-                "resize".into(),
-                "crop".into(),
                 "blur".into(),
+                "crop".into(),
+                "identity".into(),
+                "resize".into(),
+                "thumbnail".into(),
             ],
             skip_validate_imports: false,
+            // one week (in hours)
+            cache_duration: 24 * 7,
         }
     }
 }

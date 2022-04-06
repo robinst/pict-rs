@@ -270,6 +270,55 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     })))
 }
 
+/// cache an image from a URL
+#[instrument(name = "Caching file", skip(client, repo))]
+async fn cache<R: FullRepo + 'static, S: Store + 'static>(
+    client: web::Data<Client>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    query: web::Query<UrlQuery>,
+) -> Result<HttpResponse, Error> {
+    let res = client.get(&query.url).send().await?;
+
+    if !res.status().is_success() {
+        return Err(UploadError::Download(res.status()).into());
+    }
+
+    let stream = res
+        .map_err(Error::from)
+        .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
+
+    let mut session = ingest::ingest(&**repo, &**store, stream, None, true).await?;
+
+    let alias = session.alias().expect("alias should exist").to_owned();
+    let delete_token = session.delete_token().await?;
+
+    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
+
+    let details = repo.details(&identifier).await?;
+
+    let details = if let Some(details) = details {
+        details
+    } else {
+        let hint = details_hint(&alias);
+        let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
+        repo.relate_details(&identifier, &new_details).await?;
+        new_details
+    };
+
+    repo.mark_cached(&alias).await?;
+
+    session.disarm();
+    Ok(HttpResponse::Created().json(&serde_json::json!({
+        "msg": "ok",
+        "files": [{
+            "file": alias.to_string(),
+            "delete_token": delete_token.to_string(),
+            "details": details,
+        }]
+    })))
+}
+
 /// Delete aliases and files
 #[instrument(name = "Deleting file", skip(repo))]
 async fn delete<R: FullRepo>(
@@ -358,6 +407,8 @@ async fn process<R: FullRepo, S: Store + 'static>(
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let (format, alias, thumbnail_path, thumbnail_args) = prepare_process(query, ext.as_str())?;
+
+    repo.check_cached(&alias).await?;
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
     let hash = repo.hash(&alias).await?;
@@ -450,12 +501,11 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
 /// Fetch file details
 #[instrument(name = "Fetching details", skip(repo))]
 async fn details<R: FullRepo, S: Store + 'static>(
-    alias: web::Path<String>,
+    alias: web::Path<Serde<Alias>>,
     repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
-    let alias = Alias::from_existing(&alias);
 
     let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 
@@ -477,12 +527,14 @@ async fn details<R: FullRepo, S: Store + 'static>(
 #[instrument(name = "Serving file", skip(repo))]
 async fn serve<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
-    alias: web::Path<String>,
+    alias: web::Path<Serde<Alias>>,
     repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
-    let alias = Alias::from_existing(&alias);
+
+    repo.check_cached(&alias).await?;
+
     let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 
     let details = repo.details(&identifier).await?;
@@ -581,7 +633,7 @@ where
 
 #[derive(Debug, serde::Deserialize)]
 struct AliasQuery {
-    alias: String,
+    alias: Serde<Alias>,
 }
 
 #[instrument(name = "Purging file", skip(repo))]
@@ -589,13 +641,11 @@ async fn purge<R: FullRepo>(
     query: web::Query<AliasQuery>,
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
-    let alias = Alias::from_existing(&query.alias);
+    let alias = query.into_inner().alias;
     let aliases = repo.aliases_from_alias(&alias).await?;
 
-    for alias in aliases.iter() {
-        let token = repo.delete_token(alias).await?;
-        queue::cleanup_alias(&**repo, alias.clone(), token).await?;
-    }
+    let hash = repo.hash(&alias).await?;
+    queue::cleanup_hash(&**repo, hash).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",
@@ -608,7 +658,7 @@ async fn aliases<R: FullRepo>(
     query: web::Query<AliasQuery>,
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
-    let alias = Alias::from_existing(&query.alias);
+    let alias = query.into_inner().alias;
     let aliases = repo.aliases_from_alias(&alias).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
@@ -778,6 +828,7 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                             ),
                     )
                     .service(web::resource("/download").route(web::get().to(download::<R, S>)))
+                    .service(web::resource("/cache").route(web::get().to(cache::<R, S>)))
                     .service(
                         web::resource("/delete/{delete_token}/{filename}")
                             .route(web::delete().to(delete::<R>))
