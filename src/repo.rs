@@ -87,18 +87,12 @@ pub(crate) trait FullRepo:
     }
 
     #[tracing::instrument]
-    async fn mark_cached(&self, alias: &Alias) -> Result<(), Error> {
-        let hash = self.hash(alias).await?;
-        CachedRepo::create(self, hash).await
-    }
-
-    #[tracing::instrument]
     async fn check_cached(&self, alias: &Alias) -> Result<(), Error> {
-        let hash = self.hash(alias).await?;
-        let hashes = CachedRepo::update(self, hash).await?;
+        let aliases = CachedRepo::update(self, alias).await?;
 
-        for hash in hashes {
-            crate::queue::cleanup_hash(self, hash).await?;
+        for alias in aliases {
+            let token = self.delete_token(&alias).await?;
+            crate::queue::cleanup_alias(self, alias, token).await?;
         }
 
         Ok(())
@@ -111,9 +105,9 @@ pub(crate) trait BaseRepo {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait CachedRepo: BaseRepo {
-    async fn create(&self, hash: Self::Bytes) -> Result<(), Error>;
+    async fn mark_cached(&self, alias: &Alias) -> Result<(), Error>;
 
-    async fn update(&self, hash: Self::Bytes) -> Result<Vec<Self::Bytes>, Error>;
+    async fn update(&self, alias: &Alias) -> Result<Vec<Alias>, Error>;
 }
 
 #[async_trait::async_trait(?Send)]
