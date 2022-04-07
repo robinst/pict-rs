@@ -10,6 +10,7 @@ use crate::{
 use actix_web::web::Bytes;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
+use tracing::Instrument;
 
 #[tracing::instrument(skip(hash))]
 pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
@@ -47,9 +48,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     thumbnail_args: Vec<String>,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
-    let permit = tracing::trace_span!(parent: None, "Aquire semaphore")
-        .in_scope(|| crate::PROCESS_SEMAPHORE.acquire())
-        .await;
+    let permit = crate::PROCESS_SEMAPHORE.acquire().await;
 
     let identifier = if let Some(identifier) = repo
         .still_identifier_from_alias::<S::Identifier>(&alias)
@@ -77,7 +76,10 @@ async fn process<R: FullRepo, S: Store + 'static>(
         crate::magick::process_image_store_read(store.clone(), identifier, thumbnail_args, format)?;
 
     let mut vec = Vec::new();
-    processed_reader.read_to_end(&mut vec).await?;
+    processed_reader
+        .read_to_end(&mut vec)
+        .instrument(tracing::info_span!("Reading processed image to vec"))
+        .await?;
     let bytes = Bytes::from(vec);
 
     drop(permit);

@@ -76,16 +76,20 @@ where
         if let Some(identifier) = self.identifier.take() {
             let repo = self.repo.clone();
 
-            actix_rt::spawn(async move {
-                let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
+            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                actix_rt::spawn(async move {
+                    let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
+                })
             });
         }
 
         if let Some(upload_id) = self.upload_id {
             let repo = self.repo.clone();
 
-            actix_rt::spawn(async move {
-                let _ = repo.claim(upload_id).await;
+            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                actix_rt::spawn(async move {
+                    let _ = repo.claim(upload_id).await;
+                })
             });
         }
     }

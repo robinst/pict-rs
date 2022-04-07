@@ -43,14 +43,17 @@ pin_project_lite::pin_project! {
 impl Process {
     #[tracing::instrument]
     pub(crate) fn run(command: &str, args: &[&str]) -> std::io::Result<Self> {
-        Self::spawn(Command::new(command).args(args))
+        tracing::trace_span!(parent: None, "Create command")
+            .in_scope(|| Self::spawn(Command::new(command).args(args)))
     }
 
     #[tracing::instrument]
     pub(crate) fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
-        let cmd = cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+        tracing::trace_span!(parent: None, "Spawn command").in_scope(|| {
+            let cmd = cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
 
-        cmd.spawn().map(|child| Process { child })
+            cmd.spawn().map(|child| Process { child })
+        })
     }
 
     #[tracing::instrument]
@@ -67,10 +70,11 @@ impl Process {
         let mut stdin = self.child.stdin.take().expect("stdin exists");
         let stdout = self.child.stdout.take().expect("stdout exists");
 
-        let (tx, rx) = channel::<std::io::Error>();
+        let (tx, rx) = tracing::trace_span!(parent: None, "Create channel")
+            .in_scope(channel::<std::io::Error>);
 
         let mut child = self.child;
-        let handle = tracing::trace_span!(parent: None, "Spawn").in_scope(|| {
+        let handle = tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
             actix_rt::spawn(async move {
                 if let Err(e) = stdin.write_all_buf(&mut input).await {
                     let _ = tx.send(e);
@@ -104,21 +108,23 @@ impl Process {
     pub(crate) fn read(mut self) -> impl AsyncRead + Unpin {
         let stdout = self.child.stdout.take().expect("stdout exists");
 
-        let (tx, rx) = channel();
+        let (tx, rx) = tracing::trace_span!(parent: None, "Create channel").in_scope(channel);
 
         let mut child = self.child;
-        let handle = actix_rt::spawn(async move {
-            match child.wait().await {
-                Ok(status) => {
-                    if !status.success() {
-                        let _ =
-                            tx.send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+        let handle = tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+            actix_rt::spawn(async move {
+                match child.wait().await {
+                    Ok(status) => {
+                        if !status.success() {
+                            let _ = tx
+                                .send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(e);
                     }
                 }
-                Err(e) => {
-                    let _ = tx.send(e);
-                }
-            }
+            })
         });
 
         ProcessRead {
@@ -138,27 +144,29 @@ impl Process {
         let mut stdin = self.child.stdin.take().expect("stdin exists");
         let stdout = self.child.stdout.take().expect("stdout exists");
 
-        let (tx, rx) = channel();
+        let (tx, rx) = tracing::trace_span!(parent: None, "Create channel").in_scope(channel);
 
         let mut child = self.child;
-        let handle = actix_rt::spawn(async move {
-            if let Err(e) = store.read_into(&identifier, &mut stdin).await {
-                let _ = tx.send(e);
-                return;
-            }
-            drop(stdin);
+        let handle = tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+            actix_rt::spawn(async move {
+                if let Err(e) = store.read_into(&identifier, &mut stdin).await {
+                    let _ = tx.send(e);
+                    return;
+                }
+                drop(stdin);
 
-            match child.wait().await {
-                Ok(status) => {
-                    if !status.success() {
-                        let _ =
-                            tx.send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+                match child.wait().await {
+                    Ok(status) => {
+                        if !status.success() {
+                            let _ = tx
+                                .send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(e);
                     }
                 }
-                Err(e) => {
-                    let _ = tx.send(e);
-                }
-            }
+            })
         });
 
         ProcessRead {

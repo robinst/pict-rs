@@ -20,13 +20,17 @@ mod tokio_file {
     impl File {
         pub(crate) async fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
             Ok(File {
-                inner: tokio::fs::File::open(path).await?,
+                inner: tracing::trace_span!(parent: None, "Open File")
+                    .in_scope(|| tokio::fs::File::open(path))
+                    .await?,
             })
         }
 
         pub(crate) async fn create(path: impl AsRef<Path>) -> std::io::Result<Self> {
             Ok(File {
-                inner: tokio::fs::File::create(path).await?,
+                inner: tracing::trace_span!(parent: None, "Create File")
+                    .in_scope(|| tokio::fs::File::create(path))
+                    .await?,
             })
         }
 
@@ -125,7 +129,9 @@ mod io_uring {
             tracing::info!("Opening io-uring file: {:?}", path.as_ref());
             Ok(File {
                 path: path.as_ref().to_owned(),
-                inner: tokio_uring::fs::File::open(path).await?,
+                inner: tracing::trace_span!(parent: None, "Open File")
+                    .in_scope(|| tokio_uring::fs::File::open(path))
+                    .await?,
             })
         }
 
@@ -133,7 +139,9 @@ mod io_uring {
             tracing::info!("Creating io-uring file: {:?}", path.as_ref());
             Ok(File {
                 path: path.as_ref().to_owned(),
-                inner: tokio_uring::fs::File::create(path).await?,
+                inner: tracing::trace_span!(parent: None, "Create File")
+                    .in_scope(|| tokio_uring::fs::File::create(path))
+                    .await?,
             })
         }
 

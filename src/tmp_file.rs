@@ -13,7 +13,8 @@ struct TmpFile(PathBuf);
 
 impl Drop for TmpFile {
     fn drop(&mut self) {
-        actix_rt::spawn(tokio::fs::remove_file(self.0.clone()));
+        tracing::trace_span!(parent: None, "Spawn task")
+            .in_scope(|| actix_rt::spawn(tokio::fs::remove_file(self.0.clone())));
     }
 }
 

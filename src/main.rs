@@ -75,8 +75,10 @@ static DO_CONFIG: Lazy<(Configuration, Operation)> =
     Lazy::new(|| config::configure().expect("Failed to configure"));
 static CONFIG: Lazy<Configuration> = Lazy::new(|| DO_CONFIG.0.clone());
 static OPERATION: Lazy<Operation> = Lazy::new(|| DO_CONFIG.1.clone());
-static PROCESS_SEMAPHORE: Lazy<Semaphore> =
-    Lazy::new(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)));
+static PROCESS_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
+    tracing::trace_span!(parent: None, "Initialize semaphore")
+        .in_scope(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
+});
 
 /// Handle responding to succesful uploads
 #[instrument(name = "Uploaded files", skip(value))]
@@ -790,16 +792,20 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
         let store = store.clone();
         let repo = repo.clone();
 
-        actix_rt::spawn(queue::process_cleanup(
-            repo.clone(),
-            store.clone(),
-            next_worker_id(),
-        ));
-        actix_rt::spawn(queue::process_images(
-            repo.clone(),
-            store.clone(),
-            next_worker_id(),
-        ));
+        tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+            actix_rt::spawn(queue::process_cleanup(
+                repo.clone(),
+                store.clone(),
+                next_worker_id(),
+            ))
+        });
+        tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+            actix_rt::spawn(queue::process_images(
+                repo.clone(),
+                store.clone(),
+                next_worker_id(),
+            ))
+        });
 
         App::new()
             .wrap(TracingLogger::default())

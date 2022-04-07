@@ -62,9 +62,7 @@ where
     R: FullRepo + 'static,
     S: Store,
 {
-    let permit = tracing::trace_span!(parent: None, "Aquire semaphore")
-        .in_scope(|| crate::PROCESS_SEMAPHORE.acquire())
-        .await;
+    let permit = crate::PROCESS_SEMAPHORE.acquire().await;
 
     let bytes = aggregate(stream).await?;
 
@@ -205,31 +203,37 @@ where
     fn drop(&mut self) {
         if let Some(hash) = self.hash.take() {
             let repo = self.repo.clone();
-            actix_rt::spawn(async move {
-                let _ = crate::queue::cleanup_hash(&repo, hash.into()).await;
+            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                actix_rt::spawn(async move {
+                    let _ = crate::queue::cleanup_hash(&repo, hash.into()).await;
+                })
             });
         }
 
         if let Some(alias) = self.alias.take() {
             let repo = self.repo.clone();
 
-            actix_rt::spawn(async move {
-                if let Ok(token) = repo.delete_token(&alias).await {
-                    let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
-                } else {
-                    let token = DeleteToken::generate();
-                    if let Ok(Ok(())) = repo.relate_delete_token(&alias, &token).await {
+            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                actix_rt::spawn(async move {
+                    if let Ok(token) = repo.delete_token(&alias).await {
                         let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
+                    } else {
+                        let token = DeleteToken::generate();
+                        if let Ok(Ok(())) = repo.relate_delete_token(&alias, &token).await {
+                            let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
+                        }
                     }
-                }
+                })
             });
         }
 
         if let Some(identifier) = self.identifier.take() {
             let repo = self.repo.clone();
 
-            actix_rt::spawn(async move {
-                let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
+            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                actix_rt::spawn(async move {
+                    let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
+                })
             });
         }
     }

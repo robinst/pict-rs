@@ -58,7 +58,9 @@ where
                 (None, span)
             }
             Entry::Occupied(mut occupied) => {
-                let (tx, rx) = tokio::sync::oneshot::channel();
+                let (tx, rx) = tracing::trace_span!(parent: None, "Create channel")
+                    .in_scope(tokio::sync::oneshot::channel);
+
                 occupied.get_mut().push(tx);
                 let span = tracing::info_span!(
                     "Waiting for processed image",

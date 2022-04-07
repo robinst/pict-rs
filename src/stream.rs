@@ -187,7 +187,8 @@ where
 
         match std::mem::replace(&mut this.state, IterStreamState::Pending) {
             IterStreamState::New { iterator, buffer } => {
-                let (sender, receiver) = tokio::sync::mpsc::channel(buffer);
+                let (sender, receiver) = tracing::trace_span!(parent: None, "Create channel")
+                    .in_scope(|| tokio::sync::mpsc::channel(buffer));
 
                 let mut handle = actix_rt::task::spawn_blocking(move || {
                     let iterator = iterator.into_iter();

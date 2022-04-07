@@ -70,7 +70,8 @@ mod test {
             actix_rt::System::new().block_on(async move {
                 let arbiter = actix_rt::Arbiter::new();
 
-                let (tx, rx) = tokio::sync::oneshot::channel();
+                let (tx, rx) = tracing::trace_span!(parent: None, "Create channel")
+                    .in_scope(|| tokio::sync::oneshot::channel());
 
                 arbiter.spawn(async move {
                     let handle = actix_rt::spawn($fut);
