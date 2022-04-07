@@ -12,6 +12,7 @@ use tokio::{
     process::{Child, Command},
     sync::oneshot::{channel, Receiver},
 };
+use tracing::{Instrument, Span};
 
 #[derive(Debug)]
 struct StatusError;
@@ -73,27 +74,35 @@ impl Process {
         let (tx, rx) = tracing::trace_span!(parent: None, "Create channel")
             .in_scope(channel::<std::io::Error>);
 
+        let span = tracing::info_span!(parent: None, "Background process task from bytes");
+        span.follows_from(Span::current());
+
         let mut child = self.child;
         let handle = tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-            actix_rt::spawn(async move {
-                if let Err(e) = stdin.write_all_buf(&mut input).await {
-                    let _ = tx.send(e);
-                    return;
-                }
-                drop(stdin);
+            actix_rt::spawn(
+                async move {
+                    if let Err(e) = stdin.write_all_buf(&mut input).await {
+                        let _ = tx.send(e);
+                        return;
+                    }
+                    drop(stdin);
 
-                match child.wait().await {
-                    Ok(status) => {
-                        if !status.success() {
-                            let _ = tx
-                                .send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+                    match child.wait().await {
+                        Ok(status) => {
+                            if !status.success() {
+                                let _ = tx.send(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    &StatusError,
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(e);
                         }
                     }
-                    Err(e) => {
-                        let _ = tx.send(e);
-                    }
                 }
-            })
+                .instrument(span),
+            )
         });
 
         ProcessRead {
@@ -110,21 +119,29 @@ impl Process {
 
         let (tx, rx) = tracing::trace_span!(parent: None, "Create channel").in_scope(channel);
 
+        let span = tracing::info_span!(parent: None, "Background process task");
+        span.follows_from(Span::current());
+
         let mut child = self.child;
         let handle = tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-            actix_rt::spawn(async move {
-                match child.wait().await {
-                    Ok(status) => {
-                        if !status.success() {
-                            let _ = tx
-                                .send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+            actix_rt::spawn(
+                async move {
+                    match child.wait().await {
+                        Ok(status) => {
+                            if !status.success() {
+                                let _ = tx.send(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    &StatusError,
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(e);
                         }
                     }
-                    Err(e) => {
-                        let _ = tx.send(e);
-                    }
                 }
-            })
+                .instrument(span),
+            )
         });
 
         ProcessRead {
@@ -146,27 +163,40 @@ impl Process {
 
         let (tx, rx) = tracing::trace_span!(parent: None, "Create channel").in_scope(channel);
 
+        let span = tracing::info_span!(
+            parent: None,
+            "Background processs task from store",
+            ?store,
+            ?identifier
+        );
+        span.follows_from(Span::current());
+
         let mut child = self.child;
         let handle = tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-            actix_rt::spawn(async move {
-                if let Err(e) = store.read_into(&identifier, &mut stdin).await {
-                    let _ = tx.send(e);
-                    return;
-                }
-                drop(stdin);
+            actix_rt::spawn(
+                async move {
+                    if let Err(e) = store.read_into(&identifier, &mut stdin).await {
+                        let _ = tx.send(e);
+                        return;
+                    }
+                    drop(stdin);
 
-                match child.wait().await {
-                    Ok(status) => {
-                        if !status.success() {
-                            let _ = tx
-                                .send(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+                    match child.wait().await {
+                        Ok(status) => {
+                            if !status.success() {
+                                let _ = tx.send(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    &StatusError,
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(e);
                         }
                     }
-                    Err(e) => {
-                        let _ = tx.send(e);
-                    }
                 }
-            })
+                .instrument(span),
+            )
         });
 
         ProcessRead {
