@@ -8,5 +8,7 @@ export GROUP_ID=$(id -g)
 sudo docker-compose build --pull
 sudo docker-compose up -d minio
 sudo docker-compose up -d pictrs_proxy
+sudo docker-compose up -d otel
+sudo docker-compose up -d jaeger
 sudo docker-compose run --service-ports --use-aliases pictrs
 sudo docker-compose down

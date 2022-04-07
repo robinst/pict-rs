@@ -79,12 +79,14 @@ pub(crate) struct Details {
     pub(crate) height: usize,
 }
 
+#[tracing::instrument(name = "Clear Metadata", skip(input))]
 pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> std::io::Result<impl AsyncRead + Unpin> {
     let process = Process::run("magick", &["convert", "-", "-strip", "-"])?;
 
-    Ok(process.bytes_read(input).unwrap())
+    Ok(process.bytes_read(input))
 }
 
+#[tracing::instrument(name = "Convert", skip(input))]
 pub(crate) fn convert_bytes_read(
     input: Bytes,
     format: ImageFormat,
@@ -99,7 +101,7 @@ pub(crate) fn convert_bytes_read(
         ],
     )?;
 
-    Ok(process.bytes_read(input).unwrap())
+    Ok(process.bytes_read(input))
 }
 
 #[instrument(name = "Getting details from input bytes", skip(input))]
@@ -130,7 +132,7 @@ pub(crate) async fn details_bytes(
         &["identify", "-ping", "-format", "%w %h | %m\n", &last_arg],
     )?;
 
-    let mut reader = process.bytes_read(input).unwrap();
+    let mut reader = process.bytes_read(input);
 
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes).await?;
@@ -170,7 +172,7 @@ pub(crate) async fn details_store<S: Store + 'static>(
         &["identify", "-ping", "-format", "%w %h | %m\n", &last_arg],
     )?;
 
-    let mut reader = process.store_read(store, identifier).unwrap();
+    let mut reader = process.store_read(store, identifier);
 
     let mut output = Vec::new();
     reader.read_to_end(&mut output).await?;
@@ -187,7 +189,7 @@ pub(crate) async fn details_file(path_str: &str) -> Result<Details, Error> {
         &["identify", "-ping", "-format", "%w %h | %m\n", path_str],
     )?;
 
-    let mut reader = process.read().unwrap();
+    let mut reader = process.read();
 
     let mut output = Vec::new();
     reader.read_to_end(&mut output).await?;
@@ -272,7 +274,7 @@ pub(crate) fn process_image_store_read<S: Store + 'static>(
             .arg(last_arg),
     )?;
 
-    Ok(process.store_read(store, identifier).unwrap())
+    Ok(process.store_read(store, identifier))
 }
 
 impl Details {

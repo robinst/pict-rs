@@ -10,6 +10,8 @@ services:
         GID: "${GROUP_ID:-1000}"
     ports:
       - "8080:8080"
+    environment:
+      - PICTRS__TRACING__OPENTELEMETRY__URL=http://otel:4137
     links:
       - "minio:pict-rs.minio"
     stdin_open: true
@@ -33,3 +35,22 @@ services:
       - "9001:9001"
     volumes:
       - ./storage/minio:/mnt
+
+  otel:
+    image: otel/opentelemetry-collector:latest
+    command: --config otel-local-config.yaml
+    volumes:
+      - type: bind
+        source: ./otel.yml
+        target: /otel-local-config.yaml
+    restart: always
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1
+    ports:
+      - "14250:14250"
+      # To view traces, visit http://localhost:16686
+      - "16686:16686"
+    restart: always

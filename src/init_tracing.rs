@@ -41,8 +41,8 @@ where
         .with(ErrorLayer::default());
 
     if let Some(address) = tracing.console.address {
+        println!("Starting console on {}", address);
         let console_layer = ConsoleLayer::builder()
-            .with_default_env()
             .event_buffer_capacity(tracing.console.buffer_capacity)
             .server_addr(address)
             .spawn();

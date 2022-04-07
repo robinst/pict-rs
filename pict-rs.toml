@@ -1,12 +1,12 @@
 ## Server configuration
 [server]
 ## Optional: pict-rs binding address
-# environment variable: PICTRS_SERVER__ADDRESS
+# environment variable: PICTRS__SERVER__ADDRESS
 # default: 0.0.0.0:8080
 address = '0.0.0.0:8080'
 
 ## Optional: pict-rs worker id
-# environment variable PICTRS_SERVER__WORKER_ID
+# environment variable PICTRS__SERVER__WORKER_ID
 # default: pict-rs-1
 #
 # This is used for the internal job queue. It will have more meaning once a shared metadata
@@ -14,7 +14,7 @@ address = '0.0.0.0:8080'
 worker_id = 'pict-rs-1'
 
 ## Optional: shared secret for internal endpoints
-# environment variable: PICTRS_SERVER__API_KEY
+# environment variable: PICTRS__SERVER__API_KEY
 # default: empty
 #
 # Not specifying api_key disables internal endpoints
@@ -24,14 +24,14 @@ api_key = 'API_KEY'
 ## Logging configuration
 [tracing.logging]
 ## Optional: log format
-# environment variable: PICTRS_TRACING__LOGGING__FORMAT
+# environment variable: PICTRS__TRACING__LOGGING__FORMAT
 # default: normal
 #
 # available options: compact, json, normal, pretty
 format = 'normal'
 
 ## Optional: log targets
-# environment variable: PICTRS_TRACING__LOGGING__TARGETS
+# environment variable: PICTRS__TRACING__LOGGING__TARGETS
 # default: warn,tracing_actix_web=info,actix_server=info,actix_web=info
 #
 # Dictates which traces should print to stdout
@@ -42,7 +42,7 @@ targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
 ## Console configuration
 [tracing.console]
 ## Optional: console address
-# environment variable: PICTRS_TRACING__CONSOLE__ADDRESS
+# environment variable: PICTRS__TRACING__CONSOLE__ADDRESS
 # default: empty
 #
 # Dictacts whether console should be enabled, and what address it should be exposed on.
@@ -72,7 +72,7 @@ targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
 address = '0.0.0.0:6669'
 
 ## Optional: console buffer capacity
-# environment variable: PICTRS_TRACING__CONSOLE__BUFFER_CAPACITY
+# environment variable: PICTRS__TRACING__CONSOLE__BUFFER_CAPACITY
 # default: 102400
 #
 # This is the number of _events_ to buffer, not the number of bytes. In reality, the amount of
@@ -83,7 +83,7 @@ buffer_capacity = 102400
 ## OpenTelemetry configuration
 [tracing.opentelemetry]
 ## Optional: url for exporting otlp traces
-# environment variable: PICTRS_TRACING__OPENTELEMETRY__URL
+# environment variable: PICTRS__TRACING__OPENTELEMETRY__URL
 # default: empty
 #
 # Not specifying opentelemetry_url means no traces will be exported
@@ -93,12 +93,12 @@ buffer_capacity = 102400
 url = 'http://localhost:4317/'
 
 ## Optional: name to relate OpenTelemetry traces
-# environment variable: PICTRS_TRACING__OPENTELEMETRY__SERVICE_NAME
+# environment variable: PICTRS__TRACING__OPENTELEMETRY__SERVICE_NAME
 # default: pict-rs
 service_name = 'pict-rs'
 
 ## Optional: trace level to export
-# environment variable: PICTRS_TRACING__OPENTELEMETRY__TARGETS
+# environment variable: PICTRS__TRACING__OPENTELEMETRY__TARGETS
 # default: info
 #
 # Follows the same format as RUST_LOG
@@ -108,7 +108,7 @@ targets = 'info'
 ## Configuration for migrating from pict-rs 0.2
 [old_db]
 ## Optional: path to old pict-rs directory
-# environment variable: PICTRS_OLD_DB__PATH
+# environment variable: PICTRS__OLD_DB__PATH
 # default: /mnt
 path = '/mnt'
 
@@ -116,46 +116,46 @@ path = '/mnt'
 ## Media Processing Configuration
 [media]
 ## Optional: max media width (in pixels)
-# environment variable: PICTRS_MEDIA__MAX_WIDTH
+# environment variable: PICTRS__MEDIA__MAX_WIDTH
 # default: 10,000
 max_width = 10000
 
 ## Optional: max media height (in pixels)
-# environment variable: PICTRS_MEDIA__MAX_HEIGHT
+# environment variable: PICTRS__MEDIA__MAX_HEIGHT
 # default: 10,000
 max_height = 10000
 
 ## Optional: max media area (in pixels)
-# environment variable: PICTRS_MEDIA__MAX_AREA
+# environment variable: PICTRS__MEDIA__MAX_AREA
 # default: 40,000,000
 max_area = 40000000
 
 ## Optional: max file size (in Megabytes)
-# environment variable: PICTRS_MEDIA__MAX_FILE_SIZE
+# environment variable: PICTRS__MEDIA__MAX_FILE_SIZE
 # default: 40
 max_file_size = 40
 
 ## Optional: enable GIF and MP4 uploads (without sound)
-# environment variable: PICTRS_MEDIA__ENABLE_SILENT_VIDEO
+# environment variable: PICTRS__MEDIA__ENABLE_SILENT_VIDEO
 # default: true
 #
 # Set this to false to serve static images only
 enable_silent_video = true
 
 ## Optional: set allowed filters for image processing
-# environment variable: PICTRS_MEDIA__FILTERS
+# environment variable: PICTRS__MEDIA__FILTERS
 # default: ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 
 ## Optional: whether to validate images uploaded through the `import` endpoint
-# environment variable: PICTRS_MEDIA__SKIP_VALIDATE_IMPORTS
+# environment variable: PICTRS__MEDIA__SKIP_VALIDATE_IMPORTS
 # default: false
 #
 # Set this to true if you want to avoid processing imported media
 skip_validate_imports = false
 
 ## Optional: The duration, in hours, to keep media ingested through the "cache" endpoint
-# environment variable: PICTRS_MEDIA__CACHE_DURATION
+# environment variable: PICTRS__MEDIA__CACHE_DURATION
 # default: 168 (1 week)
 cache_duration = 168
 
@@ -163,19 +163,19 @@ cache_duration = 168
 ## Database configuration
 [repo]
 ## Optional: database backend to use
-# environment variable: PICTRS_REPO__TYPE
+# environment variable: PICTRS__REPO__TYPE
 # default: sled
 #
 # available options: sled
 type = 'sled'
 
 ## Optional: path to sled repository
-# environment variable: PICTRS_REPO__PATH
+# environment variable: PICTRS__REPO__PATH
 # default: /mnt/sled-repo
 path = '/mnt/sled-repo'
 
 ## Optional: in-memory cache capacity for sled data (in bytes)
-# environment variable: PICTRS_REPO__CACHE_CAPACITY
+# environment variable: PICTRS__REPO__CACHE_CAPACITY
 # default: 67,108,864 (1024 * 1024 * 64, or 64MB)
 cache_capacity = 67108864
 
@@ -183,39 +183,39 @@ cache_capacity = 67108864
 ## Media storage configuration
 [store]
 ## Optional: type of media storage to use
-# environment variable: PICTRS_STORE__TYPE
+# environment variable: PICTRS__STORE__TYPE
 # default: filesystem
 #
 # available options: filesystem, object_storage
 type = 'object_storage'
 
 ## Required: object storage bucket name
-# environment variable: PICTRS_STORE__BUCKET_NAME
+# environment variable: PICTRS__STORE__BUCKET_NAME
 # default: empty
 bucket_name = 'BUCKET_NAME'
 
 ## Required: object storage region
-# environment variable: PICTRS_STORE__REGION
+# environment variable: PICTRS__STORE__REGION
 # default: empty
 region = 'REGION'
 
 ## Required: object storage access key
-# environment variable: PICTRS_STORE__ACCESS_KEY
+# environment variable: PICTRS__STORE__ACCESS_KEY
 # default: empty
 access_key = 'ACCESS_KEY'
 
 ## Required: object storage secret key
-# environment variable: PICTRS_STORE__SECRET_KEY
+# environment variable: PICTRS__STORE__SECRET_KEY
 # default: empty
 secret_key = 'SECRET_KEY'
 
 ## Optional: object storage security token
-# environment variable: PICTRS_STORE__SECURITY_TOKEN
+# environment variable: PICTRS__STORE__SECURITY_TOKEN
 # default: empty
 security_token = 'SECURITY_TOKEN'
 
 ## Optional: object storage session token
-# environment variable: PICTRS_STORE__SESSION_TOKEN
+# environment variable: PICTRS__STORE__SESSION_TOKEN
 # default: empty
 session_token = 'SESSION_TOKEN'
 
@@ -223,13 +223,13 @@ session_token = 'SESSION_TOKEN'
 # ## Media storage configuration
 # [store]
 # ## Optional: type of media storage to use
-# # environment variable: PICTRS_STORE__TYPE
+# # environment variable: PICTRS__STORE__TYPE
 # # default: filesystem
 # #
 # # available options: filesystem, object_storage
 # type = 'filesystem'
 #
 # ## Optional: path to uploaded media
-# # environment variable: PICTRS_STORE__PATH
+# # environment variable: PICTRS__STORE__PATH
 # # default: /mnt/files
 # path = '/mnt/files'

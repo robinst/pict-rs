@@ -12,7 +12,7 @@ use std::{
 };
 use storage_path_generator::Generator;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, instrument, Instrument};
 
 mod file_id;
 pub(crate) use file_id::FileId;
@@ -88,9 +88,15 @@ impl Store for FileStore {
     ) -> Result<Self::Stream, Error> {
         let path = self.path_from_file_id(identifier);
 
-        let stream = File::open(path)
-            .await?
-            .read_to_stream(from_start, len)
+        let file_span = tracing::trace_span!(parent: None, "File Stream");
+        let file = file_span
+            .in_scope(|| File::open(path))
+            .instrument(file_span.clone())
+            .await?;
+
+        let stream = file_span
+            .in_scope(|| file.read_to_stream(from_start, len))
+            .instrument(file_span)
             .await?;
 
         Ok(Box::pin(stream))

@@ -50,6 +50,7 @@ impl ThumbnailFormat {
     }
 }
 
+#[tracing::instrument(name = "Convert to Mp4", skip(input))]
 pub(crate) async fn to_mp4_bytes(
     input: Bytes,
     input_format: InputFormat,

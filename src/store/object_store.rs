@@ -88,7 +88,7 @@ impl Store for ObjectStore {
         let start = from_start.unwrap_or(0);
         let end = len.map(|len| start + len - 1);
 
-        let request_span = tracing::info_span!(parent: None, "Get Object");
+        let request_span = tracing::trace_span!(parent: None, "Get Object");
 
         // NOTE: isolating reqwest in it's own span is to prevent the request's span from getting
         // smuggled into a long-lived task. Unfortunately, I am unable to create a minimal

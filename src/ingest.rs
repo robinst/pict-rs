@@ -8,11 +8,11 @@ use crate::{
 use actix_web::web::{Bytes, BytesMut};
 use futures_util::{Stream, StreamExt};
 use sha2::{Digest, Sha256};
-use tracing::debug;
 
 mod hasher;
 use hasher::Hasher;
 
+#[derive(Debug)]
 pub(crate) struct Session<R, S>
 where
     R: FullRepo + 'static,
@@ -24,6 +24,33 @@ where
     identifier: Option<S::Identifier>,
 }
 
+#[tracing::instrument(name = "Aggregate", skip(stream))]
+async fn aggregate<S>(stream: S) -> Result<Bytes, Error>
+where
+    S: Stream<Item = Result<Bytes, Error>>,
+{
+    futures_util::pin_mut!(stream);
+
+    let mut buf = Vec::new();
+    tracing::debug!("Reading stream to memory");
+    while let Some(res) = stream.next().await {
+        let bytes = res?;
+        buf.push(bytes);
+    }
+
+    let total_len = buf.iter().fold(0, |acc, item| acc + item.len());
+
+    let bytes_mut = buf
+        .iter()
+        .fold(BytesMut::with_capacity(total_len), |mut acc, item| {
+            acc.extend_from_slice(item);
+            acc
+        });
+
+    Ok(bytes_mut.freeze())
+}
+
+#[tracing::instrument(name = "Ingest", skip(stream))]
 pub(crate) async fn ingest<R, S>(
     repo: &R,
     store: &S,
@@ -35,21 +62,15 @@ where
     R: FullRepo + 'static,
     S: Store,
 {
-    let permit = crate::PROCESS_SEMAPHORE.acquire().await;
+    let permit = tracing::trace_span!(parent: None, "Aquire semaphore")
+        .in_scope(|| crate::PROCESS_SEMAPHORE.acquire())
+        .await;
 
-    let mut bytes_mut = BytesMut::new();
+    let bytes = aggregate(stream).await?;
 
-    futures_util::pin_mut!(stream);
-
-    debug!("Reading stream to memory");
-    while let Some(res) = stream.next().await {
-        let bytes = res?;
-        bytes_mut.extend_from_slice(&bytes);
-    }
-
-    debug!("Validating bytes");
+    tracing::debug!("Validating bytes");
     let (input_type, validated_reader) = crate::validate::validate_image_bytes(
-        bytes_mut.freeze(),
+        bytes,
         CONFIG.media.format,
         CONFIG.media.enable_silent_video,
         should_validate,
@@ -73,11 +94,7 @@ where
 
     session.hash = Some(hash.clone());
 
-    debug!("Saving upload");
-
     save_upload(repo, store, &hash, &identifier).await?;
-
-    debug!("Adding alias");
 
     if let Some(alias) = declared_alias {
         session.add_existing_alias(&hash, alias).await?
@@ -88,6 +105,7 @@ where
     Ok(session)
 }
 
+#[tracing::instrument]
 async fn save_upload<R, S>(
     repo: &R,
     store: &S,
@@ -124,25 +142,27 @@ where
         self.alias.as_ref()
     }
 
+    #[tracing::instrument]
     pub(crate) async fn delete_token(&self) -> Result<DeleteToken, Error> {
         let alias = self.alias.clone().ok_or(UploadError::MissingAlias)?;
 
-        debug!("Generating delete token");
+        tracing::debug!("Generating delete token");
         let delete_token = DeleteToken::generate();
 
-        debug!("Saving delete token");
+        tracing::debug!("Saving delete token");
         let res = self.repo.relate_delete_token(&alias, &delete_token).await?;
 
         if res.is_err() {
             let delete_token = self.repo.delete_token(&alias).await?;
-            debug!("Returning existing delete token, {:?}", delete_token);
+            tracing::debug!("Returning existing delete token, {:?}", delete_token);
             return Ok(delete_token);
         }
 
-        debug!("Returning new delete token, {:?}", delete_token);
+        tracing::debug!("Returning new delete token, {:?}", delete_token);
         Ok(delete_token)
     }
 
+    #[tracing::instrument]
     async fn add_existing_alias(&mut self, hash: &[u8], alias: Alias) -> Result<(), Error> {
         AliasRepo::create(&self.repo, &alias)
             .await?
@@ -156,8 +176,9 @@ where
         Ok(())
     }
 
+    #[tracing::instrument]
     async fn create_alias(&mut self, hash: &[u8], input_type: ValidInputType) -> Result<(), Error> {
-        debug!("Alias gen loop");
+        tracing::debug!("Alias gen loop");
 
         loop {
             let alias = Alias::generate(input_type.as_ext().to_string());
@@ -171,7 +192,7 @@ where
                 return Ok(());
             }
 
-            debug!("Alias exists, regenerating");
+            tracing::debug!("Alias exists, regenerating");
         }
     }
 }

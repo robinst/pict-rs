@@ -11,6 +11,7 @@ use actix_web::web::Bytes;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 
+#[tracing::instrument(skip(hash))]
 pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
@@ -36,6 +37,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     Ok((details, bytes))
 }
 
+#[tracing::instrument(skip(hash))]
 async fn process<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
@@ -45,7 +47,9 @@ async fn process<R: FullRepo, S: Store + 'static>(
     thumbnail_args: Vec<String>,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
-    let permit = crate::PROCESS_SEMAPHORE.acquire().await?;
+    let permit = tracing::trace_span!(parent: None, "Aquire semaphore")
+        .in_scope(|| crate::PROCESS_SEMAPHORE.acquire())
+        .await;
 
     let identifier = if let Some(identifier) = repo
         .still_identifier_from_alias::<S::Identifier>(&alias)
