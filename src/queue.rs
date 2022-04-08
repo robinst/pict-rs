@@ -170,7 +170,7 @@ where
     loop {
         let bytes = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
 
-        let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
+        let span = tracing::info_span!("Running Job", worker_id = ?worker_id, job = ?String::from_utf8_lossy(bytes.as_ref()));
 
         span.in_scope(|| (callback)(repo, store, bytes.as_ref()))
             .instrument(span)

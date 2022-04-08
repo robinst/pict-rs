@@ -8,6 +8,7 @@ use crate::{
 use actix_web::web::{Bytes, BytesMut};
 use futures_util::{Stream, StreamExt};
 use sha2::{Digest, Sha256};
+use tracing::{Instrument, Span};
 
 mod hasher;
 use hasher::Hasher;
@@ -219,40 +220,62 @@ where
     R: FullRepo + 'static,
     S: Store,
 {
+    #[tracing::instrument(name = "Drop Session", skip(self), fields(hash = ?self.hash, alias = ?self.alias, identifier = ?self.identifier))]
     fn drop(&mut self) {
         if let Some(hash) = self.hash.take() {
             let repo = self.repo.clone();
+
+            let cleanup_span =
+                tracing::info_span!(parent: None, "Session cleanup hash", hash = ?hash);
+            cleanup_span.follows_from(Span::current());
+
             tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                actix_rt::spawn(async move {
-                    let _ = crate::queue::cleanup_hash(&repo, hash.into()).await;
-                })
+                actix_rt::spawn(
+                    async move {
+                        let _ = crate::queue::cleanup_hash(&repo, hash.into()).await;
+                    }
+                    .instrument(cleanup_span),
+                )
             });
         }
 
         if let Some(alias) = self.alias.take() {
             let repo = self.repo.clone();
 
+            let cleanup_span =
+                tracing::info_span!(parent: None, "Session cleanup alias", alias = ?alias);
+            cleanup_span.follows_from(Span::current());
+
             tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                actix_rt::spawn(async move {
-                    if let Ok(token) = repo.delete_token(&alias).await {
-                        let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
-                    } else {
-                        let token = DeleteToken::generate();
-                        if let Ok(Ok(())) = repo.relate_delete_token(&alias, &token).await {
+                actix_rt::spawn(
+                    async move {
+                        if let Ok(token) = repo.delete_token(&alias).await {
                             let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
+                        } else {
+                            let token = DeleteToken::generate();
+                            if let Ok(Ok(())) = repo.relate_delete_token(&alias, &token).await {
+                                let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
+                            }
                         }
                     }
-                })
+                    .instrument(cleanup_span),
+                )
             });
         }
 
         if let Some(identifier) = self.identifier.take() {
             let repo = self.repo.clone();
 
+            let cleanup_span = tracing::info_span!(parent: None, "Session cleanup identifier", identifier = ?identifier);
+            cleanup_span.follows_from(Span::current());
+
             tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                actix_rt::spawn(async move {
-                    let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
-                })
+                actix_rt::spawn(
+                    async move {
+                        let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
+                    }
+                    .instrument(cleanup_span),
+                )
             });
         }
     }

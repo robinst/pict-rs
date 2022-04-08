@@ -322,6 +322,8 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
 
     queue::queue_ingest(&**repo, identifier, upload_id, None, true, is_cached).await?;
 
+    backgrounded.disarm();
+
     Ok(HttpResponse::Accepted().json(&serde_json::json!({
         "msg": "ok",
         "uploads": [{
