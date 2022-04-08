@@ -259,10 +259,10 @@ pict-rs offers the following endpoints:
     }
     ```
 - `GET /image/download?url={url}&backgrounded=(true|false)&ephemeral=(true|false)` Download an image
-    from a remote server, returning the same JSON payload as the `POST` endpoint by default.
+    from a remote server, returning the same JSON payload as the `POST /image` endpoint by default.
 
     if `backgrounded` is set to `true`, then the ingest processing will be queued for later and the
-    response json will be the same as the `/image/backgrounded` endpoint.
+    response json will be the same as the `POST /image/backgrounded` endpoint.
 
     if `ephemeral` is set to true, the downloaded image will be marked as a "cached" image, and
     automatically removed from pict-rs N hours after its last access. The duration is configurable
