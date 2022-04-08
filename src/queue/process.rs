@@ -27,6 +27,7 @@ where
                     upload_id,
                     declared_alias,
                     should_validate,
+                    is_cached,
                 } => {
                     process_ingest(
                         repo,
@@ -35,6 +36,7 @@ where
                         Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
                         should_validate,
+                        is_cached,
                     )
                     .await?
                 }
@@ -72,6 +74,7 @@ async fn process_ingest<R, S>(
     upload_id: UploadId,
     declared_alias: Option<Alias>,
     should_validate: bool,
+    is_cached: bool,
 ) -> Result<(), Error>
 where
     R: FullRepo + 'static,
@@ -85,8 +88,15 @@ where
             .await?
             .map_err(Error::from);
 
-        let session =
-            crate::ingest::ingest(repo, store, stream, declared_alias, should_validate).await?;
+        let session = crate::ingest::ingest(
+            repo,
+            store,
+            stream,
+            declared_alias,
+            should_validate,
+            is_cached,
+        )
+        .await?;
 
         let token = session.delete_token().await?;
 

@@ -37,6 +37,7 @@ enum Process {
         upload_id: Serde<UploadId>,
         declared_alias: Option<Serde<Alias>>,
         should_validate: bool,
+        is_cached: bool,
     },
     Generate {
         target_format: ImageFormat,
@@ -84,12 +85,14 @@ pub(crate) async fn queue_ingest<R: QueueRepo>(
     upload_id: UploadId,
     declared_alias: Option<Alias>,
     should_validate: bool,
+    is_cached: bool,
 ) -> Result<(), Error> {
     let job = serde_json::to_vec(&Process::Ingest {
         identifier,
         declared_alias: declared_alias.map(Serde::new),
         upload_id: Serde::new(upload_id),
         should_validate,
+        is_cached,
     })?;
     repo.push(PROCESS_QUEUE, job.into()).await?;
     Ok(())

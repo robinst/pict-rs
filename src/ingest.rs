@@ -57,6 +57,7 @@ pub(crate) async fn ingest<R, S>(
     stream: impl Stream<Item = Result<Bytes, Error>>,
     declared_alias: Option<Alias>,
     should_validate: bool,
+    is_cached: bool,
 ) -> Result<Session<R, S>, Error>
 where
     R: FullRepo + 'static,
@@ -95,9 +96,9 @@ where
     save_upload(repo, store, &hash, &identifier).await?;
 
     if let Some(alias) = declared_alias {
-        session.add_existing_alias(&hash, alias).await?
+        session.add_existing_alias(&hash, alias, is_cached).await?
     } else {
-        session.create_alias(&hash, input_type).await?;
+        session.create_alias(&hash, input_type, is_cached).await?;
     }
 
     Ok(session)
@@ -161,7 +162,12 @@ where
     }
 
     #[tracing::instrument]
-    async fn add_existing_alias(&mut self, hash: &[u8], alias: Alias) -> Result<(), Error> {
+    async fn add_existing_alias(
+        &mut self,
+        hash: &[u8],
+        alias: Alias,
+        is_cached: bool,
+    ) -> Result<(), Error> {
         AliasRepo::create(&self.repo, &alias)
             .await?
             .map_err(|_| UploadError::DuplicateAlias)?;
@@ -171,11 +177,20 @@ where
         self.repo.relate_hash(&alias, hash.to_vec().into()).await?;
         self.repo.relate_alias(hash.to_vec().into(), &alias).await?;
 
+        if is_cached {
+            self.repo.mark_cached(&alias).await?;
+        }
+
         Ok(())
     }
 
     #[tracing::instrument]
-    async fn create_alias(&mut self, hash: &[u8], input_type: ValidInputType) -> Result<(), Error> {
+    async fn create_alias(
+        &mut self,
+        hash: &[u8],
+        input_type: ValidInputType,
+        is_cached: bool,
+    ) -> Result<(), Error> {
         tracing::debug!("Alias gen loop");
 
         loop {
@@ -186,6 +201,10 @@ where
 
                 self.repo.relate_hash(&alias, hash.to_vec().into()).await?;
                 self.repo.relate_alias(hash.to_vec().into(), &alias).await?;
+
+                if is_cached {
+                    self.repo.mark_cached(&alias).await?;
+                }
 
                 return Ok(());
             }

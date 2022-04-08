@@ -164,7 +164,7 @@ async fn upload_backgrounded<R: FullRepo, S: Store>(
             .expect("Identifier exists")
             .to_bytes()?;
 
-        queue::queue_ingest(&**repo, identifier, upload_id, None, true).await?;
+        queue::queue_ingest(&**repo, identifier, upload_id, None, true, false).await?;
 
         files.push(serde_json::json!({
             "upload_id": upload_id.to_string(),
@@ -223,6 +223,12 @@ async fn claim_upload<R: FullRepo>(
 #[derive(Debug, serde::Deserialize)]
 struct UrlQuery {
     url: String,
+
+    #[serde(default)]
+    backgrounded: bool,
+
+    #[serde(default)]
+    ephemeral: bool,
 }
 
 /// download an image from a URL
@@ -233,7 +239,22 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     store: web::Data<S>,
     query: web::Query<UrlQuery>,
 ) -> Result<HttpResponse, Error> {
-    let res = client.get(&query.url).send().await?;
+    if query.backgrounded {
+        do_download_backgrounded(client, repo, store, &query.url, query.ephemeral).await
+    } else {
+        do_download_inline(client, repo, store, &query.url, query.ephemeral).await
+    }
+}
+
+#[instrument(name = "Downloading file inline", skip(client, repo))]
+async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
+    client: web::Data<Client>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    url: &str,
+    is_cached: bool,
+) -> Result<HttpResponse, Error> {
+    let res = client.get(url).send().await?;
 
     if !res.status().is_success() {
         return Err(UploadError::Download(res.status()).into());
@@ -243,7 +264,7 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
         .map_err(Error::from)
         .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
 
-    let mut session = ingest::ingest(&**repo, &**store, stream, None, true).await?;
+    let mut session = ingest::ingest(&**repo, &**store, stream, None, true, is_cached).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
     let delete_token = session.delete_token().await?;
@@ -262,6 +283,7 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     };
 
     session.disarm();
+
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
         "files": [{
@@ -272,14 +294,15 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     })))
 }
 
-#[instrument(name = "Downloading file for background", skip(client))]
-async fn download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
+#[instrument(name = "Downloading file in background", skip(client))]
+async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
     client: web::Data<Client>,
     repo: web::Data<R>,
     store: web::Data<S>,
-    query: web::Query<UrlQuery>,
+    url: &str,
+    is_cached: bool,
 ) -> Result<HttpResponse, Error> {
-    let res = client.get(&query.url).send().await?;
+    let res = client.get(url).send().await?;
 
     if !res.status().is_success() {
         return Err(UploadError::Download(res.status()).into());
@@ -297,61 +320,12 @@ async fn download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
         .expect("Identifier exists")
         .to_bytes()?;
 
-    queue::queue_ingest(&**repo, identifier, upload_id, None, true).await?;
+    queue::queue_ingest(&**repo, identifier, upload_id, None, true, is_cached).await?;
 
     Ok(HttpResponse::Accepted().json(&serde_json::json!({
         "msg": "ok",
         "uploads": [{
             "upload_id": upload_id.to_string(),
-        }]
-    })))
-}
-
-/// cache an image from a URL
-#[instrument(name = "Caching file", skip(client, repo))]
-async fn cache<R: FullRepo + 'static, S: Store + 'static>(
-    client: web::Data<Client>,
-    repo: web::Data<R>,
-    store: web::Data<S>,
-    query: web::Query<UrlQuery>,
-) -> Result<HttpResponse, Error> {
-    let res = client.get(&query.url).send().await?;
-
-    if !res.status().is_success() {
-        return Err(UploadError::Download(res.status()).into());
-    }
-
-    let stream = res
-        .map_err(Error::from)
-        .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
-
-    let mut session = ingest::ingest(&**repo, &**store, stream, None, true).await?;
-
-    let alias = session.alias().expect("alias should exist").to_owned();
-    let delete_token = session.delete_token().await?;
-
-    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
-
-    let details = repo.details(&identifier).await?;
-
-    let details = if let Some(details) = details {
-        details
-    } else {
-        let hint = details_hint(&alias);
-        let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        repo.relate_details(&identifier, &new_details).await?;
-        new_details
-    };
-
-    repo.mark_cached(&alias).await?;
-
-    session.disarm();
-    Ok(HttpResponse::Created().json(&serde_json::json!({
-        "msg": "ok",
-        "files": [{
-            "file": alias.to_string(),
-            "delete_token": delete_token.to_string(),
-            "details": details,
         }]
     })))
 }
@@ -757,7 +731,7 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                 let stream = stream.map_err(Error::from);
 
                 Box::pin(
-                    async move { ingest::ingest(&repo, &store, stream, None, true).await }
+                    async move { ingest::ingest(&repo, &store, stream, None, true, false).await }
                         .instrument(span),
                 )
             })),
@@ -790,6 +764,7 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                             stream,
                             Some(Alias::from_existing(&filename)),
                             !CONFIG.media.skip_validate_imports,
+                            false,
                         )
                         .await
                     }
@@ -869,11 +844,6 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                             ),
                     )
                     .service(web::resource("/download").route(web::get().to(download::<R, S>)))
-                    .service(
-                        web::resource("/download_backgrounded")
-                            .route(web::get().to(download_backgrounded::<R, S>)),
-                    )
-                    .service(web::resource("/cache").route(web::get().to(cache::<R, S>)))
                     .service(
                         web::resource("/delete/{delete_token}/{filename}")
                             .route(web::delete().to(delete::<R>))
