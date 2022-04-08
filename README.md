@@ -275,7 +275,18 @@ pict-rs offers the following endpoints:
             "files": [
                 {
                     "delete_token": "OxRpM3sf0Y",
-                    "file": "1hJaYfGE01.jpg"
+                    "file": "1hJaYfGE01.jpg",
+                    "details": {
+                        "width": 400,
+                        "height": 400,
+                        "content_type": "image/jpeg",
+                        "created_at": [
+                            2020,
+                            345,
+                            67376,
+                            394363487
+                        ]
+                    }
                 }
             ],
             "msg": "ok"

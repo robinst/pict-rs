@@ -80,6 +80,28 @@ static PROCESS_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
         .in_scope(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
 });
 
+async fn ensure_details<R: FullRepo, S: Store + 'static>(
+    repo: &R,
+    store: &S,
+    alias: &Alias,
+) -> Result<Details, Error> {
+    let identifier = repo.identifier_from_alias::<S::Identifier>(alias).await?;
+    let details = repo.details(&identifier).await?;
+
+    if let Some(details) = details {
+        debug!("details exist");
+        Ok(details)
+    } else {
+        debug!("generating new details from {:?}", identifier);
+        let hint = details_hint(alias);
+        let new_details = Details::from_store(store.clone(), identifier.clone(), hint).await?;
+        debug!("storing details for {:?}", identifier);
+        repo.relate_details(&identifier, &new_details).await?;
+        debug!("stored");
+        Ok(new_details)
+    }
+}
+
 /// Handle responding to succesful uploads
 #[instrument(name = "Uploaded files", skip(value))]
 async fn upload<R: FullRepo, S: Store + 'static>(
@@ -104,22 +126,7 @@ async fn upload<R: FullRepo, S: Store + 'static>(
             info!("Uploaded {} as {:?}", image.filename, alias);
             let delete_token = image.result.delete_token().await?;
 
-            let identifier = repo.identifier_from_alias::<S::Identifier>(alias).await?;
-            let details = repo.details(&identifier).await?;
-
-            let details = if let Some(details) = details {
-                debug!("details exist");
-                details
-            } else {
-                debug!("generating new details from {:?}", identifier);
-                let hint = details_hint(alias);
-                let new_details =
-                    Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-                debug!("storing details for {:?}", identifier);
-                repo.relate_details(&identifier, &new_details).await?;
-                debug!("stored");
-                new_details
-            };
+            let details = ensure_details(&**repo, &**store, alias).await?;
 
             files.push(serde_json::json!({
                 "file": alias.to_string(),
@@ -188,8 +195,9 @@ struct ClaimQuery {
 
 /// Claim a backgrounded upload
 #[instrument(name = "Waiting on upload", skip(repo))]
-async fn claim_upload<R: FullRepo>(
+async fn claim_upload<R: FullRepo, S: Store + 'static>(
     repo: web::Data<R>,
+    store: web::Data<S>,
     query: web::Query<ClaimQuery>,
 ) -> Result<HttpResponse, Error> {
     let upload_id = Serde::into_inner(query.into_inner().upload_id);
@@ -201,11 +209,14 @@ async fn claim_upload<R: FullRepo>(
 
             match upload_result {
                 UploadResult::Success { alias, token } => {
+                    let details = ensure_details(&**repo, &**store, &alias).await?;
+
                     Ok(HttpResponse::Ok().json(&serde_json::json!({
                         "msg": "ok",
                         "files": [{
                             "file": alias.to_string(),
                             "delete_token": token.to_string(),
+                            "details": details,
                         }]
                     })))
                 }
@@ -269,18 +280,7 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     let alias = session.alias().expect("alias should exist").to_owned();
     let delete_token = session.delete_token().await?;
 
-    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
-
-    let details = repo.details(&identifier).await?;
-
-    let details = if let Some(details) = details {
-        details
-    } else {
-        let hint = details_hint(&alias);
-        let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        repo.relate_details(&identifier, &new_details).await?;
-        new_details
-    };
+    let details = ensure_details(&**repo, &**store, &alias).await?;
 
     session.disarm();
 
@@ -430,16 +430,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
         .await?;
 
     if let Some(identifier) = identifier_opt {
-        let details_opt = repo.details(&identifier).await?;
-
-        let details = if let Some(details) = details_opt {
-            details
-        } else {
-            let hint = details_hint(&alias);
-            let details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-            repo.relate_details(&identifier, &details).await?;
-            details
-        };
+        let details = ensure_details(&**repo, &**store, &alias).await?;
 
         return ranged_file_resp(&**store, identifier, range, details).await;
     }
@@ -520,18 +511,7 @@ async fn details<R: FullRepo, S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
 
-    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
-
-    let details = repo.details(&identifier).await?;
-
-    let details = if let Some(details) = details {
-        details
-    } else {
-        let hint = details_hint(&alias);
-        let new_details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        repo.relate_details(&identifier, &new_details).await?;
-        new_details
-    };
+    let details = ensure_details(&**repo, &**store, &alias).await?;
 
     Ok(HttpResponse::Ok().json(&details))
 }
@@ -550,16 +530,7 @@ async fn serve<R: FullRepo, S: Store + 'static>(
 
     let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 
-    let details = repo.details(&identifier).await?;
-
-    let details = if let Some(details) = details {
-        details
-    } else {
-        let hint = details_hint(&alias);
-        let details = Details::from_store((**store).clone(), identifier.clone(), hint).await?;
-        repo.relate_details(&identifier, &details).await?;
-        details
-    };
+    let details = ensure_details(&**repo, &**store, &alias).await?;
 
     ranged_file_resp(&**store, identifier, range, details).await
 }
@@ -842,7 +813,7 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                                     .route(web::post().to(upload_backgrounded::<R, S>)),
                             )
                             .service(
-                                web::resource("/claim").route(web::get().to(claim_upload::<R>)),
+                                web::resource("/claim").route(web::get().to(claim_upload::<R, S>)),
                             ),
                     )
                     .service(web::resource("/download").route(web::get().to(download::<R, S>)))
