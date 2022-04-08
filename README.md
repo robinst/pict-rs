@@ -201,12 +201,7 @@ pict-rs offers the following endpoints:
                     "width": 800,
                     "height": 800,
                     "content_type": "image/jpeg",
-                    "created_at": [
-                        2020,
-                        345,
-                        67376,
-                        394363487
-                    ]
+                    "created_at": "2022-04-08T18:33:42.957791698Z"
                 }
             },
             {
@@ -216,12 +211,7 @@ pict-rs offers the following endpoints:
                     "width": 400,
                     "height": 400,
                     "content_type": "image/jpeg",
-                    "created_at": [
-                        2020,
-                        345,
-                        67376,
-                        394363487
-                    ]
+                    "created_at": "2022-04-08T18:33:42.957791698Z"
                 }
             },
             {
@@ -231,12 +221,7 @@ pict-rs offers the following endpoints:
                     "width": 400,
                     "height": 400,
                     "content_type": "image/jpeg",
-                    "created_at": [
-                        2020,
-                        345,
-                        67376,
-                        394363487
-                    ]
+                    "created_at": "2022-04-08T18:33:42.957791698Z"
                 }
             }
         ],
@@ -280,12 +265,7 @@ pict-rs offers the following endpoints:
                         "width": 400,
                         "height": 400,
                         "content_type": "image/jpeg",
-                        "created_at": [
-                            2020,
-                            345,
-                            67376,
-                            394363487
-                        ]
+                        "created_at": "2022-04-08T18:33:42.957791698Z"
                     }
                 }
             ],
@@ -309,12 +289,7 @@ pict-rs offers the following endpoints:
         "width": 800,
         "height": 537,
         "content_type": "image/webp",
-        "created_at": [
-            2020,
-            345,
-            67376,
-            394363487
-        ]
+        "created_at": "2022-04-08T18:33:42.957791698Z"
     }
     ```
 - `GET /image/process.{ext}?src={file}&...` get a file with transformations applied.

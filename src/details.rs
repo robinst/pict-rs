@@ -1,12 +1,19 @@
 use crate::{error::Error, magick::ValidInputType, serde_str::Serde, store::Store};
 use actix_web::web;
 
+#[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(untagged)]
+enum MaybeHumanDate {
+    HumanDate(#[serde(with = "time::serde::rfc3339")] time::OffsetDateTime),
+    OldDate(#[serde(serialize_with = "time::serde::rfc3339::serialize")] time::OffsetDateTime),
+}
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub(crate) struct Details {
     width: usize,
     height: usize,
     content_type: Serde<mime::Mime>,
-    created_at: time::OffsetDateTime,
+    created_at: MaybeHumanDate,
 }
 
 impl Details {
@@ -49,7 +56,7 @@ impl Details {
             width,
             height,
             content_type: Serde::new(content_type),
-            created_at: time::OffsetDateTime::now_utc(),
+            created_at: MaybeHumanDate::HumanDate(time::OffsetDateTime::now_utc()),
         }
     }
 
@@ -59,5 +66,14 @@ impl Details {
 
     pub(crate) fn system_time(&self) -> std::time::SystemTime {
         self.created_at.into()
+    }
+}
+
+impl From<MaybeHumanDate> for std::time::SystemTime {
+    fn from(this: MaybeHumanDate) -> Self {
+        match this {
+            MaybeHumanDate::OldDate(old) => old.into(),
+            MaybeHumanDate::HumanDate(human) => human.into(),
+        }
     }
 }
