@@ -250,22 +250,7 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     store: web::Data<S>,
     query: web::Query<UrlQuery>,
 ) -> Result<HttpResponse, Error> {
-    if query.backgrounded {
-        do_download_backgrounded(client, repo, store, &query.url, query.ephemeral).await
-    } else {
-        do_download_inline(client, repo, store, &query.url, query.ephemeral).await
-    }
-}
-
-#[instrument(name = "Downloading file inline", skip(client, repo))]
-async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
-    client: web::Data<Client>,
-    repo: web::Data<R>,
-    store: web::Data<S>,
-    url: &str,
-    is_cached: bool,
-) -> Result<HttpResponse, Error> {
-    let res = client.get(url).send().await?;
+    let res = client.get(&query.url).send().await?;
 
     if !res.status().is_success() {
         return Err(UploadError::Download(res.status()).into());
@@ -275,6 +260,20 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
         .map_err(Error::from)
         .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
 
+    if query.backgrounded {
+        do_download_backgrounded(stream, repo, store, query.ephemeral).await
+    } else {
+        do_download_inline(stream, repo, store, query.ephemeral).await
+    }
+}
+
+#[instrument(name = "Downloading file inline", skip(stream))]
+async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
+    stream: impl Stream<Item = Result<web::Bytes, Error>>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    is_cached: bool,
+) -> Result<HttpResponse, Error> {
     let mut session = ingest::ingest(&**repo, &**store, stream, None, true, is_cached).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
@@ -294,24 +293,13 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     })))
 }
 
-#[instrument(name = "Downloading file in background", skip(client))]
+#[instrument(name = "Downloading file in background", skip(stream))]
 async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
-    client: web::Data<Client>,
+    stream: impl Stream<Item = Result<web::Bytes, Error>>,
     repo: web::Data<R>,
     store: web::Data<S>,
-    url: &str,
     is_cached: bool,
 ) -> Result<HttpResponse, Error> {
-    let res = client.get(url).send().await?;
-
-    if !res.status().is_success() {
-        return Err(UploadError::Download(res.status()).into());
-    }
-
-    let stream = res
-        .map_err(Error::from)
-        .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
-
     let backgrounded = Backgrounded::proxy((**repo).clone(), (**store).clone(), stream).await?;
 
     let upload_id = backgrounded.upload_id().expect("Upload ID exists");
