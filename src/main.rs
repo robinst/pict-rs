@@ -272,6 +272,41 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     })))
 }
 
+#[instrument(name = "Downloading file for background", skip(client))]
+async fn download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
+    client: web::Data<Client>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    query: web::Query<UrlQuery>,
+) -> Result<HttpResponse, Error> {
+    let res = client.get(&query.url).send().await?;
+
+    if !res.status().is_success() {
+        return Err(UploadError::Download(res.status()).into());
+    }
+
+    let stream = res
+        .map_err(Error::from)
+        .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
+
+    let backgrounded = Backgrounded::proxy((**repo).clone(), (**store).clone(), stream).await?;
+
+    let upload_id = backgrounded.upload_id().expect("Upload ID exists");
+    let identifier = backgrounded
+        .identifier()
+        .expect("Identifier exists")
+        .to_bytes()?;
+
+    queue::queue_ingest(&**repo, identifier, upload_id, None, true).await?;
+
+    Ok(HttpResponse::Accepted().json(&serde_json::json!({
+        "msg": "ok",
+        "uploads": [{
+            "upload_id": upload_id.to_string(),
+        }]
+    })))
+}
+
 /// cache an image from a URL
 #[instrument(name = "Caching file", skip(client, repo))]
 async fn cache<R: FullRepo + 'static, S: Store + 'static>(
@@ -834,6 +869,10 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                             ),
                     )
                     .service(web::resource("/download").route(web::get().to(download::<R, S>)))
+                    .service(
+                        web::resource("/download_backgrounded")
+                            .route(web::get().to(download_backgrounded::<R, S>)),
+                    )
                     .service(web::resource("/cache").route(web::get().to(cache::<R, S>)))
                     .service(
                         web::resource("/delete/{delete_token}/{filename}")
