@@ -67,7 +67,7 @@ targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
 #
 # Connect from console
 # ```
-# $ tokio-console localhost 6669
+# $ tokio-console http://localhost:6669
 # ```
 address = '0.0.0.0:6669'
 

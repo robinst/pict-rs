@@ -10,7 +10,9 @@ services:
         GID: "${GROUP_ID:-1000}"
     ports:
       - "8080:8080"
+      - "6669:6669"
     environment:
+      - PICTRS__TRACING__CONSOLE__ADDRESS=0.0.0.0:6669
       - PICTRS__TRACING__OPENTELEMETRY__URL=http://otel:4137
     links:
       - "minio:pict-rs.minio"
