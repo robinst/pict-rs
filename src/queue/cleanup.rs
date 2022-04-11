@@ -5,6 +5,7 @@ use crate::{
     serde_str::Serde,
     store::{Identifier, Store},
 };
+use futures_util::StreamExt;
 use tracing::error;
 
 pub(super) fn perform<'a, R, S>(
@@ -22,7 +23,7 @@ where
                 Cleanup::Hash { hash: in_hash } => hash::<R, S>(repo, in_hash).await?,
                 Cleanup::Identifier {
                     identifier: in_identifier,
-                } => identifier(repo, &store, in_identifier).await?,
+                } => identifier(repo, store, in_identifier).await?,
                 Cleanup::Alias {
                     alias: stored_alias,
                     token,
@@ -34,6 +35,8 @@ where
                     )
                     .await?
                 }
+                Cleanup::Variant { hash } => variant::<R, S>(repo, hash).await?,
+                Cleanup::AllVariants => all_variants::<R, S>(repo).await?,
             },
             Err(e) => {
                 tracing::warn!("Invalid job: {}", e);
@@ -87,7 +90,7 @@ where
     if !aliases.is_empty() {
         for alias in aliases {
             let token = repo.delete_token(&alias).await?;
-            crate::queue::cleanup_alias(repo, alias, token).await?;
+            super::cleanup_alias(repo, alias, token).await?;
         }
         // Return after queueing cleanup alias, since we will be requeued when the last alias is cleaned
         return Ok(());
@@ -103,7 +106,7 @@ where
     idents.extend(repo.motion_identifier(hash.clone()).await?);
 
     for identifier in idents {
-        let _ = crate::queue::cleanup_identifier(repo, identifier).await;
+        let _ = super::cleanup_identifier(repo, identifier).await;
     }
 
     HashRepo::cleanup(repo, hash).await?;
@@ -126,7 +129,37 @@ where
     repo.remove_alias(hash.clone(), &alias).await?;
 
     if repo.aliases(hash.clone()).await?.is_empty() {
-        crate::queue::cleanup_hash(repo, hash).await?;
+        super::cleanup_hash(repo, hash).await?;
+    }
+
+    Ok(())
+}
+
+async fn all_variants<R, S>(repo: &R) -> Result<(), Error>
+where
+    R: FullRepo,
+    S: Store,
+{
+    let mut hash_stream = Box::pin(repo.hashes().await);
+
+    while let Some(res) = hash_stream.next().await {
+        let hash = res?;
+        super::cleanup_variants(repo, hash).await?;
+    }
+
+    Ok(())
+}
+
+async fn variant<R, S>(repo: &R, hash: Vec<u8>) -> Result<(), Error>
+where
+    R: FullRepo,
+    S: Store,
+{
+    let hash: R::Bytes = hash.into();
+
+    for (variant, identifier) in repo.variants::<S::Identifier>(hash.clone()).await? {
+        repo.remove_variant(hash.clone(), variant).await?;
+        super::cleanup_identifier(repo, identifier).await?;
     }
 
     Ok(())

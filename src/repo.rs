@@ -183,6 +183,7 @@ pub(crate) trait HashRepo: BaseRepo {
         &self,
         hash: Self::Bytes,
     ) -> Result<Vec<(String, I)>, Error>;
+    async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), Error>;
 
     async fn relate_motion_identifier<I: Identifier>(
         &self,

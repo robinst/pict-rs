@@ -690,6 +690,18 @@ impl HashRepo for SledRepo {
     }
 
     #[tracing::instrument]
+    async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), Error> {
+        let key = variant_key(&hash, &variant);
+
+        b!(
+            self.hash_variant_identifiers,
+            hash_variant_identifiers.remove(key)
+        );
+
+        Ok(())
+    }
+
+    #[tracing::instrument]
     async fn relate_motion_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,

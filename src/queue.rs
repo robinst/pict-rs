@@ -28,6 +28,10 @@ enum Cleanup {
         alias: Serde<Alias>,
         token: Serde<DeleteToken>,
     },
+    Variant {
+        hash: Vec<u8>,
+    },
+    AllVariants,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -75,6 +79,20 @@ pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
     let job = serde_json::to_vec(&Cleanup::Identifier {
         identifier: identifier.to_bytes()?,
     })?;
+    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    Ok(())
+}
+
+async fn cleanup_variants<R: QueueRepo>(repo: &R, hash: R::Bytes) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Cleanup::Variant {
+        hash: hash.as_ref().to_vec(),
+    })?;
+    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    Ok(())
+}
+
+pub(crate) async fn cleanup_all_variants<R: QueueRepo>(repo: &R) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Cleanup::AllVariants)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }

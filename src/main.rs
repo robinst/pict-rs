@@ -603,6 +603,12 @@ where
         .streaming(stream)
 }
 
+#[instrument(name = "Spawning variant cleanup", skip(repo))]
+async fn clean_variants<R: FullRepo>(repo: web::Data<R>) -> Result<HttpResponse, Error> {
+    queue::cleanup_all_variants(&**repo).await?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct AliasQuery {
     alias: Serde<Alias>,
@@ -839,6 +845,9 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                         web::resource("/import")
                             .wrap(import_form.clone())
                             .route(web::post().to(upload::<R, S>)),
+                    )
+                    .service(
+                        web::resource("/variants").route(web::delete().to(clean_variants::<R>)),
                     )
                     .service(web::resource("/purge").route(web::post().to(purge::<R>)))
                     .service(web::resource("/aliases").route(web::get().to(aliases::<R>))),
