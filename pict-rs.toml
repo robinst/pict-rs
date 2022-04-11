@@ -45,8 +45,8 @@ targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
 # environment variable: PICTRS__TRACING__CONSOLE__ADDRESS
 # default: empty
 #
-# Dictacts whether console should be enabled, and what address it should be exposed on.
-
+# Dictates whether console should be enabled, and what address it should be exposed on.
+#
 # When set, tokio-console can connect to the pict-rs service
 #
 # Configure your container to expose the console port
