@@ -1,8 +1,11 @@
-use crate::{config, details::Details, error::Error, store::Identifier};
+use crate::{
+    config,
+    details::Details,
+    error::Error,
+    store::{file_store::FileId, Identifier},
+};
 use futures_util::Stream;
-use std::fmt::Debug;
-use std::path::PathBuf;
-use tracing::debug;
+use std::{fmt::Debug, path::PathBuf};
 use uuid::Uuid;
 
 mod old;
@@ -240,6 +243,8 @@ impl Repo {
             return Ok(());
         }
 
+        tracing::warn!("Migrating Database from 0.3 layout to 0.4 layout");
+
         let old = self::old::Old::open(path)?;
 
         for hash in old.hashes() {
@@ -257,9 +262,42 @@ impl Repo {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn migrate_identifiers(&self) -> color_eyre::Result<()> {
+        if self.has_migrated_identifiers().await? {
+            return Ok(());
+        }
+
+        tracing::warn!("Migrating File Identifiers from 0.3 format to 0.4 format");
+
+        match self {
+            Self::Sled(repo) => {
+                use futures_util::StreamExt;
+                let mut hashes = repo.hashes().await;
+
+                while let Some(res) = hashes.next().await {
+                    let hash = res?;
+                    if let Err(e) = migrate_identifiers_for_hash(repo, hash).await {
+                        tracing::error!("Failed to migrate identifiers for hash: {}", e);
+                    }
+                }
+            }
+        }
+
+        self.mark_migrated_identifiers().await?;
+
+        Ok(())
+    }
+
     async fn has_migrated(&self) -> color_eyre::Result<bool> {
         match self {
             Self::Sled(repo) => Ok(repo.get(REPO_MIGRATION_O1).await?.is_some()),
+        }
+    }
+
+    async fn has_migrated_identifiers(&self) -> color_eyre::Result<bool> {
+        match self {
+            Self::Sled(repo) => Ok(repo.get(REPO_MIGRATION_02).await?.is_some()),
         }
     }
 
@@ -272,18 +310,80 @@ impl Repo {
 
         Ok(())
     }
+
+    async fn mark_migrated_identifiers(&self) -> color_eyre::Result<()> {
+        match self {
+            Self::Sled(repo) => {
+                repo.set(REPO_MIGRATION_02, b"1".to_vec().into()).await?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 const REPO_MIGRATION_O1: &str = "repo-migration-01";
+const REPO_MIGRATION_02: &str = "repo-migration-02";
 const STORE_MIGRATION_PROGRESS: &str = "store-migration-progress";
 const GENERATOR_KEY: &str = "last-path";
 
+#[tracing::instrument]
+async fn migrate_identifiers_for_hash<T>(repo: &T, hash: ::sled::IVec) -> color_eyre::Result<()>
+where
+    T: FullRepo,
+{
+    let hash: T::Bytes = hash.to_vec().into();
+
+    if let Some(motion_identifier) = repo.motion_identifier::<FileId>(hash.clone()).await? {
+        if let Some(new_motion_identifier) = motion_identifier.normalize_for_migration() {
+            migrate_identifier_details(repo, &motion_identifier, &new_motion_identifier).await?;
+            repo.relate_motion_identifier(hash.clone(), &new_motion_identifier)
+                .await?;
+        }
+    }
+
+    for (variant_path, variant_identifier) in repo.variants::<FileId>(hash.clone()).await? {
+        if let Some(new_variant_identifier) = variant_identifier.normalize_for_migration() {
+            migrate_identifier_details(repo, &variant_identifier, &new_variant_identifier).await?;
+            repo.relate_variant_identifier(hash.clone(), variant_path, &new_variant_identifier)
+                .await?;
+        }
+    }
+
+    let main_identifier = repo.identifier::<FileId>(hash.clone()).await?;
+
+    if let Some(new_main_identifier) = main_identifier.normalize_for_migration() {
+        migrate_identifier_details(repo, &main_identifier, &new_main_identifier).await?;
+        repo.relate_identifier(hash, &new_main_identifier).await?;
+    }
+
+    Ok(())
+}
+
+#[tracing::instrument]
+async fn migrate_identifier_details<T>(
+    repo: &T,
+    old: &FileId,
+    new: &FileId,
+) -> color_eyre::Result<()>
+where
+    T: FullRepo,
+{
+    if let Some(details) = repo.details(old).await? {
+        repo.relate_details(new, &details).await?;
+        IdentifierRepo::cleanup(repo, old).await?;
+    }
+
+    Ok(())
+}
+
+#[tracing::instrument(skip(old))]
 async fn migrate_hash<T>(repo: &T, old: &old::Old, hash: ::sled::IVec) -> color_eyre::Result<()>
 where
-    T: IdentifierRepo + HashRepo + AliasRepo + SettingsRepo,
+    T: IdentifierRepo + HashRepo + AliasRepo + SettingsRepo + Debug,
 {
     if HashRepo::create(repo, hash.to_vec().into()).await?.is_err() {
-        debug!("Duplicate hash detected");
+        tracing::debug!("Duplicate hash detected");
         return Ok(());
     }
 

@@ -34,6 +34,16 @@ impl Identifier for FileId {
     }
 }
 
+impl FileId {
+    pub(crate) fn normalize_for_migration(&self) -> Option<Self> {
+        if self.0.starts_with("files") {
+            Some(Self(self.0.components().skip(1).collect::<PathBuf>()))
+        } else {
+            None
+        }
+    }
+}
+
 impl FileStore {
     pub(super) fn file_id_from_path(&self, path: PathBuf) -> Result<FileId, FileError> {
         let stripped = path

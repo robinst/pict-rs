@@ -947,6 +947,8 @@ async fn main() -> color_eyre::Result<()> {
 
     match CONFIG.store.clone() {
         config::Store::Filesystem(config::Filesystem { path }) => {
+            repo.migrate_identifiers().await?;
+
             let store = FileStore::build(path, repo.clone()).await?;
             match repo {
                 Repo::Sled(sled_repo) => launch(sled_repo, store).await,
