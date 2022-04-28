@@ -47,8 +47,6 @@ mod stream;
 mod tmp_file;
 mod validate;
 
-use crate::repo::UploadResult;
-
 use self::{
     backgrounded::Backgrounded,
     config::{Configuration, ImageFormat, Operation},
@@ -60,7 +58,10 @@ use self::{
     magick::details_hint,
     middleware::{Deadline, Internal},
     queue::queue_generate,
-    repo::{Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, Repo, SettingsRepo, UploadId},
+    repo::{
+        Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, Repo, SettingsRepo, UploadId,
+        UploadResult,
+    },
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
     stream::{StreamLimit, StreamTimeout},
@@ -857,7 +858,7 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
     .run()
     .await?;
 
-    crate::tmp_file::remove_tmp_dir().await?;
+    self::tmp_file::remove_tmp_dir().await?;
 
     Ok(())
 }
