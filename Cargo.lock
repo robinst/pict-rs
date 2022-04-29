@@ -355,7 +355,7 @@ dependencies = [
 [[package]]
 name = "aws-creds"
 version = "0.29.1"
-source = "git+https://github.com/asonix/rust-s3?branch=asonix/generic-client#dcbaf4a06ce98f8d635fe7ab470a2a4a5d7149e2"
+source = "git+https://github.com/asonix/rust-s3?branch=asonix/generic-client#c213bbd9bfaf5827b646d5c3ce6f455f793c60e0"
 dependencies = [
  "dirs",
  "rust-ini",
@@ -2082,7 +2082,7 @@ dependencies = [
 [[package]]
 name = "rust-s3"
 version = "0.31.0"
-source = "git+https://github.com/asonix/rust-s3?branch=asonix/generic-client#dcbaf4a06ce98f8d635fe7ab470a2a4a5d7149e2"
+source = "git+https://github.com/asonix/rust-s3?branch=asonix/generic-client#c213bbd9bfaf5827b646d5c3ce6f455f793c60e0"
 dependencies = [
  "async-trait",
  "aws-creds",
