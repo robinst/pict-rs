@@ -6,7 +6,8 @@ use crate::{
 use actix_web::web::Bytes;
 use futures_util::{Stream, TryStreamExt};
 use s3::{
-    client::Client, command::Command, creds::Credentials, request_trait::Request, Bucket, Region,
+    client::Client, command::Command, creds::Credentials, error::S3Error, request_trait::Request,
+    Bucket, Region,
 };
 use std::{pin::Pin, string::FromUtf8Error};
 use storage_path_generator::{Generator, Path};
@@ -33,7 +34,7 @@ pub(crate) enum ObjectError {
     Length,
 
     #[error("Storage error")]
-    Anyhow(#[from] anyhow::Error),
+    Anyhow(#[from] S3Error),
 }
 
 #[derive(Clone)]
@@ -180,7 +181,7 @@ impl ObjectStore {
         Ok(ObjectStore {
             path_gen,
             repo,
-            bucket: Bucket::new_with_path_style(
+            bucket: Bucket::new(
                 bucket_name,
                 match region {
                     Region::Custom { endpoint, .. } => Region::Custom {
@@ -196,7 +197,8 @@ impl ObjectStore {
                     session_token,
                 },
             )
-            .map_err(ObjectError::from)?,
+            .map_err(ObjectError::from)?
+            .with_path_style(),
             client,
         })
     }
