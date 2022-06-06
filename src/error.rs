@@ -81,6 +81,9 @@ pub(crate) enum UploadError {
     #[error("No files present in upload")]
     NoFiles,
 
+    #[error("Upload was already claimed")]
+    AlreadyClaimed,
+
     #[error("Requested a file that doesn't exist")]
     MissingAlias,
 
@@ -154,6 +157,7 @@ impl ResponseError for Error {
                 | UploadError::NoFiles
                 | UploadError::Upload(_)
                 | UploadError::UnsupportedFormat
+                | UploadError::AlreadyClaimed
                 | UploadError::SilentVideoDisabled,
             ) => StatusCode::BAD_REQUEST,
             Some(

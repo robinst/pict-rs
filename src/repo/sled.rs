@@ -298,13 +298,13 @@ impl UploadRepo for SledRepo {
                 return Ok(result.into());
             }
         } else {
-            return Err(UploadError::NoFiles.into());
+            return Err(UploadError::AlreadyClaimed.into());
         }
 
         while let Some(event) = (&mut subscriber).await {
             match event {
                 sled::Event::Remove { .. } => {
-                    return Err(UploadError::NoFiles.into());
+                    return Err(UploadError::AlreadyClaimed.into());
                 }
                 sled::Event::Insert { value, .. } => {
                     if value != b"1" {
