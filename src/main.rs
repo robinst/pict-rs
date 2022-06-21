@@ -47,6 +47,8 @@ mod stream;
 mod tmp_file;
 mod validate;
 
+use crate::magick::ValidInputType;
+
 use self::{
     backgrounded::Backgrounded,
     config::{Configuration, ImageFormat, Operation},
@@ -419,7 +421,24 @@ async fn process<R: FullRepo, S: Store + 'static>(
         .await?;
 
     if let Some(identifier) = identifier_opt {
-        let details = ensure_details(&**repo, &**store, &alias).await?;
+        let details = repo.details(&identifier).await?;
+
+        let details = if let Some(details) = details {
+            debug!("details exist");
+            details
+        } else {
+            debug!("generating new details from {:?}", identifier);
+            let new_details = Details::from_store(
+                (**store).clone(),
+                identifier.clone(),
+                Some(ValidInputType::from_format(format)),
+            )
+            .await?;
+            debug!("storing details for {:?}", identifier);
+            repo.relate_details(&identifier, &new_details).await?;
+            debug!("stored");
+            new_details
+        };
 
         return ranged_file_resp(&**store, identifier, range, details).await;
     }
