@@ -486,6 +486,50 @@ async fn process<R: FullRepo, S: Store + 'static>(
     ))
 }
 
+#[instrument(name = "Serving processed image headers", skip(repo))]
+async fn process_head<R: FullRepo, S: Store + 'static>(
+    range: Option<web::Header<Range>>,
+    query: web::Query<ProcessQuery>,
+    ext: web::Path<String>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+) -> Result<HttpResponse, Error> {
+    let (format, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
+
+    repo.check_cached(&alias).await?;
+
+    let path_string = thumbnail_path.to_string_lossy().to_string();
+    let hash = repo.hash(&alias).await?;
+    let identifier_opt = repo
+        .variant_identifier::<S::Identifier>(hash.clone(), path_string)
+        .await?;
+
+    if let Some(identifier) = identifier_opt {
+        let details = repo.details(&identifier).await?;
+
+        let details = if let Some(details) = details {
+            debug!("details exist");
+            details
+        } else {
+            debug!("generating new details from {:?}", identifier);
+            let new_details = Details::from_store(
+                (**store).clone(),
+                identifier.clone(),
+                Some(ValidInputType::from_format(format)),
+            )
+            .await?;
+            debug!("storing details for {:?}", identifier);
+            repo.relate_details(&identifier, &new_details).await?;
+            debug!("stored");
+            new_details
+        };
+
+        return ranged_file_head_resp(&**store, identifier, range, details).await;
+    }
+
+    Ok(HttpResponse::NotFound().finish())
+}
+
 /// Process files
 #[instrument(name = "Spawning image process", skip(repo))]
 async fn process_backgrounded<R: FullRepo, S: Store>(
@@ -543,6 +587,59 @@ async fn serve<R: FullRepo, S: Store + 'static>(
     ranged_file_resp(&**store, identifier, range, details).await
 }
 
+#[instrument(name = "Serving file headers", skip(repo))]
+async fn serve_head<R: FullRepo, S: Store + 'static>(
+    range: Option<web::Header<Range>>,
+    alias: web::Path<Serde<Alias>>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+) -> Result<HttpResponse, Error> {
+    let alias = alias.into_inner();
+
+    repo.check_cached(&alias).await?;
+
+    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
+
+    let details = ensure_details(&**repo, &**store, &alias).await?;
+
+    ranged_file_head_resp(&**store, identifier, range, details).await
+}
+
+async fn ranged_file_head_resp<S: Store + 'static>(
+    store: &S,
+    identifier: S::Identifier,
+    range: Option<web::Header<Range>>,
+    details: Details,
+) -> Result<HttpResponse, Error> {
+    let builder = if let Some(web::Header(range_header)) = range {
+        //Range header exists - return as ranged
+        if let Some(range) = range::single_bytes_range(&range_header) {
+            let len = store.len(&identifier).await?;
+
+            if let Some(content_range) = range::to_content_range(range, len) {
+                let mut builder = HttpResponse::PartialContent();
+                builder.insert_header(content_range);
+                builder
+            } else {
+                HttpResponse::RangeNotSatisfiable()
+            }
+        } else {
+            return Err(UploadError::Range.into());
+        }
+    } else {
+        // no range header
+        HttpResponse::Ok()
+    };
+
+    Ok(srv_head(
+        builder,
+        details.content_type(),
+        7 * DAYS,
+        details.system_time(),
+    )
+    .finish())
+}
+
 async fn ranged_file_resp<S: Store + 'static>(
     store: &S,
     identifier: S::Identifier,
@@ -594,7 +691,7 @@ async fn ranged_file_resp<S: Store + 'static>(
 
 // A helper method to produce responses with proper cache headers
 fn srv_response<S, E>(
-    mut builder: HttpResponseBuilder,
+    builder: HttpResponseBuilder,
     stream: S,
     ext: mime::Mime,
     expires: u32,
@@ -611,6 +708,16 @@ where
         Err(e) => Err(Error::from(e).into()),
     });
 
+    srv_head(builder, ext, expires, modified).streaming(stream)
+}
+
+// A helper method to produce responses with proper cache headers
+fn srv_head(
+    mut builder: HttpResponseBuilder,
+    ext: mime::Mime,
+    expires: u32,
+    modified: SystemTime,
+) -> HttpResponseBuilder {
     builder
         .insert_header(LastModified(modified.into()))
         .insert_header(CacheControl(vec![
@@ -619,8 +726,9 @@ where
             CacheDirective::Extension("immutable".to_owned(), None),
         ]))
         .insert_header((ACCEPT_RANGES, "bytes"))
-        .content_type(ext.to_string())
-        .streaming(stream)
+        .content_type(ext.to_string());
+
+    builder
 }
 
 #[instrument(name = "Spawning variant cleanup", skip(repo))]
@@ -837,9 +945,15 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                             .route(web::get().to(delete::<R>)),
                     )
                     .service(
-                        web::resource("/original/{filename}").route(web::get().to(serve::<R, S>)),
+                        web::resource("/original/{filename}")
+                            .route(web::get().to(serve::<R, S>))
+                            .route(web::head().to(serve_head::<R, S>)),
                     )
-                    .service(web::resource("/process.{ext}").route(web::get().to(process::<R, S>)))
+                    .service(
+                        web::resource("/process.{ext}")
+                            .route(web::get().to(process::<R, S>))
+                            .route(web::head().to(process_head::<R, S>)),
+                    )
                     .service(
                         web::resource("/process_backgrounded.{ext}")
                             .route(web::get().to(process_backgrounded::<R, S>)),
