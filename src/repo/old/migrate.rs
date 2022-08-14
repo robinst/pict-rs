@@ -60,7 +60,7 @@ impl LatestDb {
         LatestDb { root_dir, version }
     }
 
-    pub(crate) fn migrate(self) -> Result<sled::Db, Error> {
+    pub(crate) fn migrate(self) -> Result<Option<sled::Db>, Error> {
         let LatestDb { root_dir, version } = self;
 
         loop {
@@ -89,9 +89,10 @@ impl DbVersion {
         DbVersion::Fresh
     }
 
-    fn migrate(self, root: PathBuf) -> Result<sled::Db, Error> {
+    fn migrate(self, root: PathBuf) -> Result<Option<sled::Db>, Error> {
         match self {
-            DbVersion::Sled034 | DbVersion::Fresh => s034::open(root),
+            DbVersion::Sled034 => Some(s034::open(root)).transpose(),
+            DbVersion::Fresh => Ok(None),
         }
     }
 }

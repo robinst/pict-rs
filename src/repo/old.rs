@@ -44,18 +44,20 @@ pub(super) struct Old {
 }
 
 impl Old {
-    pub(super) fn open(path: PathBuf) -> color_eyre::Result<Self> {
-        let db = migrate::LatestDb::exists(path).migrate()?;
-
-        Ok(Self {
-            alias_tree: db.open_tree("alias")?,
-            filename_tree: db.open_tree("filename")?,
-            main_tree: db.open_tree("main")?,
-            details_tree: db.open_tree("details")?,
-            settings_tree: db.open_tree("settings")?,
-            identifier_tree: db.open_tree("path")?,
-            _db: db,
-        })
+    pub(super) fn open(path: PathBuf) -> color_eyre::Result<Option<Self>> {
+        if let Some(db) = migrate::LatestDb::exists(path).migrate()? {
+            Ok(Some(Self {
+                alias_tree: db.open_tree("alias")?,
+                filename_tree: db.open_tree("filename")?,
+                main_tree: db.open_tree("main")?,
+                details_tree: db.open_tree("details")?,
+                settings_tree: db.open_tree("settings")?,
+                identifier_tree: db.open_tree("path")?,
+                _db: db,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(super) fn setting(&self, key: &[u8]) -> color_eyre::Result<Option<sled::IVec>> {

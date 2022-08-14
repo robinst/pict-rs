@@ -243,15 +243,15 @@ impl Repo {
             return Ok(());
         }
 
-        tracing::warn!("Migrating Database from 0.3 layout to 0.4 layout");
+        if let Some(old) = self::old::Old::open(path)? {
+            tracing::warn!("Migrating Database from 0.3 layout to 0.4 layout");
 
-        let old = self::old::Old::open(path)?;
-
-        for hash in old.hashes() {
-            match self {
-                Self::Sled(repo) => {
-                    if let Err(e) = migrate_hash(repo, &old, hash).await {
-                        tracing::error!("Failed to migrate hash: {}", e);
+            for hash in old.hashes() {
+                match self {
+                    Self::Sled(repo) => {
+                        if let Err(e) = migrate_hash(repo, &old, hash).await {
+                            tracing::error!("Failed to migrate hash: {}", e);
+                        }
                     }
                 }
             }
