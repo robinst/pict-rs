@@ -58,11 +58,11 @@ where
     where
         Reader: AsyncRead + Unpin,
     {
-        T::save_async_read(&self, reader).await
+        T::save_async_read(self, reader).await
     }
 
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
-        T::save_bytes(&self, bytes).await
+        T::save_bytes(self, bytes).await
     }
 
     async fn to_stream(
@@ -71,7 +71,7 @@ where
         from_start: Option<u64>,
         len: Option<u64>,
     ) -> Result<Self::Stream, Error> {
-        T::to_stream(&self, identifier, from_start, len).await
+        T::to_stream(self, identifier, from_start, len).await
     }
 
     async fn read_into<Writer>(
@@ -82,15 +82,15 @@ where
     where
         Writer: AsyncWrite + Send + Unpin,
     {
-        T::read_into(&self, identifier, writer).await
+        T::read_into(self, identifier, writer).await
     }
 
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
-        T::len(&self, identifier).await
+        T::len(self, identifier).await
     }
 
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
-        T::remove(&self, identifier).await
+        T::remove(self, identifier).await
     }
 }
 

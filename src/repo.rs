@@ -128,11 +128,11 @@ where
     T: CachedRepo,
 {
     async fn mark_cached(&self, alias: &Alias) -> Result<(), Error> {
-        T::mark_cached(&self, alias).await
+        T::mark_cached(self, alias).await
     }
 
     async fn update(&self, alias: &Alias) -> Result<Vec<Alias>, Error> {
-        T::update(&self, alias).await
+        T::update(self, alias).await
     }
 }
 
@@ -153,19 +153,19 @@ where
     T: UploadRepo,
 {
     async fn create(&self, upload_id: UploadId) -> Result<(), Error> {
-        T::create(&self, upload_id).await
+        T::create(self, upload_id).await
     }
 
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, Error> {
-        T::wait(&self, upload_id).await
+        T::wait(self, upload_id).await
     }
 
     async fn claim(&self, upload_id: UploadId) -> Result<(), Error> {
-        T::claim(&self, upload_id).await
+        T::claim(self, upload_id).await
     }
 
     async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), Error> {
-        T::complete(&self, upload_id, result).await
+        T::complete(self, upload_id, result).await
     }
 }
 
@@ -184,15 +184,15 @@ where
     T: QueueRepo,
 {
     async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), Error> {
-        T::requeue_in_progress(&self, worker_prefix).await
+        T::requeue_in_progress(self, worker_prefix).await
     }
 
     async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), Error> {
-        T::push(&self, queue, job).await
+        T::push(self, queue, job).await
     }
 
     async fn pop(&self, queue: &'static str, worker_id: Vec<u8>) -> Result<Self::Bytes, Error> {
-        T::pop(&self, queue, worker_id).await
+        T::pop(self, queue, worker_id).await
     }
 }
 
@@ -209,15 +209,15 @@ where
     T: SettingsRepo,
 {
     async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), Error> {
-        T::set(&self, key, value).await
+        T::set(self, key, value).await
     }
 
     async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, Error> {
-        T::get(&self, key).await
+        T::get(self, key).await
     }
 
     async fn remove(&self, key: &'static str) -> Result<(), Error> {
-        T::remove(&self, key).await
+        T::remove(self, key).await
     }
 }
 
@@ -243,15 +243,15 @@ where
         identifier: &I,
         details: &Details,
     ) -> Result<(), Error> {
-        T::relate_details(&self, identifier, details).await
+        T::relate_details(self, identifier, details).await
     }
 
     async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, Error> {
-        T::details(&self, identifier).await
+        T::details(self, identifier).await
     }
 
     async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), Error> {
-        T::cleanup(&self, identifier).await
+        T::cleanup(self, identifier).await
     }
 }
 
@@ -312,23 +312,23 @@ where
     type Stream = T::Stream;
 
     async fn hashes(&self) -> Self::Stream {
-        T::hashes(&self).await
+        T::hashes(self).await
     }
 
     async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, Error> {
-        T::create(&self, hash).await
+        T::create(self, hash).await
     }
 
     async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error> {
-        T::relate_alias(&self, hash, alias).await
+        T::relate_alias(self, hash, alias).await
     }
 
     async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error> {
-        T::remove_alias(&self, hash, alias).await
+        T::remove_alias(self, hash, alias).await
     }
 
     async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, Error> {
-        T::aliases(&self, hash).await
+        T::aliases(self, hash).await
     }
 
     async fn relate_identifier<I: Identifier>(
@@ -336,11 +336,11 @@ where
         hash: Self::Bytes,
         identifier: &I,
     ) -> Result<(), Error> {
-        T::relate_identifier(&self, hash, identifier).await
+        T::relate_identifier(self, hash, identifier).await
     }
 
     async fn identifier<I: Identifier + 'static>(&self, hash: Self::Bytes) -> Result<I, Error> {
-        T::identifier(&self, hash).await
+        T::identifier(self, hash).await
     }
 
     async fn relate_variant_identifier<I: Identifier>(
@@ -349,7 +349,7 @@ where
         variant: String,
         identifier: &I,
     ) -> Result<(), Error> {
-        T::relate_variant_identifier(&self, hash, variant, identifier).await
+        T::relate_variant_identifier(self, hash, variant, identifier).await
     }
 
     async fn variant_identifier<I: Identifier + 'static>(
@@ -357,18 +357,18 @@ where
         hash: Self::Bytes,
         variant: String,
     ) -> Result<Option<I>, Error> {
-        T::variant_identifier(&self, hash, variant).await
+        T::variant_identifier(self, hash, variant).await
     }
 
     async fn variants<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
     ) -> Result<Vec<(String, I)>, Error> {
-        T::variants(&self, hash).await
+        T::variants(self, hash).await
     }
 
     async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), Error> {
-        T::remove_variant(&self, hash, variant).await
+        T::remove_variant(self, hash, variant).await
     }
 
     async fn relate_motion_identifier<I: Identifier>(
@@ -376,18 +376,18 @@ where
         hash: Self::Bytes,
         identifier: &I,
     ) -> Result<(), Error> {
-        T::relate_motion_identifier(&self, hash, identifier).await
+        T::relate_motion_identifier(self, hash, identifier).await
     }
 
     async fn motion_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
     ) -> Result<Option<I>, Error> {
-        T::motion_identifier(&self, hash).await
+        T::motion_identifier(self, hash).await
     }
 
     async fn cleanup(&self, hash: Self::Bytes) -> Result<(), Error> {
-        T::cleanup(&self, hash).await
+        T::cleanup(self, hash).await
     }
 }
 
@@ -414,7 +414,7 @@ where
     T: AliasRepo,
 {
     async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Error> {
-        T::create(&self, alias).await
+        T::create(self, alias).await
     }
 
     async fn relate_delete_token(
@@ -422,23 +422,23 @@ where
         alias: &Alias,
         delete_token: &DeleteToken,
     ) -> Result<Result<(), AlreadyExists>, Error> {
-        T::relate_delete_token(&self, alias, delete_token).await
+        T::relate_delete_token(self, alias, delete_token).await
     }
 
     async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, Error> {
-        T::delete_token(&self, alias).await
+        T::delete_token(self, alias).await
     }
 
     async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), Error> {
-        T::relate_hash(&self, alias, hash).await
+        T::relate_hash(self, alias, hash).await
     }
 
     async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, Error> {
-        T::hash(&self, alias).await
+        T::hash(self, alias).await
     }
 
     async fn cleanup(&self, alias: &Alias) -> Result<(), Error> {
-        T::cleanup(&self, alias).await
+        T::cleanup(self, alias).await
     }
 }
 
