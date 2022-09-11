@@ -1,8 +1,8 @@
-use actix_form_data::{Field, Form, Value};
+use actix_form_data::{Field, Form, FormData, Multipart, Value};
 use actix_web::{
     guard,
     http::header::{CacheControl, CacheDirective, LastModified, Range, ACCEPT_RANGES},
-    web, App, HttpResponse, HttpResponseBuilder, HttpServer,
+    web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::Client;
 use futures_util::{
@@ -105,9 +105,136 @@ async fn ensure_details<R: FullRepo, S: Store + 'static>(
     }
 }
 
+struct Upload<R: FullRepo + 'static, S: Store + 'static>(Value<Session<R, S>>);
+
+impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
+    type Item = Session<R, S>;
+    type Error = Error;
+
+    fn form(req: &HttpRequest) -> Form<Self::Item, Self::Error> {
+        // Create a new Multipart Form validator
+        //
+        // This form is expecting a single array field, 'images' with at most 10 files in it
+        let repo = req
+            .app_data::<web::Data<R>>()
+            .expect("No repo in request")
+            .clone();
+        let store = req
+            .app_data::<web::Data<S>>()
+            .expect("No store in request")
+            .clone();
+
+        Form::new()
+            .max_files(10)
+            .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
+            .transform_error(transform_error)
+            .field(
+                "images",
+                Field::array(Field::file(move |filename, _, stream| {
+                    let repo = repo.clone();
+                    let store = store.clone();
+
+                    let span = tracing::info_span!("file-upload", ?filename);
+
+                    let stream = stream.map_err(Error::from);
+
+                    Box::pin(
+                        async move {
+                            ingest::ingest(&**repo, &**store, stream, None, true, false).await
+                        }
+                        .instrument(span),
+                    )
+                })),
+            )
+    }
+
+    fn extract(value: Value<Session<R, S>>) -> Result<Self, Self::Error> {
+        Ok(Upload(value))
+    }
+}
+
+struct Import<R: FullRepo + 'static, S: Store + 'static>(Value<Session<R, S>>);
+
+impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
+    type Item = Session<R, S>;
+    type Error = Error;
+
+    fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
+        let repo = req
+            .app_data::<web::Data<R>>()
+            .expect("No repo in request")
+            .clone();
+        let store = req
+            .app_data::<web::Data<S>>()
+            .expect("No store in request")
+            .clone();
+
+        // Create a new Multipart Form validator for internal imports
+        //
+        // This form is expecting a single array field, 'images' with at most 10 files in it
+        Form::new()
+            .max_files(10)
+            .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
+            .transform_error(transform_error)
+            .field(
+                "images",
+                Field::array(Field::file(move |filename, _, stream| {
+                    let repo = repo.clone();
+                    let store = store.clone();
+
+                    let span = tracing::info_span!("file-import", ?filename);
+
+                    let stream = stream.map_err(Error::from);
+
+                    Box::pin(
+                        async move {
+                            ingest::ingest(
+                                &**repo,
+                                &**store,
+                                stream,
+                                Some(Alias::from_existing(&filename)),
+                                !CONFIG.media.skip_validate_imports,
+                                false,
+                            )
+                            .await
+                        }
+                        .instrument(span),
+                    )
+                })),
+            )
+    }
+
+    fn extract(value: Value<Self::Item>) -> Result<Self, Self::Error>
+    where
+        Self: Sized,
+    {
+        Ok(Import(value))
+    }
+}
+
 /// Handle responding to succesful uploads
 #[instrument(name = "Uploaded files", skip(value))]
 async fn upload<R: FullRepo, S: Store + 'static>(
+    Multipart(Upload(value)): Multipart<Upload<R, S>>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+) -> Result<HttpResponse, Error> {
+    handle_upload(value, repo, store).await
+}
+
+/// Handle responding to succesful uploads
+#[instrument(name = "Imported files", skip(value))]
+async fn import<R: FullRepo, S: Store + 'static>(
+    Multipart(Import(value)): Multipart<Import<R, S>>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+) -> Result<HttpResponse, Error> {
+    handle_upload(value, repo, store).await
+}
+
+/// Handle responding to succesful uploads
+#[instrument(name = "Uploaded files", skip(value))]
+async fn handle_upload<R: FullRepo, S: Store + 'static>(
     value: Value<Session<R, S>>,
     repo: web::Data<R>,
     store: web::Data<S>,
@@ -129,7 +256,7 @@ async fn upload<R: FullRepo, S: Store + 'static>(
             info!("Uploaded {} as {:?}", image.filename, alias);
             let delete_token = image.result.delete_token().await?;
 
-            let details = ensure_details(&**repo, &**store, alias).await?;
+            let details = ensure_details(&repo, &store, alias).await?;
 
             files.push(serde_json::json!({
                 "file": alias.to_string(),
@@ -149,9 +276,58 @@ async fn upload<R: FullRepo, S: Store + 'static>(
     })))
 }
 
+struct BackgroundedUpload<R: FullRepo + 'static, S: Store + 'static>(Value<Backgrounded<R, S>>);
+
+impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
+    type Item = Backgrounded<R, S>;
+    type Error = Error;
+
+    fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
+        // Create a new Multipart Form validator for backgrounded uploads
+        //
+        // This form is expecting a single array field, 'images' with at most 10 files in it
+        let repo = req
+            .app_data::<web::Data<R>>()
+            .expect("No repo in request")
+            .clone();
+        let store = req
+            .app_data::<web::Data<S>>()
+            .expect("No store in request")
+            .clone();
+
+        Form::new()
+            .max_files(10)
+            .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
+            .transform_error(transform_error)
+            .field(
+                "images",
+                Field::array(Field::file(move |filename, _, stream| {
+                    let repo = (**repo).clone();
+                    let store = (**store).clone();
+
+                    let span = tracing::info_span!("file-proxy", ?filename);
+
+                    let stream = stream.map_err(Error::from);
+
+                    Box::pin(
+                        async move { Backgrounded::proxy(repo, store, stream).await }
+                            .instrument(span),
+                    )
+                })),
+            )
+    }
+
+    fn extract(value: Value<Self::Item>) -> Result<Self, Self::Error>
+    where
+        Self: Sized,
+    {
+        Ok(BackgroundedUpload(value))
+    }
+}
+
 #[instrument(name = "Uploaded files", skip(value))]
 async fn upload_backgrounded<R: FullRepo, S: Store>(
-    value: Value<Backgrounded<R, S>>,
+    Multipart(BackgroundedUpload(value)): Multipart<BackgroundedUpload<R, S>>,
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
     let images = value
@@ -174,7 +350,7 @@ async fn upload_backgrounded<R: FullRepo, S: Store>(
             .expect("Identifier exists")
             .to_bytes()?;
 
-        queue::queue_ingest(&**repo, identifier, upload_id, None, true, false).await?;
+        queue::queue_ingest(&repo, identifier, upload_id, None, true, false).await?;
 
         files.push(serde_json::json!({
             "upload_id": upload_id.to_string(),
@@ -212,7 +388,7 @@ async fn claim_upload<R: FullRepo, S: Store + 'static>(
 
             match upload_result {
                 UploadResult::Success { alias, token } => {
-                    let details = ensure_details(&**repo, &**store, &alias).await?;
+                    let details = ensure_details(&repo, &store, &alias).await?;
 
                     Ok(HttpResponse::Ok().json(&serde_json::json!({
                         "msg": "ok",
@@ -277,12 +453,12 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     store: web::Data<S>,
     is_cached: bool,
 ) -> Result<HttpResponse, Error> {
-    let mut session = ingest::ingest(&**repo, &**store, stream, None, true, is_cached).await?;
+    let mut session = ingest::ingest(&repo, &store, stream, None, true, is_cached).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
     let delete_token = session.delete_token().await?;
 
-    let details = ensure_details(&**repo, &**store, &alias).await?;
+    let details = ensure_details(&repo, &store, &alias).await?;
 
     session.disarm();
 
@@ -311,7 +487,7 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
         .expect("Identifier exists")
         .to_bytes()?;
 
-    queue::queue_ingest(&**repo, identifier, upload_id, None, true, is_cached).await?;
+    queue::queue_ingest(&repo, identifier, upload_id, None, true, is_cached).await?;
 
     backgrounded.disarm();
 
@@ -334,7 +510,7 @@ async fn delete<R: FullRepo>(
     let token = DeleteToken::from_existing(&token);
     let alias = Alias::from_existing(&alias);
 
-    queue::cleanup_alias(&**repo, alias, token).await?;
+    queue::cleanup_alias(&repo, alias, token).await?;
 
     Ok(HttpResponse::NoContent().finish())
 }
@@ -440,12 +616,12 @@ async fn process<R: FullRepo, S: Store + 'static>(
             new_details
         };
 
-        return ranged_file_resp(&**store, identifier, range, details).await;
+        return ranged_file_resp(&store, identifier, range, details).await;
     }
 
     let (details, bytes) = generate::generate(
-        &**repo,
-        &**store,
+        &repo,
+        &store,
         format,
         alias,
         thumbnail_path,
@@ -524,7 +700,7 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
             new_details
         };
 
-        return ranged_file_head_resp(&**store, identifier, range, details).await;
+        return ranged_file_head_resp(&store, identifier, range, details).await;
     }
 
     Ok(HttpResponse::NotFound().finish())
@@ -549,7 +725,7 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
         return Ok(HttpResponse::Accepted().finish());
     }
 
-    queue_generate(&**repo, target_format, source, process_path, process_args).await?;
+    queue_generate(&repo, target_format, source, process_path, process_args).await?;
 
     Ok(HttpResponse::Accepted().finish())
 }
@@ -563,7 +739,7 @@ async fn details<R: FullRepo, S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
 
-    let details = ensure_details(&**repo, &**store, &alias).await?;
+    let details = ensure_details(&repo, &store, &alias).await?;
 
     Ok(HttpResponse::Ok().json(&details))
 }
@@ -582,9 +758,9 @@ async fn serve<R: FullRepo, S: Store + 'static>(
 
     let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 
-    let details = ensure_details(&**repo, &**store, &alias).await?;
+    let details = ensure_details(&repo, &store, &alias).await?;
 
-    ranged_file_resp(&**store, identifier, range, details).await
+    ranged_file_resp(&store, identifier, range, details).await
 }
 
 #[instrument(name = "Serving file headers", skip(repo))]
@@ -600,9 +776,9 @@ async fn serve_head<R: FullRepo, S: Store + 'static>(
 
     let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 
-    let details = ensure_details(&**repo, &**store, &alias).await?;
+    let details = ensure_details(&repo, &store, &alias).await?;
 
-    ranged_file_head_resp(&**store, identifier, range, details).await
+    ranged_file_head_resp(&store, identifier, range, details).await
 }
 
 async fn ranged_file_head_resp<S: Store + 'static>(
@@ -733,7 +909,7 @@ fn srv_head(
 
 #[instrument(name = "Spawning variant cleanup", skip(repo))]
 async fn clean_variants<R: FullRepo>(repo: web::Data<R>) -> Result<HttpResponse, Error> {
-    queue::cleanup_all_variants(&**repo).await?;
+    queue::cleanup_all_variants(&repo).await?;
     Ok(HttpResponse::NoContent().finish())
 }
 
@@ -751,7 +927,7 @@ async fn purge<R: FullRepo>(
     let aliases = repo.aliases_from_alias(&alias).await?;
 
     let hash = repo.hash(&alias).await?;
-    queue::cleanup_hash(&**repo, hash).await?;
+    queue::cleanup_hash(&repo, hash).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",
@@ -806,92 +982,6 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
 ) -> color_eyre::Result<()> {
     repo.requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
         .await?;
-    // Create a new Multipart Form validator
-    //
-    // This form is expecting a single array field, 'images' with at most 10 files in it
-    let repo2 = repo.clone();
-    let store2 = store.clone();
-    let form = Form::new()
-        .max_files(10)
-        .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
-        .transform_error(transform_error)
-        .field(
-            "images",
-            Field::array(Field::file(move |filename, _, stream| {
-                let repo = repo2.clone();
-                let store = store2.clone();
-
-                let span = tracing::info_span!("file-upload", ?filename);
-
-                let stream = stream.map_err(Error::from);
-
-                Box::pin(
-                    async move { ingest::ingest(&repo, &store, stream, None, true, false).await }
-                        .instrument(span),
-                )
-            })),
-        );
-
-    // Create a new Multipart Form validator for internal imports
-    //
-    // This form is expecting a single array field, 'images' with at most 10 files in it
-    let repo2 = repo.clone();
-    let store2 = store.clone();
-    let import_form = Form::new()
-        .max_files(10)
-        .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
-        .transform_error(transform_error)
-        .field(
-            "images",
-            Field::array(Field::file(move |filename, _, stream| {
-                let repo = repo2.clone();
-                let store = store2.clone();
-
-                let span = tracing::info_span!("file-import", ?filename);
-
-                let stream = stream.map_err(Error::from);
-
-                Box::pin(
-                    async move {
-                        ingest::ingest(
-                            &repo,
-                            &store,
-                            stream,
-                            Some(Alias::from_existing(&filename)),
-                            !CONFIG.media.skip_validate_imports,
-                            false,
-                        )
-                        .await
-                    }
-                    .instrument(span),
-                )
-            })),
-        );
-
-    // Create a new Multipart Form validator for backgrounded uploads
-    //
-    // This form is expecting a single array field, 'images' with at most 10 files in it
-    let repo2 = repo.clone();
-    let store2 = store.clone();
-    let backgrounded_form = Form::new()
-        .max_files(10)
-        .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
-        .transform_error(transform_error)
-        .field(
-            "images",
-            Field::array(Field::file(move |filename, _, stream| {
-                let repo = repo2.clone();
-                let store = store2.clone();
-
-                let span = tracing::info_span!("file-proxy", ?filename);
-
-                let stream = stream.map_err(Error::from);
-
-                Box::pin(
-                    async move { Backgrounded::proxy(repo, store, stream).await }.instrument(span),
-                )
-            })),
-        );
 
     HttpServer::new(move || {
         let store = store.clone();
@@ -923,7 +1013,6 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                     .service(
                         web::resource("")
                             .guard(guard::Post())
-                            .wrap(form.clone())
                             .route(web::post().to(upload::<R, S>)),
                     )
                     .service(
@@ -931,7 +1020,6 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                             .service(
                                 web::resource("")
                                     .guard(guard::Post())
-                                    .wrap(backgrounded_form.clone())
                                     .route(web::post().to(upload_backgrounded::<R, S>)),
                             )
                             .service(
@@ -975,11 +1063,7 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                     .wrap(Internal(
                         CONFIG.server.api_key.as_ref().map(|s| s.to_owned()),
                     ))
-                    .service(
-                        web::resource("/import")
-                            .wrap(import_form.clone())
-                            .route(web::post().to(upload::<R, S>)),
-                    )
+                    .service(web::resource("/import").route(web::post().to(import::<R, S>)))
                     .service(
                         web::resource("/variants").route(web::delete().to(clean_variants::<R>)),
                     )
