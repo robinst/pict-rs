@@ -79,11 +79,6 @@ pub(crate) struct ObjectStorage {
     #[clap(short, long)]
     pub(crate) secret_key: String,
 
-    /// The security token for accessing the bucket
-    #[clap(long)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) security_token: Option<String>,
-
     /// The session token for accessing the bucket
     #[clap(long)]
     #[serde(skip_serializing_if = "Option::is_none")]

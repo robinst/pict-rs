@@ -958,14 +958,8 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
 fn build_client() -> awc::Client {
     Client::builder()
         .wrap(Tracing)
-        .add_default_header(("User-Agent", "pict-rs v0.3.0-main"))
+        .add_default_header(("User-Agent", "pict-rs v0.4.0-main"))
         .finish()
-}
-
-fn build_reqwest_client() -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent("pict-rs v0.3.0-main")
-        .build()
 }
 
 fn next_worker_id() -> String {
@@ -1092,22 +1086,24 @@ where
             }
         }
         config::Store::ObjectStorage(config::ObjectStorage {
+            endpoint,
             bucket_name,
+            url_style,
             region,
             access_key,
             secret_key,
-            security_token,
             session_token,
         }) => {
             let to = ObjectStore::build(
+                endpoint,
                 bucket_name,
-                region.as_ref().clone(),
+                url_style,
+                region.as_ref(),
                 Some(access_key.clone()),
                 Some(secret_key.clone()),
-                security_token.clone(),
                 session_token.clone(),
                 repo.clone(),
-                build_reqwest_client()?,
+                build_client(),
             )
             .await?;
 
@@ -1136,22 +1132,24 @@ async fn main() -> color_eyre::Result<()> {
                     migrate_inner(&repo, from, &to).await?;
                 }
                 config::Store::ObjectStorage(config::ObjectStorage {
+                    endpoint,
                     bucket_name,
+                    url_style,
                     region,
                     access_key,
                     secret_key,
-                    security_token,
                     session_token,
                 }) => {
                     let from = ObjectStore::build(
+                        endpoint,
                         &bucket_name,
+                        url_style,
                         Serde::into_inner(region),
                         Some(access_key),
                         Some(secret_key),
-                        security_token,
                         session_token,
                         repo.clone(),
-                        build_reqwest_client()?,
+                        build_client(),
                     )
                     .await?;
 
@@ -1173,22 +1171,24 @@ async fn main() -> color_eyre::Result<()> {
             }
         }
         config::Store::ObjectStorage(config::ObjectStorage {
+            endpoint,
             bucket_name,
+            url_style,
             region,
             access_key,
             secret_key,
-            security_token,
             session_token,
         }) => {
             let store = ObjectStore::build(
+                endpoint,
                 &bucket_name,
+                url_style,
                 Serde::into_inner(region),
                 Some(access_key),
                 Some(secret_key),
-                security_token,
                 session_token,
                 repo.clone(),
-                build_reqwest_client()?,
+                build_client(),
             )
             .await?;
 

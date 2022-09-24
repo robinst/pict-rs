@@ -3,16 +3,25 @@ use crate::{
     repo::{Repo, SettingsRepo},
     store::Store,
 };
-use actix_web::web::Bytes;
-use futures_util::{Stream, TryStreamExt};
-use s3::{
-    client::Client, command::Command, creds::Credentials, error::S3Error, request_trait::Request,
-    Bucket, Region,
+use actix_web::{
+    http::{
+        header::{ByteRangeSpec, Range, CONTENT_LENGTH},
+        StatusCode,
+    },
+    web::Bytes,
 };
-use std::{pin::Pin, string::FromUtf8Error};
+use awc::{Client, ClientRequest};
+use futures_util::{Stream, TryStreamExt};
+use rusty_s3::{
+    actions::{PutObject, S3Action},
+    Bucket, Credentials, UrlStyle,
+};
+use std::{pin::Pin, string::FromUtf8Error, time::Duration};
 use storage_path_generator::{Generator, Path};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio_util::io::ReaderStream;
 use tracing::Instrument;
+use url::Url;
 
 mod object_id;
 pub(crate) use object_id::ObjectId;
@@ -33,8 +42,8 @@ pub(crate) enum ObjectError {
     #[error("Invalid length")]
     Length,
 
-    #[error("Storage error")]
-    Anyhow(#[from] S3Error),
+    #[error("Invalid status")]
+    Status(StatusCode),
 }
 
 #[derive(Clone)]
@@ -42,7 +51,8 @@ pub(crate) struct ObjectStore {
     path_gen: Generator,
     repo: Repo,
     bucket: Bucket,
-    client: reqwest::Client,
+    credentials: Credentials,
+    client: Client,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -55,26 +65,30 @@ impl Store for ObjectStore {
     where
         Reader: AsyncRead + Unpin,
     {
-        let path = self.next_file().await?;
+        let response = self
+            .put_object_request()
+            .await?
+            .send_stream(ReaderStream::new(reader))
+            .await?;
 
-        self.bucket
-            .put_object_stream(&self.client, reader, &path)
-            .await
-            .map_err(ObjectError::from)?;
+        if response.status().is_success() {
+            return Ok(ObjectId::from_string(path));
+        }
 
-        Ok(ObjectId::from_string(path))
+        Err(ObjectError::Status(response.status()).into())
     }
 
     #[tracing::instrument(skip(bytes))]
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
-        let path = self.next_file().await?;
+        let req = self.put_object_request().await?;
 
-        self.bucket
-            .put_object(&self.client, &path, &bytes)
-            .await
-            .map_err(ObjectError::from)?;
+        let response = req.send_body(bytes).await?;
 
-        Ok(ObjectId::from_string(path))
+        if response.status().is_success() {
+            return Ok(ObjectId::from_string(path));
+        }
+
+        Err(ObjectError::Status(response.status()).into())
     }
 
     #[tracing::instrument]
@@ -84,38 +98,16 @@ impl Store for ObjectStore {
         from_start: Option<u64>,
         len: Option<u64>,
     ) -> Result<Self::Stream, Error> {
-        let path = identifier.as_str();
+        let response = self
+            .get_object_request(identifier, from_start, len)
+            .send()
+            .await?;
 
-        let start = from_start.unwrap_or(0);
-        let end = len.map(|len| start + len - 1);
+        if response.status.is_success() {
+            return Ok(Box::pin(response));
+        }
 
-        let request_span = tracing::trace_span!(parent: None, "Get Object");
-
-        // NOTE: isolating reqwest in it's own span is to prevent the request's span from getting
-        // smuggled into a long-lived task. Unfortunately, I am unable to create a minimal
-        // reproduction of this problem so I can't open a bug about it.
-        let request = request_span.in_scope(|| {
-            Client::request(
-                &self.client,
-                &self.bucket,
-                path,
-                Command::GetObjectRange { start, end },
-            )
-        });
-
-        let response = request_span
-            .in_scope(|| request.response())
-            .instrument(request_span.clone())
-            .await
-            .map_err(ObjectError::from)?;
-
-        let stream = request_span.in_scope(|| {
-            response
-                .bytes_stream()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-        });
-
-        Ok(Box::pin(stream))
+        Err(ObjectError::Status(response.status()).into())
     }
 
     #[tracing::instrument(skip(writer))]
@@ -127,39 +119,52 @@ impl Store for ObjectStore {
     where
         Writer: AsyncWrite + Send + Unpin,
     {
-        let path = identifier.as_str();
+        let response = self
+            .get_object_request(identifier, from_start, len)
+            .send()
+            .await?;
 
-        self.bucket
-            .get_object_stream(&self.client, path, writer)
-            .await
-            .map_err(ObjectError::from)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, Error::from(e)))?;
+        if !response.status.is_success() {
+            return Err(ObjectError::Status(response.status()).into());
+        }
+
+        while let Some(res) = response.next().await {
+            let bytes = res?;
+            writer.write_all_buf(bytes).await?;
+        }
+        writer.flush().await?;
 
         Ok(())
     }
 
     #[tracing::instrument]
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
-        let path = identifier.as_str();
+        let response = self.head_object_request(identifier).send().await?;
 
-        let (head, _) = self
-            .bucket
-            .head_object(&self.client, path)
-            .await
-            .map_err(ObjectError::from)?;
-        let length = head.content_length.ok_or(ObjectError::Length)?;
+        if !response.status.is_success() {
+            return Err(ObjectError::Status(response.status()).into());
+        }
 
-        Ok(length as u64)
+        let length = response
+            .headers()
+            .get(CONTENT_LENGTH)
+            .ok_or(ObjectError::Length)?
+            .to_str()
+            .ok_or(ObjectError::Length)
+            .parse::<u64>()
+            .map_err(|_| ObjectError::Length)?;
+
+        Ok(length)
     }
 
     #[tracing::instrument]
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
-        let path = identifier.as_str();
+        let response = self.delete_object_request(identifier).send().await?;
 
-        self.bucket
-            .delete_object(&self.client, path)
-            .await
-            .map_err(ObjectError::from)?;
+        if !response.status.is_success() {
+            return Err(ObjectError::Status(response.status()).into());
+        }
+
         Ok(())
     }
 }
@@ -167,11 +172,12 @@ impl Store for ObjectStore {
 impl ObjectStore {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn build(
+        endpoint: Url,
         bucket_name: &str,
-        region: Region,
+        url_style: UrlStyle,
+        region: &str,
         access_key: Option<String>,
         secret_key: Option<String>,
-        security_token: Option<String>,
         session_token: Option<String>,
         repo: Repo,
         client: reqwest::Client,
@@ -181,26 +187,82 @@ impl ObjectStore {
         Ok(ObjectStore {
             path_gen,
             repo,
-            bucket: Bucket::new(
-                bucket_name,
-                match region {
-                    Region::Custom { endpoint, .. } => Region::Custom {
-                        region: String::from(""),
-                        endpoint,
-                    },
-                    region => region,
-                },
-                Credentials {
-                    access_key,
-                    secret_key,
-                    security_token,
-                    session_token,
-                },
-            )
-            .map_err(ObjectError::from)?
-            .with_path_style(),
+            bucket: Bucket::new(endpoint, url_style, bucket_name, region)
+                .map_err(ObjectError::from)?,
+            credentials: Credentials::new_with_token(access_key, secret_key, session_token),
             client,
         })
+    }
+
+    async fn put_object_request(&self) -> Result<ClientRequest, Error> {
+        let path = self.next_file().await?;
+
+        let action = self.bucket.put_object(Some(&self.credentials), &path);
+
+        Ok(self.build_request(action))
+    }
+
+    fn build_request<A: S3Action>(&self, action: A) -> ClientRequest {
+        let method = match A::METHOD {
+            rusty_s3::Method::Head => awc::http::Method::HEAD,
+            rusty_s3::Method::Get => awc::http::Method::GET,
+            rusty_s3::Method::Post => awc::http::Method::POST,
+            rusty_s3::Method::Put => awc::http::Method::PUT,
+            rusty_s3::Method::Delete => awc::http::Method::DELETE,
+        };
+
+        let url = action.sign(Duration::from_secs(5));
+
+        let req = self.client.request(method, url);
+
+        action
+            .headers_mut()
+            .drain()
+            .fold(req, |req, tup| req.insert_header(tup))
+    }
+
+    fn get_object_request(
+        &self,
+        identifier: &ObjectId,
+        from_start: Option<u64>,
+        len: Option<u64>,
+    ) -> ClientRequest {
+        let action = self
+            .bucket
+            .get_object(Some(&self.credentials), identifier.as_str());
+
+        let req = self.build_request(action);
+
+        let start = from_start.unwrap_or(0);
+        let end = len.map(|len| start + len - 1);
+
+        let range = match (start, end) {
+            (Some(start), Some(end)) => Some(ByteRangeSpec::FromTo(start, end)),
+            (Some(start), None) => Some(ByteRangeSpec::From(start)),
+            _ => None,
+        };
+
+        if let Some(range) = range {
+            req.insert_header(Range::Bytes(vec![range])).send().await?;
+        } else {
+            req
+        }
+    }
+
+    fn head_object_request(&self, identifier: &ObjectId) -> ClientRequest {
+        let action = self
+            .bucket
+            .head_object(Some(&self.credentials), identifier.as_str());
+
+        self.build_request(action)
+    }
+
+    fn delete_object_request(&self, identifier: &ObjectId) -> ClientRequest {
+        let action = self
+            .bucket
+            .delete_object(Some(&self.credentials), identifier.as_str());
+
+        self.build_request(action)
     }
 
     async fn next_directory(&self) -> Result<Path, Error> {
@@ -243,8 +305,8 @@ impl std::fmt::Debug for ObjectStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ObjectStore")
             .field("path_gen", &"generator")
-            .field("bucket", &self.bucket.name)
-            .field("region", &self.bucket.region)
+            .field("bucket", &self.bucket.name())
+            .field("region", &self.bucket.region())
             .finish()
     }
 }

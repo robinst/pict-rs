@@ -559,10 +559,6 @@ struct ObjectStorage {
     #[clap(short, long)]
     secret_key: Option<String>,
 
-    /// The security token for accessing the bucket
-    #[clap(long)]
-    security_token: Option<String>,
-
     /// The session token for accessing the bucket
     #[clap(long)]
     session_token: Option<String>,
