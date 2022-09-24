@@ -15,17 +15,24 @@ pub(crate) trait Identifier: Send + Sync + Clone + Debug {
         Self: Sized;
 }
 
+pub(crate) trait StoreConfig: Send + Sync + Clone {
+    type Store: Store;
+
+    fn build(self) -> Self::Store;
+}
+
 #[async_trait::async_trait(?Send)]
 pub(crate) trait Store: Clone + Debug {
-    type Config: Send + Sync + Clone;
     type Identifier: Identifier + 'static;
-    type Stream: Stream<Item = std::io::Result<Bytes>> + 'static;
+    type Stream: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static;
 
-    fn init(config: Self::Config) -> Self;
-
-    async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
+    async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, Error>
     where
-        Reader: AsyncRead + Unpin;
+        Reader: AsyncRead + Unpin + 'static;
+
+    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, Error>
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static;
 
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error>;
 
@@ -42,7 +49,7 @@ pub(crate) trait Store: Clone + Debug {
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
-        Writer: AsyncWrite + Send + Unpin;
+        Writer: AsyncWrite + Unpin;
 
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error>;
 
@@ -57,11 +64,18 @@ where
     type Identifier = T::Identifier;
     type Stream = T::Stream;
 
-    async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
+    async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, Error>
     where
-        Reader: AsyncRead + Unpin,
+        Reader: AsyncRead + Unpin + 'static,
     {
         T::save_async_read(self, reader).await
+    }
+
+    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, Error>
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+    {
+        T::save_stream(self, stream).await
     }
 
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
@@ -83,7 +97,7 @@ where
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
-        Writer: AsyncWrite + Send + Unpin,
+        Writer: AsyncWrite + Unpin,
     {
         T::read_into(self, identifier, writer).await
     }
@@ -105,11 +119,18 @@ where
     type Identifier = T::Identifier;
     type Stream = T::Stream;
 
-    async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
+    async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, Error>
     where
-        Reader: AsyncRead + Unpin,
+        Reader: AsyncRead + Unpin + 'static,
     {
         T::save_async_read(self, reader).await
+    }
+
+    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, Error>
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+    {
+        T::save_stream(self, stream).await
     }
 
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
@@ -131,7 +152,7 @@ where
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
-        Writer: AsyncWrite + Send + Unpin,
+        Writer: AsyncWrite + Unpin,
     {
         T::read_into(self, identifier, writer).await
     }

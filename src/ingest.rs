@@ -55,7 +55,7 @@ where
 pub(crate) async fn ingest<R, S>(
     repo: &R,
     store: &S,
-    stream: impl Stream<Item = Result<Bytes, Error>>,
+    stream: impl Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     declared_alias: Option<Alias>,
     should_validate: bool,
     is_cached: bool,
@@ -77,9 +77,10 @@ where
     )
     .await?;
 
-    let mut hasher_reader = Hasher::new(validated_reader, Sha256::new());
+    let hasher_reader = Hasher::new(validated_reader, Sha256::new());
+    let hasher = hasher_reader.hasher();
 
-    let identifier = store.save_async_read(&mut hasher_reader).await?;
+    let identifier = store.save_async_read(hasher_reader).await?;
 
     drop(permit);
 
@@ -90,7 +91,7 @@ where
         identifier: Some(identifier.clone()),
     };
 
-    let hash = hasher_reader.finalize_reset().await?;
+    let hash = hasher.borrow_mut().finalize_reset().to_vec();
 
     session.hash = Some(hash.clone());
 

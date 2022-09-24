@@ -2,7 +2,7 @@ use crate::{
     error::Error,
     file::File,
     repo::{Repo, SettingsRepo},
-    store::Store,
+    store::{Store, StoreConfig},
 };
 use actix_web::web::Bytes;
 use futures_util::stream::Stream;
@@ -12,6 +12,7 @@ use std::{
 };
 use storage_path_generator::Generator;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_util::io::StreamReader;
 use tracing::{debug, error, instrument, Instrument};
 
 mod file_id;
@@ -47,29 +48,39 @@ pub(crate) struct FileStore {
     repo: Repo,
 }
 
+impl StoreConfig for FileStore {
+    type Store = FileStore;
+
+    fn build(self) -> Self::Store {
+        self
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 impl Store for FileStore {
-    type Config = Self;
     type Identifier = FileId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
-    fn init(config: Self::Config) -> Self {
-        config
-    }
-
     #[tracing::instrument(skip(reader))]
-    async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
+    async fn save_async_read<Reader>(&self, mut reader: Reader) -> Result<Self::Identifier, Error>
     where
-        Reader: AsyncRead + Unpin,
+        Reader: AsyncRead + Unpin + 'static,
     {
         let path = self.next_file().await?;
 
-        if let Err(e) = self.safe_save_reader(&path, reader).await {
+        if let Err(e) = self.safe_save_reader(&path, &mut reader).await {
             self.safe_remove_file(&path).await?;
             return Err(e.into());
         }
 
         Ok(self.file_id_from_path(path)?)
+    }
+
+    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, Error>
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+    {
+        self.save_async_read(StreamReader::new(stream)).await
     }
 
     #[tracing::instrument(skip(bytes))]
@@ -114,7 +125,7 @@ impl Store for FileStore {
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
-        Writer: AsyncWrite + Send + Unpin,
+        Writer: AsyncWrite + Unpin,
     {
         let path = self.path_from_file_id(identifier);
 
@@ -258,30 +269,6 @@ impl FileStore {
 
         file.write_from_async_read(input).await?;
 
-        Ok(())
-    }
-
-    // try moving a file
-    #[instrument(name = "Moving file", fields(from = tracing::field::debug(&from.as_ref()), to = tracing::field::debug(&to.as_ref())))]
-    pub(crate) async fn safe_move_file<P: AsRef<Path>, Q: AsRef<Path>>(
-        &self,
-        from: P,
-        to: Q,
-    ) -> Result<(), FileError> {
-        safe_create_parent(&to).await?;
-
-        debug!("Checking if {:?} already exists", to.as_ref());
-        if let Err(e) = tokio::fs::metadata(&to).await {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                return Err(e.into());
-            }
-        } else {
-            return Err(FileError::FileExists);
-        }
-
-        debug!("Moving {:?} to {:?}", from.as_ref(), to.as_ref());
-        tokio::fs::copy(&from, &to).await?;
-        self.safe_remove_file(from).await?;
         Ok(())
     }
 }

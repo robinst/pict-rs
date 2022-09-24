@@ -5,7 +5,6 @@ use crate::{
 };
 use actix_web::web::Bytes;
 use futures_util::{Stream, TryStreamExt};
-use tokio_util::io::StreamReader;
 use tracing::{Instrument, Span};
 
 pub(crate) struct Backgrounded<R, S>
@@ -38,7 +37,7 @@ where
 
     pub(crate) async fn proxy<P>(repo: R, store: S, stream: P) -> Result<Self, Error>
     where
-        P: Stream<Item = Result<Bytes, Error>>,
+        P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     {
         let mut this = Self {
             repo,
@@ -53,14 +52,13 @@ where
 
     async fn do_proxy<P>(&mut self, store: S, stream: P) -> Result<(), Error>
     where
-        P: Stream<Item = Result<Bytes, Error>>,
+        P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     {
         UploadRepo::create(&self.repo, self.upload_id.expect("Upload id exists")).await?;
 
         let stream = stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
-        let mut reader = StreamReader::new(Box::pin(stream));
 
-        let identifier = store.save_async_read(&mut reader).await?;
+        let identifier = store.save_stream(stream).await?;
 
         self.identifier = Some(identifier);
 
