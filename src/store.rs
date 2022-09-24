@@ -16,9 +16,12 @@ pub(crate) trait Identifier: Send + Sync + Clone + Debug {
 }
 
 #[async_trait::async_trait(?Send)]
-pub(crate) trait Store: Send + Sync + Clone + Debug {
+pub(crate) trait Store: Clone + Debug {
+    type Config: Send + Sync + Clone;
     type Identifier: Identifier + 'static;
     type Stream: Stream<Item = std::io::Result<Bytes>> + 'static;
+
+    fn init(config: Self::Config) -> Self;
 
     async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
     where

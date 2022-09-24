@@ -49,8 +49,13 @@ pub(crate) struct FileStore {
 
 #[async_trait::async_trait(?Send)]
 impl Store for FileStore {
+    type Config = Self;
     type Identifier = FileId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
+
+    fn init(config: Self::Config) -> Self {
+        config
+    }
 
     #[tracing::instrument(skip(reader))]
     async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>

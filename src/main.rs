@@ -10,6 +10,7 @@ use futures_util::{
     Stream, StreamExt, TryStreamExt,
 };
 use once_cell::sync::Lazy;
+use rusty_s3::UrlStyle;
 use std::{
     future::ready,
     path::PathBuf,
@@ -970,15 +971,15 @@ fn next_worker_id() -> String {
     format!("{}-{}", CONFIG.server.worker_id, next_id)
 }
 
-async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
+async fn launch<R: FullRepo + 'static, S: Store + 'static>(
     repo: R,
-    store: S,
+    store: S::Config,
 ) -> color_eyre::Result<()> {
     repo.requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
         .await?;
 
     HttpServer::new(move || {
-        let store = store.clone();
+        let store = S::init(store.clone());
         let repo = repo.clone();
 
         tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
@@ -1081,6 +1082,8 @@ where
     match to {
         config::Store::Filesystem(config::Filesystem { path }) => {
             let to = FileStore::build(path.clone(), repo.clone()).await?;
+            let to = FileStore::init(to);
+
             match repo {
                 Repo::Sled(repo) => migrate_store(repo, from, to).await?,
             }
@@ -1088,24 +1091,29 @@ where
         config::Store::ObjectStorage(config::ObjectStorage {
             endpoint,
             bucket_name,
-            url_style,
+            use_path_style,
             region,
             access_key,
             secret_key,
             session_token,
         }) => {
             let to = ObjectStore::build(
-                endpoint,
+                endpoint.clone(),
                 bucket_name,
-                url_style,
+                if *use_path_style {
+                    UrlStyle::Path
+                } else {
+                    UrlStyle::VirtualHost
+                },
                 region.as_ref(),
                 Some(access_key.clone()),
                 Some(secret_key.clone()),
                 session_token.clone(),
                 repo.clone(),
-                build_client(),
             )
             .await?;
+
+            let to = ObjectStore::init(to);
 
             match repo {
                 Repo::Sled(repo) => migrate_store(repo, from, to).await?,
@@ -1129,29 +1137,34 @@ async fn main() -> color_eyre::Result<()> {
             match from {
                 config::Store::Filesystem(config::Filesystem { path }) => {
                     let from = FileStore::build(path.clone(), repo.clone()).await?;
+                    let from = FileStore::init(from);
                     migrate_inner(&repo, from, &to).await?;
                 }
                 config::Store::ObjectStorage(config::ObjectStorage {
                     endpoint,
                     bucket_name,
-                    url_style,
+                    use_path_style,
                     region,
                     access_key,
                     secret_key,
                     session_token,
                 }) => {
                     let from = ObjectStore::build(
-                        endpoint,
+                        endpoint.clone(),
                         &bucket_name,
-                        url_style,
+                        if *use_path_style {
+                            UrlStyle::Path
+                        } else {
+                            UrlStyle::VirtualHost
+                        },
                         Serde::into_inner(region),
                         Some(access_key),
                         Some(secret_key),
                         session_token,
                         repo.clone(),
-                        build_client(),
                     )
                     .await?;
+                    let from = ObjectStore::init(from);
 
                     migrate_inner(&repo, from, &to).await?;
                 }
@@ -1167,33 +1180,36 @@ async fn main() -> color_eyre::Result<()> {
 
             let store = FileStore::build(path, repo.clone()).await?;
             match repo {
-                Repo::Sled(sled_repo) => launch(sled_repo, store).await,
+                Repo::Sled(sled_repo) => launch::<_, FileStore>(sled_repo, store).await,
             }
         }
         config::Store::ObjectStorage(config::ObjectStorage {
             endpoint,
             bucket_name,
-            url_style,
+            use_path_style,
             region,
             access_key,
             secret_key,
             session_token,
         }) => {
             let store = ObjectStore::build(
-                endpoint,
+                endpoint.clone(),
                 &bucket_name,
-                url_style,
+                if *use_path_style {
+                    UrlStyle::Path
+                } else {
+                    UrlStyle::VirtualHost
+                },
                 Serde::into_inner(region),
                 Some(access_key),
                 Some(secret_key),
                 session_token,
                 repo.clone(),
-                build_client(),
             )
             .await?;
 
             match repo {
-                Repo::Sled(sled_repo) => launch(sled_repo, store).await,
+                Repo::Sled(sled_repo) => launch::<_, ObjectStore>(sled_repo, store).await,
             }
         }
     }

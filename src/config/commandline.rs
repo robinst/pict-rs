@@ -543,13 +543,30 @@ struct Filesystem {
 #[derive(Clone, Debug, Parser, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 struct ObjectStorage {
+    /// The base endpoint for the object storage
+    ///
+    /// Examples:
+    /// - `http://localhost:9000`
+    /// - `https://s3.dualstack.eu-west-1.amazonaws.com`
+    #[clap(short, long)]
+    endpoint: Url,
+
+    /// Determines whether to use path style or virtualhost style for accessing objects
+    ///
+    /// When this is true, objects will be fetched from {endpoint}/{bucket_name}/{object}
+    /// When false, objects will be fetched from {bucket_name}.{endpoint}/{object}
+    #[clap(short, long)]
+    use_path_style: bool,
+
     /// The bucket in which to store media
     #[clap(short, long)]
     bucket_name: Option<String>,
 
     /// The region the bucket is located in
+    ///
+    /// For minio deployments, this can just be 'minio'
     #[clap(short, long)]
-    region: Option<Serde<s3::Region>>,
+    region: Option<String>,
 
     /// The Access Key for the user accessing the bucket
     #[clap(short, long)]

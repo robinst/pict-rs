@@ -12,15 +12,11 @@ use actix_web::{
 };
 use awc::{Client, ClientRequest};
 use futures_util::{Stream, TryStreamExt};
-use rusty_s3::{
-    actions::{PutObject, S3Action},
-    Bucket, Credentials, UrlStyle,
-};
+use rusty_s3::{actions::S3Action, Bucket, Credentials, UrlStyle};
 use std::{pin::Pin, string::FromUtf8Error, time::Duration};
 use storage_path_generator::{Generator, Path};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
-use tracing::Instrument;
 use url::Url;
 
 mod object_id;
@@ -55,24 +51,41 @@ pub(crate) struct ObjectStore {
     client: Client,
 }
 
+#[derive(Clone)]
+pub(crate) struct ObjectStoreConfig {
+    path_gen: Generator,
+    repo: Repo,
+    bucket: Bucket,
+    credentials: Credentials,
+}
+
 #[async_trait::async_trait(?Send)]
 impl Store for ObjectStore {
+    type Config = ObjectStoreConfig;
     type Identifier = ObjectId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
+
+    fn init(config: Self::Config) -> Self {
+        ObjectStore {
+            path_gen: config.path_gen,
+            repo: config.repo,
+            bucket: config.bucket,
+            credentials: config.credentials,
+            client: crate::build_client(),
+        }
+    }
 
     #[tracing::instrument(skip(reader))]
     async fn save_async_read<Reader>(&self, reader: &mut Reader) -> Result<Self::Identifier, Error>
     where
         Reader: AsyncRead + Unpin,
     {
-        let response = self
-            .put_object_request()
-            .await?
-            .send_stream(ReaderStream::new(reader))
-            .await?;
+        let (req, object_id) = self.put_object_request().await?;
+
+        let response = req.send_stream(ReaderStream::new(reader)).await?;
 
         if response.status().is_success() {
-            return Ok(ObjectId::from_string(path));
+            return Ok(object_id);
         }
 
         Err(ObjectError::Status(response.status()).into())
@@ -80,12 +93,12 @@ impl Store for ObjectStore {
 
     #[tracing::instrument(skip(bytes))]
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
-        let req = self.put_object_request().await?;
+        let (req, object_id) = self.put_object_request().await?;
 
         let response = req.send_body(bytes).await?;
 
         if response.status().is_success() {
-            return Ok(ObjectId::from_string(path));
+            return Ok(object_id);
         }
 
         Err(ObjectError::Status(response.status()).into())
@@ -103,7 +116,7 @@ impl Store for ObjectStore {
             .send()
             .await?;
 
-        if response.status.is_success() {
+        if response.status().is_success() {
             return Ok(Box::pin(response));
         }
 
@@ -120,11 +133,11 @@ impl Store for ObjectStore {
         Writer: AsyncWrite + Send + Unpin,
     {
         let response = self
-            .get_object_request(identifier, from_start, len)
+            .get_object_request(identifier, None, None)
             .send()
             .await?;
 
-        if !response.status.is_success() {
+        if !response.status().is_success() {
             return Err(ObjectError::Status(response.status()).into());
         }
 
@@ -141,7 +154,7 @@ impl Store for ObjectStore {
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
         let response = self.head_object_request(identifier).send().await?;
 
-        if !response.status.is_success() {
+        if !response.status().is_success() {
             return Err(ObjectError::Status(response.status()).into());
         }
 
@@ -161,7 +174,7 @@ impl Store for ObjectStore {
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
         let response = self.delete_object_request(identifier).send().await?;
 
-        if !response.status.is_success() {
+        if !response.status().is_success() {
             return Err(ObjectError::Status(response.status()).into());
         }
 
@@ -180,29 +193,27 @@ impl ObjectStore {
         secret_key: Option<String>,
         session_token: Option<String>,
         repo: Repo,
-        client: reqwest::Client,
-    ) -> Result<ObjectStore, Error> {
+    ) -> Result<ObjectStoreConfig, Error> {
         let path_gen = init_generator(&repo).await?;
 
-        Ok(ObjectStore {
+        Ok(ObjectStoreConfig {
             path_gen,
             repo,
             bucket: Bucket::new(endpoint, url_style, bucket_name, region)
                 .map_err(ObjectError::from)?,
             credentials: Credentials::new_with_token(access_key, secret_key, session_token),
-            client,
         })
     }
 
-    async fn put_object_request(&self) -> Result<ClientRequest, Error> {
+    async fn put_object_request(&self) -> Result<(ClientRequest, ObjectId), Error> {
         let path = self.next_file().await?;
 
         let action = self.bucket.put_object(Some(&self.credentials), &path);
 
-        Ok(self.build_request(action))
+        Ok((self.build_request(action), ObjectId::from_string(path)))
     }
 
-    fn build_request<A: S3Action>(&self, action: A) -> ClientRequest {
+    fn build_request<'a, A: S3Action<'a>>(&'a self, action: A) -> ClientRequest {
         let method = match A::METHOD {
             rusty_s3::Method::Head => awc::http::Method::HEAD,
             rusty_s3::Method::Get => awc::http::Method::GET,
@@ -243,7 +254,7 @@ impl ObjectStore {
         };
 
         if let Some(range) = range {
-            req.insert_header(Range::Bytes(vec![range])).send().await?;
+            req.insert_header(Range::Bytes(vec![range]))
         } else {
             req
         }

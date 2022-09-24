@@ -1,8 +1,8 @@
 use crate::magick::ValidInputType;
-use crate::serde_str::Serde;
 use clap::ArgEnum;
 use std::{fmt::Display, path::PathBuf, str::FromStr};
 use tracing::Level;
+use url::Url;
 
 #[derive(
     Clone,
@@ -63,13 +63,28 @@ pub(crate) struct Filesystem {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, clap::Parser)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct ObjectStorage {
+    /// The base endpoint for the object storage
+    ///
+    /// Examples:
+    /// - `http://localhost:9000`
+    /// - `https://s3.dualstack.eu-west-1.amazonaws.com`
+    #[clap(short, long)]
+    pub(crate) endpoint: Url,
+
+    /// Determines whether to use path style or virtualhost style for accessing objects
+    ///
+    /// When this is true, objects will be fetched from {endpoint}/{bucket_name}/{object}
+    /// When false, objects will be fetched from {bucket_name}.{endpoint}/{object}
+    #[clap(short, long)]
+    pub(crate) use_path_style: bool,
+
     /// The bucket in which to store media
     #[clap(short, long)]
     pub(crate) bucket_name: String,
 
     /// The region the bucket is located in
     #[clap(short, long)]
-    pub(crate) region: Serde<s3::Region>,
+    pub(crate) region: String,
 
     /// The Access Key for the user accessing the bucket
     #[clap(short, long)]
@@ -219,7 +234,8 @@ impl Display for LogFormat {
 
 #[cfg(test)]
 mod tests {
-    use super::{Serde, Targets};
+    use super::Targets;
+    use crate::serde_str::Serde;
 
     #[test]
     fn builds_info_targets() {
