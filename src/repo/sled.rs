@@ -281,11 +281,13 @@ impl CachedRepo for SledRepo {
 
 #[async_trait::async_trait(?Send)]
 impl UploadRepo for SledRepo {
+    #[tracing::instrument(skip(self))]
     async fn create(&self, upload_id: UploadId) -> Result<(), Error> {
         b!(self.uploads, uploads.insert(upload_id.as_bytes(), b"1"));
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, Error> {
         let mut subscriber = self.uploads.watch_prefix(upload_id.as_bytes());
 
@@ -318,11 +320,13 @@ impl UploadRepo for SledRepo {
         Err(UploadError::Canceled.into())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn claim(&self, upload_id: UploadId) -> Result<(), Error> {
         b!(self.uploads, uploads.remove(upload_id.as_bytes()));
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, result))]
     async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), Error> {
         let result: InnerUploadResult = result.into();
         let result = serde_json::to_vec(&result)?;
