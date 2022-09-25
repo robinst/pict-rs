@@ -9,9 +9,9 @@ use actix_web::{
         header::{ByteRangeSpec, Range, CONTENT_LENGTH},
         StatusCode,
     },
-    web::Bytes,
+    web::{Bytes, BytesMut},
 };
-use awc::{error::SendRequestError, Client, ClientRequest};
+use awc::{error::SendRequestError, Client, ClientRequest, SendClientRequest};
 use futures_util::{Stream, StreamExt, TryStreamExt};
 use rusty_s3::{actions::S3Action, Bucket, BucketError, Credentials, UrlStyle};
 use std::{pin::Pin, string::FromUtf8Error, time::Duration};
@@ -22,6 +22,8 @@ use url::Url;
 
 mod object_id;
 pub(crate) use object_id::ObjectId;
+
+const CHUNK_SIZE: usize = 8_388_608; // 8 Mebibytes, min is 5 (5_242_880);
 
 // - Settings Tree
 //   - last-path -> last generated path
@@ -42,11 +44,17 @@ pub(crate) enum ObjectError {
     #[error("Failed to parse string")]
     Utf8(#[from] FromUtf8Error),
 
+    #[error("Failed to parse xml")]
+    Xml(#[from] quick_xml::de::DeError),
+
     #[error("Invalid length")]
     Length,
 
-    #[error("Invalid status")]
-    Status(StatusCode),
+    #[error("Invalid etag response")]
+    Etag,
+
+    #[error("Invalid status: {0}\n{1}")]
+    Status(StatusCode, String),
 }
 
 impl From<SendRequestError> for ObjectError {
@@ -70,6 +78,16 @@ pub(crate) struct ObjectStoreConfig {
     repo: Repo,
     bucket: Bucket,
     credentials: Credentials,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct InitiateMultipartUploadResponse {
+    #[serde(rename = "Bucket")]
+    _bucket: String,
+    #[serde(rename = "Key")]
+    _key: String,
+    #[serde(rename = "UploadId")]
+    upload_id: String,
 }
 
 impl StoreConfig for ObjectStoreConfig {
@@ -107,32 +125,105 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip(stream))]
-    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, Error>
+    async fn save_stream<S>(&self, mut stream: S) -> Result<Self::Identifier, Error>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
-        let (req, object_id) = self.put_object_request().await?;
+        let (req, object_id) = self.create_multipart_request().await?;
+        let mut response = req.send().await.map_err(ObjectError::from)?;
 
-        let response = req.send_stream(stream).await.map_err(ObjectError::from)?;
+        if !response.status().is_success() {
+            let body = String::from_utf8_lossy(&response.body().await?).to_string();
 
-        if response.status().is_success() {
-            return Ok(object_id);
+            return Err(ObjectError::Status(response.status(), body).into());
         }
 
-        Err(ObjectError::Status(response.status()).into())
+        let body = response.body().await?;
+        let body: InitiateMultipartUploadResponse =
+            quick_xml::de::from_reader(&*body).map_err(ObjectError::from)?;
+        let upload_id = &body.upload_id;
+
+        let res = async {
+            let mut etags = Vec::new();
+            let mut complete = false;
+            let mut part_number = 0;
+
+            while !complete {
+                part_number += 1;
+                let mut bytes = BytesMut::with_capacity(CHUNK_SIZE);
+
+                while bytes.len() < CHUNK_SIZE {
+                    if let Some(res) = stream.next().await {
+                        bytes.extend_from_slice(&res?);
+                    } else {
+                        complete = true;
+                        break;
+                    }
+                }
+
+                let mut response = self
+                    .create_upload_part_request(&bytes, &object_id, part_number, upload_id)
+                    .send_body(bytes)
+                    .await?;
+
+                if !response.status().is_success() {
+                    let body = String::from_utf8_lossy(&response.body().await?).to_string();
+
+                    return Err(ObjectError::Status(response.status(), body).into());
+                }
+
+                let etag = response
+                    .headers()
+                    .get("etag")
+                    .ok_or(ObjectError::Etag)?
+                    .to_str()
+                    .map_err(|_| ObjectError::Etag)?
+                    .to_string();
+
+                etags.push(etag);
+            }
+
+            let mut response = self
+                .send_complete_multipart_request(
+                    &object_id,
+                    upload_id,
+                    etags.iter().map(|s| s.as_ref()),
+                )
+                .await?;
+
+            if !response.status().is_success() {
+                let body = String::from_utf8_lossy(&response.body().await?).to_string();
+
+                return Err(ObjectError::Status(response.status(), body).into());
+            }
+
+            Ok(()) as Result<(), Error>
+        }
+        .await;
+
+        if let Err(e) = res {
+            self.create_abort_multipart_request(&object_id, upload_id)
+                .send()
+                .await?;
+            return Err(e);
+        }
+
+        Ok(object_id)
     }
 
     #[tracing::instrument(skip(bytes))]
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
         let (req, object_id) = self.put_object_request().await?;
 
-        let response = req.send_body(bytes).await.map_err(ObjectError::from)?;
+        let mut response = req.send_body(bytes).await.map_err(ObjectError::from)?;
 
         if response.status().is_success() {
             return Ok(object_id);
         }
 
-        Err(ObjectError::Status(response.status()).into())
+        let body = String::from_utf8_lossy(&response.body().await?).to_string();
+
+        Err(ObjectError::Status(response.status(), body).into())
     }
 
     #[tracing::instrument]
@@ -142,7 +233,7 @@ impl Store for ObjectStore {
         from_start: Option<u64>,
         len: Option<u64>,
     ) -> Result<Self::Stream, Error> {
-        let response = self
+        let mut response = self
             .get_object_request(identifier, from_start, len)
             .send()
             .await
@@ -152,7 +243,9 @@ impl Store for ObjectStore {
             return Ok(Box::pin(response.map_err(payload_to_io_error)));
         }
 
-        Err(ObjectError::Status(response.status()).into())
+        let body = String::from_utf8_lossy(&response.body().await?).to_string();
+
+        Err(ObjectError::Status(response.status(), body).into())
     }
 
     #[tracing::instrument(skip(writer))]
@@ -171,9 +264,12 @@ impl Store for ObjectStore {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, ObjectError::from(e)))?;
 
         if !response.status().is_success() {
+            let body = response.body().await.map_err(payload_to_io_error)?;
+            let body = String::from_utf8_lossy(&body).to_string();
+
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                ObjectError::Status(response.status()),
+                ObjectError::Status(response.status(), body),
             ));
         }
 
@@ -188,14 +284,16 @@ impl Store for ObjectStore {
 
     #[tracing::instrument]
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
-        let response = self
+        let mut response = self
             .head_object_request(identifier)
             .send()
             .await
             .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
-            return Err(ObjectError::Status(response.status()).into());
+            let body = String::from_utf8_lossy(&response.body().await?).to_string();
+
+            return Err(ObjectError::Status(response.status(), body).into());
         }
 
         let length = response
@@ -212,10 +310,12 @@ impl Store for ObjectStore {
 
     #[tracing::instrument]
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
-        let response = self.delete_object_request(identifier).send().await?;
+        let mut response = self.delete_object_request(identifier).send().await?;
 
         if !response.status().is_success() {
-            return Err(ObjectError::Status(response.status()).into());
+            let body = String::from_utf8_lossy(&response.body().await?).to_string();
+
+            return Err(ObjectError::Status(response.status(), body).into());
         }
 
         Ok(())
@@ -252,12 +352,100 @@ impl ObjectStore {
     async fn put_object_request(&self) -> Result<(ClientRequest, ObjectId), Error> {
         let path = self.next_file().await?;
 
-        let action = self.bucket.put_object(Some(&self.credentials), &path);
+        let mut action = self.bucket.put_object(Some(&self.credentials), &path);
+
+        action
+            .headers_mut()
+            .insert("content-type", "application/octet-stream");
 
         Ok((self.build_request(action), ObjectId::from_string(path)))
     }
 
-    fn build_request<'a, A: S3Action<'a>>(&'a self, mut action: A) -> ClientRequest {
+    async fn create_multipart_request(&self) -> Result<(ClientRequest, ObjectId), Error> {
+        let path = self.next_file().await?;
+
+        let mut action = self
+            .bucket
+            .create_multipart_upload(Some(&self.credentials), &path);
+
+        action
+            .headers_mut()
+            .insert("content-type", "application/octet-stream");
+
+        Ok((self.build_request(action), ObjectId::from_string(path)))
+    }
+
+    fn create_upload_part_request(
+        &self,
+        bytes: &[u8],
+        object_id: &ObjectId,
+        part_number: u16,
+        upload_id: &str,
+    ) -> ClientRequest {
+        use md5::Digest;
+
+        let mut action = self.bucket.upload_part(
+            Some(&self.credentials),
+            object_id.as_str(),
+            part_number,
+            upload_id,
+        );
+
+        let mut hasher = md5::Md5::new();
+        hasher.update(bytes);
+        let hash = hasher.finalize();
+        let hash_string = base64::encode(&hash);
+
+        action
+            .headers_mut()
+            .insert("content-type", "application/octet-stream");
+        action.headers_mut().insert("content-md5", hash_string);
+
+        self.build_request(action)
+    }
+
+    fn send_complete_multipart_request<'a, I: Iterator<Item = &'a str>>(
+        &'a self,
+        object_id: &'a ObjectId,
+        upload_id: &'a str,
+        etags: I,
+    ) -> SendClientRequest {
+        let mut action = self.bucket.complete_multipart_upload(
+            Some(&self.credentials),
+            object_id.as_str(),
+            upload_id,
+            etags,
+        );
+
+        action
+            .headers_mut()
+            .insert("content-type", "application/octet-stream");
+
+        let (req, action) = self.build_request_inner(action);
+
+        req.send_body(action.body())
+    }
+
+    fn create_abort_multipart_request(
+        &self,
+        object_id: &ObjectId,
+        upload_id: &str,
+    ) -> ClientRequest {
+        let action = self.bucket.abort_multipart_upload(
+            Some(&self.credentials),
+            object_id.as_str(),
+            upload_id,
+        );
+
+        self.build_request(action)
+    }
+
+    fn build_request<'a, A: S3Action<'a>>(&'a self, action: A) -> ClientRequest {
+        let (req, _) = self.build_request_inner(action);
+        req
+    }
+
+    fn build_request_inner<'a, A: S3Action<'a>>(&'a self, mut action: A) -> (ClientRequest, A) {
         let method = match A::METHOD {
             rusty_s3::Method::Head => awc::http::Method::HEAD,
             rusty_s3::Method::Get => awc::http::Method::GET,
@@ -270,10 +458,12 @@ impl ObjectStore {
 
         let req = self.client.request(method, url.as_str());
 
-        action
+        let req = action
             .headers_mut()
             .iter()
-            .fold(req, |req, tup| req.insert_header(tup))
+            .fold(req, |req, tup| req.insert_header(tup));
+
+        (req, action)
     }
 
     fn get_object_request(
