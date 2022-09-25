@@ -74,6 +74,7 @@ where
         bytes,
         CONFIG.media.format,
         CONFIG.media.enable_silent_video,
+        CONFIG.media.enable_full_video,
         should_validate,
     )
     .await?;

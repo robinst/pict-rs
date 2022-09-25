@@ -16,22 +16,29 @@ pub(crate) fn details_hint(alias: &Alias) -> Option<ValidInputType> {
     let ext = alias.extension()?;
     if ext.ends_with(".mp4") {
         Some(ValidInputType::Mp4)
+    } else if ext.ends_with(".webm") {
+        Some(ValidInputType::Webm)
     } else {
         None
     }
 }
 
-pub(crate) fn image_webp() -> mime::Mime {
+fn image_webp() -> mime::Mime {
     "image/webp".parse().unwrap()
 }
 
-pub(crate) fn video_mp4() -> mime::Mime {
+fn video_mp4() -> mime::Mime {
     "video/mp4".parse().unwrap()
+}
+
+fn video_webm() -> mime::Mime {
+    "video/webm".parse().unwrap()
 }
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum ValidInputType {
     Mp4,
+    Webm,
     Gif,
     Png,
     Jpeg,
@@ -42,6 +49,7 @@ impl ValidInputType {
     fn as_str(self) -> &'static str {
         match self {
             Self::Mp4 => "MP4",
+            Self::Webm => "WEBM",
             Self::Gif => "GIF",
             Self::Png => "PNG",
             Self::Jpeg => "JPEG",
@@ -52,6 +60,7 @@ impl ValidInputType {
     pub(crate) fn as_ext(self) -> &'static str {
         match self {
             Self::Mp4 => ".mp4",
+            Self::Webm => ".webm",
             Self::Gif => ".gif",
             Self::Png => ".png",
             Self::Jpeg => ".jpeg",
@@ -59,8 +68,13 @@ impl ValidInputType {
         }
     }
 
-    fn is_mp4(self) -> bool {
-        matches!(self, Self::Mp4)
+    fn video_hint(self) -> Option<&'static str> {
+        match self {
+            Self::Mp4 => Some(".mp4"),
+            Self::Webm => Some(".webm"),
+            Self::Gif => Some(".gif"),
+            _ => None,
+        }
     }
 
     pub(crate) fn from_format(format: ImageFormat) -> Self {
@@ -119,8 +133,8 @@ pub(crate) async fn details_bytes(
     input: Bytes,
     hint: Option<ValidInputType>,
 ) -> Result<Details, Error> {
-    if hint.as_ref().map(|h| h.is_mp4()).unwrap_or(false) {
-        let input_file = crate::tmp_file::tmp_file(Some(".mp4"));
+    if let Some(hint) = hint.and_then(|hint| hint.video_hint()) {
+        let input_file = crate::tmp_file::tmp_file(Some(hint));
         let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
         crate::store::file_store::safe_create_parent(&input_file).await?;
 
@@ -157,8 +171,8 @@ pub(crate) async fn details_store<S: Store + 'static>(
     identifier: S::Identifier,
     hint: Option<ValidInputType>,
 ) -> Result<Details, Error> {
-    if hint.as_ref().map(|h| h.is_mp4()).unwrap_or(false) {
-        let input_file = crate::tmp_file::tmp_file(Some(".mp4"));
+    if let Some(hint) = hint.and_then(|hint| hint.video_hint()) {
+        let input_file = crate::tmp_file::tmp_file(Some(hint));
         let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
         crate::store::file_store::safe_create_parent(&input_file).await?;
 
@@ -249,6 +263,7 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
 
     let mime_type = match format {
         "MP4" => video_mp4(),
+        "WEBM" => video_webm(),
         "GIF" => mime::IMAGE_GIF,
         "PNG" => mime::IMAGE_PNG,
         "JPEG" => mime::IMAGE_JPEG,
@@ -323,6 +338,7 @@ impl Details {
 
         let input_type = match (self.mime_type.type_(), self.mime_type.subtype()) {
             (mime::VIDEO, mime::MP4 | mime::MPEG) => ValidInputType::Mp4,
+            (mime::VIDEO, subtype) if subtype.as_str() == "webm" => ValidInputType::Webm,
             (mime::IMAGE, mime::GIF) => ValidInputType::Gif,
             (mime::IMAGE, mime::PNG) => ValidInputType::Png,
             (mime::IMAGE, mime::JPEG) => ValidInputType::Jpeg,

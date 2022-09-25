@@ -142,12 +142,22 @@ max_area = 40000000
 # default: 40
 max_file_size = 40
 
-## Optional: enable GIF and MP4 uploads (without sound)
+## Optional: max frame count
+# environment variable: PICTRS__MEDIA__MAX_FRAME_COUNT
+# default: # 900
+max_frame_count = 900
+
+## Optional: enable GIF, MP4, and WEBM uploads (without sound)
 # environment variable: PICTRS__MEDIA__ENABLE_SILENT_VIDEO
 # default: true
 #
 # Set this to false to serve static images only
 enable_silent_video = true
+
+## Optional: enable MP4, and WEBM uploads (with sound) and GIF (without sound)
+# environment variable: PICTRS__MEDIA__ENABLE_FULL_VIDEO
+# default: false
+enable_full_video = false
 
 ## Optional: set allowed filters for image processing
 # environment variable: PICTRS__MEDIA__FILTERS

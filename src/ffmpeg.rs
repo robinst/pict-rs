@@ -54,6 +54,7 @@ impl ThumbnailFormat {
 pub(crate) async fn to_mp4_bytes(
     input: Bytes,
     input_format: InputFormat,
+    permit_audio: bool,
 ) -> Result<impl AsyncRead + Unpin, Error> {
     let input_file = crate::tmp_file::tmp_file(Some(input_format.to_ext()));
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
@@ -67,9 +68,24 @@ pub(crate) async fn to_mp4_bytes(
     tmp_one.write_from_bytes(input).await?;
     tmp_one.close().await?;
 
-    let process = Process::run(
-        "ffmpeg",
-        &[
+    let process = if permit_audio {
+        Process::run("ffmpeg", &[
+            "-i",
+            input_file_str,
+            "-pix_fmt",
+            "yuv420p",
+            "-vf",
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-c:a",
+            "aac",
+            "-c:v",
+            "h264",
+            "-f",
+            "mp4",
+            output_file_str,
+        ])?
+    } else {
+        Process::run("ffmpeg", &[
             "-i",
             input_file_str,
             "-pix_fmt",
@@ -77,13 +93,13 @@ pub(crate) async fn to_mp4_bytes(
             "-vf",
             "scale=trunc(iw/2)*2:trunc(ih/2)*2",
             "-an",
-            "-codec",
+            "-c:v",
             "h264",
             "-f",
             "mp4",
             output_file_str,
-        ],
-    )?;
+        ])?
+    };
 
     process.wait().await?;
     tokio::fs::remove_file(input_file).await?;

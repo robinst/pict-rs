@@ -152,7 +152,7 @@ impl Default for MediaDefaults {
             max_height: 10_000,
             max_area: 40_000_000,
             max_file_size: 40,
-            max_frame_count: 3_600,
+            max_frame_count: 900,
             enable_silent_video: true,
             enable_full_video: false,
             filters: vec![
