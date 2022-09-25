@@ -89,11 +89,11 @@ mod test {
         let hash = test_on_arbiter!(async move {
             let file1 = tokio::fs::File::open("./client-examples/earth.gif").await?;
 
-            let mut hasher = Hasher::new(file1, Sha256::new());
+            let mut reader = Hasher::new(file1, Sha256::new());
 
-            tokio::io::copy(&mut hasher, &mut tokio::io::sink()).await?;
+            tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
 
-            hasher.finalize_reset().await
+            Ok(reader.hasher().borrow_mut().finalize_reset().to_vec()) as std::io::Result<_>
         })
         .unwrap();
 
