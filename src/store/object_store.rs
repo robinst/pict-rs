@@ -188,6 +188,7 @@ impl Store for ObjectStore {
             quick_xml::de::from_reader(&*body).map_err(ObjectError::from)?;
         let upload_id = &body.upload_id;
 
+        // hack-ish: use async block as Result boundary
         let res = async {
             let mut complete = false;
             let mut part_number = 0;
@@ -230,6 +231,7 @@ impl Store for ObjectStore {
                             .map_err(|_| ObjectError::Etag)?
                             .to_string();
 
+                        // early-drop response to close its tracing spans
                         drop(response);
 
                         Ok(etag) as Result<String, Error>
@@ -239,6 +241,9 @@ impl Store for ObjectStore {
 
                 futures.push(handle);
             }
+
+            // early-drop stream to allow the next Part to be polled concurrently
+            drop(stream);
 
             let mut etags = Vec::new();
 
