@@ -12,6 +12,7 @@ enum MaybeHumanDate {
 pub(crate) struct Details {
     width: usize,
     height: usize,
+    frames: Option<usize>,
     content_type: Serde<mime::Mime>,
     created_at: MaybeHumanDate,
 }
@@ -33,6 +34,7 @@ impl Details {
             details.width,
             details.height,
             details.mime_type,
+            details.frames,
         ))
     }
 
@@ -48,13 +50,15 @@ impl Details {
             details.width,
             details.height,
             details.mime_type,
+            details.frames,
         ))
     }
 
-    pub(crate) fn now(width: usize, height: usize, content_type: mime::Mime) -> Self {
+    pub(crate) fn now(width: usize, height: usize, content_type: mime::Mime, frames: Option<usize>) -> Self {
         Details {
             width,
             height,
+            frames,
             content_type: Serde::new(content_type),
             created_at: MaybeHumanDate::HumanDate(time::OffsetDateTime::now_utc()),
         }

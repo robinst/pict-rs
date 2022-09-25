@@ -51,7 +51,9 @@ impl Args {
                 media_max_height,
                 media_max_area,
                 media_max_file_size,
+                media_max_frame_count,
                 media_enable_silent_video,
+                media_enable_full_video,
                 media_filters,
                 media_format,
                 media_cache_duration,
@@ -69,7 +71,9 @@ impl Args {
                     max_height: media_max_height,
                     max_area: media_max_area,
                     max_file_size: media_max_file_size,
+                    max_frame_count: media_max_frame_count,
                     enable_silent_video: media_enable_silent_video,
+                    enable_full_video: media_enable_full_video,
                     filters: media_filters,
                     format: media_format,
                     cache_duration: media_cache_duration,
@@ -312,7 +316,11 @@ struct Media {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_file_size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    max_frame_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     enable_silent_video: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_full_video: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     filters: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -412,9 +420,15 @@ struct Run {
     /// The maximum size, in megabytes, for uploaded media
     #[clap(long)]
     media_max_file_size: Option<usize>,
-    /// Whether to enable GIF and silent MP4 uploads. Full videos are unsupported
+    /// The maximum number of frames allowed for uploaded GIF and MP4s.
+    #[clap(long)]
+    media_max_frame_count: Option<usize>,
+    /// Whether to enable GIF and silent MP4 uploads
     #[clap(long)]
     media_enable_silent_video: Option<bool>,
+    /// Whether to enable full MP4 uploads
+    #[clap(long)]
+    media_enable_full_video: Option<bool>,
     /// Which media filters should be enabled on the `process` endpoint
     #[clap(long)]
     media_filters: Option<Vec<String>>,

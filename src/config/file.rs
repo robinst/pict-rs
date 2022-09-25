@@ -98,7 +98,11 @@ pub(crate) struct Media {
 
     pub(crate) max_file_size: usize,
 
+    pub(crate) max_frame_count: usize,
+
     pub(crate) enable_silent_video: bool,
+
+    pub(crate) enable_full_video: bool,
 
     pub(crate) filters: BTreeSet<String>,
 

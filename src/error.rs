@@ -99,6 +99,9 @@ pub(crate) enum UploadError {
     #[error("Invalid media dimensions")]
     Dimensions,
 
+    #[error("Too many frames")]
+    Frames,
+
     #[error("Unable to download image, bad response {0}")]
     Download(actix_web::http::StatusCode),
 

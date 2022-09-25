@@ -86,6 +86,7 @@ pub(crate) struct Details {
     pub(crate) mime_type: mime::Mime,
     pub(crate) width: usize,
     pub(crate) height: usize,
+    pub(crate) frames: Option<usize>,
 }
 
 #[tracing::instrument(name = "Clear Metadata", skip(input))]
@@ -210,6 +211,8 @@ pub(crate) async fn details_file(path_str: &str) -> Result<Details, Error> {
 }
 
 fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
+    let frames = s.lines().count();
+
     let mut lines = s.lines();
     let first = lines.next().ok_or(UploadError::UnsupportedFormat)?;
 
@@ -257,6 +260,11 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
         mime_type,
         width,
         height,
+        frames: if frames > 1 {
+            Some(frames)
+        } else {
+            None
+        },
     })
 }
 
@@ -305,6 +313,12 @@ impl Details {
             || self.width * self.height > crate::CONFIG.media.max_area
         {
             return Err(UploadError::Dimensions.into());
+        }
+
+        if let Some(frames) = self.frames {
+            if frames > crate::CONFIG.media.max_frame_count {
+                return Err(UploadError::Frames.into());
+            }
         }
 
         let input_type = match (self.mime_type.type_(), self.mime_type.subtype()) {
