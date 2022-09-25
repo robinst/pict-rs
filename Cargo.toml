@@ -19,7 +19,7 @@ io-uring = [
 ]
 
 [dependencies]
-actix-form-data = { version = "0.7.0-beta.0", git = "https://git.asonix.dog/asonix/actix-form-data", branch = "v0.7.x" }
+actix-form-data = "0.7.0-beta.0"
 actix-rt = { version = "2.7.0", default-features = false }
 actix-server = "2.0.0"
 actix-web = { version = "4.0.0", default-features = false }
@@ -33,23 +33,18 @@ config = "0.13.0"
 console-subscriber = "0.1"
 dashmap = "5.1.0"
 futures-util = "0.3.17"
+md-5 = "0.10.5"
 mime = "0.3.1"
 num_cpus = "1.13"
 once_cell = "1.4.0"
 opentelemetry = { version = "0.18", features = ["rt-tokio"] }
 opentelemetry-otlp = "0.11"
 pin-project-lite = "0.2.7"
-reqwest = { version = "0.11.5", default-features = false, features = [
-  "rustls-tls",
-  "stream",
-] }
-rust-s3 = { version = "0.31.0", default-features = false, features = [
-  "fail-on-err",
-  "with-reqwest",
-], git = "https://github.com/asonix/rust-s3", branch = "asonix/generic-client" }
+rusty-s3 = "0.3.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = "0.11.2"
 serde_json = "1.0"
+quick-xml = { version = "0.24.1", features = ["serialize"] }
 sha2 = "0.10.0"
 sled = { version = "0.34.7" }
 storage-path-generator = "0.1.0"
@@ -57,7 +52,10 @@ thiserror = "1.0"
 time = { version = "0.3.0", features = ["serde", "serde-well-known"] }
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-uring = { version = "0.3", optional = true, features = ["bytes"] }
-tokio-util = { version = "0.7", default-features = false, features = ["codec"] }
+tokio-util = { version = "0.7", default-features = false, features = [
+  "codec",
+  "io",
+] }
 toml = "0.5.8"
 tracing = "0.1.15"
 tracing-error = "0.2.0"

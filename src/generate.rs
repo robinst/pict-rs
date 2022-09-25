@@ -57,14 +57,14 @@ async fn process<R: FullRepo, S: Store + 'static>(
         identifier
     } else {
         let identifier = repo.identifier(hash.clone()).await?;
-        let mut reader = crate::ffmpeg::thumbnail(
+        let reader = crate::ffmpeg::thumbnail(
             store.clone(),
             identifier,
             InputFormat::Mp4,
             ThumbnailFormat::Jpeg,
         )
         .await?;
-        let motion_identifier = store.save_async_read(&mut reader).await?;
+        let motion_identifier = store.save_async_read(reader).await?;
 
         repo.relate_motion_identifier(hash.clone(), &motion_identifier)
             .await?;

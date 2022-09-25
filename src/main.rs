@@ -10,6 +10,7 @@ use futures_util::{
     Stream, StreamExt, TryStreamExt,
 };
 use once_cell::sync::Lazy;
+use rusty_s3::UrlStyle;
 use std::{
     future::ready,
     path::PathBuf,
@@ -65,7 +66,11 @@ use self::{
         UploadResult,
     },
     serde_str::Serde,
-    store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
+    store::{
+        file_store::FileStore,
+        object_store::{ObjectStore, ObjectStoreConfig},
+        Identifier, Store, StoreConfig,
+    },
     stream::{StreamLimit, StreamTimeout},
 };
 
@@ -448,7 +453,7 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
 
 #[instrument(name = "Downloading file inline", skip(stream))]
 async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
-    stream: impl Stream<Item = Result<web::Bytes, Error>>,
+    stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
     repo: web::Data<R>,
     store: web::Data<S>,
     is_cached: bool,
@@ -474,7 +479,7 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
 
 #[instrument(name = "Downloading file in background", skip(stream))]
 async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
-    stream: impl Stream<Item = Result<web::Bytes, Error>>,
+    stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
     repo: web::Data<R>,
     store: web::Data<S>,
     is_cached: bool,
@@ -958,14 +963,8 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
 fn build_client() -> awc::Client {
     Client::builder()
         .wrap(Tracing)
-        .add_default_header(("User-Agent", "pict-rs v0.3.0-main"))
+        .add_default_header(("User-Agent", "pict-rs v0.4.0-main"))
         .finish()
-}
-
-fn build_reqwest_client() -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent("pict-rs v0.3.0-main")
-        .build()
 }
 
 fn next_worker_id() -> String {
@@ -976,15 +975,15 @@ fn next_worker_id() -> String {
     format!("{}-{}", CONFIG.server.worker_id, next_id)
 }
 
-async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
+async fn launch<R: FullRepo + 'static, SC: StoreConfig + 'static>(
     repo: R,
-    store: S,
+    store_config: SC,
 ) -> color_eyre::Result<()> {
     repo.requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
         .await?;
 
     HttpServer::new(move || {
-        let store = store.clone();
+        let store = store_config.clone().build();
         let repo = repo.clone();
 
         tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
@@ -1013,20 +1012,23 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                     .service(
                         web::resource("")
                             .guard(guard::Post())
-                            .route(web::post().to(upload::<R, S>)),
+                            .route(web::post().to(upload::<R, SC::Store>)),
                     )
                     .service(
                         web::scope("/backgrounded")
                             .service(
                                 web::resource("")
                                     .guard(guard::Post())
-                                    .route(web::post().to(upload_backgrounded::<R, S>)),
+                                    .route(web::post().to(upload_backgrounded::<R, SC::Store>)),
                             )
                             .service(
-                                web::resource("/claim").route(web::get().to(claim_upload::<R, S>)),
+                                web::resource("/claim")
+                                    .route(web::get().to(claim_upload::<R, SC::Store>)),
                             ),
                     )
-                    .service(web::resource("/download").route(web::get().to(download::<R, S>)))
+                    .service(
+                        web::resource("/download").route(web::get().to(download::<R, SC::Store>)),
+                    )
                     .service(
                         web::resource("/delete/{delete_token}/{filename}")
                             .route(web::delete().to(delete::<R>))
@@ -1034,27 +1036,27 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                     )
                     .service(
                         web::resource("/original/{filename}")
-                            .route(web::get().to(serve::<R, S>))
-                            .route(web::head().to(serve_head::<R, S>)),
+                            .route(web::get().to(serve::<R, SC::Store>))
+                            .route(web::head().to(serve_head::<R, SC::Store>)),
                     )
                     .service(
                         web::resource("/process.{ext}")
-                            .route(web::get().to(process::<R, S>))
-                            .route(web::head().to(process_head::<R, S>)),
+                            .route(web::get().to(process::<R, SC::Store>))
+                            .route(web::head().to(process_head::<R, SC::Store>)),
                     )
                     .service(
                         web::resource("/process_backgrounded.{ext}")
-                            .route(web::get().to(process_backgrounded::<R, S>)),
+                            .route(web::get().to(process_backgrounded::<R, SC::Store>)),
                     )
                     .service(
                         web::scope("/details")
                             .service(
                                 web::resource("/original/{filename}")
-                                    .route(web::get().to(details::<R, S>)),
+                                    .route(web::get().to(details::<R, SC::Store>)),
                             )
                             .service(
                                 web::resource("/process.{ext}")
-                                    .route(web::get().to(process_details::<R, S>)),
+                                    .route(web::get().to(process_details::<R, SC::Store>)),
                             ),
                     ),
             )
@@ -1063,7 +1065,7 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
                     .wrap(Internal(
                         CONFIG.server.api_key.as_ref().map(|s| s.to_owned()),
                     ))
-                    .service(web::resource("/import").route(web::post().to(import::<R, S>)))
+                    .service(web::resource("/import").route(web::post().to(import::<R, SC::Store>)))
                     .service(
                         web::resource("/variants").route(web::delete().to(clean_variants::<R>)),
                     )
@@ -1080,36 +1082,43 @@ async fn launch<R: FullRepo + Clone + 'static, S: Store + Clone + 'static>(
     Ok(())
 }
 
-async fn migrate_inner<S1>(repo: &Repo, from: S1, to: &config::Store) -> color_eyre::Result<()>
+async fn migrate_inner<S1>(repo: &Repo, from: S1, to: config::Store) -> color_eyre::Result<()>
 where
     S1: Store,
 {
     match to {
         config::Store::Filesystem(config::Filesystem { path }) => {
-            let to = FileStore::build(path.clone(), repo.clone()).await?;
+            let to = FileStore::build(path.clone(), repo.clone()).await?.build();
+
             match repo {
                 Repo::Sled(repo) => migrate_store(repo, from, to).await?,
             }
         }
         config::Store::ObjectStorage(config::ObjectStorage {
+            endpoint,
             bucket_name,
+            use_path_style,
             region,
             access_key,
             secret_key,
-            security_token,
             session_token,
         }) => {
             let to = ObjectStore::build(
+                endpoint.clone(),
                 bucket_name,
-                region.as_ref().clone(),
-                Some(access_key.clone()),
-                Some(secret_key.clone()),
-                security_token.clone(),
-                session_token.clone(),
+                if use_path_style {
+                    UrlStyle::Path
+                } else {
+                    UrlStyle::VirtualHost
+                },
+                region,
+                access_key,
+                secret_key,
+                session_token,
                 repo.clone(),
-                build_reqwest_client()?,
             )
-            .await?;
+            .await?
+            .build();
 
             match repo {
                 Repo::Sled(repo) => migrate_store(repo, from, to).await?,
@@ -1132,30 +1141,36 @@ async fn main() -> color_eyre::Result<()> {
         Operation::MigrateStore { from, to } => {
             match from {
                 config::Store::Filesystem(config::Filesystem { path }) => {
-                    let from = FileStore::build(path.clone(), repo.clone()).await?;
-                    migrate_inner(&repo, from, &to).await?;
+                    let from = FileStore::build(path.clone(), repo.clone()).await?.build();
+                    migrate_inner(&repo, from, to).await?;
                 }
                 config::Store::ObjectStorage(config::ObjectStorage {
+                    endpoint,
                     bucket_name,
+                    use_path_style,
                     region,
                     access_key,
                     secret_key,
-                    security_token,
                     session_token,
                 }) => {
                     let from = ObjectStore::build(
-                        &bucket_name,
-                        Serde::into_inner(region),
-                        Some(access_key),
-                        Some(secret_key),
-                        security_token,
+                        endpoint,
+                        bucket_name,
+                        if use_path_style {
+                            UrlStyle::Path
+                        } else {
+                            UrlStyle::VirtualHost
+                        },
+                        region,
+                        access_key,
+                        secret_key,
                         session_token,
                         repo.clone(),
-                        build_reqwest_client()?,
                     )
-                    .await?;
+                    .await?
+                    .build();
 
-                    migrate_inner(&repo, from, &to).await?;
+                    migrate_inner(&repo, from, to).await?;
                 }
             }
 
@@ -1169,31 +1184,36 @@ async fn main() -> color_eyre::Result<()> {
 
             let store = FileStore::build(path, repo.clone()).await?;
             match repo {
-                Repo::Sled(sled_repo) => launch(sled_repo, store).await,
+                Repo::Sled(sled_repo) => launch::<_, FileStore>(sled_repo, store).await,
             }
         }
         config::Store::ObjectStorage(config::ObjectStorage {
+            endpoint,
             bucket_name,
+            use_path_style,
             region,
             access_key,
             secret_key,
-            security_token,
             session_token,
         }) => {
             let store = ObjectStore::build(
-                &bucket_name,
-                Serde::into_inner(region),
-                Some(access_key),
-                Some(secret_key),
-                security_token,
+                endpoint,
+                bucket_name,
+                if use_path_style {
+                    UrlStyle::Path
+                } else {
+                    UrlStyle::VirtualHost
+                },
+                region,
+                access_key,
+                secret_key,
                 session_token,
                 repo.clone(),
-                build_reqwest_client()?,
             )
             .await?;
 
             match repo {
-                Repo::Sled(sled_repo) => launch(sled_repo, store).await,
+                Repo::Sled(sled_repo) => launch::<_, ObjectStoreConfig>(sled_repo, store).await,
             }
         }
     }
@@ -1255,10 +1275,8 @@ where
     S2: Store,
 {
     let stream = from.to_stream(identifier, None, None).await?;
-    futures_util::pin_mut!(stream);
-    let mut reader = tokio_util::io::StreamReader::new(stream);
 
-    let new_identifier = to.save_async_read(&mut reader).await?;
+    let new_identifier = to.save_stream(stream).await?;
 
     Ok(new_identifier)
 }

@@ -14,8 +14,6 @@ services:
     environment:
       - PICTRS__TRACING__CONSOLE__ADDRESS=0.0.0.0:6669
       - PICTRS__TRACING__OPENTELEMETRY__URL=http://otel:4137
-    links:
-      - "minio:pict-rs.minio"
     stdin_open: true
     tty: true
     volumes:
@@ -23,7 +21,7 @@ services:
       - ../../:/opt/app
 
   pictrs_proxy:
-    image: asonix/pictrs-proxy:0.3
+    image: asonix/pictrs-proxy:0.4.0-alpha.4
     ports:
       - "8081:8081"
     environment:

@@ -1,6 +1,7 @@
 [server]
 address = '0.0.0.0:8080'
 worker_id = 'pict-rs-1'
+
 [tracing.logging]
 format = 'normal'
 targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
@@ -21,13 +22,7 @@ max_height = 10000
 max_area = 40000000
 max_file_size = 40
 enable_silent_video = true
-filters = [
-    'blur',
-    'crop',
-    'identity',
-    'resize',
-    'thumbnail',
-]
+filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 skip_validate_imports = false
 
 [repo]
@@ -37,7 +32,9 @@ cache_capacity = 67108864
 
 [store]
 type = 'object_storage'
+endpoint = 'http://minio:9000'
+use_path_style = true
 bucket_name = 'pict-rs'
-region = 'http://minio:9000'
-access_key = 'Q7Z3AY3JO01N27UNH5IR'
-secret_key = 'bH3Kj6UVJF+btBtWsExVurN3ukEilC3saECsupzi'
+region = 'minio'
+access_key = 'pictrs'
+secret_key = 'pictrspass'

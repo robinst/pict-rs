@@ -1,8 +1,8 @@
-use crate::error::Error;
-use actix_web::web;
 use sha2::{digest::FixedOutputReset, Digest};
 use std::{
+    cell::RefCell,
     pin::Pin,
+    rc::Rc,
     task::{Context, Poll},
 };
 use tokio::io::{AsyncRead, ReadBuf};
@@ -12,7 +12,7 @@ pin_project_lite::pin_project! {
         #[pin]
         inner: I,
 
-        hasher: D,
+        hasher: Rc<RefCell<D>>,
     }
 }
 
@@ -23,14 +23,12 @@ where
     pub(super) fn new(reader: I, digest: D) -> Self {
         Hasher {
             inner: reader,
-            hasher: digest,
+            hasher: Rc::new(RefCell::new(digest)),
         }
     }
 
-    pub(super) async fn finalize_reset(self) -> Result<Vec<u8>, Error> {
-        let mut hasher = self.hasher;
-        let hash = web::block(move || hasher.finalize_reset().to_vec()).await?;
-        Ok(hash)
+    pub(super) fn hasher(&self) -> Rc<RefCell<D>> {
+        Rc::clone(&self.hasher)
     }
 }
 
@@ -53,7 +51,9 @@ where
         let poll_res = reader.poll_read(cx, buf);
         let after_len = buf.filled().len();
         if after_len > before_len {
-            hasher.update(&buf.filled()[before_len..after_len]);
+            hasher
+                .borrow_mut()
+                .update(&buf.filled()[before_len..after_len]);
         }
         poll_res
     }
@@ -89,11 +89,11 @@ mod test {
         let hash = test_on_arbiter!(async move {
             let file1 = tokio::fs::File::open("./client-examples/earth.gif").await?;
 
-            let mut hasher = Hasher::new(file1, Sha256::new());
+            let mut reader = Hasher::new(file1, Sha256::new());
 
-            tokio::io::copy(&mut hasher, &mut tokio::io::sink()).await?;
+            tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
 
-            hasher.finalize_reset().await
+            Ok(reader.hasher().borrow_mut().finalize_reset().to_vec()) as std::io::Result<_>
         })
         .unwrap();
 
