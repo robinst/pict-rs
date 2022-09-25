@@ -121,6 +121,14 @@ impl ImageFormat {
             Self::Webp => "WEBP",
         }
     }
+
+    pub(crate) fn as_ext(self) -> &'static str {
+        match self {
+            Self::Jpeg => ".jpeg",
+            Self::Png => ".png",
+            Self::Webp => ".webp",
+        }
+    }
 }
 
 impl From<Filesystem> for Store {

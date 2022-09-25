@@ -39,7 +39,7 @@ pub(crate) enum ValidInputType {
 }
 
 impl ValidInputType {
-    fn as_str(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             Self::Mp4 => "MP4",
             Self::Gif => "GIF",
@@ -49,7 +49,7 @@ impl ValidInputType {
         }
     }
 
-    pub(crate) fn as_ext(&self) -> &'static str {
+    pub(crate) fn as_ext(self) -> &'static str {
         match self {
             Self::Mp4 => ".mp4",
             Self::Gif => ".gif",
@@ -59,7 +59,7 @@ impl ValidInputType {
         }
     }
 
-    fn is_mp4(&self) -> bool {
+    fn is_mp4(self) -> bool {
         matches!(self, Self::Mp4)
     }
 
@@ -68,6 +68,15 @@ impl ValidInputType {
             ImageFormat::Jpeg => ValidInputType::Jpeg,
             ImageFormat::Png => ValidInputType::Png,
             ImageFormat::Webp => ValidInputType::Webp,
+        }
+    }
+
+    pub(crate) fn to_format(self) -> Option<ImageFormat> {
+        match self {
+            Self::Jpeg => Some(ImageFormat::Jpeg),
+            Self::Png => Some(ImageFormat::Png),
+            Self::Webp => Some(ImageFormat::Webp),
+            _ => None,
         }
     }
 }
@@ -256,6 +265,19 @@ pub(crate) async fn input_type_bytes(input: Bytes) -> Result<ValidInputType, Err
     details_bytes(input, None).await?.validate_input()
 }
 
+fn process_image(args: Vec<String>, format: ImageFormat) -> std::io::Result<Process> {
+    let command = "magick";
+    let convert_args = ["convert", "-"];
+    let last_arg = format!("{}:-", format.as_magick_format());
+
+    Process::spawn(
+        Command::new(command)
+            .args(convert_args)
+            .args(args)
+            .arg(last_arg),
+    )
+}
+
 #[instrument(name = "Spawning process command")]
 pub(crate) fn process_image_store_read<S: Store + 'static>(
     store: S,
@@ -263,18 +285,16 @@ pub(crate) fn process_image_store_read<S: Store + 'static>(
     args: Vec<String>,
     format: ImageFormat,
 ) -> std::io::Result<impl AsyncRead + Unpin> {
-    let command = "magick";
-    let convert_args = ["convert", "-"];
-    let last_arg = format!("{}:-", format.as_magick_format());
+    Ok(process_image(args, format)?.store_read(store, identifier))
+}
 
-    let process = Process::spawn(
-        Command::new(command)
-            .args(convert_args)
-            .args(args)
-            .arg(last_arg),
-    )?;
-
-    Ok(process.store_read(store, identifier))
+#[instrument(name = "Spawning process command", skip(async_read))]
+pub(crate) fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
+    async_read: A,
+    args: Vec<String>,
+    format: ImageFormat,
+) -> std::io::Result<impl AsyncRead + Unpin> {
+    Ok(process_image(args, format)?.pipe_async_read(async_read))
 }
 
 impl Details {

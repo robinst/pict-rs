@@ -2,6 +2,7 @@ use crate::{
     config::primitives::{ImageFormat, LogFormat, Store, Targets},
     serde_str::Serde,
 };
+use once_cell::sync::OnceCell;
 use std::{collections::BTreeSet, net::SocketAddr, path::PathBuf};
 use url::Url;
 
@@ -86,6 +87,9 @@ pub(crate) struct OldDb {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Media {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) preprocess_steps: Option<String>,
+
     pub(crate) max_width: usize,
 
     pub(crate) max_height: usize,
@@ -104,6 +108,25 @@ pub(crate) struct Media {
     pub(crate) skip_validate_imports: bool,
 
     pub(crate) cache_duration: i64,
+}
+
+impl Media {
+    pub(crate) fn preprocess_steps(&self) -> Option<&[(String, String)]> {
+        static PREPROCESS_STEPS: OnceCell<Vec<(String, String)>> = OnceCell::new();
+
+        if let Some(steps) = &self.preprocess_steps {
+            let steps = PREPROCESS_STEPS
+                .get_or_try_init(|| {
+                    serde_urlencoded::from_str(steps) as Result<Vec<(String, String)>, _>
+                })
+                .expect("Invalid preprocess_steps configuration")
+                .as_slice();
+
+            Some(steps)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

@@ -45,6 +45,7 @@ impl Args {
                 address,
                 api_key,
                 worker_id,
+                media_preprocess_steps,
                 media_skip_validate_imports,
                 media_max_width,
                 media_max_height,
@@ -62,6 +63,7 @@ impl Args {
                     worker_id,
                 };
                 let media = Media {
+                    preprocess_steps: media_preprocess_steps,
                     skip_validate_imports: media_skip_validate_imports,
                     max_width: media_max_width,
                     max_height: media_max_height,
@@ -300,6 +302,8 @@ struct OldDb {
 #[serde(rename_all = "snake_case")]
 struct Media {
     #[serde(skip_serializing_if = "Option::is_none")]
+    preprocess_steps: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_width: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_height: Option<usize>,
@@ -383,8 +387,15 @@ struct Run {
     #[clap(long)]
     api_key: Option<String>,
 
+    /// ID of this pict-rs node. Doesn't do much yet
     #[clap(long)]
     worker_id: Option<String>,
+
+    /// Optional pre-processing steps for uploaded media.
+    ///
+    /// All still images will be put through these steps before saving
+    #[clap(long)]
+    media_preprocess_steps: Option<String>,
 
     /// Whether to validate media on the "import" endpoint
     #[clap(long)]

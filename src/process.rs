@@ -152,6 +152,55 @@ impl Process {
         }
     }
 
+    pub(crate) fn pipe_async_read<A: AsyncRead + Unpin + 'static>(
+        mut self,
+        mut async_read: A,
+    ) -> impl AsyncRead + Unpin {
+        let mut stdin = self.child.stdin.take().expect("stdin exists");
+        let stdout = self.child.stdout.take().expect("stdout exists");
+
+        let (tx, rx) = tracing::trace_span!(parent: None, "Create channel")
+            .in_scope(channel::<std::io::Error>);
+
+        let span = tracing::info_span!(parent: None, "Background process task from bytes");
+        span.follows_from(Span::current());
+
+        let mut child = self.child;
+        let handle = tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+            actix_rt::spawn(
+                async move {
+                    if let Err(e) = tokio::io::copy(&mut async_read, &mut stdin).await {
+                        let _ = tx.send(e);
+                        return;
+                    }
+                    drop(stdin);
+
+                    match child.wait().await {
+                        Ok(status) => {
+                            if !status.success() {
+                                let _ = tx.send(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    &StatusError,
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(e);
+                        }
+                    }
+                }
+                .instrument(span),
+            )
+        });
+
+        ProcessRead {
+            inner: stdout,
+            err_recv: rx,
+            err_closed: false,
+            handle: DropHandle { inner: handle },
+        }
+    }
+
     #[tracing::instrument]
     pub(crate) fn store_read<S: Store + 'static>(
         mut self,

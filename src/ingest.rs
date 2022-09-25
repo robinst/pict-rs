@@ -1,4 +1,5 @@
 use crate::{
+    either::Either,
     error::{Error, UploadError},
     magick::ValidInputType,
     repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo},
@@ -32,14 +33,14 @@ where
 {
     futures_util::pin_mut!(stream);
 
+    let mut total_len = 0;
     let mut buf = Vec::new();
     tracing::debug!("Reading stream to memory");
     while let Some(res) = stream.next().await {
         let bytes = res?;
+        total_len += bytes.len();
         buf.push(bytes);
     }
-
-    let total_len = buf.iter().fold(0, |acc, item| acc + item.len());
 
     let bytes_mut = buf
         .iter()
@@ -77,7 +78,22 @@ where
     )
     .await?;
 
-    let hasher_reader = Hasher::new(validated_reader, Sha256::new());
+    let processed_reader = if let Some(operations) = CONFIG.media.preprocess_steps() {
+        if let Some(format) = input_type.to_format() {
+            let (_, magick_args) = crate::processor::build_chain(operations, format.as_ext())?;
+
+            let processed_reader =
+                crate::magick::process_image_async_read(validated_reader, magick_args, format)?;
+
+            Either::left(processed_reader)
+        } else {
+            Either::right(validated_reader)
+        }
+    } else {
+        Either::right(validated_reader)
+    };
+
+    let hasher_reader = Hasher::new(processed_reader, Sha256::new());
     let hasher = hasher_reader.hasher();
 
     let identifier = store.save_async_read(hasher_reader).await?;

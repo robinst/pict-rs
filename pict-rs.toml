@@ -115,6 +115,13 @@ path = '/mnt'
 
 ## Media Processing Configuration
 [media]
+## Optional: preprocessing steps for uploaded images
+# environment variable: PICTRS__MEDIA__PREPROCESS_STEPS
+# default: empty
+#
+# This configuration is the same format as the process endpoint's query arguments
+preprocess_steps = 'crop=16x9&resize=1200&blur=0.2'
+
 ## Optional: max media width (in pixels)
 # environment variable: PICTRS__MEDIA__MAX_WIDTH
 # default: 10,000
@@ -189,15 +196,36 @@ cache_capacity = 67108864
 # available options: filesystem, object_storage
 type = 'object_storage'
 
+## Required: endpoint at which the object storage exists
+# environment variable: PICTRS__STORE__ENDPOINT
+# default: empty
+#
+# examples:
+# - `http://localhost:9000` # minio
+# - `https://s3.dualstack.eu-west-1.amazonaws.com` # s3
+endpoint = 'http://minio:9000'
+
+## Optional: How to format object storage requests
+# environment variable: PICTRS__STORE__USE_PATH_STYLE
+# default: false
+#
+# When this is true, objects will be fetched from http{s}://{endpoint}:{port}/{bucket_name}/{object}
+# When false, objects will be fetched from http{s}://{bucket_name}.{endpoint}:{port}/{object}
+#
+# Set to true when using minio
+use_path_style = false
+
 ## Required: object storage bucket name
 # environment variable: PICTRS__STORE__BUCKET_NAME
 # default: empty
-bucket_name = 'BUCKET_NAME'
+bucket_name = 'pict-rs'
 
 ## Required: object storage region
 # environment variable: PICTRS__STORE__REGION
 # default: empty
-region = 'REGION'
+#
+# When using minio, this can be set to `minio`
+region = 'minio'
 
 ## Required: object storage access key
 # environment variable: PICTRS__STORE__ACCESS_KEY
@@ -208,11 +236,6 @@ access_key = 'ACCESS_KEY'
 # environment variable: PICTRS__STORE__SECRET_KEY
 # default: empty
 secret_key = 'SECRET_KEY'
-
-## Optional: object storage security token
-# environment variable: PICTRS__STORE__SECURITY_TOKEN
-# default: empty
-security_token = 'SECURITY_TOKEN'
 
 ## Optional: object storage session token
 # environment variable: PICTRS__STORE__SESSION_TOKEN
