@@ -6,7 +6,6 @@ use crate::{
     store::{Identifier, Store},
 };
 use futures_util::StreamExt;
-use tracing::error;
 
 pub(super) fn perform<'a, R, S>(
     repo: &'a R,
@@ -39,7 +38,7 @@ where
                 Cleanup::AllVariants => all_variants::<R, S>(repo).await?,
             },
             Err(e) => {
-                tracing::warn!("Invalid job: {}", e);
+                tracing::warn!("Invalid job: {}", format!("{}", e));
             }
         }
 
@@ -69,7 +68,7 @@ where
         let span = tracing::error_span!("Error deleting files");
         span.in_scope(|| {
             for error in errors {
-                error!("{}", error);
+                tracing::error!("{}", format!("{}" error));
             }
         });
     }
