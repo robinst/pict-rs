@@ -15,9 +15,78 @@ pub(crate) trait Processor {
 
 pub(crate) struct Identity;
 pub(crate) struct Thumbnail(usize);
-pub(crate) struct Resize(usize);
+pub(crate) struct Resize {
+    filter: Option<ResizeFilter>,
+    kind: ResizeKind,
+}
+#[derive(Copy, Clone)]
+pub(crate) enum ResizeFilter {
+    Lanczos,
+    LanczosSharp,
+    Lanczos2,
+    Lanczos2Sharp,
+    Mitchell,
+    RobidouxSharp,
+}
+#[derive(Copy, Clone)]
+pub(crate) enum ResizeKind {
+    Bounds(usize),
+    Area(usize),
+}
 pub(crate) struct Crop(usize, usize);
 pub(crate) struct Blur(f64);
+
+impl ResizeFilter {
+    fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "lanczos" => Some(Self::Lanczos),
+            "lanczossharp" => Some(Self::LanczosSharp),
+            "lanczos2" => Some(Self::Lanczos2),
+            "lanczos2sharp" => Some(Self::Lanczos2Sharp),
+            "mitchell" => Some(Self::Mitchell),
+            "robidouxsharp" => Some(Self::RobidouxSharp),
+            _ => None,
+        }
+    }
+
+    fn to_magick_str(self) -> &'static str {
+        match self {
+            Self::Lanczos => "Lanczos",
+            Self::LanczosSharp => "LanczosSharp",
+            Self::Lanczos2 => "Lanczos2",
+            Self::Lanczos2Sharp => "Lanczos2Sharp",
+            Self::Mitchell => "Mitchell",
+            Self::RobidouxSharp => "RobidouxSharp",
+        }
+    }
+}
+
+impl Default for ResizeFilter {
+    fn default() -> Self {
+        Self::Lanczos2
+    }
+}
+
+impl ResizeKind {
+    fn from_str(s: &str) -> Option<Self> {
+        let kind = if s.starts_with('a') {
+            let size = s.trim_start_matches('a').parse().ok()?;
+            ResizeKind::Area(size)
+        } else {
+            let size = s.parse().ok()?;
+            ResizeKind::Bounds(size)
+        };
+
+        Some(kind)
+    }
+
+    fn to_magick_string(self) -> String {
+        match self {
+            Self::Area(size) => format!("{}@>", size),
+            Self::Bounds(size) => format!("{}x{}>", size, size),
+        }
+    }
+}
 
 #[instrument]
 pub(crate) fn build_chain(
@@ -111,22 +180,61 @@ impl Processor for Resize {
     where
         Self: Sized,
     {
-        let size = v.parse().ok()?;
-        Some(Resize(size))
+        if let Some((first, second)) = v.split_once('.') {
+            let filter = ResizeFilter::from_str(first);
+
+            let kind = ResizeKind::from_str(second)?;
+
+            Some(Resize { filter, kind })
+        } else {
+            let size = v.parse().ok()?;
+            Some(Resize {
+                filter: None,
+                kind: ResizeKind::Bounds(size),
+            })
+        }
     }
 
     fn path(&self, mut path: PathBuf) -> PathBuf {
         path.push(Self::NAME);
-        path.push(self.0.to_string());
+        match self {
+            Resize {
+                filter: None,
+                kind: ResizeKind::Bounds(size),
+            } => {
+                path.push(size.to_string());
+            }
+            Resize {
+                filter: None,
+                kind: ResizeKind::Area(size),
+            } => {
+                let node = format!(".a{}", size);
+                path.push(node);
+            }
+            Resize {
+                filter: Some(filter),
+                kind: ResizeKind::Bounds(size),
+            } => {
+                let node = format!("{}.{}", filter.to_magick_str(), size);
+                path.push(node);
+            }
+            Resize {
+                filter: Some(filter),
+                kind: ResizeKind::Area(size),
+            } => {
+                let node = format!("{}.a{}", filter.to_magick_str(), size);
+                path.push(node);
+            }
+        }
         path
     }
 
     fn command(&self, mut args: Vec<String>) -> Vec<String> {
         args.extend([
             "-filter".to_string(),
-            "Lanczos2".to_string(),
+            self.filter.unwrap_or_default().to_magick_str().to_string(),
             "-resize".to_string(),
-            format!("{}x{}>", self.0, self.0),
+            self.kind.to_magick_string(),
         ]);
 
         args
