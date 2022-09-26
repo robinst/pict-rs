@@ -69,10 +69,7 @@ impl ValidInputType {
     }
 
     pub(crate) fn is_video(self) -> bool {
-        match self {
-            Self::Mp4 | Self::Webm | Self::Gif => true,
-            _ => false,
-        }
+        matches!(self, Self::Mp4 | Self::Webm | Self::Gif)
     }
 
     fn video_hint(self) -> Option<&'static str> {

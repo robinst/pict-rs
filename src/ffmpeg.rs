@@ -85,7 +85,7 @@ pub(crate) async fn details_store<S: Store>(
 
     let mut tmp_one = crate::file::File::create(&input_file).await?;
     tmp_one
-        .write_from_stream(store.to_stream(&identifier, None, None).await?)
+        .write_from_stream(store.to_stream(identifier, None, None).await?)
         .await?;
     tmp_one.close().await?;
 
