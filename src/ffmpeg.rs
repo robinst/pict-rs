@@ -1,8 +1,8 @@
 use crate::{
     error::{Error, UploadError},
+    magick::{Details, ValidInputType},
     process::Process,
     store::Store,
-    magick::ValidInputType,
 };
 use actix_web::web::Bytes;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -30,11 +30,11 @@ impl InputFormat {
         }
     }
 
-    pub(crate) fn to_valid_input_type(self) -> ValidInputType {
+    fn to_mime(self) -> mime::Mime {
         match self {
-            Self::Gif => ValidInputType::Gif,
-            Self::Mp4 => ValidInputType::Mp4,
-            Self::Webm => ValidInputType::Webm,
+            Self::Gif => mime::IMAGE_GIF,
+            Self::Mp4 => crate::magick::video_mp4(),
+            Self::Webm => crate::magick::video_webm(),
         }
     }
 }
@@ -67,9 +67,53 @@ const FORMAT_MAPPINGS: &[(&str, InputFormat)] = &[
     ("webm", InputFormat::Webm),
 ];
 
-pub(crate) async fn input_type_bytes(
-    input: Bytes,
-) -> Result<Option<InputFormat>, Error> {
+pub(crate) async fn input_type_bytes(input: Bytes) -> Result<Option<ValidInputType>, Error> {
+    if let Some(details) = details_bytes(input).await? {
+        return Ok(Some(details.validate_input()?));
+    }
+
+    Ok(None)
+}
+
+pub(crate) async fn details_store<S: Store>(
+    store: &S,
+    identifier: &S::Identifier,
+) -> Result<Option<Details>, Error> {
+    let input_file = crate::tmp_file::tmp_file(None);
+    let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
+    crate::store::file_store::safe_create_parent(&input_file).await?;
+
+    let mut tmp_one = crate::file::File::create(&input_file).await?;
+    tmp_one
+        .write_from_stream(store.to_stream(&identifier, None, None).await?)
+        .await?;
+    tmp_one.close().await?;
+
+    let process = Process::run(
+        "ffprobe",
+        &[
+            "-v",
+            "quiet",
+            "-select_streams",
+            "v:0",
+            "-count_frames",
+            "-show_entries",
+            "stream=width,height,nb_read_frames:format=format_name",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            input_file_str,
+        ],
+    )?;
+
+    let mut output = Vec::new();
+    process.read().read_to_end(&mut output).await?;
+    let output = String::from_utf8_lossy(&output);
+    tokio::fs::remove_file(input_file_str).await?;
+
+    parse_details(output)
+}
+
+pub(crate) async fn details_bytes(input: Bytes) -> Result<Option<Details>, Error> {
     let input_file = crate::tmp_file::tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file).await?;
@@ -78,29 +122,80 @@ pub(crate) async fn input_type_bytes(
     tmp_one.write_from_bytes(input).await?;
     tmp_one.close().await?;
 
-    let process = Process::run("ffprobe", &[
+    let process = Process::run(
+        "ffprobe",
+        &[
             "-v",
             "quiet",
+            "-select_streams",
+            "v:0",
+            "-count_frames",
             "-show_entries",
-            "format=format_name",
+            "stream=width,height,nb_read_frames:format=format_name",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
             input_file_str,
-        ])?;
+        ],
+    )?;
 
     let mut output = Vec::new();
     process.read().read_to_end(&mut output).await?;
-    let formats = String::from_utf8_lossy(&output);
+    let output = String::from_utf8_lossy(&output);
+    tokio::fs::remove_file(input_file_str).await?;
 
-    tracing::info!("FORMATS: {}", formats);
+    parse_details(output)
+}
+
+fn parse_details(output: std::borrow::Cow<'_, str>) -> Result<Option<Details>, Error> {
+    tracing::info!("OUTPUT: {}", output);
+
+    let mut lines = output.lines();
+
+    let width = match lines.next() {
+        Some(line) => line,
+        None => return Ok(None),
+    };
+
+    let height = match lines.next() {
+        Some(line) => line,
+        None => return Ok(None),
+    };
+
+    let frames = match lines.next() {
+        Some(line) => line,
+        None => return Ok(None),
+    };
+
+    let formats = match lines.next() {
+        Some(line) => line,
+        None => return Ok(None),
+    };
 
     for (k, v) in FORMAT_MAPPINGS {
         if formats.contains(k) {
-            return Ok(Some(*v))
+            return Ok(Some(parse_details_inner(width, height, frames, *v)?));
         }
     }
 
     Ok(None)
+}
+
+fn parse_details_inner(
+    width: &str,
+    height: &str,
+    frames: &str,
+    format: InputFormat,
+) -> Result<Details, Error> {
+    let width = width.parse().map_err(|_| UploadError::UnsupportedFormat)?;
+    let height = height.parse().map_err(|_| UploadError::UnsupportedFormat)?;
+    let frames = frames.parse().map_err(|_| UploadError::UnsupportedFormat)?;
+
+    Ok(Details {
+        mime_type: format.to_mime(),
+        width,
+        height,
+        frames: Some(frames),
+    })
 }
 
 #[tracing::instrument(name = "Convert to Mp4", skip(input))]
@@ -122,36 +217,42 @@ pub(crate) async fn to_mp4_bytes(
     tmp_one.close().await?;
 
     let process = if permit_audio {
-        Process::run("ffmpeg", &[
-            "-i",
-            input_file_str,
-            "-pix_fmt",
-            "yuv420p",
-            "-vf",
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-c:a",
-            "aac",
-            "-c:v",
-            "h264",
-            "-f",
-            "mp4",
-            output_file_str,
-        ])?
+        Process::run(
+            "ffmpeg",
+            &[
+                "-i",
+                input_file_str,
+                "-pix_fmt",
+                "yuv420p",
+                "-vf",
+                "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                "-c:a",
+                "aac",
+                "-c:v",
+                "h264",
+                "-f",
+                "mp4",
+                output_file_str,
+            ],
+        )?
     } else {
-        Process::run("ffmpeg", &[
-            "-i",
-            input_file_str,
-            "-pix_fmt",
-            "yuv420p",
-            "-vf",
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-an",
-            "-c:v",
-            "h264",
-            "-f",
-            "mp4",
-            output_file_str,
-        ])?
+        Process::run(
+            "ffmpeg",
+            &[
+                "-i",
+                input_file_str,
+                "-pix_fmt",
+                "yuv420p",
+                "-vf",
+                "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                "-an",
+                "-c:v",
+                "h264",
+                "-f",
+                "mp4",
+                output_file_str,
+            ],
+        )?
     };
 
     process.wait().await?;

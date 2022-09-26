@@ -4,12 +4,12 @@ use actix_web::web::Bytes;
 use std::{
     future::Future,
     pin::Pin,
-    process::{Stdio},
+    process::Stdio,
     task::{Context, Poll},
 };
 use tokio::{
     io::{AsyncRead, AsyncWriteExt, ReadBuf},
-    process::{Child, Command, ChildStdin},
+    process::{Child, ChildStdin, Command},
     sync::oneshot::{channel, Receiver},
 };
 use tracing::{Instrument, Span};
@@ -83,7 +83,11 @@ impl Process {
         self,
         mut async_read: A,
     ) -> impl AsyncRead + Unpin {
-        self.read_fn(move |mut stdin| async move { tokio::io::copy(&mut async_read, &mut stdin).await.map(|_| ()) })
+        self.read_fn(move |mut stdin| async move {
+            tokio::io::copy(&mut async_read, &mut stdin)
+                .await
+                .map(|_| ())
+        })
     }
 
     #[tracing::instrument]
@@ -147,7 +151,6 @@ impl Process {
             err_closed: false,
             handle: DropHandle { inner: handle },
         }
-
     }
 }
 

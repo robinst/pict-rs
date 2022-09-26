@@ -110,8 +110,8 @@ pub(crate) enum Store {
 }
 
 impl ImageFormat {
-    pub(crate) fn as_hint(self) -> Option<ValidInputType> {
-        Some(ValidInputType::from_format(self))
+    pub(crate) fn as_hint(self) -> ValidInputType {
+        ValidInputType::from_format(self)
     }
 
     pub(crate) fn as_magick_format(self) -> &'static str {

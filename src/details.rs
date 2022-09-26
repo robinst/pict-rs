@@ -24,11 +24,18 @@ impl Details {
     }
 
     #[tracing::instrument("Details from bytes", skip(input))]
-    pub(crate) async fn from_bytes(
-        input: web::Bytes,
-        hint: Option<ValidInputType>,
-    ) -> Result<Self, Error> {
-        let details = crate::magick::details_bytes(input, hint).await?;
+    pub(crate) async fn from_bytes(input: web::Bytes, hint: ValidInputType) -> Result<Self, Error> {
+        let details = if hint.is_video() {
+            crate::ffmpeg::details_bytes(input.clone()).await?
+        } else {
+            None
+        };
+
+        let details = if let Some(details) = details {
+            details
+        } else {
+            crate::magick::details_bytes(input, Some(hint)).await?
+        };
 
         Ok(Details::now(
             details.width,
@@ -44,7 +51,17 @@ impl Details {
         identifier: S::Identifier,
         expected_format: Option<ValidInputType>,
     ) -> Result<Self, Error> {
-        let details = crate::magick::details_store(store, identifier, expected_format).await?;
+        let details = if expected_format.map(|t| t.is_video()).unwrap_or(true) {
+            crate::ffmpeg::details_store(&store, &identifier).await?
+        } else {
+            None
+        };
+
+        let details = if let Some(details) = details {
+            details
+        } else {
+            crate::magick::details_store(store, identifier, expected_format).await?
+        };
 
         Ok(Details::now(
             details.width,
@@ -54,7 +71,12 @@ impl Details {
         ))
     }
 
-    pub(crate) fn now(width: usize, height: usize, content_type: mime::Mime, frames: Option<usize>) -> Self {
+    pub(crate) fn now(
+        width: usize,
+        height: usize,
+        content_type: mime::Mime,
+        frames: Option<usize>,
+    ) -> Self {
         Details {
             width,
             height,

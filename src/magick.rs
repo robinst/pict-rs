@@ -27,11 +27,11 @@ fn image_webp() -> mime::Mime {
     "image/webp".parse().unwrap()
 }
 
-fn video_mp4() -> mime::Mime {
+pub(crate) fn video_mp4() -> mime::Mime {
     "video/mp4".parse().unwrap()
 }
 
-fn video_webm() -> mime::Mime {
+pub(crate) fn video_webm() -> mime::Mime {
     "video/webm".parse().unwrap()
 }
 
@@ -65,6 +65,13 @@ impl ValidInputType {
             Self::Png => ".png",
             Self::Jpeg => ".jpeg",
             Self::Webp => ".webp",
+        }
+    }
+
+    pub(crate) fn is_video(self) -> bool {
+        match self {
+            Self::Mp4 | Self::Webm | Self::Gif => true,
+            _ => false,
         }
     }
 
@@ -275,11 +282,7 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
         mime_type,
         width,
         height,
-        frames: if frames > 1 {
-            Some(frames)
-        } else {
-            None
-        },
+        frames: if frames > 1 { Some(frames) } else { None },
     })
 }
 
@@ -322,7 +325,7 @@ pub(crate) fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
 
 impl Details {
     #[instrument(name = "Validating input type")]
-    fn validate_input(&self) -> Result<ValidInputType, Error> {
+    pub(crate) fn validate_input(&self) -> Result<ValidInputType, Error> {
         if self.width > crate::CONFIG.media.max_width
             || self.height > crate::CONFIG.media.max_height
             || self.width * self.height > crate::CONFIG.media.max_area
