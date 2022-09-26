@@ -16,6 +16,10 @@ impl Identifier for ObjectId {
             String::from_utf8(bytes).map_err(ObjectError::from)?,
         ))
     }
+
+    fn string_repr(&self) -> String {
+        self.0.clone()
+    }
 }
 
 impl ObjectId {

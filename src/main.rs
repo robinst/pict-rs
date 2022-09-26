@@ -954,6 +954,19 @@ async fn aliases<R: FullRepo>(
     })))
 }
 
+async fn identifier<R: FullRepo, S: Store>(
+    query: web::Query<AliasQuery>,
+    repo: web::Data<R>,
+) -> Result<HttpResponse, Error> {
+    let alias = query.into_inner().alias;
+    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
+
+    Ok(HttpResponse::Ok().json(&serde_json::json!({
+        "msg": "ok",
+        "identifier": identifier.string_repr(),
+    })))
+}
+
 fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
     let error: Error = error.into();
     let error: actix_web::Error = error.into();
@@ -1070,7 +1083,11 @@ async fn launch<R: FullRepo + 'static, SC: StoreConfig + 'static>(
                         web::resource("/variants").route(web::delete().to(clean_variants::<R>)),
                     )
                     .service(web::resource("/purge").route(web::post().to(purge::<R>)))
-                    .service(web::resource("/aliases").route(web::get().to(aliases::<R>))),
+                    .service(web::resource("/aliases").route(web::get().to(aliases::<R>)))
+                    .service(
+                        web::resource("/identifier")
+                            .route(web::get().to(identifier::<R, SC::Store>)),
+                    ),
             )
     })
     .bind(CONFIG.server.address)?

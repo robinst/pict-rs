@@ -13,6 +13,8 @@ pub(crate) trait Identifier: Send + Sync + Clone + Debug {
     fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error>
     where
         Self: Sized;
+
+    fn string_repr(&self) -> String;
 }
 
 pub(crate) trait StoreConfig: Send + Sync + Clone {

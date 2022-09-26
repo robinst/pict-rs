@@ -32,6 +32,10 @@ impl Identifier for FileId {
 
         Ok(id)
     }
+
+    fn string_repr(&self) -> String {
+        self.0.to_string_lossy().into_owned()
+    }
 }
 
 impl FileId {

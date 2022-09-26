@@ -850,6 +850,10 @@ impl Identifier for Vec<u8> {
     fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         Ok(self.clone())
     }
+
+    fn string_repr(&self) -> String {
+        base64::encode(self.as_slice())
+    }
 }
 
 #[cfg(test)]
