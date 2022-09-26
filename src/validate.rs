@@ -44,7 +44,11 @@ pub(crate) async fn validate_image_bytes(
     enable_full_video: bool,
     validate: bool,
 ) -> Result<(ValidInputType, impl AsyncRead + Unpin), Error> {
-    let input_type = crate::magick::input_type_bytes(bytes.clone()).await?;
+    let input_type = if let Some(input_type) = crate::ffmpeg::input_type_bytes(bytes.clone()).await? {
+        input_type.to_valid_input_type()
+    } else {
+        crate::magick::input_type_bytes(bytes.clone()).await?
+    };
 
     if !validate {
         return Ok((input_type, Either::left(UnvalidatedBytes::new(bytes))));
@@ -80,7 +84,7 @@ pub(crate) async fn validate_image_bytes(
             Ok((
                 ValidInputType::Mp4,
                 Either::right(Either::left(
-                    crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Mp4, enable_full_video).await?,
+                    crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Webm, enable_full_video).await?,
                 )),
             ))
         }

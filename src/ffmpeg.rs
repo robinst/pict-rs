@@ -2,52 +2,105 @@ use crate::{
     error::{Error, UploadError},
     process::Process,
     store::Store,
+    magick::ValidInputType,
 };
 use actix_web::web::Bytes;
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::instrument;
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum InputFormat {
     Gif,
     Mp4,
+    Webm,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum ThumbnailFormat {
     Jpeg,
     // Webp,
 }
 
 impl InputFormat {
-    fn to_ext(&self) -> &'static str {
+    fn to_ext(self) -> &'static str {
         match self {
             InputFormat::Gif => ".gif",
             InputFormat::Mp4 => ".mp4",
+            InputFormat::Webm => ".webm",
+        }
+    }
+
+    pub(crate) fn to_valid_input_type(self) -> ValidInputType {
+        match self {
+            Self::Gif => ValidInputType::Gif,
+            Self::Mp4 => ValidInputType::Mp4,
+            Self::Webm => ValidInputType::Webm,
         }
     }
 }
 
 impl ThumbnailFormat {
-    fn as_codec(&self) -> &'static str {
+    fn as_codec(self) -> &'static str {
         match self {
             ThumbnailFormat::Jpeg => "mjpeg",
             // ThumbnailFormat::Webp => "webp",
         }
     }
 
-    fn to_ext(&self) -> &'static str {
+    fn to_ext(self) -> &'static str {
         match self {
             ThumbnailFormat::Jpeg => ".jpeg",
         }
     }
 
-    fn as_format(&self) -> &'static str {
+    fn as_format(self) -> &'static str {
         match self {
             ThumbnailFormat::Jpeg => "image2",
             // ThumbnailFormat::Webp => "webp",
         }
     }
+}
+
+const FORMAT_MAPPINGS: &[(&str, InputFormat)] = &[
+    ("gif", InputFormat::Gif),
+    ("mp4", InputFormat::Mp4),
+    ("webm", InputFormat::Webm),
+];
+
+pub(crate) async fn input_type_bytes(
+    input: Bytes,
+) -> Result<Option<InputFormat>, Error> {
+    let input_file = crate::tmp_file::tmp_file(None);
+    let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
+    crate::store::file_store::safe_create_parent(&input_file).await?;
+
+    let mut tmp_one = crate::file::File::create(&input_file).await?;
+    tmp_one.write_from_bytes(input).await?;
+    tmp_one.close().await?;
+
+    let process = Process::run("ffprobe", &[
+            "-v",
+            "quiet",
+            "-show_entries",
+            "format=format_name",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            input_file_str,
+        ])?;
+
+    let mut output = Vec::new();
+    process.read().read_to_end(&mut output).await?;
+    let formats = String::from_utf8_lossy(&output);
+
+    tracing::info!("FORMATS: {}", formats);
+
+    for (k, v) in FORMAT_MAPPINGS {
+        if formats.contains(k) {
+            return Ok(Some(*v))
+        }
+    }
+
+    Ok(None)
 }
 
 #[tracing::instrument(name = "Convert to Mp4", skip(input))]
