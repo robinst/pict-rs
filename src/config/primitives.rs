@@ -1,5 +1,5 @@
 use crate::magick::ValidInputType;
-use clap::ArgEnum;
+use clap::ValueEnum;
 use std::{fmt::Display, path::PathBuf, str::FromStr};
 use tracing::Level;
 use url::Url;
@@ -15,7 +15,7 @@ use url::Url;
     Hash,
     serde::Deserialize,
     serde::Serialize,
-    ArgEnum,
+    ValueEnum,
 )]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum LogFormat {
@@ -36,7 +36,7 @@ pub(crate) enum LogFormat {
     Hash,
     serde::Deserialize,
     serde::Serialize,
-    ArgEnum,
+    ValueEnum,
 )]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ImageFormat {
@@ -55,7 +55,7 @@ pub(crate) struct Targets {
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Filesystem {
     /// Path to store media
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub(crate) path: PathBuf,
 }
 
@@ -68,34 +68,34 @@ pub(crate) struct ObjectStorage {
     /// Examples:
     /// - `http://localhost:9000`
     /// - `https://s3.dualstack.eu-west-1.amazonaws.com`
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub(crate) endpoint: Url,
 
     /// Determines whether to use path style or virtualhost style for accessing objects
     ///
     /// When this is true, objects will be fetched from {endpoint}/{bucket_name}/{object}
     /// When false, objects will be fetched from {bucket_name}.{endpoint}/{object}
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub(crate) use_path_style: bool,
 
     /// The bucket in which to store media
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub(crate) bucket_name: String,
 
     /// The region the bucket is located in
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub(crate) region: String,
 
     /// The Access Key for the user accessing the bucket
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub(crate) access_key: String,
 
     /// The secret key for the user accessing the bucket
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub(crate) secret_key: String,
 
     /// The session token for accessing the bucket
-    #[clap(long)]
+    #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) session_token: Option<String>,
 }

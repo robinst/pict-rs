@@ -9,111 +9,88 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.4.0-beta.1
-asonix <asonix@asonix.dog>
+$ pict-rs -h
 A simple image hosting service
 
-USAGE:
-    pict-rs [OPTIONS] <SUBCOMMAND>
+Usage: pict-rs [OPTIONS] <COMMAND>
 
-OPTIONS:
-    -c, --config-file <CONFIG_FILE>
-            Path to the pict-rs configuration file
+Commands:
+  run             Runs the pict-rs web server
+  filesystem      Migrate from the provided filesystem storage
+  object-storage  Migrate from the provided object storage
+  help            Print this message or the help of the given subcommand(s)
 
-        --console-address <CONSOLE_ADDRESS>
-            Address and port to expose tokio-console metrics
-
-        --console-buffer-capacity <CONSOLE_BUFFER_CAPACITY>
-            Capacity of the console-subscriber Event Buffer
-
-    -h, --help
-            Print help information
-
-        --log-format <LOG_FORMAT>
-            Format of logs printed to stdout
-
-        --log-targets <LOG_TARGETS>
-            Log levels to print to stdout, respects RUST_LOG formatting
-
-        --old-db-path <OLD_DB_PATH>
-            Path to the old pict-rs sled database
-
-        --opentelemetry-service-name <OPENTELEMETRY_SERVICE_NAME>
-            Service Name to use for OpenTelemetry
-
-        --opentelemetry-targets <OPENTELEMETRY_TARGETS>
-            Log levels to use for OpenTelemetry, respects RUST_LOG formatting
-
-        --opentelemetry-url <OPENTELEMETRY_URL>
-            URL to send OpenTelemetry metrics
-
-        --save-to <SAVE_TO>
-            File to save the current configuration for reproducible runs
-
-    -V, --version
-            Print version information
-
-SUBCOMMANDS:
-    filesystem        Migrate from the provided filesystem storage
-    help              Print this message or the help of the given subcommand(s)
-    object-storage    Migrate from the provided object storage
-    run               Runs the pict-rs web server
+Options:
+  -c, --config-file <CONFIG_FILE>
+          Path to the pict-rs configuration file
+      --old-db-path <OLD_DB_PATH>
+          Path to the old pict-rs sled database
+      --log-format <LOG_FORMAT>
+          Format of logs printed to stdout [possible values: compact, json, normal, pretty]
+      --log-targets <LOG_TARGETS>
+          Log levels to print to stdout, respects RUST_LOG formatting
+      --console-address <CONSOLE_ADDRESS>
+          Address and port to expose tokio-console metrics
+      --console-buffer-capacity <CONSOLE_BUFFER_CAPACITY>
+          Capacity of the console-subscriber Event Buffer
+      --opentelemetry-url <OPENTELEMETRY_URL>
+          URL to send OpenTelemetry metrics
+      --opentelemetry-service-name <OPENTELEMETRY_SERVICE_NAME>
+          Service Name to use for OpenTelemetry
+      --opentelemetry-targets <OPENTELEMETRY_TARGETS>
+          Log levels to use for OpenTelemetry, respects RUST_LOG formatting
+      --save-to <SAVE_TO>
+          File to save the current configuration for reproducible runs
+  -h, --help
+          Print help information
+  -V, --version
+          Print version information
 ```
 
 ```
-pict-rs-run 
+$ pict-rs run -h
 Runs the pict-rs web server
 
-USAGE:
-    pict-rs run [OPTIONS] [SUBCOMMAND]
+Usage: pict-rs run [OPTIONS] [COMMAND]
 
-OPTIONS:
-    -a, --address <ADDRESS>
-            The address and port to bind the pict-rs web server
+Commands:
+  filesystem      Run pict-rs with filesystem storage
+  object-storage  Run pict-rs with object storage
+  help            Print this message or the help of the given subcommand(s)
 
-        --api-key <API_KEY>
-            The API KEY required to access restricted routes
-
-    -h, --help
-            Print help information
-
-        --media-cache-duration <MEDIA_CACHE_DURATION>
-            How long, in hours, to keep media ingested through the "cached" endpoint
-
-        --media-enable-silent-video <MEDIA_ENABLE_SILENT_VIDEO>
-            Whether to enable GIF and silent MP4 uploads. Full videos are unsupported
-
-        --media-filters <MEDIA_FILTERS>
-            Which media filters should be enabled on the `process` endpoint
-
-        --media-format <MEDIA_FORMAT>
-            Enforce uploaded media is transcoded to the provided format
-
-        --media-max-area <MEDIA_MAX_AREA>
-            The maximum area, in pixels, for uploaded media
-
-        --media-max-file-size <MEDIA_MAX_FILE_SIZE>
-            The maximum size, in megabytes, for uploaded media
-
-        --media-max-height <MEDIA_MAX_HEIGHT>
-            The maximum height, in pixels, for uploaded media
-
-        --media-max-width <MEDIA_MAX_WIDTH>
-            The maximum width, in pixels, for uploaded media
-
-        --media-preprocess-steps <MEDIA_PREPROCESS_STEPS>
-            Optional pre-processing steps for uploaded media
-
-        --media-skip-validate-imports <MEDIA_SKIP_VALIDATE_IMPORTS>
-            Whether to validate media on the "import" endpoint
-
-        --worker-id <WORKER_ID>
-            ID of this pict-rs node. Doesn't do much yet
-
-SUBCOMMANDS:
-    filesystem        Run pict-rs with filesystem storage
-    help              Print this message or the help of the given subcommand(s)
-    object-storage    Run pict-rs with object storage
+Options:
+  -a, --address <ADDRESS>
+          The address and port to bind the pict-rs web server
+      --api-key <API_KEY>
+          The API KEY required to access restricted routes
+      --worker-id <WORKER_ID>
+          ID of this pict-rs node. Doesn't do much yet
+      --media-preprocess-steps <MEDIA_PREPROCESS_STEPS>
+          Optional pre-processing steps for uploaded media
+      --media-skip-validate-imports <MEDIA_SKIP_VALIDATE_IMPORTS>
+          Whether to validate media on the "import" endpoint [possible values: true, false]
+      --media-max-width <MEDIA_MAX_WIDTH>
+          The maximum width, in pixels, for uploaded media
+      --media-max-height <MEDIA_MAX_HEIGHT>
+          The maximum height, in pixels, for uploaded media
+      --media-max-area <MEDIA_MAX_AREA>
+          The maximum area, in pixels, for uploaded media
+      --media-max-file-size <MEDIA_MAX_FILE_SIZE>
+          The maximum size, in megabytes, for uploaded media
+      --media-max-frame-count <MEDIA_MAX_FRAME_COUNT>
+          The maximum number of frames allowed for uploaded GIF and MP4s
+      --media-enable-silent-video <MEDIA_ENABLE_SILENT_VIDEO>
+          Whether to enable GIF and silent MP4 uploads [possible values: true, false]
+      --media-enable-full-video <MEDIA_ENABLE_FULL_VIDEO>
+          Whether to enable full MP4 uploads [possible values: true, false]
+      --media-filters <MEDIA_FILTERS>
+          Which media filters should be enabled on the `process` endpoint
+      --media-format <MEDIA_FORMAT>
+          Enforce uploaded media is transcoded to the provided format [possible values: jpeg, webp, png]
+      --media-cache-duration <MEDIA_CACHE_DURATION>
+          How long, in hours, to keep media ingested through the "cached" endpoint
+  -h, --help
+          Print help information (use `--help` for more detail)
 ```
 
 Try running `help` commands for more runtime configuration options

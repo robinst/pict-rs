@@ -333,45 +333,45 @@ struct Media {
 
 /// Run the pict-rs application
 #[derive(Debug, Parser)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 pub(super) struct Args {
     /// Path to the pict-rs configuration file
-    #[clap(short, long)]
+    #[arg(short, long)]
     config_file: Option<PathBuf>,
 
     /// Path to the old pict-rs sled database
-    #[clap(long)]
+    #[arg(long)]
     old_db_path: Option<PathBuf>,
 
     /// Format of logs printed to stdout
-    #[clap(long)]
+    #[arg(long)]
     log_format: Option<LogFormat>,
     /// Log levels to print to stdout, respects RUST_LOG formatting
-    #[clap(long)]
+    #[arg(long)]
     log_targets: Option<Targets>,
 
     /// Address and port to expose tokio-console metrics
-    #[clap(long)]
+    #[arg(long)]
     console_address: Option<SocketAddr>,
     /// Capacity of the console-subscriber Event Buffer
-    #[clap(long)]
+    #[arg(long)]
     console_buffer_capacity: Option<usize>,
 
     /// URL to send OpenTelemetry metrics
-    #[clap(long)]
+    #[arg(long)]
     opentelemetry_url: Option<Url>,
     /// Service Name to use for OpenTelemetry
-    #[clap(long)]
+    #[arg(long)]
     opentelemetry_service_name: Option<String>,
     /// Log levels to use for OpenTelemetry, respects RUST_LOG formatting
-    #[clap(long)]
+    #[arg(long)]
     opentelemetry_targets: Option<Targets>,
 
     /// File to save the current configuration for reproducible runs
-    #[clap(long)]
+    #[arg(long)]
     save_to: Option<PathBuf>,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Command,
 }
 
@@ -381,66 +381,66 @@ enum Command {
     Run(Run),
 
     /// Migrates from one provided media store to another
-    #[clap(flatten)]
+    #[command(flatten)]
     MigrateStore(MigrateStore),
 }
 
 #[derive(Debug, Parser)]
 struct Run {
     /// The address and port to bind the pict-rs web server
-    #[clap(short, long)]
+    #[arg(short, long)]
     address: Option<SocketAddr>,
 
     /// The API KEY required to access restricted routes
-    #[clap(long)]
+    #[arg(long)]
     api_key: Option<String>,
 
     /// ID of this pict-rs node. Doesn't do much yet
-    #[clap(long)]
+    #[arg(long)]
     worker_id: Option<String>,
 
     /// Optional pre-processing steps for uploaded media.
     ///
     /// All still images will be put through these steps before saving
-    #[clap(long)]
+    #[arg(long)]
     media_preprocess_steps: Option<String>,
 
     /// Whether to validate media on the "import" endpoint
-    #[clap(long)]
+    #[arg(long)]
     media_skip_validate_imports: Option<bool>,
     /// The maximum width, in pixels, for uploaded media
-    #[clap(long)]
+    #[arg(long)]
     media_max_width: Option<usize>,
     /// The maximum height, in pixels, for uploaded media
-    #[clap(long)]
+    #[arg(long)]
     media_max_height: Option<usize>,
     /// The maximum area, in pixels, for uploaded media
-    #[clap(long)]
+    #[arg(long)]
     media_max_area: Option<usize>,
     /// The maximum size, in megabytes, for uploaded media
-    #[clap(long)]
+    #[arg(long)]
     media_max_file_size: Option<usize>,
     /// The maximum number of frames allowed for uploaded GIF and MP4s.
-    #[clap(long)]
+    #[arg(long)]
     media_max_frame_count: Option<usize>,
     /// Whether to enable GIF and silent MP4 uploads
-    #[clap(long)]
+    #[arg(long)]
     media_enable_silent_video: Option<bool>,
     /// Whether to enable full MP4 uploads
-    #[clap(long)]
+    #[arg(long)]
     media_enable_full_video: Option<bool>,
     /// Which media filters should be enabled on the `process` endpoint
-    #[clap(long)]
+    #[arg(long)]
     media_filters: Option<Vec<String>>,
     /// Enforce uploaded media is transcoded to the provided format
-    #[clap(long)]
+    #[arg(long)]
     media_format: Option<ImageFormat>,
 
     /// How long, in hours, to keep media ingested through the "cached" endpoint
-    #[clap(long)]
+    #[arg(long)]
     media_cache_duration: Option<i64>,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     store: Option<RunStore>,
 }
 
@@ -489,60 +489,60 @@ enum MigrateStoreInner {
 /// Migrate pict-rs' storage from the provided filesystem storage
 #[derive(Debug, Parser)]
 struct MigrateFilesystem {
-    #[clap(flatten)]
+    #[command(flatten)]
     from: crate::config::primitives::Filesystem,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     to: MigrateStoreInner,
 }
 
 /// Migrate pict-rs' storage to the provided filesystem storage
 #[derive(Debug, Parser)]
 struct MigrateFilesystemInner {
-    #[clap(flatten)]
+    #[command(flatten)]
     to: crate::config::primitives::Filesystem,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     repo: Option<Repo>,
 }
 
 /// Migrate pict-rs' storage from the provided object storage
 #[derive(Debug, Parser)]
 struct MigrateObjectStorage {
-    #[clap(flatten)]
+    #[command(flatten)]
     from: crate::config::primitives::ObjectStorage,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     to: MigrateStoreInner,
 }
 
 /// Migrate pict-rs' storage to the provided object storage
 #[derive(Debug, Parser)]
 struct MigrateObjectStorageInner {
-    #[clap(flatten)]
+    #[command(flatten)]
     to: crate::config::primitives::ObjectStorage,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     repo: Option<Repo>,
 }
 
 /// Run pict-rs with the provided filesystem storage
 #[derive(Debug, Parser)]
 struct RunFilesystem {
-    #[clap(flatten)]
+    #[command(flatten)]
     system: Filesystem,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     repo: Option<Repo>,
 }
 
 /// Run pict-rs with the provided object storage
 #[derive(Debug, Parser)]
 struct RunObjectStorage {
-    #[clap(flatten)]
+    #[command(flatten)]
     storage: ObjectStorage,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     repo: Option<Repo>,
 }
 
@@ -560,7 +560,7 @@ enum Repo {
 #[serde(rename_all = "snake_case")]
 struct Filesystem {
     /// The path to store uploaded media
-    #[clap(short, long)]
+    #[arg(short, long)]
     path: Option<PathBuf>,
 }
 
@@ -573,36 +573,36 @@ struct ObjectStorage {
     /// Examples:
     /// - `http://localhost:9000`
     /// - `https://s3.dualstack.eu-west-1.amazonaws.com`
-    #[clap(short, long)]
+    #[arg(short, long)]
     endpoint: Url,
 
     /// Determines whether to use path style or virtualhost style for accessing objects
     ///
     /// When this is true, objects will be fetched from {endpoint}/{bucket_name}/{object}
     /// When false, objects will be fetched from {bucket_name}.{endpoint}/{object}
-    #[clap(short, long)]
+    #[arg(short, long)]
     use_path_style: bool,
 
     /// The bucket in which to store media
-    #[clap(short, long)]
+    #[arg(short, long)]
     bucket_name: Option<String>,
 
     /// The region the bucket is located in
     ///
     /// For minio deployments, this can just be 'minio'
-    #[clap(short, long)]
+    #[arg(short, long)]
     region: Option<String>,
 
     /// The Access Key for the user accessing the bucket
-    #[clap(short, long)]
+    #[arg(short, long)]
     access_key: Option<String>,
 
     /// The secret key for the user accessing the bucket
-    #[clap(short, long)]
+    #[arg(short, long)]
     secret_key: Option<String>,
 
     /// The session token for accessing the bucket
-    #[clap(long)]
+    #[arg(long)]
     session_token: Option<String>,
 }
 
@@ -611,12 +611,12 @@ struct ObjectStorage {
 #[serde(rename_all = "snake_case")]
 struct Sled {
     /// The path to store the sled database
-    #[clap(short, long)]
+    #[arg(short, long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<PathBuf>,
 
     /// The cache capacity, in bytes, allowed to sled for in-memory operations
-    #[clap(short, long)]
+    #[arg(short, long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_capacity: Option<u64>,
 }
