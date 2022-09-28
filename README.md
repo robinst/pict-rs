@@ -9,7 +9,7 @@ _a simple image hosting service_
 ## Usage
 ### Running
 ```
-pict-rs 0.4.0-alpha.9
+pict-rs 0.4.0-beta.1
 asonix <asonix@asonix.dog>
 A simple image hosting service
 
