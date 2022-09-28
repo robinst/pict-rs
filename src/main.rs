@@ -1151,7 +1151,7 @@ async fn main() -> color_eyre::Result<()> {
     init_tracing(&CONFIG.tracing)?;
 
     let repo = Repo::open(CONFIG.repo.clone())?;
-    repo.from_db(CONFIG.old_db.path.clone()).await?;
+    repo.migrate_from_db(CONFIG.old_db.path.clone()).await?;
 
     match (*OPERATION).clone() {
         Operation::Run => (),

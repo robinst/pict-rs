@@ -462,7 +462,7 @@ impl Repo {
         }
     }
 
-    pub(crate) async fn from_db(&self, path: PathBuf) -> color_eyre::Result<()> {
+    pub(crate) async fn migrate_from_db(&self, path: PathBuf) -> color_eyre::Result<()> {
         if self.has_migrated().await? {
             return Ok(());
         }
