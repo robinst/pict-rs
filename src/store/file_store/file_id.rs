@@ -7,7 +7,7 @@ use crate::{
 };
 use std::path::PathBuf;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FileId(PathBuf);
 
 impl Identifier for FileId {

@@ -6,6 +6,7 @@ use crate::{
 };
 use futures_util::Stream;
 use std::{fmt::Debug, path::PathBuf};
+use tracing::Instrument;
 use uuid::Uuid;
 
 mod old;
@@ -59,7 +60,7 @@ pub(crate) trait FullRepo:
     + Clone
     + Debug
 {
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn identifier_from_alias<I: Identifier + 'static>(
         &self,
         alias: &Alias,
@@ -68,13 +69,13 @@ pub(crate) trait FullRepo:
         self.identifier(hash).await
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn aliases_from_alias(&self, alias: &Alias) -> Result<Vec<Alias>, Error> {
         let hash = self.hash(alias).await?;
         self.aliases(hash).await
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn still_identifier_from_alias<I: Identifier + 'static>(
         &self,
         alias: &Alias,
@@ -89,7 +90,7 @@ pub(crate) trait FullRepo:
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn check_cached(&self, alias: &Alias) -> Result<(), Error> {
         let aliases = CachedRepo::update(self, alias).await?;
 
@@ -461,22 +462,35 @@ impl Repo {
         }
     }
 
-    #[tracing::instrument(skip_all)]
     pub(crate) async fn from_db(&self, path: PathBuf) -> color_eyre::Result<()> {
         if self.has_migrated().await? {
             return Ok(());
         }
 
         if let Some(old) = self::old::Old::open(path)? {
-            tracing::warn!("Migrating Database from 0.3 layout to 0.4 layout");
+            let span = tracing::warn_span!("Migrating Database from 0.3 layout to 0.4 layout");
 
-            for hash in old.hashes() {
-                match self {
-                    Self::Sled(repo) => {
-                        if let Err(e) = migrate_hash(repo, &old, hash).await {
-                            tracing::error!("Failed to migrate hash: {}", e);
+            match self {
+                Self::Sled(repo) => {
+                    async {
+                        for hash in old.hashes() {
+                            if let Err(e) = migrate_hash(repo, &old, hash).await {
+                                tracing::error!("Failed to migrate hash: {}", format!("{:?}", e));
+                            }
+                        }
+
+                        if let Ok(Some(value)) = old.setting(STORE_MIGRATION_PROGRESS.as_bytes()) {
+                            tracing::warn!("Setting STORE_MIGRATION_PROGRESS");
+                            let _ = repo.set(STORE_MIGRATION_PROGRESS, value).await;
+                        }
+
+                        if let Ok(Some(value)) = old.setting(GENERATOR_KEY.as_bytes()) {
+                            tracing::warn!("Setting GENERATOR_KEY");
+                            let _ = repo.set(GENERATOR_KEY, value).await;
                         }
                     }
+                    .instrument(span)
+                    .await;
                 }
             }
         }
@@ -486,25 +500,33 @@ impl Repo {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all)]
     pub(crate) async fn migrate_identifiers(&self) -> color_eyre::Result<()> {
         if self.has_migrated_identifiers().await? {
             return Ok(());
         }
 
-        tracing::warn!("Migrating File Identifiers from 0.3 format to 0.4 format");
+        let span = tracing::warn_span!("Migrating File Identifiers from 0.3 format to 0.4 format");
 
         match self {
             Self::Sled(repo) => {
-                use futures_util::StreamExt;
-                let mut hashes = repo.hashes().await;
+                async {
+                    use futures_util::StreamExt;
+                    let mut hashes = repo.hashes().await;
 
-                while let Some(res) = hashes.next().await {
-                    let hash = res?;
-                    if let Err(e) = migrate_identifiers_for_hash(repo, hash).await {
-                        tracing::error!("Failed to migrate identifiers for hash: {}", e);
+                    while let Some(res) = hashes.next().await {
+                        let hash = res?;
+                        if let Err(e) = migrate_identifiers_for_hash(repo, hash).await {
+                            tracing::error!(
+                                "Failed to migrate identifiers for hash: {}",
+                                format!("{:?}", e)
+                            );
+                        }
                     }
+
+                    Ok(()) as color_eyre::Result<()>
                 }
+                .instrument(span)
+                .await?;
             }
         }
 
@@ -551,7 +573,7 @@ const REPO_MIGRATION_02: &str = "repo-migration-02";
 const STORE_MIGRATION_PROGRESS: &str = "store-migration-progress";
 const GENERATOR_KEY: &str = "last-path";
 
-#[tracing::instrument]
+#[tracing::instrument(skip(repo, hash), fields(hash = hex::encode(&hash)))]
 async fn migrate_identifiers_for_hash<T>(repo: &T, hash: ::sled::IVec) -> color_eyre::Result<()>
 where
     T: FullRepo,
@@ -584,7 +606,7 @@ where
     Ok(())
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(repo))]
 async fn migrate_identifier_details<T>(
     repo: &T,
     old: &FileId,
@@ -593,6 +615,11 @@ async fn migrate_identifier_details<T>(
 where
     T: FullRepo,
 {
+    if old == new {
+        tracing::warn!("Old FileId and new FileId are identical");
+        return Ok(());
+    }
+
     if let Some(details) = repo.details(old).await? {
         repo.relate_details(new, &details).await?;
         IdentifierRepo::cleanup(repo, old).await?;
@@ -601,25 +628,26 @@ where
     Ok(())
 }
 
-#[tracing::instrument(skip(old))]
+#[tracing::instrument(skip(repo, old, hash), fields(hash = hex::encode(&hash)))]
 async fn migrate_hash<T>(repo: &T, old: &old::Old, hash: ::sled::IVec) -> color_eyre::Result<()>
 where
     T: IdentifierRepo + HashRepo + AliasRepo + SettingsRepo + Debug,
 {
-    if HashRepo::create(repo, hash.to_vec().into()).await?.is_err() {
-        tracing::debug!("Duplicate hash detected");
+    let new_hash: T::Bytes = hash.to_vec().into();
+    let main_ident = old.main_identifier(&hash)?.to_vec();
+
+    if HashRepo::create(repo, new_hash.clone()).await?.is_err() {
+        tracing::warn!("Duplicate hash detected");
         return Ok(());
     }
 
-    let main_ident = old.main_identifier(&hash)?.to_vec();
-
-    repo.relate_identifier(hash.to_vec().into(), &main_ident)
+    repo.relate_identifier(new_hash.clone(), &main_ident)
         .await?;
 
     for alias in old.aliases(&hash) {
         if let Ok(Ok(())) = AliasRepo::create(repo, &alias).await {
-            let _ = repo.relate_alias(hash.to_vec().into(), &alias).await;
-            let _ = repo.relate_hash(&alias, hash.to_vec().into()).await;
+            let _ = repo.relate_alias(new_hash.clone(), &alias).await;
+            let _ = repo.relate_hash(&alias, new_hash.clone()).await;
 
             if let Ok(Some(delete_token)) = old.delete_token(&alias) {
                 let _ = repo.relate_delete_token(&alias, &delete_token).await;
@@ -629,7 +657,7 @@ where
 
     if let Ok(Some(identifier)) = old.motion_identifier(&hash) {
         let _ = repo
-            .relate_motion_identifier(hash.to_vec().into(), &identifier.to_vec())
+            .relate_motion_identifier(new_hash.clone(), &identifier.to_vec())
             .await;
     }
 
@@ -637,21 +665,12 @@ where
         let variant = variant_path.to_string_lossy().to_string();
 
         let _ = repo
-            .relate_variant_identifier(hash.to_vec().into(), variant, &identifier.to_vec())
+            .relate_variant_identifier(new_hash.clone(), variant, &identifier.to_vec())
             .await;
     }
 
     for (identifier, details) in old.details(&hash)? {
         let _ = repo.relate_details(&identifier.to_vec(), &details).await;
-    }
-
-    if let Ok(Some(value)) = old.setting(STORE_MIGRATION_PROGRESS.as_bytes()) {
-        repo.set(STORE_MIGRATION_PROGRESS, value.to_vec().into())
-            .await?;
-    }
-
-    if let Ok(Some(value)) = old.setting(GENERATOR_KEY.as_bytes()) {
-        repo.set(GENERATOR_KEY, value.to_vec().into()).await?;
     }
 
     Ok(())

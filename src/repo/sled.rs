@@ -170,7 +170,7 @@ fn insert_cache_inverse(
 
 #[async_trait::async_trait(?Send)]
 impl CachedRepo for SledRepo {
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn mark_cached(&self, alias: &Alias) -> Result<(), Error> {
         let now = DateTime::now();
         let now_bytes = serde_json::to_vec(&now)?;
@@ -186,7 +186,7 @@ impl CachedRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn update(&self, alias: &Alias) -> Result<Vec<Alias>, Error> {
         let now = DateTime::now();
         let now_bytes = serde_json::to_vec(&now)?;
@@ -475,14 +475,14 @@ impl SettingsRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, Error> {
         let opt = b!(self.settings, settings.get(key));
 
         Ok(opt)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn remove(&self, key: &'static str) -> Result<(), Error> {
         b!(self.settings, settings.remove(key));
 
@@ -505,7 +505,7 @@ fn variant_from_key(hash: &[u8], key: &[u8]) -> Option<String> {
 
 #[async_trait::async_trait(?Send)]
 impl IdentifierRepo for SledRepo {
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, identifier), fields(identifier = identifier.string_repr()))]
     async fn relate_details<I: Identifier>(
         &self,
         identifier: &I,
@@ -522,7 +522,7 @@ impl IdentifierRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, identifier), fields(identifier = identifier.string_repr()))]
     async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, Error> {
         let key = identifier.to_bytes()?;
 
@@ -535,7 +535,7 @@ impl IdentifierRepo for SledRepo {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, identifier), fields(identifier = identifier.string_repr()))]
     async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), Error> {
         let key = identifier.to_bytes()?;
 
@@ -568,7 +568,7 @@ impl HashRepo for SledRepo {
         Box::pin(from_iterator(iter, 8))
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, Error> {
         let res = b!(self.hashes, {
             let hash2 = hash.clone();
@@ -578,7 +578,7 @@ impl HashRepo for SledRepo {
         Ok(res.map_err(|_| AlreadyExists))
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error> {
         let key = hash_alias_key(&hash, alias);
         let value = alias.to_bytes();
@@ -588,7 +588,7 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error> {
         let key = hash_alias_key(&hash, alias);
 
@@ -597,7 +597,7 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, Error> {
         let v = b!(self.hash_aliases, {
             Ok(hash_aliases
@@ -611,7 +611,7 @@ impl HashRepo for SledRepo {
         Ok(v)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash, identifier), fields(hash = hex::encode(&hash), identifier = identifier.string_repr()))]
     async fn relate_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
@@ -624,7 +624,7 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn identifier<I: Identifier + 'static>(&self, hash: Self::Bytes) -> Result<I, Error> {
         let opt = b!(self.hash_identifiers, hash_identifiers.get(hash));
 
@@ -633,7 +633,7 @@ impl HashRepo for SledRepo {
             .and_then(|ivec| I::from_bytes(ivec.to_vec()))
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash, identifier), fields(hash = hex::encode(&hash), identifier = identifier.string_repr()))]
     async fn relate_variant_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
@@ -651,7 +651,7 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn variant_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
@@ -671,7 +671,7 @@ impl HashRepo for SledRepo {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn variants<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
@@ -693,7 +693,7 @@ impl HashRepo for SledRepo {
         Ok(vec)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), Error> {
         let key = variant_key(&hash, &variant);
 
@@ -705,7 +705,7 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash, identifier), fields(hash = hex::encode(&hash), identifier = identifier.string_repr()))]
     async fn relate_motion_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
@@ -721,7 +721,7 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn motion_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
@@ -738,7 +738,7 @@ impl HashRepo for SledRepo {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn cleanup(&self, hash: Self::Bytes) -> Result<(), Error> {
         let hash2 = hash.clone();
         b!(self.hashes, hashes.remove(hash2));
@@ -785,7 +785,7 @@ impl HashRepo for SledRepo {
 
 #[async_trait::async_trait(?Send)]
 impl AliasRepo for SledRepo {
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Error> {
         let bytes = alias.to_bytes();
         let bytes2 = bytes.clone();
@@ -798,7 +798,7 @@ impl AliasRepo for SledRepo {
         Ok(res.map_err(|_| AlreadyExists))
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn relate_delete_token(
         &self,
         alias: &Alias,
@@ -815,7 +815,7 @@ impl AliasRepo for SledRepo {
         Ok(res.map_err(|_| AlreadyExists))
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, Error> {
         let key = alias.to_bytes();
 
@@ -826,7 +826,7 @@ impl AliasRepo for SledRepo {
             .map_err(Error::from)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), Error> {
         let key = alias.to_bytes();
 
@@ -835,7 +835,7 @@ impl AliasRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, Error> {
         let key = alias.to_bytes();
 
@@ -844,7 +844,7 @@ impl AliasRepo for SledRepo {
         opt.ok_or(SledError::Missing).map_err(Error::from)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn cleanup(&self, alias: &Alias) -> Result<(), Error> {
         let key = alias.to_bytes();
 
