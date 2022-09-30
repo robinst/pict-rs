@@ -79,47 +79,33 @@ pub(crate) async fn details_store<S: Store>(
     store: &S,
     identifier: &S::Identifier,
 ) -> Result<Option<Details>, Error> {
-    let input_file = crate::tmp_file::tmp_file(None);
-    let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
-    crate::store::file_store::safe_create_parent(&input_file).await?;
-
-    let mut tmp_one = crate::file::File::create(&input_file).await?;
-    tmp_one
-        .write_from_stream(store.to_stream(identifier, None, None).await?)
-        .await?;
-    tmp_one.close().await?;
-
-    let process = Process::run(
-        "ffprobe",
-        &[
-            "-v",
-            "quiet",
-            "-select_streams",
-            "v:0",
-            "-count_frames",
-            "-show_entries",
-            "stream=width,height,nb_read_frames:format=format_name",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            input_file_str,
-        ],
-    )?;
-
-    let mut output = Vec::new();
-    process.read().read_to_end(&mut output).await?;
-    let output = String::from_utf8_lossy(&output);
-    tokio::fs::remove_file(input_file_str).await?;
-
-    parse_details(output)
+    details_file(move |mut tmp_one| async move {
+        let stream = store.to_stream(identifier, None, None).await?;
+        tmp_one.write_from_stream(stream).await?;
+        Ok(tmp_one)
+    })
+    .await
 }
 
 pub(crate) async fn details_bytes(input: Bytes) -> Result<Option<Details>, Error> {
+    details_file(move |mut tmp_one| async move {
+        tmp_one.write_from_bytes(input).await?;
+        Ok(tmp_one)
+    })
+    .await
+}
+
+async fn details_file<F, Fut>(f: F) -> Result<Option<Details>, Error>
+where
+    F: FnOnce(crate::file::File) -> Fut,
+    Fut: std::future::Future<Output = Result<crate::file::File, Error>>,
+{
     let input_file = crate::tmp_file::tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file).await?;
 
-    let mut tmp_one = crate::file::File::create(&input_file).await?;
-    tmp_one.write_from_bytes(input).await?;
+    let tmp_one = crate::file::File::create(&input_file).await?;
+    let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await?;
 
     let process = Process::run(
