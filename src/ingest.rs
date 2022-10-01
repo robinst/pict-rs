@@ -1,4 +1,5 @@
 use crate::{
+    bytes_stream::BytesStream,
     either::Either,
     error::{Error, UploadError},
     magick::ValidInputType,
@@ -6,7 +7,7 @@ use crate::{
     store::Store,
     CONFIG,
 };
-use actix_web::web::{Bytes, BytesMut};
+use actix_web::web::Bytes;
 use futures_util::{Stream, StreamExt};
 use sha2::{Digest, Sha256};
 use tracing::{Instrument, Span};
@@ -27,29 +28,17 @@ where
 }
 
 #[tracing::instrument(name = "Aggregate", skip(stream))]
-async fn aggregate<S>(stream: S) -> Result<Bytes, Error>
+async fn aggregate<S>(mut stream: S) -> Result<Bytes, Error>
 where
-    S: Stream<Item = Result<Bytes, Error>>,
+    S: Stream<Item = Result<Bytes, Error>> + Unpin,
 {
-    futures_util::pin_mut!(stream);
+    let mut buf = BytesStream::new();
 
-    let mut total_len = 0;
-    let mut buf = Vec::new();
-    tracing::debug!("Reading stream to memory");
     while let Some(res) = stream.next().await {
-        let bytes = res?;
-        total_len += bytes.len();
-        buf.push(bytes);
+        buf.add_bytes(res?);
     }
 
-    let bytes_mut = buf
-        .iter()
-        .fold(BytesMut::with_capacity(total_len), |mut acc, item| {
-            acc.extend_from_slice(item);
-            acc
-        });
-
-    Ok(bytes_mut.freeze())
+    Ok(buf.into_bytes())
 }
 
 #[tracing::instrument(name = "Ingest", skip(stream))]

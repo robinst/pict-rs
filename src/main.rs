@@ -24,6 +24,7 @@ use tracing_awc::Tracing;
 use tracing_futures::Instrument;
 
 mod backgrounded;
+mod bytes_stream;
 mod concurrent_processor;
 mod config;
 mod details;
