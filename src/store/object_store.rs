@@ -176,6 +176,21 @@ impl Store for ObjectStore {
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
+        let first_chunk = read_chunk(&mut stream).await?;
+
+        if first_chunk.len() < CHUNK_SIZE {
+            let (req, object_id) = self.put_object_request().await?;
+            let response = req.send_body(first_chunk).await?;
+
+            if !response.status().is_success() {
+                return Err(status_error(response).await);
+            }
+
+            return Ok(object_id);
+        }
+
+        let mut first_chunk = Some(first_chunk);
+
         let (req, object_id) = self.create_multipart_request().await?;
         let mut response = req.send().await.map_err(ObjectError::from)?;
 
@@ -197,7 +212,12 @@ impl Store for ObjectStore {
             while !complete {
                 part_number += 1;
 
-                let buf = read_chunk(&mut stream).await?;
+                let buf = if let Some(buf) = first_chunk.take() {
+                    buf
+                } else {
+                    read_chunk(&mut stream).await?
+                };
+
                 complete = buf.len() < CHUNK_SIZE;
 
                 let this = self.clone();
@@ -214,7 +234,7 @@ impl Store for ObjectStore {
                                 &upload_id2,
                             )
                             .await?
-                            .send_stream(buf.into_io_stream())
+                            .send_body(buf)
                             .await?;
 
                         if !response.status().is_success() {
@@ -234,7 +254,7 @@ impl Store for ObjectStore {
 
                         Ok(etag) as Result<String, Error>
                     }
-                    .instrument(tracing::info_span!("Upload Part")),
+                    .instrument(tracing::Span::current()),
                 );
 
                 futures.push(handle);
@@ -444,6 +464,8 @@ impl ObjectStore {
             upload_id,
         );
 
+        let length = buf.len();
+
         let hashing_span = tracing::info_span!("Hashing request body");
         let hash_string = actix_web::web::block(move || {
             let guard = hashing_span.enter();
@@ -463,6 +485,9 @@ impl ObjectStore {
             .headers_mut()
             .insert("content-type", "application/octet-stream");
         action.headers_mut().insert("content-md5", hash_string);
+        action
+            .headers_mut()
+            .insert("content-length", length.to_string());
 
         Ok(self.build_request(action))
     }

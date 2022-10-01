@@ -236,7 +236,7 @@ impl FileStore {
         // try writing
         debug!("Writing to {:?}", path.as_ref());
         if let Err(e) = file.write_from_bytes(bytes).await {
-            error!("Error writing {:?}, {}", path.as_ref(), e);
+            error!("Error writing {:?}, {}", path.as_ref(), format!("{}", e));
             // remove file if writing failed before completion
             self.safe_remove_file(path).await?;
             return Err(e.into());
