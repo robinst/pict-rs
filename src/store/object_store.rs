@@ -179,6 +179,7 @@ impl Store for ObjectStore {
         let first_chunk = read_chunk(&mut stream).await?;
 
         if first_chunk.len() < CHUNK_SIZE {
+            drop(stream);
             let (req, object_id) = self.put_object_request().await?;
             let response = req.send_body(first_chunk).await?;
 
