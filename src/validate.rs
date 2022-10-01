@@ -1,5 +1,5 @@
 use crate::{
-    config::ImageFormat,
+    config::{AudioCodec, ImageFormat, VideoCodec},
     either::Either,
     error::{Error, UploadError},
     ffmpeg::InputFormat,
@@ -36,12 +36,14 @@ impl AsyncRead for UnvalidatedBytes {
     }
 }
 
-#[instrument(name = "Validate image", skip(bytes))]
-pub(crate) async fn validate_image_bytes(
+#[instrument(name = "Validate media", skip(bytes))]
+pub(crate) async fn validate_bytes(
     bytes: Bytes,
     prescribed_format: Option<ImageFormat>,
     enable_silent_video: bool,
     enable_full_video: bool,
+    video_codec: VideoCodec,
+    audio_codec: Option<AudioCodec>,
     validate: bool,
 ) -> Result<(ValidInputType, impl AsyncRead + Unpin), Error> {
     let input_type =
@@ -63,7 +65,14 @@ pub(crate) async fn validate_image_bytes(
             Ok((
                 ValidInputType::Mp4,
                 Either::right(Either::left(
-                    crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Gif, false).await?,
+                    crate::ffmpeg::trancsocde_bytes(
+                        bytes,
+                        InputFormat::Gif,
+                        false,
+                        video_codec,
+                        audio_codec,
+                    )
+                    .await?,
                 )),
             ))
         }
@@ -74,7 +83,14 @@ pub(crate) async fn validate_image_bytes(
             Ok((
                 ValidInputType::Mp4,
                 Either::right(Either::left(
-                    crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Mp4, enable_full_video).await?,
+                    crate::ffmpeg::trancsocde_bytes(
+                        bytes,
+                        InputFormat::Mp4,
+                        enable_full_video,
+                        video_codec,
+                        audio_codec,
+                    )
+                    .await?,
                 )),
             ))
         }
@@ -85,8 +101,14 @@ pub(crate) async fn validate_image_bytes(
             Ok((
                 ValidInputType::Mp4,
                 Either::right(Either::left(
-                    crate::ffmpeg::to_mp4_bytes(bytes, InputFormat::Webm, enable_full_video)
-                        .await?,
+                    crate::ffmpeg::trancsocde_bytes(
+                        bytes,
+                        InputFormat::Webm,
+                        enable_full_video,
+                        video_codec,
+                        audio_codec,
+                    )
+                    .await?,
                 )),
             ))
         }

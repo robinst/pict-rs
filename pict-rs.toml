@@ -159,6 +159,26 @@ enable_silent_video = true
 # default: false
 enable_full_video = false
 
+## Optional: set the default video codec
+# environment variable: PICTRS__MEDIA__VIDEO_CODEC
+# default: h264
+#
+# available options: av1, h264, h265, vp8, vp9
+# this setting does nothing if video is not enabled
+video_codec = "h264"
+
+## Optional: set the default audio codec
+# environment variable: PICTRS__MEDIA__AUDIO_CODEC
+# default: empty
+#
+# available options: aac, opus, vorbis
+# The audio codec is automatically selected based on video codec, but can be overriden
+# av1, vp8, and vp9 map to opus
+# h264 and h265 map to aac
+# vorbis is not default for any codec
+# this setting does nothing if full video is not enabled
+audio_codec = "aac"
+
 ## Optional: set allowed filters for image processing
 # environment variable: PICTRS__MEDIA__FILTERS
 # default: ['blur', 'crop', 'identity', 'resize', 'thumbnail']

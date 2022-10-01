@@ -1,5 +1,5 @@
 use crate::{
-    config::primitives::{ImageFormat, LogFormat, Targets},
+    config::primitives::{AudioCodec, ImageFormat, LogFormat, Targets, VideoCodec},
     serde_str::Serde,
 };
 use clap::{Parser, Subcommand};
@@ -54,6 +54,8 @@ impl Args {
                 media_max_frame_count,
                 media_enable_silent_video,
                 media_enable_full_video,
+                media_video_codec,
+                media_audio_codec,
                 media_filters,
                 media_format,
                 media_cache_duration,
@@ -74,6 +76,8 @@ impl Args {
                     max_frame_count: media_max_frame_count,
                     enable_silent_video: media_enable_silent_video,
                     enable_full_video: media_enable_full_video,
+                    video_codec: media_video_codec,
+                    audio_codec: media_audio_codec,
                     filters: media_filters,
                     format: media_format,
                     cache_duration: media_cache_duration,
@@ -322,6 +326,10 @@ struct Media {
     #[serde(skip_serializing_if = "Option::is_none")]
     enable_full_video: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    video_codec: Option<VideoCodec>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_codec: Option<AudioCodec>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     filters: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<ImageFormat>,
@@ -423,12 +431,18 @@ struct Run {
     /// The maximum number of frames allowed for uploaded GIF and MP4s.
     #[arg(long)]
     media_max_frame_count: Option<usize>,
-    /// Whether to enable GIF and silent MP4 uploads
+    /// Whether to enable GIF and silent video uploads
     #[arg(long)]
     media_enable_silent_video: Option<bool>,
-    /// Whether to enable full MP4 uploads
+    /// Whether to enable full video uploads
     #[arg(long)]
     media_enable_full_video: Option<bool>,
+    /// Enforce a specific video codec for uploaded videos
+    #[arg(long)]
+    media_video_codec: Option<VideoCodec>,
+    /// Enforce a specific audio codec for uploaded videos
+    #[arg(long)]
+    media_audio_codec: Option<AudioCodec>,
     /// Which media filters should be enabled on the `process` endpoint
     #[arg(long)]
     media_filters: Option<Vec<String>>,

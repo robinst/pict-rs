@@ -1,5 +1,5 @@
 use crate::{
-    config::primitives::{ImageFormat, LogFormat, Store, Targets},
+    config::primitives::{AudioCodec, ImageFormat, LogFormat, Store, Targets, VideoCodec},
     serde_str::Serde,
 };
 use once_cell::sync::OnceCell;
@@ -103,6 +103,10 @@ pub(crate) struct Media {
     pub(crate) enable_silent_video: bool,
 
     pub(crate) enable_full_video: bool,
+
+    pub(crate) video_codec: VideoCodec,
+
+    pub(crate) audio_codec: Option<AudioCodec>,
 
     pub(crate) filters: BTreeSet<String>,
 

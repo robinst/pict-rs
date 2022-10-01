@@ -80,9 +80,13 @@ Options:
       --media-max-frame-count <MEDIA_MAX_FRAME_COUNT>
           The maximum number of frames allowed for uploaded GIF and MP4s
       --media-enable-silent-video <MEDIA_ENABLE_SILENT_VIDEO>
-          Whether to enable GIF and silent MP4 uploads [possible values: true, false]
+          Whether to enable GIF and silent video uploads [possible values: true, false]
       --media-enable-full-video <MEDIA_ENABLE_FULL_VIDEO>
-          Whether to enable full MP4 uploads [possible values: true, false]
+          Whether to enable full video uploads [possible values: true, false]
+      --media-video-codec <MEDIA_VIDEO_CODEC>
+          Enforce a specific video codec for uploaded videos [possible values: h264, h265, av1, vp8, vp9]
+      --media-audio-codec <MEDIA_AUDIO_CODEC>
+          Enforce a specific audio codec for uploaded videos [possible values: aac, opus, vorbis]
       --media-filters <MEDIA_FILTERS>
           Which media filters should be enabled on the `process` endpoint
       --media-format <MEDIA_FORMAT>

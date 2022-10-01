@@ -1,4 +1,10 @@
-use crate::{error::Error, magick::ValidInputType, serde_str::Serde, store::Store};
+use crate::{
+    error::Error,
+    ffmpeg::InputFormat,
+    magick::{video_mp4, video_webm, ValidInputType},
+    serde_str::Serde,
+    store::Store,
+};
 use actix_web::web;
 
 #[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -92,6 +98,22 @@ impl Details {
 
     pub(crate) fn system_time(&self) -> std::time::SystemTime {
         self.created_at.into()
+    }
+
+    pub(crate) fn to_input_format(&self) -> Option<InputFormat> {
+        if *self.content_type == mime::IMAGE_GIF {
+            return Some(InputFormat::Gif);
+        }
+
+        if *self.content_type == video_mp4() {
+            return Some(InputFormat::Mp4);
+        }
+
+        if *self.content_type == video_webm() {
+            return Some(InputFormat::Webm);
+        }
+
+        None
     }
 }
 

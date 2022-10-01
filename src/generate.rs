@@ -20,6 +20,8 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     alias: Alias,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
+    input_format: Option<InputFormat>,
+    thumbnail_format: Option<ThumbnailFormat>,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
     let process_fut = process(
@@ -29,6 +31,8 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
         alias,
         thumbnail_path.clone(),
         thumbnail_args,
+        input_format,
+        thumbnail_format,
         hash.clone(),
     );
 
@@ -46,6 +50,8 @@ async fn process<R: FullRepo, S: Store + 'static>(
     alias: Alias,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
+    input_format: Option<InputFormat>,
+    thumbnail_format: Option<ThumbnailFormat>,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
     let permit = crate::PROCESS_SEMAPHORE.acquire().await;
@@ -60,8 +66,8 @@ async fn process<R: FullRepo, S: Store + 'static>(
         let reader = crate::ffmpeg::thumbnail(
             store.clone(),
             identifier,
-            InputFormat::Mp4,
-            ThumbnailFormat::Jpeg,
+            input_format.unwrap_or(InputFormat::Mp4),
+            thumbnail_format.unwrap_or(ThumbnailFormat::Jpeg),
         )
         .await?;
         let motion_identifier = store.save_async_read(reader).await?;

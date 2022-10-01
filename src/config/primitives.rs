@@ -45,6 +45,48 @@ pub(crate) enum ImageFormat {
     Png,
 }
 
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Deserialize,
+    serde::Serialize,
+    ValueEnum,
+)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum VideoCodec {
+    H264,
+    H265,
+    Av1,
+    Vp8,
+    Vp9,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Deserialize,
+    serde::Serialize,
+    ValueEnum,
+)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AudioCodec {
+    Aac,
+    Opus,
+    Vorbis,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Targets {
     pub(crate) targets: tracing_subscriber::filter::Targets,

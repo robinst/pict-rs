@@ -11,7 +11,9 @@ use defaults::Defaults;
 
 pub(crate) use commandline::Operation;
 pub(crate) use file::{ConfigFile as Configuration, OpenTelemetry, Repo, Sled, Tracing};
-pub(crate) use primitives::{Filesystem, ImageFormat, LogFormat, ObjectStorage, Store};
+pub(crate) use primitives::{
+    AudioCodec, Filesystem, ImageFormat, LogFormat, ObjectStorage, Store, VideoCodec,
+};
 
 pub(crate) fn configure() -> color_eyre::Result<(Configuration, Operation)> {
     let Output {

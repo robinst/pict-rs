@@ -1,6 +1,7 @@
 [server]
 address = '0.0.0.0:8080'
 worker_id = 'pict-rs-1'
+
 [tracing.logging]
 format = 'normal'
 targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
@@ -23,6 +24,7 @@ max_file_size = 40
 max_frame_count = 900
 enable_silent_video = true
 enable_full_video = false
+video_codec = 'h264'
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 skip_validate_imports = false
 cache_duration = 168

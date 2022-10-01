@@ -70,11 +70,13 @@ where
     let bytes = aggregate(stream).await?;
 
     tracing::debug!("Validating bytes");
-    let (input_type, validated_reader) = crate::validate::validate_image_bytes(
+    let (input_type, validated_reader) = crate::validate::validate_bytes(
         bytes,
         CONFIG.media.format,
         CONFIG.media.enable_silent_video,
         CONFIG.media.enable_full_video,
+        CONFIG.media.video_codec,
+        CONFIG.media.audio_codec,
         should_validate,
     )
     .await?;

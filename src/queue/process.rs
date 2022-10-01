@@ -149,6 +149,8 @@ async fn generate<R: FullRepo, S: Store + 'static>(
         return Ok(());
     }
 
+    let original_details = crate::ensure_details(repo, store, &source).await?;
+
     crate::generate::generate(
         repo,
         store,
@@ -156,6 +158,8 @@ async fn generate<R: FullRepo, S: Store + 'static>(
         source,
         process_path,
         process_args,
+        original_details.to_input_format(),
+        None,
         hash,
     )
     .await?;

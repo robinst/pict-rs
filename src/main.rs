@@ -48,8 +48,6 @@ mod stream;
 mod tmp_file;
 mod validate;
 
-use crate::magick::ValidInputType;
-
 use self::{
     backgrounded::Backgrounded,
     config::{Configuration, ImageFormat, Operation},
@@ -58,7 +56,7 @@ use self::{
     error::{Error, UploadError},
     ingest::Session,
     init_tracing::init_tracing,
-    magick::details_hint,
+    magick::{details_hint, ValidInputType},
     middleware::{Deadline, Internal},
     queue::queue_generate,
     repo::{
@@ -597,6 +595,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
     let hash = repo.hash(&alias).await?;
+
     let identifier_opt = repo
         .variant_identifier::<S::Identifier>(hash.clone(), path_string)
         .await?;
@@ -624,6 +623,8 @@ async fn process<R: FullRepo, S: Store + 'static>(
         return ranged_file_resp(&store, identifier, range, details).await;
     }
 
+    let original_details = ensure_details(&repo, &store, &alias).await?;
+
     let (details, bytes) = generate::generate(
         &repo,
         &store,
@@ -631,6 +632,8 @@ async fn process<R: FullRepo, S: Store + 'static>(
         alias,
         thumbnail_path,
         thumbnail_args,
+        original_details.to_input_format(),
+        None,
         hash,
     )
     .await?;

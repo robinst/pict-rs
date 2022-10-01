@@ -1,4 +1,5 @@
 use crate::{
+    config::{AudioCodec, VideoCodec},
     error::{Error, UploadError},
     magick::{Details, ValidInputType},
     process::Process,
@@ -8,25 +9,31 @@ use actix_web::web::Bytes;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::instrument;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum InputFormat {
     Gif,
     Mp4,
     Webm,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum OutputFormat {
+    Mp4,
+    Webm,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum ThumbnailFormat {
     Jpeg,
     // Webp,
 }
 
 impl InputFormat {
-    fn to_ext(self) -> &'static str {
+    const fn to_ext(self) -> &'static str {
         match self {
-            InputFormat::Gif => ".gif",
-            InputFormat::Mp4 => ".mp4",
-            InputFormat::Webm => ".webm",
+            Self::Gif => ".gif",
+            Self::Mp4 => ".mp4",
+            Self::Webm => ".webm",
         }
     }
 
@@ -40,23 +47,69 @@ impl InputFormat {
 }
 
 impl ThumbnailFormat {
-    fn as_codec(self) -> &'static str {
+    const fn as_ffmpeg_codec(self) -> &'static str {
         match self {
-            ThumbnailFormat::Jpeg => "mjpeg",
-            // ThumbnailFormat::Webp => "webp",
+            Self::Jpeg => "mjpeg",
+            // Self::Webp => "webp",
         }
     }
 
-    fn to_ext(self) -> &'static str {
+    const fn to_ext(self) -> &'static str {
         match self {
-            ThumbnailFormat::Jpeg => ".jpeg",
+            Self::Jpeg => ".jpeg",
+            // Self::Webp => ".webp",
         }
     }
 
-    fn as_format(self) -> &'static str {
+    const fn as_ffmpeg_format(self) -> &'static str {
         match self {
-            ThumbnailFormat::Jpeg => "image2",
-            // ThumbnailFormat::Webp => "webp",
+            Self::Jpeg => "image2",
+            // Self::Webp => "webp",
+        }
+    }
+}
+
+impl OutputFormat {
+    const fn to_ffmpeg_format(self) -> &'static str {
+        match self {
+            Self::Mp4 => "mp4",
+            Self::Webm => "webm",
+        }
+    }
+
+    const fn default_audio_codec(self) -> AudioCodec {
+        match self {
+            Self::Mp4 => AudioCodec::Aac,
+            Self::Webm => AudioCodec::Opus,
+        }
+    }
+}
+
+impl VideoCodec {
+    const fn to_output_format(self) -> OutputFormat {
+        match self {
+            Self::H264 | Self::H265 => OutputFormat::Mp4,
+            Self::Av1 | Self::Vp8 | Self::Vp9 => OutputFormat::Webm,
+        }
+    }
+
+    const fn to_ffmpeg_codec(self) -> &'static str {
+        match self {
+            Self::Av1 => "av1",
+            Self::H264 => "h264",
+            Self::H265 => "hevc",
+            Self::Vp8 => "vp8",
+            Self::Vp9 => "vp9",
+        }
+    }
+}
+
+impl AudioCodec {
+    const fn to_ffmpeg_codec(self) -> &'static str {
+        match self {
+            Self::Aac => "aac",
+            Self::Opus => "opus",
+            Self::Vorbis => "vorbis",
         }
     }
 }
@@ -184,11 +237,13 @@ fn parse_details_inner(
     })
 }
 
-#[tracing::instrument(name = "Convert to Mp4", skip(input))]
-pub(crate) async fn to_mp4_bytes(
+#[tracing::instrument(name = "Transcode video", skip(input))]
+pub(crate) async fn trancsocde_bytes(
     input: Bytes,
     input_format: InputFormat,
     permit_audio: bool,
+    video_codec: VideoCodec,
+    audio_codec: Option<AudioCodec>,
 ) -> Result<impl AsyncRead + Unpin, Error> {
     let input_file = crate::tmp_file::tmp_file(Some(input_format.to_ext()));
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
@@ -202,6 +257,9 @@ pub(crate) async fn to_mp4_bytes(
     tmp_one.write_from_bytes(input).await?;
     tmp_one.close().await?;
 
+    let output_format = video_codec.to_output_format();
+    let audio_codec = audio_codec.unwrap_or(output_format.default_audio_codec());
+
     let process = if permit_audio {
         Process::run(
             "ffmpeg",
@@ -213,11 +271,11 @@ pub(crate) async fn to_mp4_bytes(
                 "-vf",
                 "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                 "-c:a",
-                "aac",
+                audio_codec.to_ffmpeg_codec(),
                 "-c:v",
-                "h264",
+                video_codec.to_ffmpeg_codec(),
                 "-f",
-                "mp4",
+                output_format.to_ffmpeg_format(),
                 output_file_str,
             ],
         )?
@@ -233,9 +291,9 @@ pub(crate) async fn to_mp4_bytes(
                 "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                 "-an",
                 "-c:v",
-                "h264",
+                video_codec.to_ffmpeg_codec(),
                 "-f",
-                "mp4",
+                output_format.to_ffmpeg_format(),
                 output_file_str,
             ],
         )?
@@ -281,9 +339,9 @@ pub(crate) async fn thumbnail<S: Store>(
             "-vframes",
             "1",
             "-codec",
-            format.as_codec(),
+            format.as_ffmpeg_codec(),
             "-f",
-            format.as_format(),
+            format.as_ffmpeg_format(),
             output_file_str,
         ],
     )?;

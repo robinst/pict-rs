@@ -1,5 +1,5 @@
 use crate::{
-    config::primitives::{LogFormat, Targets},
+    config::primitives::{LogFormat, Targets, VideoCodec},
     serde_str::Serde,
 };
 use std::{net::SocketAddr, path::PathBuf};
@@ -68,6 +68,7 @@ struct MediaDefaults {
     max_frame_count: usize,
     enable_silent_video: bool,
     enable_full_video: bool,
+    video_codec: VideoCodec,
     filters: Vec<String>,
     skip_validate_imports: bool,
     cache_duration: i64,
@@ -155,6 +156,7 @@ impl Default for MediaDefaults {
             max_frame_count: 900,
             enable_silent_video: true,
             enable_full_video: false,
+            video_codec: VideoCodec::H264,
             filters: vec![
                 "blur".into(),
                 "crop".into(),
