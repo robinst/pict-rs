@@ -29,7 +29,7 @@ pub(crate) enum ThumbnailFormat {
 }
 
 impl InputFormat {
-    const fn to_ext(self) -> &'static str {
+    const fn to_file_extension(self) -> &'static str {
         match self {
             Self::Gif => ".gif",
             Self::Mp4 => ".mp4",
@@ -54,7 +54,7 @@ impl ThumbnailFormat {
         }
     }
 
-    const fn to_ext(self) -> &'static str {
+    const fn to_file_extension(self) -> &'static str {
         match self {
             Self::Jpeg => ".jpeg",
             // Self::Webp => ".webp",
@@ -81,6 +81,13 @@ impl OutputFormat {
         match self {
             Self::Mp4 => AudioCodec::Aac,
             Self::Webm => AudioCodec::Opus,
+        }
+    }
+
+    const fn to_file_extension(self) -> &'static str {
+        match self {
+            Self::Mp4 => ".mp4",
+            Self::Webm => ".webm",
         }
     }
 }
@@ -245,11 +252,12 @@ pub(crate) async fn trancsocde_bytes(
     video_codec: VideoCodec,
     audio_codec: Option<AudioCodec>,
 ) -> Result<impl AsyncRead + Unpin, Error> {
-    let input_file = crate::tmp_file::tmp_file(Some(input_format.to_ext()));
+    let input_file = crate::tmp_file::tmp_file(Some(input_format.to_file_extension()));
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file).await?;
 
-    let output_file = crate::tmp_file::tmp_file(Some(".mp4"));
+    let output_file =
+        crate::tmp_file::tmp_file(Some(video_codec.to_output_format().to_file_extension()));
     let output_file_str = output_file.to_str().ok_or(UploadError::Path)?;
     crate::store::file_store::safe_create_parent(&output_file).await?;
 
@@ -317,11 +325,11 @@ pub(crate) async fn thumbnail<S: Store>(
     input_format: InputFormat,
     format: ThumbnailFormat,
 ) -> Result<impl AsyncRead + Unpin, Error> {
-    let input_file = crate::tmp_file::tmp_file(Some(input_format.to_ext()));
+    let input_file = crate::tmp_file::tmp_file(Some(input_format.to_file_extension()));
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file).await?;
 
-    let output_file = crate::tmp_file::tmp_file(Some(format.to_ext()));
+    let output_file = crate::tmp_file::tmp_file(Some(format.to_file_extension()));
     let output_file_str = output_file.to_str().ok_or(UploadError::Path)?;
     crate::store::file_store::safe_create_parent(&output_file).await?;
 

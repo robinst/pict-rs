@@ -63,7 +63,7 @@ pub(crate) async fn validate_bytes(
                 return Err(UploadError::SilentVideoDisabled.into());
             }
             Ok((
-                ValidInputType::Mp4,
+                ValidInputType::from_video_codec(video_codec),
                 Either::right(Either::left(
                     crate::ffmpeg::trancsocde_bytes(
                         bytes,
@@ -81,7 +81,7 @@ pub(crate) async fn validate_bytes(
                 return Err(UploadError::SilentVideoDisabled.into());
             }
             Ok((
-                ValidInputType::Mp4,
+                ValidInputType::from_video_codec(video_codec),
                 Either::right(Either::left(
                     crate::ffmpeg::trancsocde_bytes(
                         bytes,
@@ -99,7 +99,7 @@ pub(crate) async fn validate_bytes(
                 return Err(UploadError::SilentVideoDisabled.into());
             }
             Ok((
-                ValidInputType::Mp4,
+                ValidInputType::from_video_codec(video_codec),
                 Either::right(Either::left(
                     crate::ffmpeg::trancsocde_bytes(
                         bytes,

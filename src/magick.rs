@@ -1,5 +1,5 @@
 use crate::{
-    config::ImageFormat,
+    config::{ImageFormat, VideoCodec},
     error::{Error, UploadError},
     process::Process,
     repo::Alias,
@@ -78,6 +78,13 @@ impl ValidInputType {
             Self::Webm => Some(".webm"),
             Self::Gif => Some(".gif"),
             _ => None,
+        }
+    }
+
+    pub(crate) fn from_video_codec(codec: VideoCodec) -> Self {
+        match codec {
+            VideoCodec::Av1 | VideoCodec::Vp8 | VideoCodec::Vp9 => Self::Webm,
+            VideoCodec::H264 | VideoCodec::H265 => Self::Mp4,
         }
     }
 

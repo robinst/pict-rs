@@ -21,7 +21,7 @@ services:
       - ../../:/opt/app
 
   pictrs_proxy:
-    image: asonix/pictrs-proxy:0.4.0-alpha.4
+    image: asonix/pictrs-proxy:0.4.0-beta.1
     ports:
       - "8081:8081"
     environment:

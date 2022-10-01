@@ -23,6 +23,7 @@ max_area = 40000000
 max_file_size = 40
 enable_silent_video = true
 enable_full_video = true
+video_codec = "vp9"
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 skip_validate_imports = false
 
