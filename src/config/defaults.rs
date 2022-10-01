@@ -156,7 +156,7 @@ impl Default for MediaDefaults {
             max_frame_count: 900,
             enable_silent_video: true,
             enable_full_video: false,
-            video_codec: VideoCodec::H264,
+            video_codec: VideoCodec::Vp9,
             filters: vec![
                 "blur".into(),
                 "crop".into(),
