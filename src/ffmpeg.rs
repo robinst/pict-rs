@@ -266,7 +266,7 @@ pub(crate) async fn trancsocde_bytes(
     tmp_one.close().await?;
 
     let output_format = video_codec.to_output_format();
-    let audio_codec = audio_codec.unwrap_or(output_format.default_audio_codec());
+    let audio_codec = audio_codec.unwrap_or_else(|| output_format.default_audio_codec());
 
     let process = if permit_audio {
         Process::run(

@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
 
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(hash))]
 pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
@@ -42,6 +43,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     Ok((details, bytes))
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(hash))]
 async fn process<R: FullRepo, S: Store + 'static>(
     repo: &R,
