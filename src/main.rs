@@ -958,6 +958,7 @@ async fn aliases<R: FullRepo>(
     })))
 }
 
+#[instrument(name = "Fetching identifier", skip(repo))]
 async fn identifier<R: FullRepo, S: Store>(
     query: web::Query<AliasQuery>,
     repo: web::Data<R>,

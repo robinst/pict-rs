@@ -3,7 +3,7 @@ use crate::{
     config::ImageFormat,
     details::Details,
     error::Error,
-    ffmpeg::{InputFormat, ThumbnailFormat},
+    ffmpeg::{ThumbnailFormat, VideoFormat},
     repo::{Alias, FullRepo},
     store::Store,
 };
@@ -21,7 +21,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     alias: Alias,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
-    input_format: Option<InputFormat>,
+    input_format: Option<VideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
@@ -52,7 +52,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     alias: Alias,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
-    input_format: Option<InputFormat>,
+    input_format: Option<VideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
@@ -68,7 +68,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
         let reader = crate::ffmpeg::thumbnail(
             store.clone(),
             identifier,
-            input_format.unwrap_or(InputFormat::Mp4),
+            input_format.unwrap_or(VideoFormat::Mp4),
             thumbnail_format.unwrap_or(ThumbnailFormat::Jpeg),
         )
         .await?;

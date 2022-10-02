@@ -13,7 +13,7 @@ use std::{
 use storage_path_generator::Generator;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::io::StreamReader;
-use tracing::{debug, error, instrument, Instrument};
+use tracing::Instrument;
 
 mod file_id;
 pub(crate) use file_id::FileId;
@@ -211,7 +211,6 @@ impl FileStore {
     }
 
     // Try writing to a file
-    #[instrument(name = "Saving file", skip(bytes), fields(path = tracing::field::debug(&path.as_ref())))]
     async fn safe_save_bytes<P: AsRef<Path>>(
         &self,
         path: P,
@@ -220,7 +219,6 @@ impl FileStore {
         safe_create_parent(&path).await?;
 
         // Only write the file if it doesn't already exist
-        debug!("Checking if {:?} already exists", path.as_ref());
         if let Err(e) = tokio::fs::metadata(&path).await {
             if e.kind() != std::io::ErrorKind::NotFound {
                 return Err(e.into());
@@ -230,23 +228,18 @@ impl FileStore {
         }
 
         // Open the file for writing
-        debug!("Creating {:?}", path.as_ref());
         let mut file = File::create(&path).await?;
 
         // try writing
-        debug!("Writing to {:?}", path.as_ref());
         if let Err(e) = file.write_from_bytes(bytes).await {
-            error!("Error writing {:?}, {}", path.as_ref(), format!("{}", e));
             // remove file if writing failed before completion
             self.safe_remove_file(path).await?;
             return Err(e.into());
         }
-        debug!("{:?} written", path.as_ref());
 
         Ok(())
     }
 
-    #[instrument(skip(input), fields(to = tracing::field::debug(&to.as_ref())))]
     async fn safe_save_reader<P: AsRef<Path>>(
         &self,
         to: P,
@@ -254,7 +247,6 @@ impl FileStore {
     ) -> Result<(), FileError> {
         safe_create_parent(&to).await?;
 
-        debug!("Checking if {:?} already exists", to.as_ref());
         if let Err(e) = tokio::fs::metadata(&to).await {
             if e.kind() != std::io::ErrorKind::NotFound {
                 return Err(e.into());
@@ -262,8 +254,6 @@ impl FileStore {
         } else {
             return Err(FileError::FileExists);
         }
-
-        debug!("Writing stream to {:?}", to.as_ref());
 
         let mut file = File::create(to).await?;
 
@@ -275,7 +265,6 @@ impl FileStore {
 
 pub(crate) async fn safe_create_parent<P: AsRef<Path>>(path: P) -> Result<(), FileError> {
     if let Some(path) = path.as_ref().parent() {
-        debug!("Creating directory {:?}", path);
         tokio::fs::create_dir_all(path).await?;
     }
 

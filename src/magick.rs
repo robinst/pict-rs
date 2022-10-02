@@ -10,7 +10,6 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt},
     process::Command,
 };
-use tracing::instrument;
 
 pub(crate) fn details_hint(alias: &Alias) -> Option<ValidInputType> {
     let ext = alias.extension()?;
@@ -114,14 +113,7 @@ pub(crate) struct Details {
     pub(crate) frames: Option<usize>,
 }
 
-#[tracing::instrument(name = "Clear Metadata", skip(input))]
-pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> std::io::Result<impl AsyncRead + Unpin> {
-    let process = Process::run("magick", &["convert", "-", "-strip", "-"])?;
-
-    Ok(process.bytes_read(input))
-}
-
-#[tracing::instrument(name = "Convert", skip(input))]
+#[tracing::instrument(level = "debug", skip(input))]
 pub(crate) fn convert_bytes_read(
     input: Bytes,
     format: ImageFormat,
@@ -139,7 +131,7 @@ pub(crate) fn convert_bytes_read(
     Ok(process.bytes_read(input))
 }
 
-#[instrument(name = "Getting details from input bytes", skip(input))]
+#[tracing::instrument(skip(input))]
 pub(crate) async fn details_bytes(
     input: Bytes,
     hint: Option<ValidInputType>,
@@ -290,7 +282,6 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
     })
 }
 
-#[instrument(name = "Getting input type from bytes", skip(input))]
 pub(crate) async fn input_type_bytes(input: Bytes) -> Result<ValidInputType, Error> {
     details_bytes(input, None).await?.validate_input()
 }
@@ -308,7 +299,6 @@ fn process_image(args: Vec<String>, format: ImageFormat) -> std::io::Result<Proc
     )
 }
 
-#[instrument(name = "Spawning process command")]
 pub(crate) fn process_image_store_read<S: Store + 'static>(
     store: S,
     identifier: S::Identifier,
@@ -318,7 +308,6 @@ pub(crate) fn process_image_store_read<S: Store + 'static>(
     Ok(process_image(args, format)?.store_read(store, identifier))
 }
 
-#[instrument(name = "Spawning process command", skip(async_read))]
 pub(crate) fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
     async_read: A,
     args: Vec<String>,
@@ -328,7 +317,7 @@ pub(crate) fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
 }
 
 impl Details {
-    #[instrument(name = "Validating input type")]
+    #[tracing::instrument(level = "debug", name = "Validating input type")]
     pub(crate) fn validate_input(&self) -> Result<ValidInputType, Error> {
         if self.width > crate::CONFIG.media.max_width
             || self.height > crate::CONFIG.media.max_height

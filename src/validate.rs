@@ -2,12 +2,11 @@ use crate::{
     config::{AudioCodec, ImageFormat, VideoCodec},
     either::Either,
     error::{Error, UploadError},
-    ffmpeg::InputFormat,
+    ffmpeg::FileFormat,
     magick::ValidInputType,
 };
 use actix_web::web::Bytes;
 use tokio::io::AsyncRead;
-use tracing::instrument;
 
 struct UnvalidatedBytes {
     bytes: Bytes,
@@ -36,7 +35,7 @@ impl AsyncRead for UnvalidatedBytes {
     }
 }
 
-#[instrument(name = "Validate media", skip(bytes))]
+#[tracing::instrument(skip_all)]
 pub(crate) async fn validate_bytes(
     bytes: Bytes,
     prescribed_format: Option<ImageFormat>,
@@ -57,8 +56,8 @@ pub(crate) async fn validate_bytes(
         return Ok((input_type, Either::left(UnvalidatedBytes::new(bytes))));
     }
 
-    match (prescribed_format, input_type) {
-        (_, ValidInputType::Gif) => {
+    match (input_type.to_file_format(), prescribed_format) {
+        (FileFormat::Video(video_format), _) => {
             if !(enable_silent_video || enable_full_video) {
                 return Err(UploadError::SilentVideoDisabled.into());
             }
@@ -67,25 +66,7 @@ pub(crate) async fn validate_bytes(
                 Either::right(Either::left(
                     crate::ffmpeg::trancsocde_bytes(
                         bytes,
-                        InputFormat::Gif,
-                        false,
-                        video_codec,
-                        audio_codec,
-                    )
-                    .await?,
-                )),
-            ))
-        }
-        (_, ValidInputType::Mp4) => {
-            if !(enable_silent_video || enable_full_video) {
-                return Err(UploadError::SilentVideoDisabled.into());
-            }
-            Ok((
-                ValidInputType::from_video_codec(video_codec),
-                Either::right(Either::left(
-                    crate::ffmpeg::trancsocde_bytes(
-                        bytes,
-                        InputFormat::Mp4,
+                        video_format,
                         enable_full_video,
                         video_codec,
                         audio_codec,
@@ -94,47 +75,17 @@ pub(crate) async fn validate_bytes(
                 )),
             ))
         }
-        (_, ValidInputType::Webm) => {
-            if !(enable_silent_video || enable_full_video) {
-                return Err(UploadError::SilentVideoDisabled.into());
-            }
-            Ok((
-                ValidInputType::from_video_codec(video_codec),
-                Either::right(Either::left(
-                    crate::ffmpeg::trancsocde_bytes(
-                        bytes,
-                        InputFormat::Webm,
-                        enable_full_video,
-                        video_codec,
-                        audio_codec,
-                    )
-                    .await?,
-                )),
-            ))
-        }
-        (Some(ImageFormat::Jpeg) | None, ValidInputType::Jpeg) => Ok((
-            ValidInputType::Jpeg,
-            Either::right(Either::right(Either::left(
-                crate::exiftool::clear_metadata_bytes_read(bytes)?,
-            ))),
-        )),
-        (Some(ImageFormat::Png) | None, ValidInputType::Png) => Ok((
-            ValidInputType::Png,
-            Either::right(Either::right(Either::left(
-                crate::exiftool::clear_metadata_bytes_read(bytes)?,
-            ))),
-        )),
-        (Some(ImageFormat::Webp) | None, ValidInputType::Webp) => Ok((
-            ValidInputType::Webp,
-            Either::right(Either::right(Either::right(Either::left(
-                crate::magick::clear_metadata_bytes_read(bytes)?,
-            )))),
-        )),
-        (Some(format), _) => Ok((
+        (FileFormat::Image(image_format), Some(format)) if image_format != format => Ok((
             ValidInputType::from_format(format),
-            Either::right(Either::right(Either::right(Either::right(
+            Either::right(Either::right(Either::left(
                 crate::magick::convert_bytes_read(bytes, format)?,
-            )))),
+            ))),
+        )),
+        (FileFormat::Image(image_format), _) => Ok((
+            ValidInputType::from_format(image_format),
+            Either::right(Either::right(Either::right(
+                crate::exiftool::clear_metadata_bytes_read(bytes)?,
+            ))),
         )),
     }
 }

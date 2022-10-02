@@ -27,7 +27,7 @@ where
     identifier: Option<S::Identifier>,
 }
 
-#[tracing::instrument(name = "Aggregate", skip(stream))]
+#[tracing::instrument(skip(stream))]
 async fn aggregate<S>(mut stream: S) -> Result<Bytes, Error>
 where
     S: Stream<Item = Result<Bytes, Error>> + Unpin,
@@ -41,7 +41,7 @@ where
     Ok(buf.into_bytes())
 }
 
-#[tracing::instrument(name = "Ingest", skip(stream))]
+#[tracing::instrument(skip(stream))]
 pub(crate) async fn ingest<R, S>(
     repo: &R,
     store: &S,
@@ -231,12 +231,13 @@ where
 {
     #[tracing::instrument(name = "Drop Session", skip(self), fields(hash = ?self.hash, alias = ?self.alias, identifier = ?self.identifier))]
     fn drop(&mut self) {
+        let cleanup_parent_span = tracing::info_span!(parent: None, "Dropped session cleanup");
+        cleanup_parent_span.follows_from(Span::current());
+
         if let Some(hash) = self.hash.take() {
             let repo = self.repo.clone();
 
-            let cleanup_span =
-                tracing::info_span!(parent: None, "Session cleanup hash", hash = ?hash);
-            cleanup_span.follows_from(Span::current());
+            let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Session cleanup hash", hash = ?hash);
 
             tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                 actix_rt::spawn(
@@ -251,9 +252,7 @@ where
         if let Some(alias) = self.alias.take() {
             let repo = self.repo.clone();
 
-            let cleanup_span =
-                tracing::info_span!(parent: None, "Session cleanup alias", alias = ?alias);
-            cleanup_span.follows_from(Span::current());
+            let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Session cleanup alias", alias = ?alias);
 
             tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                 actix_rt::spawn(
@@ -275,8 +274,7 @@ where
         if let Some(identifier) = self.identifier.take() {
             let repo = self.repo.clone();
 
-            let cleanup_span = tracing::info_span!(parent: None, "Session cleanup identifier", identifier = ?identifier);
-            cleanup_span.follows_from(Span::current());
+            let cleanup_span = tracing::info_span!(parent: cleanup_parent_span, "Session cleanup identifier", identifier = ?identifier);
 
             tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                 actix_rt::spawn(

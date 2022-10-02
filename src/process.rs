@@ -42,13 +42,11 @@ pin_project_lite::pin_project! {
 }
 
 impl Process {
-    #[tracing::instrument]
     pub(crate) fn run(command: &str, args: &[&str]) -> std::io::Result<Self> {
         tracing::trace_span!(parent: None, "Create command")
             .in_scope(|| Self::spawn(Command::new(command).args(args)))
     }
 
-    #[tracing::instrument]
     pub(crate) fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
         tracing::trace_span!(parent: None, "Spawn command").in_scope(|| {
             let cmd = cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
@@ -66,37 +64,34 @@ impl Process {
         Ok(())
     }
 
-    #[tracing::instrument(skip(input))]
     pub(crate) fn bytes_read(self, input: Bytes) -> impl AsyncRead + Unpin {
-        self.read_fn(move |mut stdin| {
+        self.spawn_fn(move |mut stdin| {
             let mut input = input;
             async move { stdin.write_all_buf(&mut input).await }
         })
     }
 
-    #[tracing::instrument]
     pub(crate) fn read(self) -> impl AsyncRead + Unpin {
-        self.read_fn(|_| async { Ok(()) })
+        self.spawn_fn(|_| async { Ok(()) })
     }
 
     pub(crate) fn pipe_async_read<A: AsyncRead + Unpin + 'static>(
         self,
         mut async_read: A,
     ) -> impl AsyncRead + Unpin {
-        self.read_fn(move |mut stdin| async move {
+        self.spawn_fn(move |mut stdin| async move {
             tokio::io::copy(&mut async_read, &mut stdin)
                 .await
                 .map(|_| ())
         })
     }
 
-    #[tracing::instrument]
     pub(crate) fn store_read<S: Store + 'static>(
         self,
         store: S,
         identifier: S::Identifier,
     ) -> impl AsyncRead + Unpin {
-        self.read_fn(move |mut stdin| {
+        self.spawn_fn(move |mut stdin| {
             let store = store;
             let identifier = identifier;
 
@@ -104,7 +99,8 @@ impl Process {
         })
     }
 
-    fn read_fn<F, Fut>(mut self, f: F) -> impl AsyncRead + Unpin
+    #[tracing::instrument(skip(f))]
+    fn spawn_fn<F, Fut>(mut self, f: F) -> impl AsyncRead + Unpin
     where
         F: FnOnce(ChildStdin) -> Fut + 'static,
         Fut: Future<Output = std::io::Result<()>>,

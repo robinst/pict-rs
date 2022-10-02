@@ -163,7 +163,6 @@ impl Store for ObjectStore {
     type Identifier = ObjectId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
-    #[tracing::instrument(skip(reader))]
     async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, Error>
     where
         Reader: AsyncRead + Unpin + 'static,

@@ -606,7 +606,7 @@ where
     Ok(())
 }
 
-#[tracing::instrument(skip(repo))]
+#[tracing::instrument(level = "debug", skip(repo))]
 async fn migrate_identifier_details<T>(
     repo: &T,
     old: &FileId,

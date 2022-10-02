@@ -1,6 +1,5 @@
 use crate::error::{Error, UploadError};
 use std::path::PathBuf;
-use tracing::instrument;
 
 pub(crate) trait Processor {
     const NAME: &'static str;
@@ -88,7 +87,7 @@ impl ResizeKind {
     }
 }
 
-#[instrument]
+#[tracing::instrument(level = "debug")]
 pub(crate) fn build_chain(
     args: &[(String, String)],
     ext: &str,

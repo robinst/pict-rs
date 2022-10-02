@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    ffmpeg::InputFormat,
+    ffmpeg::VideoFormat,
     magick::{video_mp4, video_webm, ValidInputType},
     serde_str::Serde,
     store::Store,
@@ -29,7 +29,6 @@ impl Details {
             || self.content_type.type_() == "image" && self.content_type.subtype() == "gif"
     }
 
-    #[tracing::instrument("Details from bytes", skip(input))]
     pub(crate) async fn from_bytes(input: web::Bytes, hint: ValidInputType) -> Result<Self, Error> {
         let details = if hint.is_video() {
             crate::ffmpeg::details_bytes(input.clone()).await?
@@ -51,7 +50,6 @@ impl Details {
         ))
     }
 
-    #[tracing::instrument("Details from store")]
     pub(crate) async fn from_store<S: Store + 'static>(
         store: S,
         identifier: S::Identifier,
@@ -100,17 +98,17 @@ impl Details {
         self.created_at.into()
     }
 
-    pub(crate) fn to_input_format(&self) -> Option<InputFormat> {
+    pub(crate) fn to_input_format(&self) -> Option<VideoFormat> {
         if *self.content_type == mime::IMAGE_GIF {
-            return Some(InputFormat::Gif);
+            return Some(VideoFormat::Gif);
         }
 
         if *self.content_type == video_mp4() {
-            return Some(InputFormat::Mp4);
+            return Some(VideoFormat::Mp4);
         }
 
         if *self.content_type == video_webm() {
-            return Some(InputFormat::Webm);
+            return Some(VideoFormat::Webm);
         }
 
         None

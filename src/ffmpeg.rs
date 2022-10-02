@@ -1,5 +1,5 @@
 use crate::{
-    config::{AudioCodec, VideoCodec},
+    config::{AudioCodec, ImageFormat, VideoCodec},
     error::{Error, UploadError},
     magick::{Details, ValidInputType},
     process::Process,
@@ -7,10 +7,9 @@ use crate::{
 };
 use actix_web::web::Bytes;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tracing::instrument;
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum InputFormat {
+pub(crate) enum VideoFormat {
     Gif,
     Mp4,
     Webm,
@@ -28,7 +27,26 @@ pub(crate) enum ThumbnailFormat {
     // Webp,
 }
 
-impl InputFormat {
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum FileFormat {
+    Image(ImageFormat),
+    Video(VideoFormat),
+}
+
+impl ValidInputType {
+    pub(crate) fn to_file_format(self) -> FileFormat {
+        match self {
+            Self::Gif => FileFormat::Video(VideoFormat::Gif),
+            Self::Mp4 => FileFormat::Video(VideoFormat::Mp4),
+            Self::Webm => FileFormat::Video(VideoFormat::Webm),
+            Self::Jpeg => FileFormat::Image(ImageFormat::Jpeg),
+            Self::Png => FileFormat::Image(ImageFormat::Png),
+            Self::Webp => FileFormat::Image(ImageFormat::Webp),
+        }
+    }
+}
+
+impl VideoFormat {
     const fn to_file_extension(self) -> &'static str {
         match self {
             Self::Gif => ".gif",
@@ -121,10 +139,10 @@ impl AudioCodec {
     }
 }
 
-const FORMAT_MAPPINGS: &[(&str, InputFormat)] = &[
-    ("gif", InputFormat::Gif),
-    ("mp4", InputFormat::Mp4),
-    ("webm", InputFormat::Webm),
+const FORMAT_MAPPINGS: &[(&str, VideoFormat)] = &[
+    ("gif", VideoFormat::Gif),
+    ("mp4", VideoFormat::Mp4),
+    ("webm", VideoFormat::Webm),
 ];
 
 pub(crate) async fn input_type_bytes(input: Bytes) -> Result<Option<ValidInputType>, Error> {
@@ -155,6 +173,7 @@ pub(crate) async fn details_bytes(input: Bytes) -> Result<Option<Details>, Error
     .await
 }
 
+#[tracing::instrument(skip(f))]
 async fn details_file<F, Fut>(f: F) -> Result<Option<Details>, Error>
 where
     F: FnOnce(crate::file::File) -> Fut,
@@ -193,7 +212,7 @@ where
 }
 
 fn parse_details(output: std::borrow::Cow<'_, str>) -> Result<Option<Details>, Error> {
-    tracing::info!("OUTPUT: {}", output);
+    tracing::debug!("OUTPUT: {}", output);
 
     let mut lines = output.lines();
 
@@ -230,7 +249,7 @@ fn parse_details_inner(
     width: &str,
     height: &str,
     frames: &str,
-    format: InputFormat,
+    format: VideoFormat,
 ) -> Result<Details, Error> {
     let width = width.parse().map_err(|_| UploadError::UnsupportedFormat)?;
     let height = height.parse().map_err(|_| UploadError::UnsupportedFormat)?;
@@ -244,10 +263,10 @@ fn parse_details_inner(
     })
 }
 
-#[tracing::instrument(name = "Transcode video", skip(input))]
+#[tracing::instrument(skip(input))]
 pub(crate) async fn trancsocde_bytes(
     input: Bytes,
-    input_format: InputFormat,
+    input_format: VideoFormat,
     permit_audio: bool,
     video_codec: VideoCodec,
     audio_codec: Option<AudioCodec>,
@@ -318,11 +337,11 @@ pub(crate) async fn trancsocde_bytes(
     Ok(Box::pin(clean_reader))
 }
 
-#[instrument(name = "Create video thumbnail")]
+#[tracing::instrument]
 pub(crate) async fn thumbnail<S: Store>(
     store: S,
     from: S::Identifier,
-    input_format: InputFormat,
+    input_format: VideoFormat,
     format: ThumbnailFormat,
 ) -> Result<impl AsyncRead + Unpin, Error> {
     let input_file = crate::tmp_file::tmp_file(Some(input_format.to_file_extension()));

@@ -126,7 +126,7 @@ mod io_uring {
 
     impl File {
         pub(crate) async fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
-            tracing::info!("Opening io-uring file: {:?}", path.as_ref());
+            tracing::debug!("Opening io-uring file: {:?}", path.as_ref());
             Ok(File {
                 path: path.as_ref().to_owned(),
                 inner: tracing::trace_span!(parent: None, "Open File")
@@ -136,7 +136,7 @@ mod io_uring {
         }
 
         pub(crate) async fn create(path: impl AsRef<Path>) -> std::io::Result<Self> {
-            tracing::info!("Creating io-uring file: {:?}", path.as_ref());
+            tracing::debug!("Creating io-uring file: {:?}", path.as_ref());
             Ok(File {
                 path: path.as_ref().to_owned(),
                 inner: tracing::trace_span!(parent: None, "Create File")
