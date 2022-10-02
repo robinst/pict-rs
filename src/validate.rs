@@ -63,7 +63,7 @@ pub(crate) async fn validate_bytes(
             }
             Ok((
                 ValidInputType::from_video_codec(video_codec),
-                Either::right(Either::left(
+                Either::right(Either::left(Either::left(
                     crate::ffmpeg::trancsocde_bytes(
                         bytes,
                         video_format,
@@ -72,20 +72,26 @@ pub(crate) async fn validate_bytes(
                         audio_codec,
                     )
                     .await?,
-                )),
+                ))),
             ))
         }
         (FileFormat::Image(image_format), Some(format)) if image_format != format => Ok((
             ValidInputType::from_format(format),
-            Either::right(Either::right(Either::left(
+            Either::right(Either::left(Either::right(
                 crate::magick::convert_bytes_read(bytes, format)?,
+            ))),
+        )),
+        (FileFormat::Image(ImageFormat::Webp), _) => Ok((
+            ValidInputType::Webp,
+            Either::right(Either::left(Either::right(
+                crate::magick::convert_bytes_read(bytes, ImageFormat::Webp)?,
             ))),
         )),
         (FileFormat::Image(image_format), _) => Ok((
             ValidInputType::from_format(image_format),
-            Either::right(Either::right(Either::right(
-                crate::exiftool::clear_metadata_bytes_read(bytes)?,
-            ))),
+            Either::right(Either::right(crate::exiftool::clear_metadata_bytes_read(
+                bytes,
+            )?)),
         )),
     }
 }

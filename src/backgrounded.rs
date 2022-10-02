@@ -71,38 +71,41 @@ where
     R: FullRepo + 'static,
     S: Store,
 {
-    #[tracing::instrument(name = "Drop Backgrounded", skip(self), fields(identifier = ?self.identifier, upload_id = ?self.upload_id))]
     fn drop(&mut self) {
-        if let Some(identifier) = self.identifier.take() {
-            let repo = self.repo.clone();
+        if self.identifier.is_some() || self.upload_id.is_some() {
+            let cleanup_parent_span =
+                tracing::info_span!(parent: None, "Dropped backgrounded cleanup");
+            cleanup_parent_span.follows_from(Span::current());
 
-            let cleanup_span = tracing::info_span!(parent: None, "Backgrounded cleanup Identifier", identifier = ?identifier);
-            cleanup_span.follows_from(Span::current());
+            if let Some(identifier) = self.identifier.take() {
+                let repo = self.repo.clone();
 
-            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                actix_rt::spawn(
-                    async move {
-                        let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
-                    }
-                    .instrument(cleanup_span),
-                )
-            });
-        }
+                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Backgrounded cleanup Identifier", identifier = ?identifier);
 
-        if let Some(upload_id) = self.upload_id {
-            let repo = self.repo.clone();
+                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                    actix_rt::spawn(
+                        async move {
+                            let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
+                        }
+                        .instrument(cleanup_span),
+                    )
+                });
+            }
 
-            let cleanup_span = tracing::info_span!(parent: None, "Backgrounded cleanup Upload ID", upload_id = ?upload_id);
-            cleanup_span.follows_from(Span::current());
+            if let Some(upload_id) = self.upload_id {
+                let repo = self.repo.clone();
 
-            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                actix_rt::spawn(
-                    async move {
-                        let _ = repo.claim(upload_id).await;
-                    }
-                    .instrument(cleanup_span),
-                )
-            });
+                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span, "Backgrounded cleanup Upload ID", upload_id = ?upload_id);
+
+                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                    actix_rt::spawn(
+                        async move {
+                            let _ = repo.claim(upload_id).await;
+                        }
+                        .instrument(cleanup_span),
+                    )
+                });
+            }
         }
     }
 }

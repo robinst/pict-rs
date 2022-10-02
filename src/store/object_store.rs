@@ -170,7 +170,7 @@ impl Store for ObjectStore {
         self.save_stream(ReaderStream::new(reader)).await
     }
 
-    #[tracing::instrument(skip(stream))]
+    #[tracing::instrument(skip_all)]
     async fn save_stream<S>(&self, mut stream: S) -> Result<Self::Identifier, Error>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
@@ -295,7 +295,7 @@ impl Store for ObjectStore {
         Ok(object_id)
     }
 
-    #[tracing::instrument(skip(bytes))]
+    #[tracing::instrument(skip_all)]
     async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
         let (req, object_id) = self.put_object_request().await?;
 
@@ -308,7 +308,7 @@ impl Store for ObjectStore {
         Ok(object_id)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn to_stream(
         &self,
         identifier: &Self::Identifier,
@@ -328,7 +328,7 @@ impl Store for ObjectStore {
         Ok(Box::pin(response.map_err(payload_to_io_error)))
     }
 
-    #[tracing::instrument(skip(writer))]
+    #[tracing::instrument(skip(self, writer))]
     async fn read_into<Writer>(
         &self,
         identifier: &Self::Identifier,
@@ -359,7 +359,7 @@ impl Store for ObjectStore {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
         let response = self
             .head_object_request(identifier)
@@ -383,7 +383,7 @@ impl Store for ObjectStore {
         Ok(length)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
         let response = self.delete_object_request(identifier).send().await?;
 

@@ -18,7 +18,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::sync::Semaphore;
-use tracing::{debug, info, instrument};
 use tracing_actix_web::TracingLogger;
 use tracing_awc::Tracing;
 use tracing_futures::Instrument;
@@ -96,15 +95,15 @@ async fn ensure_details<R: FullRepo, S: Store + 'static>(
     let details = repo.details(&identifier).await?;
 
     if let Some(details) = details {
-        debug!("details exist");
+        tracing::debug!("details exist");
         Ok(details)
     } else {
-        debug!("generating new details from {:?}", identifier);
+        tracing::debug!("generating new details from {:?}", identifier);
         let hint = details_hint(alias);
         let new_details = Details::from_store(store.clone(), identifier.clone(), hint).await?;
-        debug!("storing details for {:?}", identifier);
+        tracing::debug!("storing details for {:?}", identifier);
         repo.relate_details(&identifier, &new_details).await?;
-        debug!("stored");
+        tracing::debug!("stored");
         Ok(new_details)
     }
 }
@@ -217,7 +216,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
 }
 
 /// Handle responding to succesful uploads
-#[instrument(name = "Uploaded files", skip(value))]
+#[tracing::instrument(name = "Uploaded files", skip(value, repo, store))]
 async fn upload<R: FullRepo, S: Store + 'static>(
     Multipart(Upload(value)): Multipart<Upload<R, S>>,
     repo: web::Data<R>,
@@ -227,7 +226,7 @@ async fn upload<R: FullRepo, S: Store + 'static>(
 }
 
 /// Handle responding to succesful uploads
-#[instrument(name = "Imported files", skip(value))]
+#[tracing::instrument(name = "Imported files", skip(value, repo, store))]
 async fn import<R: FullRepo, S: Store + 'static>(
     Multipart(Import(value)): Multipart<Import<R, S>>,
     repo: web::Data<R>,
@@ -237,7 +236,7 @@ async fn import<R: FullRepo, S: Store + 'static>(
 }
 
 /// Handle responding to succesful uploads
-#[instrument(name = "Uploaded files", skip(value))]
+#[tracing::instrument(name = "Uploaded files", skip(value, repo, store))]
 async fn handle_upload<R: FullRepo, S: Store + 'static>(
     value: Value<Session<R, S>>,
     repo: web::Data<R>,
@@ -257,7 +256,7 @@ async fn handle_upload<R: FullRepo, S: Store + 'static>(
 
     for image in &images {
         if let Some(alias) = image.result.alias() {
-            info!("Uploaded {} as {:?}", image.filename, alias);
+            tracing::debug!("Uploaded {} as {:?}", image.filename, alias);
             let delete_token = image.result.delete_token().await?;
 
             let details = ensure_details(&repo, &store, alias).await?;
@@ -329,7 +328,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
     }
 }
 
-#[instrument(name = "Uploaded files", skip(value))]
+#[tracing::instrument(name = "Uploaded files", skip(value, repo))]
 async fn upload_backgrounded<R: FullRepo, S: Store>(
     Multipart(BackgroundedUpload(value)): Multipart<BackgroundedUpload<R, S>>,
     repo: web::Data<R>,
@@ -377,7 +376,7 @@ struct ClaimQuery {
 }
 
 /// Claim a backgrounded upload
-#[instrument(name = "Waiting on upload", skip(repo))]
+#[tracing::instrument(name = "Waiting on upload", skip_all)]
 async fn claim_upload<R: FullRepo, S: Store + 'static>(
     repo: web::Data<R>,
     store: web::Data<S>,
@@ -426,7 +425,7 @@ struct UrlQuery {
 }
 
 /// download an image from a URL
-#[instrument(name = "Downloading file", skip(client, repo))]
+#[tracing::instrument(name = "Downloading file", skip(client, repo, store))]
 async fn download<R: FullRepo + 'static, S: Store + 'static>(
     client: web::Data<Client>,
     repo: web::Data<R>,
@@ -450,7 +449,7 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     }
 }
 
-#[instrument(name = "Downloading file inline", skip(stream))]
+#[tracing::instrument(name = "Downloading file inline", skip(stream, repo, store))]
 async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
     repo: web::Data<R>,
@@ -476,7 +475,7 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     })))
 }
 
-#[instrument(name = "Downloading file in background", skip(stream))]
+#[tracing::instrument(name = "Downloading file in background", skip(stream, repo, store))]
 async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
     repo: web::Data<R>,
@@ -504,7 +503,7 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
 }
 
 /// Delete aliases and files
-#[instrument(name = "Deleting file", skip(repo))]
+#[tracing::instrument(name = "Deleting file", skip(repo))]
 async fn delete<R: FullRepo>(
     repo: web::Data<R>,
     path_entries: web::Path<(String, String)>,
@@ -560,7 +559,7 @@ fn prepare_process(
     Ok((format, alias, thumbnail_path, thumbnail_args))
 }
 
-#[instrument(name = "Fetching derived details", skip(repo))]
+#[tracing::instrument(name = "Fetching derived details", skip(repo))]
 async fn process_details<R: FullRepo, S: Store>(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
@@ -582,7 +581,7 @@ async fn process_details<R: FullRepo, S: Store>(
 }
 
 /// Process files
-#[instrument(name = "Serving processed image", skip(repo))]
+#[tracing::instrument(name = "Serving processed image", skip(repo, store))]
 async fn process<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     query: web::Query<ProcessQuery>,
@@ -605,19 +604,19 @@ async fn process<R: FullRepo, S: Store + 'static>(
         let details = repo.details(&identifier).await?;
 
         let details = if let Some(details) = details {
-            debug!("details exist");
+            tracing::debug!("details exist");
             details
         } else {
-            debug!("generating new details from {:?}", identifier);
+            tracing::debug!("generating new details from {:?}", identifier);
             let new_details = Details::from_store(
                 (**store).clone(),
                 identifier.clone(),
                 Some(ValidInputType::from_format(format)),
             )
             .await?;
-            debug!("storing details for {:?}", identifier);
+            tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
-            debug!("stored");
+            tracing::debug!("stored");
             new_details
         };
 
@@ -671,7 +670,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     ))
 }
 
-#[instrument(name = "Serving processed image headers", skip(repo))]
+#[tracing::instrument(name = "Serving processed image headers", skip(repo, store))]
 async fn process_head<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     query: web::Query<ProcessQuery>,
@@ -693,19 +692,19 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
         let details = repo.details(&identifier).await?;
 
         let details = if let Some(details) = details {
-            debug!("details exist");
+            tracing::debug!("details exist");
             details
         } else {
-            debug!("generating new details from {:?}", identifier);
+            tracing::debug!("generating new details from {:?}", identifier);
             let new_details = Details::from_store(
                 (**store).clone(),
                 identifier.clone(),
                 Some(ValidInputType::from_format(format)),
             )
             .await?;
-            debug!("storing details for {:?}", identifier);
+            tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
-            debug!("stored");
+            tracing::debug!("stored");
             new_details
         };
 
@@ -716,7 +715,7 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
 }
 
 /// Process files
-#[instrument(name = "Spawning image process", skip(repo))]
+#[tracing::instrument(name = "Spawning image process", skip(repo))]
 async fn process_backgrounded<R: FullRepo, S: Store>(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
@@ -740,7 +739,7 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
 }
 
 /// Fetch file details
-#[instrument(name = "Fetching details", skip(repo))]
+#[tracing::instrument(name = "Fetching details", skip(repo, store))]
 async fn details<R: FullRepo, S: Store + 'static>(
     alias: web::Path<Serde<Alias>>,
     repo: web::Data<R>,
@@ -754,7 +753,7 @@ async fn details<R: FullRepo, S: Store + 'static>(
 }
 
 /// Serve files
-#[instrument(name = "Serving file", skip(repo))]
+#[tracing::instrument(name = "Serving file", skip(repo, store))]
 async fn serve<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
@@ -772,7 +771,7 @@ async fn serve<R: FullRepo, S: Store + 'static>(
     ranged_file_resp(&store, identifier, range, details).await
 }
 
-#[instrument(name = "Serving file headers", skip(repo))]
+#[tracing::instrument(name = "Serving file headers", skip(repo, store))]
 async fn serve_head<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
@@ -916,7 +915,7 @@ fn srv_head(
     builder
 }
 
-#[instrument(name = "Spawning variant cleanup", skip(repo))]
+#[tracing::instrument(name = "Spawning variant cleanup", skip(repo))]
 async fn clean_variants<R: FullRepo>(repo: web::Data<R>) -> Result<HttpResponse, Error> {
     queue::cleanup_all_variants(&repo).await?;
     Ok(HttpResponse::NoContent().finish())
@@ -927,7 +926,7 @@ struct AliasQuery {
     alias: Serde<Alias>,
 }
 
-#[instrument(name = "Purging file", skip(repo))]
+#[tracing::instrument(name = "Purging file", skip(repo))]
 async fn purge<R: FullRepo>(
     query: web::Query<AliasQuery>,
     repo: web::Data<R>,
@@ -944,7 +943,7 @@ async fn purge<R: FullRepo>(
     })))
 }
 
-#[instrument(name = "Fetching aliases", skip(repo))]
+#[tracing::instrument(name = "Fetching aliases", skip(repo))]
 async fn aliases<R: FullRepo>(
     query: web::Query<AliasQuery>,
     repo: web::Data<R>,
@@ -958,7 +957,7 @@ async fn aliases<R: FullRepo>(
     })))
 }
 
-#[instrument(name = "Fetching identifier", skip(repo))]
+#[tracing::instrument(name = "Fetching identifier", skip(repo))]
 async fn identifier<R: FullRepo, S: Store>(
     query: web::Query<AliasQuery>,
     repo: web::Data<R>,

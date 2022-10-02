@@ -337,7 +337,7 @@ pub(crate) async fn trancsocde_bytes(
     Ok(Box::pin(clean_reader))
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(store))]
 pub(crate) async fn thumbnail<S: Store>(
     store: S,
     from: S::Identifier,

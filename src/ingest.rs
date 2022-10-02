@@ -41,7 +41,7 @@ where
     Ok(buf.into_bytes())
 }
 
-#[tracing::instrument(skip(stream))]
+#[tracing::instrument(skip(repo, store, stream))]
 pub(crate) async fn ingest<R, S>(
     repo: &R,
     store: &S,
@@ -58,7 +58,7 @@ where
 
     let bytes = aggregate(stream).await?;
 
-    tracing::debug!("Validating bytes");
+    tracing::trace!("Validating bytes");
     let (input_type, validated_reader) = crate::validate::validate_bytes(
         bytes,
         CONFIG.media.format,
@@ -114,7 +114,7 @@ where
     Ok(session)
 }
 
-#[tracing::instrument]
+#[tracing::instrument(level = "trace", skip_all)]
 async fn save_upload<R, S>(
     repo: &R,
     store: &S,
@@ -151,27 +151,27 @@ where
         self.alias.as_ref()
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) async fn delete_token(&self) -> Result<DeleteToken, Error> {
         let alias = self.alias.clone().ok_or(UploadError::MissingAlias)?;
 
-        tracing::debug!("Generating delete token");
+        tracing::trace!("Generating delete token");
         let delete_token = DeleteToken::generate();
 
-        tracing::debug!("Saving delete token");
+        tracing::trace!("Saving delete token");
         let res = self.repo.relate_delete_token(&alias, &delete_token).await?;
 
         if res.is_err() {
             let delete_token = self.repo.delete_token(&alias).await?;
-            tracing::debug!("Returning existing delete token, {:?}", delete_token);
+            tracing::trace!("Returning existing delete token, {:?}", delete_token);
             return Ok(delete_token);
         }
 
-        tracing::debug!("Returning new delete token, {:?}", delete_token);
+        tracing::trace!("Returning new delete token, {:?}", delete_token);
         Ok(delete_token)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, hash))]
     async fn add_existing_alias(
         &mut self,
         hash: &[u8],
@@ -194,15 +194,13 @@ where
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(level = "debug", skip(self, hash))]
     async fn create_alias(
         &mut self,
         hash: &[u8],
         input_type: ValidInputType,
         is_cached: bool,
     ) -> Result<(), Error> {
-        tracing::debug!("Alias gen loop");
-
         loop {
             let alias = Alias::generate(input_type.as_ext().to_string());
 
@@ -219,7 +217,7 @@ where
                 return Ok(());
             }
 
-            tracing::debug!("Alias exists, regenerating");
+            tracing::trace!("Alias exists, regenerating");
         }
     }
 }
@@ -229,61 +227,62 @@ where
     R: FullRepo + 'static,
     S: Store,
 {
-    #[tracing::instrument(name = "Drop Session", skip(self), fields(hash = ?self.hash, alias = ?self.alias, identifier = ?self.identifier))]
     fn drop(&mut self) {
-        let cleanup_parent_span = tracing::info_span!(parent: None, "Dropped session cleanup");
-        cleanup_parent_span.follows_from(Span::current());
+        if self.hash.is_some() || self.alias.is_some() | self.identifier.is_some() {
+            let cleanup_parent_span = tracing::info_span!(parent: None, "Dropped session cleanup");
+            cleanup_parent_span.follows_from(Span::current());
 
-        if let Some(hash) = self.hash.take() {
-            let repo = self.repo.clone();
+            if let Some(hash) = self.hash.take() {
+                let repo = self.repo.clone();
 
-            let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Session cleanup hash", hash = ?hash);
+                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Session cleanup hash", hash = ?hash);
 
-            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                actix_rt::spawn(
-                    async move {
-                        let _ = crate::queue::cleanup_hash(&repo, hash.into()).await;
-                    }
-                    .instrument(cleanup_span),
-                )
-            });
-        }
+                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                    actix_rt::spawn(
+                        async move {
+                            let _ = crate::queue::cleanup_hash(&repo, hash.into()).await;
+                        }
+                        .instrument(cleanup_span),
+                    )
+                });
+            }
 
-        if let Some(alias) = self.alias.take() {
-            let repo = self.repo.clone();
+            if let Some(alias) = self.alias.take() {
+                let repo = self.repo.clone();
 
-            let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Session cleanup alias", alias = ?alias);
+                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Session cleanup alias", alias = ?alias);
 
-            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                actix_rt::spawn(
-                    async move {
-                        if let Ok(token) = repo.delete_token(&alias).await {
-                            let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
-                        } else {
-                            let token = DeleteToken::generate();
-                            if let Ok(Ok(())) = repo.relate_delete_token(&alias, &token).await {
+                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                    actix_rt::spawn(
+                        async move {
+                            if let Ok(token) = repo.delete_token(&alias).await {
                                 let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
+                            } else {
+                                let token = DeleteToken::generate();
+                                if let Ok(Ok(())) = repo.relate_delete_token(&alias, &token).await {
+                                    let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
+                                }
                             }
                         }
-                    }
-                    .instrument(cleanup_span),
-                )
-            });
-        }
+                        .instrument(cleanup_span),
+                    )
+                });
+            }
 
-        if let Some(identifier) = self.identifier.take() {
-            let repo = self.repo.clone();
+            if let Some(identifier) = self.identifier.take() {
+                let repo = self.repo.clone();
 
-            let cleanup_span = tracing::info_span!(parent: cleanup_parent_span, "Session cleanup identifier", identifier = ?identifier);
+                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span, "Session cleanup identifier", identifier = ?identifier);
 
-            tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                actix_rt::spawn(
-                    async move {
-                        let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
-                    }
-                    .instrument(cleanup_span),
-                )
-            });
+                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+                    actix_rt::spawn(
+                        async move {
+                            let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
+                        }
+                        .instrument(cleanup_span),
+                    )
+                });
+            }
         }
     }
 }

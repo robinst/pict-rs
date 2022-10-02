@@ -13,23 +13,48 @@ use tracing::Instrument;
 mod cleanup;
 mod process;
 
+#[derive(Debug)]
+struct Base64Bytes(Vec<u8>);
+
+impl serde::Serialize for Base64Bytes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = base64::encode(&self.0);
+        s.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Base64Bytes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s: String = serde::Deserialize::deserialize(deserializer)?;
+        base64::decode(s)
+            .map(Base64Bytes)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))
+    }
+}
+
 const CLEANUP_QUEUE: &str = "cleanup";
 const PROCESS_QUEUE: &str = "process";
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 enum Cleanup {
     Hash {
-        hash: Vec<u8>,
+        hash: Base64Bytes,
     },
     Identifier {
-        identifier: Vec<u8>,
+        identifier: Base64Bytes,
     },
     Alias {
         alias: Serde<Alias>,
         token: Serde<DeleteToken>,
     },
     Variant {
-        hash: Vec<u8>,
+        hash: Base64Bytes,
     },
     AllVariants,
 }
@@ -37,7 +62,7 @@ enum Cleanup {
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 enum Process {
     Ingest {
-        identifier: Vec<u8>,
+        identifier: Base64Bytes,
         upload_id: Serde<UploadId>,
         declared_alias: Option<Serde<Alias>>,
         should_validate: bool,
@@ -66,7 +91,7 @@ pub(crate) async fn cleanup_alias<R: QueueRepo>(
 
 pub(crate) async fn cleanup_hash<R: QueueRepo>(repo: &R, hash: R::Bytes) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::Hash {
-        hash: hash.as_ref().to_vec(),
+        hash: Base64Bytes(hash.as_ref().to_vec()),
     })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
@@ -77,7 +102,7 @@ pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
     identifier: I,
 ) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::Identifier {
-        identifier: identifier.to_bytes()?,
+        identifier: Base64Bytes(identifier.to_bytes()?),
     })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
@@ -85,7 +110,7 @@ pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
 
 async fn cleanup_variants<R: QueueRepo>(repo: &R, hash: R::Bytes) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::Variant {
-        hash: hash.as_ref().to_vec(),
+        hash: Base64Bytes(hash.as_ref().to_vec()),
     })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
@@ -106,7 +131,7 @@ pub(crate) async fn queue_ingest<R: QueueRepo>(
     is_cached: bool,
 ) -> Result<(), Error> {
     let job = serde_json::to_vec(&Process::Ingest {
-        identifier,
+        identifier: Base64Bytes(identifier),
         declared_alias: declared_alias.map(Serde::new),
         upload_id: Serde::new(upload_id),
         should_validate,
@@ -188,7 +213,7 @@ where
     loop {
         let bytes = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
 
-        let span = tracing::info_span!("Running Job", worker_id = ?worker_id, job = ?String::from_utf8_lossy(bytes.as_ref()));
+        let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
 
         span.in_scope(|| (callback)(repo, store, bytes.as_ref()))
             .instrument(span)

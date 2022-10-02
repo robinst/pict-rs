@@ -1,6 +1,6 @@
 use crate::{
     error::{Error, UploadError},
-    queue::{Cleanup, LocalBoxFuture},
+    queue::{Base64Bytes, Cleanup, LocalBoxFuture},
     repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo},
     serde_str::Serde,
     store::{Identifier, Store},
@@ -19,9 +19,11 @@ where
     Box::pin(async move {
         match serde_json::from_slice(job) {
             Ok(job) => match job {
-                Cleanup::Hash { hash: in_hash } => hash::<R, S>(repo, in_hash).await?,
+                Cleanup::Hash {
+                    hash: Base64Bytes(in_hash),
+                } => hash::<R, S>(repo, in_hash).await?,
                 Cleanup::Identifier {
-                    identifier: in_identifier,
+                    identifier: Base64Bytes(in_identifier),
                 } => identifier(repo, store, in_identifier).await?,
                 Cleanup::Alias {
                     alias: stored_alias,
@@ -34,7 +36,9 @@ where
                     )
                     .await?
                 }
-                Cleanup::Variant { hash } => variant::<R, S>(repo, hash).await?,
+                Cleanup::Variant {
+                    hash: Base64Bytes(hash),
+                } => variant::<R, S>(repo, hash).await?,
                 Cleanup::AllVariants => all_variants::<R, S>(repo).await?,
             },
             Err(e) => {
@@ -46,7 +50,7 @@ where
     })
 }
 
-#[tracing::instrument(skip(repo, store))]
+#[tracing::instrument(skip_all)]
 async fn identifier<R, S>(repo: &R, store: &S, identifier: Vec<u8>) -> Result<(), Error>
 where
     R: FullRepo,
@@ -76,7 +80,7 @@ where
     Ok(())
 }
 
-#[tracing::instrument(skip(repo))]
+#[tracing::instrument(skip_all)]
 async fn hash<R, S>(repo: &R, hash: Vec<u8>) -> Result<(), Error>
 where
     R: FullRepo,
@@ -113,6 +117,7 @@ where
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 async fn alias<R>(repo: &R, alias: Alias, token: DeleteToken) -> Result<(), Error>
 where
     R: FullRepo,

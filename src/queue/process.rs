@@ -2,7 +2,7 @@ use crate::{
     config::ImageFormat,
     error::Error,
     ingest::Session,
-    queue::{LocalBoxFuture, Process},
+    queue::{Base64Bytes, LocalBoxFuture, Process},
     repo::{Alias, DeleteToken, FullRepo, UploadId, UploadResult},
     serde_str::Serde,
     store::{Identifier, Store},
@@ -23,7 +23,7 @@ where
         match serde_json::from_slice(job) {
             Ok(job) => match job {
                 Process::Ingest {
-                    identifier,
+                    identifier: Base64Bytes(identifier),
                     upload_id,
                     declared_alias,
                     should_validate,
@@ -66,7 +66,7 @@ where
     })
 }
 
-#[tracing::instrument(skip(repo, store))]
+#[tracing::instrument(skip_all)]
 async fn process_ingest<R, S>(
     repo: &R,
     store: &S,
@@ -130,6 +130,7 @@ where
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,

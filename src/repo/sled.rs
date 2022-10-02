@@ -281,7 +281,7 @@ impl CachedRepo for SledRepo {
 
 #[async_trait::async_trait(?Send)]
 impl UploadRepo for SledRepo {
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn create(&self, upload_id: UploadId) -> Result<(), Error> {
         b!(self.uploads, uploads.insert(upload_id.as_bytes(), b"1"));
         Ok(())
@@ -320,13 +320,13 @@ impl UploadRepo for SledRepo {
         Err(UploadError::Canceled.into())
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn claim(&self, upload_id: UploadId) -> Result<(), Error> {
         b!(self.uploads, uploads.remove(upload_id.as_bytes()));
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, result))]
+    #[tracing::instrument(level = "trace", skip(self, result))]
     async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), Error> {
         let result: InnerUploadResult = result.into();
         let result = serde_json::to_vec(&result)?;
@@ -384,7 +384,7 @@ impl QueueRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, job), fields(worker_id = %String::from_utf8_lossy(&job)))]
+    #[tracing::instrument(skip(self, job), fields(job = %String::from_utf8_lossy(&job)))]
     async fn push(&self, queue_name: &'static str, job: Self::Bytes) -> Result<(), Error> {
         let id = self.db.generate_id()?;
         let mut key = queue_name.as_bytes().to_vec();
@@ -597,7 +597,7 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
+    #[tracing::instrument(skip_all)]
     async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, Error> {
         let v = b!(self.hash_aliases, {
             Ok(hash_aliases

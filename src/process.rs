@@ -55,7 +55,7 @@ impl Process {
         })
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     pub(crate) async fn wait(mut self) -> std::io::Result<()> {
         let status = self.child.wait().await?;
         if !status.success() {
@@ -99,7 +99,7 @@ impl Process {
         })
     }
 
-    #[tracing::instrument(skip(f))]
+    #[tracing::instrument(level = "trace", skip_all)]
     fn spawn_fn<F, Fut>(mut self, f: F) -> impl AsyncRead + Unpin
     where
         F: FnOnce(ChildStdin) -> Fut + 'static,

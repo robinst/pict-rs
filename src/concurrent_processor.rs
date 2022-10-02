@@ -51,7 +51,7 @@ where
                 vacant.insert(Vec::new());
                 let span = tracing::info_span!(
                     "Processing image",
-                    hash = &tracing::field::debug(&hash),
+                    hash = &tracing::field::debug(&hex::encode(&hash)),
                     path = &tracing::field::debug(&path),
                     completed = &tracing::field::Empty,
                 );
@@ -64,7 +64,7 @@ where
                 occupied.get_mut().push(tx);
                 let span = tracing::info_span!(
                     "Waiting for processed image",
-                    hash = &tracing::field::debug(&hash),
+                    hash = &tracing::field::debug(&hex::encode(&hash)),
                     path = &tracing::field::debug(&path),
                 );
                 (Some(rx), span)

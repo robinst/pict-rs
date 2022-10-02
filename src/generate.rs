@@ -13,7 +13,7 @@ use tokio::io::AsyncReadExt;
 use tracing::Instrument;
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(hash))]
+#[tracing::instrument(skip(repo, store, hash))]
 pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
@@ -44,7 +44,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(hash))]
+#[tracing::instrument(skip(repo, store, hash))]
 async fn process<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
