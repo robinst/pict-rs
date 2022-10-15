@@ -87,11 +87,22 @@ pub(crate) async fn validate_bytes(
                 crate::magick::convert_bytes_read(bytes, ImageFormat::Webp)?,
             ))),
         )),
-        (FileFormat::Image(image_format), _) => Ok((
-            ValidInputType::from_format(image_format),
-            Either::right(Either::right(crate::exiftool::clear_metadata_bytes_read(
-                bytes,
-            )?)),
-        )),
+        (FileFormat::Image(image_format), _) => {
+            if crate::exiftool::needs_reorienting(bytes.clone()).await? {
+                Ok((
+                    ValidInputType::from_format(image_format),
+                    Either::right(Either::left(Either::right(
+                        crate::magick::convert_bytes_read(bytes, image_format)?,
+                    ))),
+                ))
+            } else {
+                Ok((
+                    ValidInputType::from_format(image_format),
+                    Either::right(Either::right(crate::exiftool::clear_metadata_bytes_read(
+                        bytes,
+                    )?)),
+                ))
+            }
+        }
     }
 }

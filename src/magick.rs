@@ -123,6 +123,7 @@ pub(crate) fn convert_bytes_read(
         &[
             "convert",
             "-",
+            "-auto-orient",
             "-strip",
             format!("{}:-", format.as_magick_format()).as_str(),
         ],
