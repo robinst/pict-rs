@@ -474,7 +474,7 @@ impl ObjectStore {
                 hasher.update(&bytes);
             }
             let hash = hasher.finalize();
-            let hash_string = base64::encode(&hash);
+            let hash_string = base64::encode(hash);
             drop(guard);
             hash_string
         })
