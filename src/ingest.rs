@@ -235,7 +235,7 @@ where
             if let Some(hash) = self.hash.take() {
                 let repo = self.repo.clone();
 
-                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Session cleanup hash", hash = ?hash);
+                let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup hash", hash = ?hash);
 
                 tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                     actix_rt::spawn(
@@ -250,7 +250,7 @@ where
             if let Some(alias) = self.alias.take() {
                 let repo = self.repo.clone();
 
-                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Session cleanup alias", alias = ?alias);
+                let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup alias", alias = ?alias);
 
                 tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                     actix_rt::spawn(
@@ -272,7 +272,7 @@ where
             if let Some(identifier) = self.identifier.take() {
                 let repo = self.repo.clone();
 
-                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span, "Session cleanup identifier", identifier = ?identifier);
+                let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup identifier", identifier = ?identifier);
 
                 tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                     actix_rt::spawn(

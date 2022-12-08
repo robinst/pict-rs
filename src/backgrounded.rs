@@ -80,7 +80,7 @@ where
             if let Some(identifier) = self.identifier.take() {
                 let repo = self.repo.clone();
 
-                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span.clone(), "Backgrounded cleanup Identifier", identifier = ?identifier);
+                let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Backgrounded cleanup Identifier", identifier = ?identifier);
 
                 tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                     actix_rt::spawn(
@@ -95,7 +95,7 @@ where
             if let Some(upload_id) = self.upload_id {
                 let repo = self.repo.clone();
 
-                let cleanup_span = tracing::info_span!(parent: cleanup_parent_span, "Backgrounded cleanup Upload ID", upload_id = ?upload_id);
+                let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Backgrounded cleanup Upload ID", upload_id = ?upload_id);
 
                 tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                     actix_rt::spawn(
