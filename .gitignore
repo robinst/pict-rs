@@ -3,3 +3,4 @@
 /docker/dev/volumes
 /client-examples/javascript/node_modules
 /docker/object-storage/storage
+/docker/object-storage/pict-rs-garage.toml

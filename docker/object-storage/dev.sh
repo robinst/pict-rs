@@ -7,6 +7,7 @@ export GROUP_ID=$(id -g)
 
 sudo docker-compose build --pull
 sudo docker-compose up -d minio
+sudo docker-compose up -d garage
 sudo docker-compose up -d pictrs_proxy
 sudo docker-compose up -d otel
 sudo docker-compose up -d jaeger

@@ -14,6 +14,7 @@ services:
     environment:
       - PICTRS__TRACING__CONSOLE__ADDRESS=0.0.0.0:6669
       - PICTRS__TRACING__OPENTELEMETRY__URL=http://otel:4137
+      - RUST_BACKTRACE=1
     stdin_open: true
     tty: true
     volumes:
@@ -36,6 +37,20 @@ services:
       - "9001:9001"
     volumes:
       - ./storage/minio:/mnt
+
+  garage:
+    image: dxflrs/garage:v0.8.0
+    ports:
+      - "3900:3900"
+      - "3901:3901"
+      - "3902:3902"
+      - "3903:3903"
+      - "3904:3904"
+    environment:
+      - RUST_LOG=debug
+    volumes:
+      - ./storage/garage:/mnt
+      - ./garage.toml:/etc/garage.toml
 
   otel:
     image: otel/opentelemetry-collector:latest
