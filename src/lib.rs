@@ -73,6 +73,8 @@ use self::{
     stream::{StreamLimit, StreamTimeout},
 };
 
+pub use self::config::ConfigSource;
+
 const MEGABYTES: usize = 1024 * 1024;
 const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
@@ -1162,28 +1164,50 @@ where
     Ok(())
 }
 
-/// Initialize the pict-rs configuration
-///
-/// This takes an optional config_file path which is a valid pict-rs configuration file, and an
-/// optional save_to path, which the generated configuration will be saved into. Since many
-/// parameters have defaults, it can be useful to dump a valid configuration with default values to
-/// see what is available for tweaking.
-///
-/// This function must be called before `run` or `install_tracing`
-///
-/// When running pict-rs as a library, configuration is limited to environment variables and
-/// configuration files. Commandline options are not available.
-pub fn init_config<P: AsRef<Path>, Q: AsRef<Path>>(
-    config_file: Option<P>,
-    save_to: Option<Q>,
-) -> color_eyre::Result<()> {
-    let (config, operation) = config::configure_without_clap(config_file, save_to)?;
+impl<P: AsRef<Path>, T: serde::Serialize> ConfigSource<P, T> {
+    /// Initialize the pict-rs configuration
+    ///
+    /// This takes an optional config_file path which is a valid pict-rs configuration file, and an
+    /// optional save_to path, which the generated configuration will be saved into. Since many
+    /// parameters have defaults, it can be useful to dump a valid configuration with default values to
+    /// see what is available for tweaking.
+    ///
+    /// This function must be called before `run` or `install_tracing`
+    ///
+    /// When running pict-rs as a library, configuration is limited to environment variables and
+    /// configuration files. Commandline options are not available.
+    ///
+    /// ```rust
+    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     pict_rs::ConfigSource::memory(serde_json::json!({
+    ///         "server": {
+    ///             "address": "127.0.0.1:8080"
+    ///         },
+    ///         "old_db": {
+    ///             "path": "./old"
+    ///         },
+    ///         "repo": {
+    ///             "type": "sled",
+    ///             "path": "./sled-repo"
+    ///         },
+    ///         "store": {
+    ///             "type": "filesystem",
+    ///             "path": "./files"
+    ///         }
+    ///     })).init::<&str>(None)?;
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn init<Q: AsRef<Path>>(self, save_to: Option<Q>) -> color_eyre::Result<()> {
+        let (config, operation) = config::configure_without_clap(self, save_to)?;
 
-    DO_CONFIG
-        .set((config, operation))
-        .unwrap_or_else(|_| panic!("CONFIG cannot be initialized more than once"));
+        DO_CONFIG
+            .set((config, operation))
+            .unwrap_or_else(|_| panic!("CONFIG cannot be initialized more than once"));
 
-    Ok(())
+        Ok(())
+    }
 }
 
 /// Install the default pict-rs tracer
