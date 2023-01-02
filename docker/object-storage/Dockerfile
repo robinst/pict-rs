@@ -11,7 +11,5 @@ RUN \
 
 COPY root/ /
 
-COPY ./pict-rs.toml /etc/pict-rs.toml
-
 WORKDIR /opt/app
 USER app

@@ -3,6 +3,8 @@
 STDOUT=./out.log
 STDERR=./err.log
 
+touch "${STDOUT}"
+touch "${STDERR}"
 rm "${STDOUT}" "${STDERR}"
 
 node_id=$(garage -c garage-local.toml status 2>>"${STDERR}" | tail -n 1 | awk '{ print $1 }')
