@@ -42,7 +42,7 @@ use std::{
     path::Path,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 use tokio::sync::Semaphore;
 use tracing_actix_web::TracingLogger;
@@ -1316,6 +1316,28 @@ const STORE_MIGRATION_VARIANT: &str = "store-migration-variant";
 
 async fn migrate_store<R, S1, S2>(repo: &R, from: S1, to: S2) -> Result<(), Error>
 where
+    S1: Store + Clone,
+    S2: Store + Clone,
+    R: IdentifierRepo + HashRepo + SettingsRepo,
+{
+    let mut failure_count = 0;
+
+    while let Err(e) = do_migrate_store(repo, from.clone(), to.clone()).await {
+        tracing::error!("Failed with {}", e.to_string());
+        failure_count += 1;
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        if failure_count >= 50 {
+            tracing::error!("Exceeded 50 errors");
+            return Err(e);
+        }
+    }
+
+    Ok(())
+}
+async fn do_migrate_store<R, S1, S2>(repo: &R, from: S1, to: S2) -> Result<(), Error>
+where
     S1: Store,
     S2: Store,
     R: IdentifierRepo + HashRepo + SettingsRepo,
@@ -1395,9 +1417,17 @@ where
     S1: Store,
     S2: Store,
 {
+    const CONST_TIME: Duration = Duration::from_millis(250);
+
+    let start = Instant::now();
     let stream = from.to_stream(identifier, None, None).await?;
 
     let new_identifier = to.save_stream(stream).await?;
+
+    let elapsed = start.elapsed();
+    if elapsed < CONST_TIME {
+        tokio::time::sleep(CONST_TIME - elapsed).await;
+    }
 
     Ok(new_identifier)
 }
