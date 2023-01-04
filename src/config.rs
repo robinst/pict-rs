@@ -66,7 +66,11 @@ pub(crate) fn configure_without_clap<P: AsRef<Path>, T: serde::Serialize, Q: AsR
     };
 
     let built = config
-        .add_source(config::Environment::with_prefix("PICTRS").separator("__"))
+        .add_source(
+            config::Environment::with_prefix("PICTRS")
+                .separator("__")
+                .try_parsing(true),
+        )
         .build()?;
 
     let operation = Operation::Run;
