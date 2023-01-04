@@ -102,7 +102,11 @@ pub(crate) fn configure() -> color_eyre::Result<(Configuration, Operation)> {
     };
 
     let built = config
-        .add_source(config::Environment::with_prefix("PICTRS").separator("__"))
+        .add_source(
+            config::Environment::with_prefix("PICTRS")
+                .separator("__")
+                .try_parsing(true),
+        )
         .add_source(config::Config::try_from(&config_format)?)
         .build()?;
 
