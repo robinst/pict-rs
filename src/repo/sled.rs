@@ -682,10 +682,20 @@ impl HashRepo for SledRepo {
                 .scan_prefix(&hash)
                 .filter_map(|res| res.ok())
                 .filter_map(|(key, ivec)| {
-                    let identifier = I::from_bytes(ivec.to_vec()).ok()?;
-                    let variant = variant_from_key(&hash, &key)?;
+                    let identifier = I::from_bytes(ivec.to_vec()).ok();
+                    if identifier.is_none() {
+                        tracing::warn!(
+                            "Skipping an identifier: {}",
+                            String::from_utf8_lossy(&ivec)
+                        );
+                    }
 
-                    Some((variant, identifier))
+                    let variant = variant_from_key(&hash, &key);
+                    if variant.is_none() {
+                        tracing::warn!("Skipping a variant: {}", String::from_utf8_lossy(&key));
+                    }
+
+                    Some((variant?, identifier?))
                 })
                 .collect::<Vec<_>>()) as Result<Vec<_>, sled::Error>
         );

@@ -42,7 +42,7 @@ use std::{
     path::Path,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, SystemTime},
 };
 use tokio::sync::Semaphore;
 use tracing_actix_web::TracingLogger;
@@ -1383,6 +1383,8 @@ where
 
             let new_identifier = migrate_file(&from, &to, &identifier).await?;
             migrate_details(repo, identifier, &new_identifier).await?;
+            repo.remove_variant(hash.as_ref().to_vec().into(), variant.clone())
+                .await?;
             repo.relate_variant_identifier(hash.as_ref().to_vec().into(), variant, &new_identifier)
                 .await?;
 
@@ -1417,17 +1419,37 @@ where
     S1: Store,
     S2: Store,
 {
-    const CONST_TIME: Duration = Duration::from_millis(250);
+    let mut failure_count = 0;
 
-    let start = Instant::now();
+    loop {
+        match do_migrate_file(from, to, identifier).await {
+            Ok(identifier) => return Ok(identifier),
+            Err(e) => {
+                failure_count += 1;
+
+                tokio::time::sleep(Duration::from_secs(5)).await;
+
+                if failure_count > 50 {
+                    tracing::error!("Error migrating file: {}", e.to_string());
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
+
+async fn do_migrate_file<S1, S2>(
+    from: &S1,
+    to: &S2,
+    identifier: &S1::Identifier,
+) -> Result<S2::Identifier, Error>
+where
+    S1: Store,
+    S2: Store,
+{
     let stream = from.to_stream(identifier, None, None).await?;
 
     let new_identifier = to.save_stream(stream).await?;
-
-    let elapsed = start.elapsed();
-    if elapsed < CONST_TIME {
-        tokio::time::sleep(CONST_TIME - elapsed).await;
-    }
 
     Ok(new_identifier)
 }
