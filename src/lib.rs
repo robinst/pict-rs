@@ -985,6 +985,11 @@ async fn identifier<R: FullRepo, S: Store>(
     })))
 }
 
+async fn healthz<R: FullRepo>(repo: web::Data<R>) -> Result<HttpResponse, Error> {
+    repo.health_check().await?;
+    Ok(HttpResponse::Ok().finish())
+}
+
 fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
     let error: Error = error.into();
     let error: actix_web::Error = error.into();
@@ -1039,6 +1044,7 @@ async fn launch<R: FullRepo + 'static, SC: StoreConfig + 'static>(
             .app_data(web::Data::new(repo))
             .app_data(web::Data::new(store))
             .app_data(web::Data::new(build_client()))
+            .route("/healthz", web::get().to(healthz::<R>))
             .service(
                 web::scope("/image")
                     .service(

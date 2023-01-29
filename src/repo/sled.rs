@@ -13,7 +13,10 @@ use sled::{CompareAndSwapError, Db, IVec, Tree};
 use std::{
     collections::HashMap,
     pin::Pin,
-    sync::{Arc, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, RwLock,
+    },
 };
 use tokio::sync::Notify;
 
@@ -52,6 +55,8 @@ pub(crate) enum SledError {
 
 #[derive(Clone)]
 pub(crate) struct SledRepo {
+    healthz_count: Arc<AtomicU64>,
+    healthz: Tree,
     settings: Tree,
     identifier_details: Tree,
     hashes: Tree,
@@ -74,6 +79,8 @@ pub(crate) struct SledRepo {
 impl SledRepo {
     pub(crate) fn new(db: Db) -> Result<Self, SledError> {
         Ok(SledRepo {
+            healthz_count: Arc::new(AtomicU64::new(0)),
+            healthz: db.open_tree("pict-rs-healthz-tree")?,
             settings: db.open_tree("pict-rs-settings-tree")?,
             identifier_details: db.open_tree("pict-rs-identifier-details-tree")?,
             hashes: db.open_tree("pict-rs-hashes-tree")?,
@@ -99,7 +106,18 @@ impl BaseRepo for SledRepo {
     type Bytes = IVec;
 }
 
-impl FullRepo for SledRepo {}
+#[async_trait::async_trait(?Send)]
+impl FullRepo for SledRepo {
+    async fn health_check(&self) -> Result<(), Error> {
+        let next = self.healthz_count.fetch_add(1, Ordering::Relaxed);
+        b!(self.healthz, {
+            healthz.insert("healthz", &next.to_be_bytes()[..])
+        });
+        self.healthz.flush_async().await?;
+        b!(self.healthz, healthz.get("healthz"));
+        Ok(())
+    }
+}
 
 #[derive(serde::Deserialize, serde::Serialize)]
 enum InnerUploadResult {

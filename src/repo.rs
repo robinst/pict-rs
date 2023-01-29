@@ -60,6 +60,8 @@ pub(crate) trait FullRepo:
     + Clone
     + Debug
 {
+    async fn health_check(&self) -> Result<(), Error>;
+
     #[tracing::instrument(skip(self))]
     async fn identifier_from_alias<I: Identifier + 'static>(
         &self,
@@ -103,7 +105,12 @@ pub(crate) trait FullRepo:
     }
 }
 
-impl<T> FullRepo for actix_web::web::Data<T> where T: FullRepo {}
+#[async_trait::async_trait(?Send)]
+impl<T> FullRepo for actix_web::web::Data<T> where T: FullRepo {
+    async fn health_check(&self) -> Result<(), Error> {
+        T::health_check(self).await
+    }
+}
 
 pub(crate) trait BaseRepo {
     type Bytes: AsRef<[u8]> + From<Vec<u8>> + Clone;
