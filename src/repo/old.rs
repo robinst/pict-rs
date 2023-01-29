@@ -123,7 +123,7 @@ impl Old {
 
         let filename_string = String::from_utf8_lossy(&filename);
 
-        let variant_prefix = format!("{}/", filename_string);
+        let variant_prefix = format!("{filename_string}/");
 
         Ok(self
             .identifier_tree
@@ -157,7 +157,7 @@ impl Old {
 
         let filename_string = String::from_utf8_lossy(&filename);
 
-        let motion_key = format!("{}/motion", filename_string);
+        let motion_key = format!("{filename_string}/motion");
 
         Ok(self.filename_tree.get(motion_key)?)
     }
@@ -175,7 +175,7 @@ impl Old {
     }
 
     pub(super) fn delete_token(&self, alias: &Alias) -> color_eyre::Result<Option<DeleteToken>> {
-        let key = format!("{}/delete", alias);
+        let key = format!("{alias}/delete");
 
         if let Some(ivec) = self.alias_tree.get(key)? {
             return Ok(DeleteToken::from_slice(&ivec));

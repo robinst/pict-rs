@@ -42,7 +42,7 @@ where
                 Cleanup::AllVariants => all_variants::<R, S>(repo).await?,
             },
             Err(e) => {
-                tracing::warn!("Invalid job: {}", format!("{}", e));
+                tracing::warn!("Invalid job: {}", format!("{e}"));
             }
         }
 
@@ -72,7 +72,7 @@ where
         let span = tracing::error_span!("Error deleting files");
         span.in_scope(|| {
             for error in errors {
-                tracing::error!("{}", format!("{}", error));
+                tracing::error!("{}", format!("{error}"));
             }
         });
     }

@@ -611,7 +611,7 @@ impl ObjectStore {
         let path = self.next_directory().await?.to_strings().join("/");
         let filename = uuid::Uuid::new_v4().to_string();
 
-        Ok(format!("{}/{}", path, filename))
+        Ok(format!("{path}/{filename}"))
     }
 }
 

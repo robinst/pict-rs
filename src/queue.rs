@@ -190,8 +190,8 @@ async fn process_jobs<R, S, F>(
         let res = job_loop(repo, store, worker_id.clone(), queue, callback).await;
 
         if let Err(e) = res {
-            tracing::warn!("Error processing jobs: {}", format!("{}", e));
-            tracing::warn!("{}", format!("{:?}", e));
+            tracing::warn!("Error processing jobs: {}", format!("{e}"));
+            tracing::warn!("{}", format!("{e:?}"));
             continue;
         }
 

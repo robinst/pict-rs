@@ -200,7 +200,7 @@ impl Display for Targets {
         let targets = self
             .targets
             .iter()
-            .map(|(path, level)| format!("{}={}", path, level))
+            .map(|(path, level)| format!("{path}={level}"))
             .collect::<Vec<_>>()
             .join(",");
 
@@ -226,12 +226,12 @@ impl Display for Targets {
 
         if let Some(level) = max_level {
             if !targets.is_empty() {
-                write!(f, "{},{}", level, targets)
+                write!(f, "{level},{targets}")
             } else {
-                write!(f, "{}", level)
+                write!(f, "{level}")
             }
         } else if !targets.is_empty() {
-            write!(f, "{}", targets)
+            write!(f, "{targets}")
         } else {
             Ok(())
         }
@@ -246,7 +246,7 @@ impl FromStr for ImageFormat {
             "jpeg" | "jpg" => Ok(Self::Jpeg),
             "png" => Ok(Self::Png),
             "webp" => Ok(Self::Webp),
-            other => Err(format!("Invalid variant: {}", other)),
+            other => Err(format!("Invalid variant: {other}")),
         }
     }
 }
@@ -260,7 +260,7 @@ impl FromStr for LogFormat {
                 return Ok(*variant);
             }
         }
-        Err(format!("Invalid variant: {}", s))
+        Err(format!("Invalid variant: {s}"))
     }
 }
 

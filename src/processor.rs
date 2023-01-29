@@ -81,8 +81,8 @@ impl ResizeKind {
 
     fn to_magick_string(self) -> String {
         match self {
-            Self::Area(size) => format!("{}@>", size),
-            Self::Bounds(size) => format!("{}x{}>", size, size),
+            Self::Area(size) => format!("{size}@>"),
+            Self::Bounds(size) => format!("{size}x{size}>"),
         }
     }
 }
@@ -207,21 +207,21 @@ impl Processor for Resize {
                 filter: None,
                 kind: ResizeKind::Area(size),
             } => {
-                let node = format!(".a{}", size);
+                let node = format!(".a{size}");
                 path.push(node);
             }
             Resize {
                 filter: Some(filter),
                 kind: ResizeKind::Bounds(size),
             } => {
-                let node = format!("{}.{}", filter.to_magick_str(), size);
+                let node = format!("{}.{size}", filter.to_magick_str());
                 path.push(node);
             }
             Resize {
                 filter: Some(filter),
                 kind: ResizeKind::Area(size),
             } => {
-                let node = format!("{}.a{}", filter.to_magick_str(), size);
+                let node = format!("{}.a{size}", filter.to_magick_str());
                 path.push(node);
             }
         }

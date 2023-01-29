@@ -486,7 +486,7 @@ impl Repo {
                     async {
                         for hash in old.hashes() {
                             if let Err(e) = migrate_hash(repo, &old, hash).await {
-                                tracing::error!("Failed to migrate hash: {}", format!("{:?}", e));
+                                tracing::error!("Failed to migrate hash: {}", format!("{e:?}"));
                             }
                         }
 
@@ -529,7 +529,7 @@ impl Repo {
                         if let Err(e) = migrate_identifiers_for_hash(repo, hash).await {
                             tracing::error!(
                                 "Failed to migrate identifiers for hash: {}",
-                                format!("{:?}", e)
+                                format!("{e:?}")
                             );
                         }
                     }
@@ -831,8 +831,8 @@ impl std::fmt::Display for UploadId {
 impl std::fmt::Display for MaybeUuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Uuid(id) => write!(f, "{}", id),
-            Self::Name(name) => write!(f, "{}", name),
+            Self::Uuid(id) => write!(f, "{id}"),
+            Self::Name(name) => write!(f, "{name}"),
         }
     }
 }
@@ -862,7 +862,7 @@ impl std::str::FromStr for Alias {
 impl std::fmt::Display for Alias {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(ext) = self.extension() {
-            write!(f, "{}{}", self.id, ext)
+            write!(f, "{}{ext}", self.id)
         } else {
             write!(f, "{}", self.id)
         }
@@ -1001,7 +1001,7 @@ mod tests {
     fn uuid_string_alias_ext() {
         let uuid = Uuid::new_v4();
 
-        let alias_str = format!("{}.mp4", uuid);
+        let alias_str = format!("{uuid}.mp4");
         let alias = Alias::from_existing(&alias_str);
 
         assert_eq!(
@@ -1091,7 +1091,7 @@ mod tests {
     fn uuid_bytes_string_alias_ext() {
         let uuid = Uuid::new_v4();
 
-        let alias_str = format!("{}.mp4", uuid);
+        let alias_str = format!("{uuid}.mp4");
         let alias = Alias::from_slice(alias_str.as_bytes()).unwrap();
 
         assert_eq!(
