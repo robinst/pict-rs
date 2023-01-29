@@ -14,6 +14,7 @@ use actix_web::{
     web::Bytes,
 };
 use awc::{error::SendRequestError, Client, ClientRequest, ClientResponse, SendClientRequest};
+use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_util::{Stream, StreamExt, TryStreamExt};
 use rusty_s3::{actions::S3Action, Bucket, BucketError, Credentials, UrlStyle};
 use std::{pin::Pin, string::FromUtf8Error, time::Duration};
@@ -474,7 +475,7 @@ impl ObjectStore {
                 hasher.update(&bytes);
             }
             let hash = hasher.finalize();
-            let hash_string = base64::encode(hash);
+            let hash_string = BASE64_STANDARD.encode(hash);
             drop(guard);
             hash_string
         })

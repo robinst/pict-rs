@@ -4,6 +4,7 @@ use crate::{
     error::Error,
     store::{file_store::FileId, Identifier},
 };
+use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_util::Stream;
 use std::{fmt::Debug, path::PathBuf};
 use tracing::Instrument;
@@ -106,7 +107,10 @@ pub(crate) trait FullRepo:
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> FullRepo for actix_web::web::Data<T> where T: FullRepo {
+impl<T> FullRepo for actix_web::web::Data<T>
+where
+    T: FullRepo,
+{
     async fn health_check(&self) -> Result<(), Error> {
         T::health_check(self).await
     }
@@ -878,7 +882,7 @@ impl Identifier for Vec<u8> {
     }
 
     fn string_repr(&self) -> String {
-        base64::encode(self.as_slice())
+        BASE64_STANDARD.encode(self.as_slice())
     }
 }
 

@@ -7,6 +7,7 @@ use crate::{
     serde_str::Serde,
     store::{Identifier, Store},
 };
+use base64::{prelude::BASE64_STANDARD, Engine};
 use std::{future::Future, path::PathBuf, pin::Pin};
 use tracing::Instrument;
 
@@ -21,7 +22,7 @@ impl serde::Serialize for Base64Bytes {
     where
         S: serde::Serializer,
     {
-        let s = base64::encode(&self.0);
+        let s = BASE64_STANDARD.encode(&self.0);
         s.serialize(serializer)
     }
 }
@@ -32,7 +33,8 @@ impl<'de> serde::Deserialize<'de> for Base64Bytes {
         D: serde::Deserializer<'de>,
     {
         let s: String = serde::Deserialize::deserialize(deserializer)?;
-        base64::decode(s)
+        BASE64_STANDARD
+            .decode(s)
             .map(Base64Bytes)
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
