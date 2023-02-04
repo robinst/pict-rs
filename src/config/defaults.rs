@@ -66,12 +66,21 @@ struct MediaDefaults {
     max_area: usize,
     max_file_size: usize,
     max_frame_count: usize,
+    gif: GifDefaults,
     enable_silent_video: bool,
     enable_full_video: bool,
     video_codec: VideoCodec,
     filters: Vec<String>,
     skip_validate_imports: bool,
     cache_duration: i64,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct GifDefaults {
+    max_height: usize,
+    max_width: usize,
+    max_area: usize,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -154,6 +163,7 @@ impl Default for MediaDefaults {
             max_area: 40_000_000,
             max_file_size: 40,
             max_frame_count: 900,
+            gif: Default::default(),
             enable_silent_video: true,
             enable_full_video: false,
             video_codec: VideoCodec::Vp9,
@@ -167,6 +177,16 @@ impl Default for MediaDefaults {
             skip_validate_imports: false,
             // one week (in hours)
             cache_duration: 24 * 7,
+        }
+    }
+}
+
+impl Default for GifDefaults {
+    fn default() -> Self {
+        GifDefaults {
+            max_height: 128,
+            max_width: 128,
+            max_area: 16384,
         }
     }
 }

@@ -100,12 +100,15 @@ pub(crate) struct Media {
 
     pub(crate) max_frame_count: usize,
 
+    pub(crate) gif: Gif,
+
     pub(crate) enable_silent_video: bool,
 
     pub(crate) enable_full_video: bool,
 
     pub(crate) video_codec: VideoCodec,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) audio_codec: Option<AudioCodec>,
 
     pub(crate) filters: BTreeSet<String>,
@@ -116,6 +119,15 @@ pub(crate) struct Media {
     pub(crate) skip_validate_imports: bool,
 
     pub(crate) cache_duration: i64,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Gif {
+    pub(crate) max_width: usize,
+
+    pub(crate) max_height: usize,
+
+    pub(crate) max_area: usize,
 }
 
 impl Media {

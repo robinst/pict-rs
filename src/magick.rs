@@ -45,7 +45,7 @@ pub(crate) enum ValidInputType {
 }
 
 impl ValidInputType {
-    fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
             Self::Mp4 => "MP4",
             Self::Webm => "WEBM",
@@ -56,7 +56,7 @@ impl ValidInputType {
         }
     }
 
-    pub(crate) fn as_ext(self) -> &'static str {
+    pub(crate) const fn as_ext(self) -> &'static str {
         match self {
             Self::Mp4 => ".mp4",
             Self::Webm => ".webm",
@@ -67,11 +67,11 @@ impl ValidInputType {
         }
     }
 
-    pub(crate) fn is_video(self) -> bool {
+    pub(crate) const fn is_video(self) -> bool {
         matches!(self, Self::Mp4 | Self::Webm | Self::Gif)
     }
 
-    fn video_hint(self) -> Option<&'static str> {
+    const fn video_hint(self) -> Option<&'static str> {
         match self {
             Self::Mp4 => Some(".mp4"),
             Self::Webm => Some(".webm"),
@@ -80,14 +80,14 @@ impl ValidInputType {
         }
     }
 
-    pub(crate) fn from_video_codec(codec: VideoCodec) -> Self {
+    pub(crate) const fn from_video_codec(codec: VideoCodec) -> Self {
         match codec {
             VideoCodec::Av1 | VideoCodec::Vp8 | VideoCodec::Vp9 => Self::Webm,
             VideoCodec::H264 | VideoCodec::H265 => Self::Mp4,
         }
     }
 
-    pub(crate) fn from_format(format: ImageFormat) -> Self {
+    pub(crate) const fn from_format(format: ImageFormat) -> Self {
         match format {
             ImageFormat::Jpeg => ValidInputType::Jpeg,
             ImageFormat::Png => ValidInputType::Png,
@@ -95,7 +95,7 @@ impl ValidInputType {
         }
     }
 
-    pub(crate) fn to_format(self) -> Option<ImageFormat> {
+    pub(crate) const fn to_format(self) -> Option<ImageFormat> {
         match self {
             Self::Jpeg => Some(ImageFormat::Jpeg),
             Self::Png => Some(ImageFormat::Png),
@@ -283,8 +283,10 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
     })
 }
 
-pub(crate) async fn input_type_bytes(input: Bytes) -> Result<ValidInputType, Error> {
-    details_bytes(input, None).await?.validate_input()
+pub(crate) async fn input_type_bytes(input: Bytes) -> Result<(Details, ValidInputType), Error> {
+    let details = details_bytes(input, None).await?;
+    let input_type = details.validate_input()?;
+    Ok((details, input_type))
 }
 
 fn process_image(args: Vec<String>, format: ImageFormat) -> std::io::Result<Process> {

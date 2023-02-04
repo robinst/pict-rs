@@ -1,8 +1,8 @@
 use crate::{
-    config::{AudioCodec, ImageFormat, VideoCodec},
+    config::{ImageFormat, MediaConfiguration},
     either::Either,
     error::{Error, UploadError},
-    ffmpeg::FileFormat,
+    ffmpeg::{FileFormat, TranscodeOptions},
     magick::ValidInputType,
 };
 use actix_web::web::Bytes;
@@ -38,16 +38,12 @@ impl AsyncRead for UnvalidatedBytes {
 #[tracing::instrument(skip_all)]
 pub(crate) async fn validate_bytes(
     bytes: Bytes,
-    prescribed_format: Option<ImageFormat>,
-    enable_silent_video: bool,
-    enable_full_video: bool,
-    video_codec: VideoCodec,
-    audio_codec: Option<AudioCodec>,
+    media: &MediaConfiguration,
     validate: bool,
 ) -> Result<(ValidInputType, impl AsyncRead + Unpin), Error> {
-    let input_type =
-        if let Some(input_type) = crate::ffmpeg::input_type_bytes(bytes.clone()).await? {
-            input_type
+    let (details, input_type) =
+        if let Some(tup) = crate::ffmpeg::input_type_bytes(bytes.clone()).await? {
+            tup
         } else {
             crate::magick::input_type_bytes(bytes.clone()).await?
         };
@@ -56,22 +52,17 @@ pub(crate) async fn validate_bytes(
         return Ok((input_type, Either::left(UnvalidatedBytes::new(bytes))));
     }
 
-    match (input_type.to_file_format(), prescribed_format) {
+    match (input_type.to_file_format(), media.format) {
         (FileFormat::Video(video_format), _) => {
-            if !(enable_silent_video || enable_full_video) {
+            if !(media.enable_silent_video || media.enable_full_video) {
                 return Err(UploadError::SilentVideoDisabled.into());
             }
+            let transcode_options = TranscodeOptions::new(media, &details, video_format);
+
             Ok((
-                ValidInputType::from_video_codec(video_codec),
+                transcode_options.output_type(),
                 Either::right(Either::left(Either::left(
-                    crate::ffmpeg::trancsocde_bytes(
-                        bytes,
-                        video_format,
-                        enable_full_video,
-                        video_codec,
-                        audio_codec,
-                    )
-                    .await?,
+                    crate::ffmpeg::transcode_bytes(bytes, transcode_options).await?,
                 ))),
             ))
         }

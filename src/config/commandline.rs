@@ -52,6 +52,9 @@ impl Args {
                 media_max_area,
                 media_max_file_size,
                 media_max_frame_count,
+                media_gif_max_width,
+                media_gif_max_height,
+                media_gif_max_area,
                 media_enable_silent_video,
                 media_enable_full_video,
                 media_video_codec,
@@ -66,6 +69,18 @@ impl Args {
                     api_key,
                     worker_id,
                 };
+                let gif = if media_gif_max_width.is_none()
+                    && media_gif_max_height.is_none()
+                    && media_gif_max_area.is_none()
+                {
+                    None
+                } else {
+                    Some(Gif {
+                        max_width: media_gif_max_width,
+                        max_height: media_gif_max_height,
+                        max_area: media_gif_max_area,
+                    })
+                };
                 let media = Media {
                     preprocess_steps: media_preprocess_steps,
                     skip_validate_imports: media_skip_validate_imports,
@@ -74,6 +89,7 @@ impl Args {
                     max_area: media_max_area,
                     max_file_size: media_max_file_size,
                     max_frame_count: media_max_frame_count,
+                    gif,
                     enable_silent_video: media_enable_silent_video,
                     enable_full_video: media_enable_full_video,
                     video_codec: media_video_codec,
@@ -322,6 +338,8 @@ struct Media {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_frame_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    gif: Option<Gif>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     enable_silent_video: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     enable_full_video: Option<bool>,
@@ -337,6 +355,17 @@ struct Media {
     skip_validate_imports: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_duration: Option<i64>,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct Gif {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_width: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_height: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_area: Option<usize>,
 }
 
 /// Run the pict-rs application
@@ -431,6 +460,24 @@ struct Run {
     /// The maximum number of frames allowed for uploaded GIF and MP4s.
     #[arg(long)]
     media_max_frame_count: Option<usize>,
+    /// Maximum width allowed for gif uploads.
+    ///
+    /// If an upload exceeds this value, it will be transcoded to a video format or aborted,
+    /// depending on whether video uploads are enabled.
+    #[arg(long)]
+    media_gif_max_width: Option<usize>,
+    /// Maximum height allowed for gif uploads
+    ///
+    /// If an upload exceeds this value, it will be transcoded to a video format or aborted,
+    /// depending on whether video uploads are enabled.
+    #[arg(long)]
+    media_gif_max_height: Option<usize>,
+    /// Maximum area allowed for gif uploads
+    ///
+    /// If an upload exceeds this value, it will be transcoded to a video format or aborted,
+    /// depending on whether video uploads are enabled.
+    #[arg(long)]
+    media_gif_max_area: Option<usize>,
     /// Whether to enable GIF and silent video uploads
     #[arg(long)]
     media_enable_silent_video: Option<bool>,

@@ -11,7 +11,9 @@ use config::Config;
 use defaults::Defaults;
 
 pub(crate) use commandline::Operation;
-pub(crate) use file::{ConfigFile as Configuration, OpenTelemetry, Repo, Sled, Tracing};
+pub(crate) use file::{
+    ConfigFile as Configuration, Media as MediaConfiguration, OpenTelemetry, Repo, Sled, Tracing,
+};
 pub(crate) use primitives::{
     AudioCodec, Filesystem, ImageFormat, LogFormat, ObjectStorage, Store, VideoCodec,
 };

@@ -1,5 +1,5 @@
 use crate::{
-    config::{AudioCodec, ImageFormat, VideoCodec},
+    config::{AudioCodec, ImageFormat, MediaConfiguration, VideoCodec},
     error::{Error, UploadError},
     magick::{Details, ValidInputType},
     process::Process,
@@ -7,6 +7,160 @@ use crate::{
 };
 use actix_web::web::Bytes;
 use tokio::io::{AsyncRead, AsyncReadExt};
+
+#[derive(Debug)]
+pub(crate) struct TranscodeOptions {
+    input_format: VideoFormat,
+    output: TranscodeOutputOptions,
+}
+
+#[derive(Debug)]
+enum TranscodeOutputOptions {
+    Gif,
+    Video {
+        video_codec: VideoCodec,
+        audio_codec: Option<AudioCodec>,
+    },
+}
+
+impl TranscodeOptions {
+    pub(crate) fn new(
+        media: &MediaConfiguration,
+        details: &Details,
+        input_format: VideoFormat,
+    ) -> Self {
+        if let VideoFormat::Gif = input_format {
+            if details.width <= media.gif.max_width
+                && details.height <= media.gif.max_height
+                && details.width * details.height <= media.gif.max_area
+            {
+                return Self {
+                    input_format,
+                    output: TranscodeOutputOptions::gif(),
+                };
+            }
+        }
+
+        Self {
+            input_format,
+            output: TranscodeOutputOptions::video(media),
+        }
+    }
+
+    const fn input_file_extension(&self) -> &'static str {
+        self.input_format.to_file_extension()
+    }
+
+    const fn output_ffmpeg_video_codec(&self) -> &'static str {
+        match self.output {
+            TranscodeOutputOptions::Gif => "gif",
+            TranscodeOutputOptions::Video { video_codec, .. } => video_codec.to_ffmpeg_codec(),
+        }
+    }
+
+    const fn output_ffmpeg_audio_codec(&self) -> Option<&'static str> {
+        match self.output {
+            TranscodeOutputOptions::Video {
+                audio_codec: Some(audio_codec),
+                ..
+            } => Some(audio_codec.to_ffmpeg_codec()),
+            _ => None,
+        }
+    }
+
+    const fn output_ffmpeg_format(&self) -> &'static str {
+        match self.output {
+            TranscodeOutputOptions::Gif => "gif",
+            TranscodeOutputOptions::Video { video_codec, .. } => {
+                video_codec.to_output_format().to_ffmpeg_format()
+            }
+        }
+    }
+
+    const fn output_file_extension(&self) -> &'static str {
+        match self.output {
+            TranscodeOutputOptions::Gif => ".gif",
+            TranscodeOutputOptions::Video { video_codec, .. } => {
+                video_codec.to_output_format().to_file_extension()
+            }
+        }
+    }
+
+    fn execute<'a>(
+        &self,
+        input_path: &str,
+        output_path: &'a str,
+    ) -> Result<Process, std::io::Error> {
+        if let Some(audio_codec) = self.output_ffmpeg_audio_codec() {
+            Process::run(
+                "ffmpeg",
+                &[
+                    "-i",
+                    input_path,
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-vf",
+                    "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-c:a",
+                    audio_codec,
+                    "-c:v",
+                    self.output_ffmpeg_video_codec(),
+                    "-f",
+                    self.output_ffmpeg_format(),
+                    output_path,
+                ],
+            )
+        } else {
+            Process::run(
+                "ffmpeg",
+                &[
+                    "-i",
+                    input_path,
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-vf",
+                    "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-an",
+                    "-c:v",
+                    self.output_ffmpeg_video_codec(),
+                    "-f",
+                    self.output_ffmpeg_format(),
+                    output_path,
+                ],
+            )
+        }
+    }
+
+    pub(crate) const fn output_type(&self) -> ValidInputType {
+        match self.output {
+            TranscodeOutputOptions::Gif => ValidInputType::Gif,
+            TranscodeOutputOptions::Video { video_codec, .. } => {
+                ValidInputType::from_video_codec(video_codec)
+            }
+        }
+    }
+}
+
+impl TranscodeOutputOptions {
+    fn video(media: &MediaConfiguration) -> Self {
+        Self::Video {
+            video_codec: media.video_codec,
+            audio_codec: if media.enable_full_video {
+                Some(
+                    media
+                        .audio_codec
+                        .unwrap_or(media.video_codec.to_output_format().default_audio_codec()),
+                )
+            } else {
+                None
+            },
+        }
+    }
+
+    const fn gif() -> Self {
+        Self::Gif
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum VideoFormat {
@@ -145,9 +299,12 @@ const FORMAT_MAPPINGS: &[(&str, VideoFormat)] = &[
     ("webm", VideoFormat::Webm),
 ];
 
-pub(crate) async fn input_type_bytes(input: Bytes) -> Result<Option<ValidInputType>, Error> {
+pub(crate) async fn input_type_bytes(
+    input: Bytes,
+) -> Result<Option<(Details, ValidInputType)>, Error> {
     if let Some(details) = details_bytes(input).await? {
-        return Ok(Some(details.validate_input()?));
+        let input_type = details.validate_input()?;
+        return Ok(Some((details, input_type)));
     }
 
     Ok(None)
@@ -264,19 +421,15 @@ fn parse_details_inner(
 }
 
 #[tracing::instrument(skip(input))]
-pub(crate) async fn trancsocde_bytes(
+pub(crate) async fn transcode_bytes(
     input: Bytes,
-    input_format: VideoFormat,
-    permit_audio: bool,
-    video_codec: VideoCodec,
-    audio_codec: Option<AudioCodec>,
+    transcode_options: TranscodeOptions,
 ) -> Result<impl AsyncRead + Unpin, Error> {
-    let input_file = crate::tmp_file::tmp_file(Some(input_format.to_file_extension()));
+    let input_file = crate::tmp_file::tmp_file(Some(transcode_options.input_file_extension()));
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file).await?;
 
-    let output_file =
-        crate::tmp_file::tmp_file(Some(video_codec.to_output_format().to_file_extension()));
+    let output_file = crate::tmp_file::tmp_file(Some(transcode_options.output_file_extension()));
     let output_file_str = output_file.to_str().ok_or(UploadError::Path)?;
     crate::store::file_store::safe_create_parent(&output_file).await?;
 
@@ -284,47 +437,7 @@ pub(crate) async fn trancsocde_bytes(
     tmp_one.write_from_bytes(input).await?;
     tmp_one.close().await?;
 
-    let output_format = video_codec.to_output_format();
-    let audio_codec = audio_codec.unwrap_or_else(|| output_format.default_audio_codec());
-
-    let process = if permit_audio {
-        Process::run(
-            "ffmpeg",
-            &[
-                "-i",
-                input_file_str,
-                "-pix_fmt",
-                "yuv420p",
-                "-vf",
-                "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                "-c:a",
-                audio_codec.to_ffmpeg_codec(),
-                "-c:v",
-                video_codec.to_ffmpeg_codec(),
-                "-f",
-                output_format.to_ffmpeg_format(),
-                output_file_str,
-            ],
-        )?
-    } else {
-        Process::run(
-            "ffmpeg",
-            &[
-                "-i",
-                input_file_str,
-                "-pix_fmt",
-                "yuv420p",
-                "-vf",
-                "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                "-an",
-                "-c:v",
-                video_codec.to_ffmpeg_codec(),
-                "-f",
-                output_format.to_ffmpeg_format(),
-                output_file_str,
-            ],
-        )?
-    };
+    let process = transcode_options.execute(input_file_str, output_file_str)?;
 
     process.wait().await?;
     tokio::fs::remove_file(input_file).await?;

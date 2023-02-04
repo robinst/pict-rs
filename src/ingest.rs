@@ -59,16 +59,8 @@ where
     let bytes = aggregate(stream).await?;
 
     tracing::trace!("Validating bytes");
-    let (input_type, validated_reader) = crate::validate::validate_bytes(
-        bytes,
-        CONFIG.media.format,
-        CONFIG.media.enable_silent_video,
-        CONFIG.media.enable_full_video,
-        CONFIG.media.video_codec,
-        CONFIG.media.audio_codec,
-        should_validate,
-    )
-    .await?;
+    let (input_type, validated_reader) =
+        crate::validate::validate_bytes(bytes, &CONFIG.media, should_validate).await?;
 
     let processed_reader = if let Some(operations) = CONFIG.media.preprocess_steps() {
         if let Some(format) = input_type.to_format() {

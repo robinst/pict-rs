@@ -196,6 +196,34 @@ skip_validate_imports = false
 # default: 168 (1 week)
 cache_duration = 168
 
+## Gif configuration 
+#
+# Making any of these bounds 0 will disable gif uploads
+[media.gif]
+# Optional: Maximum width in pixels for uploaded gifs
+# environment variable: PICTRS__MEDIA__GIF__MAX_WIDTH
+# default: 128
+#
+# If a gif does not fit within this bound, it will either be transcoded to a video or rejected,
+# depending on whether video uploads are enabled
+max_width = 128
+
+# Optional: Maximum height in pixels for uploaded gifs
+# environment variable: PICTRS__MEDIA__GIF__MAX_HEIGHT
+# default: 128
+#
+# If a gif does not fit within this bound, it will either be transcoded to a video or rejected,
+# depending on whether video uploads are enabled
+max_height = 128
+
+# Optional: Maximum area in pixels for uploaded gifs
+# environment variable: PICTRS__MEDIA__GIF__MAX_AREA
+# default: 16384 (128 * 128)
+#
+# If a gif does not fit within this bound, it will either be transcoded to a video or rejected,
+# depending on whether video uploads are enabled
+max_area = 16384
+
 
 ## Database configuration
 [repo]
