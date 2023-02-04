@@ -128,6 +128,8 @@ pub(crate) struct Gif {
     pub(crate) max_height: usize,
 
     pub(crate) max_area: usize,
+
+    pub(crate) max_frame_count: usize,
 }
 
 impl Media {

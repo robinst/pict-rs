@@ -33,6 +33,7 @@ impl TranscodeOptions {
             if details.width <= media.gif.max_width
                 && details.height <= media.gif.max_height
                 && details.width * details.height <= media.gif.max_area
+                && details.frames.unwrap_or(1) <= media.gif.max_frame_count
             {
                 return Self {
                     input_format,

@@ -462,19 +462,19 @@ struct Run {
     media_max_frame_count: Option<usize>,
     /// Maximum width allowed for gif uploads.
     ///
-    /// If an upload exceeds this value, it will be transcoded to a video format or aborted,
+    /// If an upload exceeds this value, it will be transcoded to a video format or rejected,
     /// depending on whether video uploads are enabled.
     #[arg(long)]
     media_gif_max_width: Option<usize>,
     /// Maximum height allowed for gif uploads
     ///
-    /// If an upload exceeds this value, it will be transcoded to a video format or aborted,
+    /// If an upload exceeds this value, it will be transcoded to a video format or rejected,
     /// depending on whether video uploads are enabled.
     #[arg(long)]
     media_gif_max_height: Option<usize>,
     /// Maximum area allowed for gif uploads
     ///
-    /// If an upload exceeds this value, it will be transcoded to a video format or aborted,
+    /// If an upload exceeds this value, it will be transcoded to a video format or rejected,
     /// depending on whether video uploads are enabled.
     #[arg(long)]
     media_gif_max_area: Option<usize>,

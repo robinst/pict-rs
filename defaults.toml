@@ -39,6 +39,7 @@ cache_duration = 168
 max_width = 128
 max_height = 128
 max_area = 16384
+max_frame_count = 100
 
 [repo]
 type = "sled"

@@ -224,6 +224,14 @@ max_height = 128
 # depending on whether video uploads are enabled
 max_area = 16384
 
+# Optional: Maximum number of frames permitted in uploaded gifs
+# environment variable: PICTRS__MEDIA__GIF__MAX_FRAME_COUNT
+# default: 100
+#
+# If a gif does not fit within this bound, it will either be transcoded to a video or rejected,
+# depending on whether video uploads are enabled
+max_frame_count = 100
+
 
 ## Database configuration
 [repo]

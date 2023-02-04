@@ -81,6 +81,7 @@ struct GifDefaults {
     max_height: usize,
     max_width: usize,
     max_area: usize,
+    max_frame_count: usize,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -187,6 +188,7 @@ impl Default for GifDefaults {
             max_height: 128,
             max_width: 128,
             max_area: 16384,
+            max_frame_count: 100,
         }
     }
 }
