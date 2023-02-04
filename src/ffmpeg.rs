@@ -476,7 +476,7 @@ pub(crate) async fn thumbnail<S: Store>(
         &[
             "-i",
             input_file_str,
-            "-vframes",
+            "-frames:v",
             "1",
             "-codec",
             format.as_ffmpeg_codec(),
