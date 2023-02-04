@@ -87,11 +87,7 @@ impl TranscodeOptions {
         }
     }
 
-    fn execute<'a>(
-        &self,
-        input_path: &str,
-        output_path: &'a str,
-    ) -> Result<Process, std::io::Error> {
+    fn execute(&self, input_path: &str, output_path: &str) -> Result<Process, std::io::Error> {
         if let Some(audio_codec) = self.output_ffmpeg_audio_codec() {
             Process::run(
                 "ffmpeg",
