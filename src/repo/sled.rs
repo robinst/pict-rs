@@ -546,11 +546,9 @@ impl IdentifierRepo for SledRepo {
 
         let opt = b!(self.identifier_details, identifier_details.get(key));
 
-        if let Some(ivec) = opt {
-            Ok(Some(serde_json::from_slice(&ivec)?))
-        } else {
-            Ok(None)
-        }
+        opt.map(|ivec| serde_json::from_slice(&ivec))
+            .transpose()
+            .map_err(Error::from)
     }
 
     #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
@@ -682,11 +680,9 @@ impl HashRepo for SledRepo {
             hash_variant_identifiers.get(key)
         );
 
-        if let Some(ivec) = opt {
-            Ok(Some(I::from_bytes(ivec.to_vec())?))
-        } else {
-            Ok(None)
-        }
+        opt.map(|ivec| I::from_bytes(ivec.to_vec()))
+            .transpose()
+            .map_err(Error::from)
     }
 
     #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
@@ -759,11 +755,9 @@ impl HashRepo for SledRepo {
             hash_motion_identifiers.get(hash)
         );
 
-        if let Some(ivec) = opt {
-            Ok(Some(I::from_bytes(ivec.to_vec())?))
-        } else {
-            Ok(None)
-        }
+        opt.map(|ivec| I::from_bytes(ivec.to_vec()))
+            .transpose()
+            .map_err(Error::from)
     }
 
     #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
