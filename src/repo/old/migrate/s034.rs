@@ -14,18 +14,6 @@ pub(crate) fn exists(mut base: PathBuf) -> bool {
     std::fs::metadata(base).is_ok()
 }
 
-pub(crate) fn migrating(base: PathBuf) -> bool {
-    if let Ok(db) = open(base) {
-        if let Ok(tree) = db.open_tree("migrate") {
-            if let Ok(Some(_)) = tree.get("done") {
-                return false;
-            }
-        }
-    }
-
-    true
-}
-
 pub(crate) fn open(mut base: PathBuf) -> Result<sled034::Db, Error> {
     base.push("sled");
     base.push(SLED_034);

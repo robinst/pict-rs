@@ -65,6 +65,8 @@ impl Old {
     }
 
     pub(super) fn hashes(&self) -> impl std::iter::Iterator<Item = sled::IVec> {
+        let length = self.filename_tree.len();
+        tracing::info!("FILENAME_TREE_LEN: {}", length);
         self.filename_tree
             .iter()
             .values()
