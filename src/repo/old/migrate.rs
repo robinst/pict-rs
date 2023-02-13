@@ -82,7 +82,7 @@ enum DbVersion {
 
 impl DbVersion {
     fn exists(root: PathBuf) -> Self {
-        if s034::exists(root.clone()) {
+        if s034::exists(root) {
             return DbVersion::Sled034;
         }
 
