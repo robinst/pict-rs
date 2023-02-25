@@ -54,23 +54,6 @@ impl TranscodeOptions {
         self.input_format.to_file_extension()
     }
 
-    const fn output_ffmpeg_video_codec(&self) -> &'static str {
-        match self.output {
-            TranscodeOutputOptions::Gif => "gif",
-            TranscodeOutputOptions::Video { video_codec, .. } => video_codec.to_ffmpeg_codec(),
-        }
-    }
-
-    const fn output_ffmpeg_audio_codec(&self) -> Option<&'static str> {
-        match self.output {
-            TranscodeOutputOptions::Video {
-                audio_codec: Some(audio_codec),
-                ..
-            } => Some(audio_codec.to_ffmpeg_codec()),
-            _ => None,
-        }
-    }
-
     const fn output_ffmpeg_format(&self) -> &'static str {
         match self.output {
             TranscodeOutputOptions::Gif => "gif",
@@ -106,43 +89,61 @@ impl TranscodeOptions {
         output_path: &str,
         alpha: bool,
     ) -> Result<Process, std::io::Error> {
-        if let Some(audio_codec) = self.output_ffmpeg_audio_codec() {
-            Process::run(
+        match self.output {
+            TranscodeOutputOptions::Gif => Process::run("ffmpeg", &[
+                "-hide_banner",
+                "-i",
+                input_path,
+                "-filter_complex",
+                "[0:v] split [a][b]; [a] palettegen=reserve_transparent=on:transparency_color=ffffff [p]; [b][p] paletteuse",
+                "-an",
+                "-f",
+                self.output_ffmpeg_format(),
+                output_path
+            ]),
+            TranscodeOutputOptions::Video {
+                video_codec,
+                audio_codec: None,
+            } => Process::run(
                 "ffmpeg",
                 &[
+                    "-hide_banner",
                     "-i",
                     input_path,
                     "-pix_fmt",
-                    if alpha { "yuva420p" } else { "yuv420p" },
-                    "-vf",
-                    "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                    "-c:a",
-                    audio_codec,
-                    "-c:v",
-                    self.output_ffmpeg_video_codec(),
-                    "-f",
-                    self.output_ffmpeg_format(),
-                    output_path,
-                ],
-            )
-        } else {
-            Process::run(
-                "ffmpeg",
-                &[
-                    "-i",
-                    input_path,
-                    "-pix_fmt",
-                    if alpha { "yuva420p" } else { "yuv420p" },
+                    video_codec.pix_fmt(alpha),
                     "-vf",
                     "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                     "-an",
                     "-c:v",
-                    self.output_ffmpeg_video_codec(),
+                    video_codec.to_ffmpeg_codec(),
                     "-f",
                     self.output_ffmpeg_format(),
                     output_path,
                 ],
-            )
+            ),
+            TranscodeOutputOptions::Video {
+                video_codec,
+                audio_codec: Some(audio_codec),
+            } => Process::run(
+                "ffmpeg",
+                &[
+                    "-hide_banner",
+                    "-i",
+                    input_path,
+                    "-pix_fmt",
+                    video_codec.pix_fmt(alpha),
+                    "-vf",
+                    "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-c:a",
+                    audio_codec.to_ffmpeg_codec(),
+                    "-c:v",
+                    video_codec.to_ffmpeg_codec(),
+                    "-f",
+                    self.output_ffmpeg_format(),
+                    output_path,
+                ],
+            ),
         }
     }
 
@@ -294,6 +295,13 @@ impl VideoCodec {
             Self::H265 => "hevc",
             Self::Vp8 => "vp8",
             Self::Vp9 => "vp9",
+        }
+    }
+
+    const fn pix_fmt(&self, alpha: bool) -> &'static str {
+        match (self, alpha) {
+            (VideoCodec::Vp8 | VideoCodec::Vp9, true) => "yuva420p",
+            _ => "yuv420p",
         }
     }
 }
@@ -567,6 +575,7 @@ pub(crate) async fn thumbnail<S: Store>(
     let process = Process::run(
         "ffmpeg",
         &[
+            "-hide_banner",
             "-i",
             input_file_str,
             "-frames:v",

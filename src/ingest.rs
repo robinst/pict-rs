@@ -163,11 +163,7 @@ where
     }
 
     #[tracing::instrument(skip(self, hash))]
-    async fn add_existing_alias(
-        &mut self,
-        hash: &[u8],
-        alias: Alias,
-    ) -> Result<(), Error> {
+    async fn add_existing_alias(&mut self, hash: &[u8], alias: Alias) -> Result<(), Error> {
         AliasRepo::create(&self.repo, &alias)
             .await?
             .map_err(|_| UploadError::DuplicateAlias)?;
@@ -181,11 +177,7 @@ where
     }
 
     #[tracing::instrument(level = "debug", skip(self, hash))]
-    async fn create_alias(
-        &mut self,
-        hash: &[u8],
-        input_type: ValidInputType,
-    ) -> Result<(), Error> {
+    async fn create_alias(&mut self, hash: &[u8], input_type: ValidInputType) -> Result<(), Error> {
         loop {
             let alias = Alias::generate(input_type.as_ext().to_string());
 
