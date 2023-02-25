@@ -90,14 +90,14 @@ impl TranscodeOptions {
     }
 
     const fn supports_alpha(&self) -> bool {
-        match self.output {
+        matches!(
+            self.output,
             TranscodeOutputOptions::Gif
-            | TranscodeOutputOptions::Video {
-                video_codec: VideoCodec::Vp8 | VideoCodec::Vp9,
-                ..
-            } => true,
-            _ => false,
-        }
+                | TranscodeOutputOptions::Video {
+                    video_codec: VideoCodec::Vp8 | VideoCodec::Vp9,
+                    ..
+                }
+        )
     }
 
     fn execute(
@@ -368,7 +368,7 @@ async fn alpha_pixel_formats() -> Result<HashSet<String>, Error> {
                 return None;
             }
 
-            if !format.ends_with("1") {
+            if !format.ends_with('1') {
                 return None;
             }
 
