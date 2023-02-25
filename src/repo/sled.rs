@@ -1,15 +1,14 @@
 use crate::{
     error::{Error, UploadError},
     repo::{
-        Alias, AliasRepo, AlreadyExists, BaseRepo, CachedRepo, DeleteToken, Details, FullRepo,
-        HashRepo, Identifier, IdentifierRepo, QueueRepo, SettingsRepo, UploadId, UploadRepo,
-        UploadResult,
+        Alias, AliasRepo, AlreadyExists, BaseRepo, DeleteToken, Details, FullRepo, HashRepo,
+        Identifier, IdentifierRepo, QueueRepo, SettingsRepo, UploadId, UploadRepo, UploadResult,
     },
     serde_str::Serde,
     stream::from_iterator,
 };
 use futures_util::Stream;
-use sled::{CompareAndSwapError, Db, IVec, Tree};
+use sled::{Db, IVec, Tree};
 use std::{
     collections::HashMap,
     pin::Pin,
@@ -19,12 +18,6 @@ use std::{
     },
 };
 use tokio::sync::Notify;
-
-mod bucket;
-mod datetime;
-
-use bucket::Bucket;
-use datetime::DateTime;
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -71,8 +64,6 @@ pub(crate) struct SledRepo {
     in_progress_queue: Tree,
     queue_notifier: Arc<RwLock<HashMap<&'static str, Arc<Notify>>>>,
     uploads: Tree,
-    cache: Tree,
-    cache_inverse: Tree,
     db: Db,
 }
 
@@ -95,8 +86,6 @@ impl SledRepo {
             in_progress_queue: db.open_tree("pict-rs-in-progress-queue-tree")?,
             queue_notifier: Arc::new(RwLock::new(HashMap::new())),
             uploads: db.open_tree("pict-rs-uploads-tree")?,
-            cache: db.open_tree("pict-rs-cache-tree")?,
-            cache_inverse: db.open_tree("pict-rs-cache-inverse-tree")?,
             db,
         })
     }
@@ -151,149 +140,6 @@ impl From<InnerUploadResult> for UploadResult {
             },
             InnerUploadResult::Failure { message } => UploadResult::Failure { message },
         }
-    }
-}
-
-fn insert_cache_inverse(
-    cache_inverse: &Tree,
-    now_bytes: &[u8],
-    alias_bytes: &[u8],
-) -> Result<(), Error> {
-    let mut old = cache_inverse.get(now_bytes)?;
-
-    loop {
-        // unsure of whether to bail on deserialize error or fail with empty bucket
-        let mut bucket = old
-            .as_ref()
-            .and_then(|old| serde_cbor::from_slice::<Bucket>(old).ok())
-            .unwrap_or_else(Bucket::empty);
-
-        bucket.insert(alias_bytes.to_vec());
-
-        tracing::trace!("Inserting new {:?}", bucket);
-        let bucket_bytes = serde_cbor::to_vec(&bucket)?;
-        let new = Some(bucket_bytes);
-
-        let res = cache_inverse.compare_and_swap(now_bytes, old, new)?;
-
-        if let Err(CompareAndSwapError { current, .. }) = res {
-            old = current;
-        } else {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
-#[async_trait::async_trait(?Send)]
-impl CachedRepo for SledRepo {
-    #[tracing::instrument(skip(self))]
-    async fn mark_cached(&self, alias: &Alias) -> Result<(), Error> {
-        let now = DateTime::now();
-        let now_bytes = serde_json::to_vec(&now)?;
-
-        let alias_bytes = alias.to_bytes();
-
-        let cache_inverse = self.cache_inverse.clone();
-        b!(self.cache, {
-            cache.insert(&alias_bytes, now_bytes.clone())?;
-
-            insert_cache_inverse(&cache_inverse, &now_bytes, &alias_bytes)
-        });
-        Ok(())
-    }
-
-    #[tracing::instrument(skip(self))]
-    async fn update(&self, alias: &Alias) -> Result<Vec<Alias>, Error> {
-        let now = DateTime::now();
-        let now_bytes = serde_json::to_vec(&now)?;
-
-        let to_clean = now.min_cache_date();
-        let to_clean_bytes = serde_json::to_vec(&to_clean)?;
-
-        let alias_bytes = alias.to_bytes();
-
-        let cache_inverse = self.cache_inverse.clone();
-        let aliases = b!(self.cache, {
-            let previous_datetime_opt = cache
-                .fetch_and_update(&alias_bytes, |previous_datetime_opt| {
-                    previous_datetime_opt.map(|_| now_bytes.clone())
-                })?;
-
-            if let Some(previous_datetime_bytes) = previous_datetime_opt {
-                // Insert cached media into new date bucket
-                insert_cache_inverse(&cache_inverse, &now_bytes, &alias_bytes)?;
-
-                // Remove cached media from old date bucket
-                let mut old = cache_inverse.get(&previous_datetime_bytes)?;
-                loop {
-                    let new = old
-                        .as_ref()
-                        .and_then(|bucket_bytes| {
-                            let mut bucket = serde_cbor::from_slice::<Bucket>(bucket_bytes).ok()?;
-
-                            bucket.remove(&alias_bytes);
-
-                            if bucket.is_empty() {
-                                tracing::trace!("Removed old {:?}", bucket);
-                                None
-                            } else {
-                                tracing::trace!("Inserting old {:?}", bucket);
-                                Some(serde_cbor::to_vec(&bucket))
-                            }
-                        })
-                        .transpose()?;
-
-                    if let Err(CompareAndSwapError { current, .. }) =
-                        cache_inverse.compare_and_swap(&previous_datetime_bytes, old, new)?
-                    {
-                        old = current;
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            let mut aliases: Vec<Alias> = Vec::new();
-
-            for (date_bytes, bucket_bytes) in
-                cache_inverse.range(..to_clean_bytes).filter_map(Result::ok)
-            {
-                if let Ok(datetime) = serde_json::from_slice::<DateTime>(&date_bytes) {
-                    tracing::trace!("Checking {}", datetime);
-                } else {
-                    tracing::warn!("Invalid date bytes");
-                }
-                if let Ok(bucket) = serde_cbor::from_slice::<Bucket>(&bucket_bytes) {
-                    tracing::trace!("Read for deletion: {:?}", bucket);
-                    for alias_bytes in bucket {
-                        // Best effort cleanup
-                        let _ = cache.remove(&alias_bytes);
-                        if let Some(alias) = Alias::from_slice(&alias_bytes) {
-                            aliases.push(alias);
-                        }
-                    }
-                } else {
-                    tracing::warn!("Invalid bucket");
-                }
-
-                cache_inverse.remove(date_bytes)?;
-            }
-
-            #[cfg(debug)]
-            for date_bytes in cache_inverse.range(to_clean_bytes..).filter_map(Result::ok) {
-                if let Ok(datetime) = serde_json::from_slice::<DateTime>(&date_bytes) {
-                    tracing::trace!("Not cleaning for {}", datetime);
-                } else {
-                    tracing::warn!("Invalid date bytes");
-                }
-            }
-
-            Ok(aliases) as Result<_, Error>
-        });
-
-        Ok(aliases)
     }
 }
 

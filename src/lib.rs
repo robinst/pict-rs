@@ -156,10 +156,8 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
                     let stream = stream.map_err(Error::from);
 
                     Box::pin(
-                        async move {
-                            ingest::ingest(&**repo, &**store, stream, None, true, false).await
-                        }
-                        .instrument(span),
+                        async move { ingest::ingest(&**repo, &**store, stream, None, true).await }
+                            .instrument(span),
                     )
                 })),
             )
@@ -211,7 +209,6 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
                                 stream,
                                 Some(Alias::from_existing(&filename)),
                                 !CONFIG.media.skip_validate_imports,
-                                false,
                             )
                             .await
                         }
@@ -367,7 +364,7 @@ async fn upload_backgrounded<R: FullRepo, S: Store>(
             .expect("Identifier exists")
             .to_bytes()?;
 
-        queue::queue_ingest(&repo, identifier, upload_id, None, true, false).await?;
+        queue::queue_ingest(&repo, identifier, upload_id, None, true).await?;
 
         files.push(serde_json::json!({
             "upload_id": upload_id.to_string(),
@@ -433,9 +430,6 @@ struct UrlQuery {
 
     #[serde(default)]
     backgrounded: bool,
-
-    #[serde(default)]
-    ephemeral: bool,
 }
 
 /// download an image from a URL
@@ -457,9 +451,9 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
         .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
 
     if query.backgrounded {
-        do_download_backgrounded(stream, repo, store, query.ephemeral).await
+        do_download_backgrounded(stream, repo, store).await
     } else {
-        do_download_inline(stream, repo, store, query.ephemeral).await
+        do_download_inline(stream, repo, store).await
     }
 }
 
@@ -468,9 +462,8 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
     repo: web::Data<R>,
     store: web::Data<S>,
-    is_cached: bool,
 ) -> Result<HttpResponse, Error> {
-    let mut session = ingest::ingest(&repo, &store, stream, None, true, is_cached).await?;
+    let mut session = ingest::ingest(&repo, &store, stream, None, true).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
     let delete_token = session.delete_token().await?;
@@ -494,7 +487,6 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
     repo: web::Data<R>,
     store: web::Data<S>,
-    is_cached: bool,
 ) -> Result<HttpResponse, Error> {
     let backgrounded = Backgrounded::proxy((**repo).clone(), (**store).clone(), stream).await?;
 
@@ -504,7 +496,7 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
         .expect("Identifier exists")
         .to_bytes()?;
 
-    queue::queue_ingest(&repo, identifier, upload_id, None, true, is_cached).await?;
+    queue::queue_ingest(&repo, identifier, upload_id, None, true).await?;
 
     backgrounded.disarm();
 
@@ -605,8 +597,6 @@ async fn process<R: FullRepo, S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let (format, alias, thumbnail_path, thumbnail_args) = prepare_process(query, ext.as_str())?;
 
-    repo.check_cached(&alias).await?;
-
     let path_string = thumbnail_path.to_string_lossy().to_string();
     let hash = repo.hash(&alias).await?;
 
@@ -694,8 +684,6 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let (format, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
 
-    repo.check_cached(&alias).await?;
-
     let path_string = thumbnail_path.to_string_lossy().to_string();
     let hash = repo.hash(&alias).await?;
     let identifier_opt = repo
@@ -776,8 +764,6 @@ async fn serve<R: FullRepo, S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
 
-    repo.check_cached(&alias).await?;
-
     let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 
     let details = ensure_details(&repo, &store, &alias).await?;
@@ -793,8 +779,6 @@ async fn serve_head<R: FullRepo, S: Store + 'static>(
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
-
-    repo.check_cached(&alias).await?;
 
     let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
 

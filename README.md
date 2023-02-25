@@ -91,8 +91,6 @@ Options:
           Which media filters should be enabled on the `process` endpoint
       --media-format <MEDIA_FORMAT>
           Enforce uploaded media is transcoded to the provided format [possible values: jpeg, webp, png]
-      --media-cache-duration <MEDIA_CACHE_DURATION>
-          How long, in hours, to keep media ingested through the "cached" endpoint
   -h, --help
           Print help information (use `--help` for more detail)
 ```
@@ -230,15 +228,11 @@ pict-rs offers the following endpoints:
         "msg": "ok"
     }
     ```
-- `GET /image/download?url={url}&backgrounded=(true|false)&ephemeral=(true|false)` Download an image
+- `GET /image/download?url={url}&backgrounded=(true|false)` Download an image
     from a remote server, returning the same JSON payload as the `POST /image` endpoint by default.
 
     if `backgrounded` is set to `true`, then the ingest processing will be queued for later and the
     response json will be the same as the `POST /image/backgrounded` endpoint.
-
-    if `ephemeral` is set to true, the downloaded image will be marked as a "cached" image, and
-    automatically removed from pict-rs N hours after its last access. The duration is configurable
-    with the `--media-cache-duration` run flag, or the `[media] cache_duration` toml option.
 - `GET /image/backgrounded/claim?upload_id={uuid}` Wait for a backgrounded upload to complete, claiming it's result
     Possible results:
     - 200 Ok (validation and ingest complete):

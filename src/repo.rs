@@ -49,8 +49,7 @@ pub(crate) enum UploadResult {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait FullRepo:
-    CachedRepo
-    + UploadRepo
+    UploadRepo
     + SettingsRepo
     + IdentifierRepo
     + AliasRepo
@@ -92,18 +91,6 @@ pub(crate) trait FullRepo:
             None => Ok(None),
         }
     }
-
-    #[tracing::instrument(skip(self))]
-    async fn check_cached(&self, alias: &Alias) -> Result<(), Error> {
-        let aliases = CachedRepo::update(self, alias).await?;
-
-        for alias in aliases {
-            let token = self.delete_token(&alias).await?;
-            crate::queue::cleanup_alias(self, alias, token).await?;
-        }
-
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -125,27 +112,6 @@ where
     T: BaseRepo,
 {
     type Bytes = T::Bytes;
-}
-
-#[async_trait::async_trait(?Send)]
-pub(crate) trait CachedRepo: BaseRepo {
-    async fn mark_cached(&self, alias: &Alias) -> Result<(), Error>;
-
-    async fn update(&self, alias: &Alias) -> Result<Vec<Alias>, Error>;
-}
-
-#[async_trait::async_trait(?Send)]
-impl<T> CachedRepo for actix_web::web::Data<T>
-where
-    T: CachedRepo,
-{
-    async fn mark_cached(&self, alias: &Alias) -> Result<(), Error> {
-        T::mark_cached(self, alias).await
-    }
-
-    async fn update(&self, alias: &Alias) -> Result<Vec<Alias>, Error> {
-        T::update(self, alias).await
-    }
 }
 
 #[async_trait::async_trait(?Send)]
