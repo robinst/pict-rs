@@ -6,6 +6,8 @@ use crate::{
     store::Store,
 };
 use actix_web::web::Bytes;
+use once_cell::sync::OnceCell;
+use std::collections::HashSet;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 #[derive(Debug)]
@@ -87,7 +89,23 @@ impl TranscodeOptions {
         }
     }
 
-    fn execute(&self, input_path: &str, output_path: &str) -> Result<Process, std::io::Error> {
+    const fn supports_alpha(&self) -> bool {
+        match self.output {
+            TranscodeOutputOptions::Gif
+            | TranscodeOutputOptions::Video {
+                video_codec: VideoCodec::Vp8 | VideoCodec::Vp9,
+                ..
+            } => true,
+            _ => false,
+        }
+    }
+
+    fn execute(
+        &self,
+        input_path: &str,
+        output_path: &str,
+        alpha: bool,
+    ) -> Result<Process, std::io::Error> {
         if let Some(audio_codec) = self.output_ffmpeg_audio_codec() {
             Process::run(
                 "ffmpeg",
@@ -95,7 +113,7 @@ impl TranscodeOptions {
                     "-i",
                     input_path,
                     "-pix_fmt",
-                    "yuv420p",
+                    if alpha { "yuva420p" } else { "yuv420p" },
                     "-vf",
                     "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                     "-c:a",
@@ -114,7 +132,7 @@ impl TranscodeOptions {
                     "-i",
                     input_path,
                     "-pix_fmt",
-                    "yuv420p",
+                    if alpha { "yuva420p" } else { "yuv420p" },
                     "-vf",
                     "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                     "-an",
@@ -327,6 +345,45 @@ pub(crate) async fn details_bytes(input: Bytes) -> Result<Option<Details>, Error
     .await
 }
 
+async fn alpha_pixel_formats() -> Result<HashSet<String>, Error> {
+    let process = Process::run(
+        "ffprobe",
+        &[
+            "-v",
+            "0",
+            "-show_entries",
+            "pixel_format=name:flags=alpha",
+            "-of",
+            "compact=p=0",
+        ],
+    )?;
+
+    let mut output = Vec::new();
+    process.read().read_to_end(&mut output).await?;
+    let output = String::from_utf8_lossy(&output);
+    let formats = output
+        .split('\n')
+        .filter_map(|format| {
+            if format.is_empty() {
+                return None;
+            }
+
+            if !format.ends_with("1") {
+                return None;
+            }
+
+            Some(
+                format
+                    .trim_start_matches("name=")
+                    .trim_end_matches("|flags:alpha=1")
+                    .to_string(),
+            )
+        })
+        .collect();
+
+    Ok(formats)
+}
+
 #[tracing::instrument(skip(f))]
 async fn details_file<F, Fut>(f: F) -> Result<Option<Details>, Error>
 where
@@ -417,6 +474,27 @@ fn parse_details_inner(
     })
 }
 
+async fn pixel_format(input_file: &str) -> Result<String, Error> {
+    let process = Process::run(
+        "ffprobe",
+        &[
+            "-v",
+            "0",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=pix_fmt",
+            "-of",
+            "compact=p=0:nk=1",
+            input_file,
+        ],
+    )?;
+
+    let mut output = Vec::new();
+    process.read().read_to_end(&mut output).await?;
+    Ok(String::from_utf8_lossy(&output).trim().to_string())
+}
+
 #[tracing::instrument(skip(input))]
 pub(crate) async fn transcode_bytes(
     input: Bytes,
@@ -434,7 +512,25 @@ pub(crate) async fn transcode_bytes(
     tmp_one.write_from_bytes(input).await?;
     tmp_one.close().await?;
 
-    let process = transcode_options.execute(input_file_str, output_file_str)?;
+    let alpha = if transcode_options.supports_alpha() {
+        static ALPHA_PIXEL_FORMATS: OnceCell<HashSet<String>> = OnceCell::new();
+
+        let format = pixel_format(input_file_str).await?;
+
+        match ALPHA_PIXEL_FORMATS.get() {
+            Some(alpha_pixel_formats) => alpha_pixel_formats.contains(&format),
+            None => {
+                let pixel_formats = alpha_pixel_formats().await?;
+                let alpha = pixel_formats.contains(&format);
+                let _ = ALPHA_PIXEL_FORMATS.set(pixel_formats);
+                alpha
+            }
+        }
+    } else {
+        false
+    };
+
+    let process = transcode_options.execute(input_file_str, output_file_str, alpha)?;
 
     process.wait().await?;
     tokio::fs::remove_file(input_file).await?;
