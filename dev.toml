@@ -27,9 +27,9 @@ cache_duration = 168
 
 [repo]
 type = 'sled'
-path = 'data/sled-repo'
+path = 'data/sled-repo-local'
 cache_capacity = 67108864
 
 [store]
 type = 'filesystem'
-path = 'data/files'
+path = 'data/files-local'
