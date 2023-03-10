@@ -14,8 +14,19 @@
         };
       in
       {
-        defaultPackage = pkgs.callPackage ./pict-rs.nix {
-          inherit (pkgs.darwin.apple_sdk.frameworks) Security;
+        packages = rec {
+          pict-rs = pkgs.callPackage ./pict-rs.nix {
+            inherit (pkgs.darwin.apple_sdk.frameworks) Security;
+          };
+
+          default = pict-rs;
         };
+
+        apps = rec {
+          dev = flake-utils.lib.mkApp { drv = self.packages.${system}.pict-rs; };
+          default = dev;
+        };
+
+        devShell = pkgs.callPackage ./shell.nix { };
       });
 }
