@@ -310,7 +310,7 @@ impl AudioCodec {
     const fn to_ffmpeg_codec(self) -> &'static str {
         match self {
             Self::Aac => "aac",
-            Self::Opus => "opus",
+            Self::Opus => "libopus",
             Self::Vorbis => "vorbis",
         }
     }

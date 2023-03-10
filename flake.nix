@@ -27,6 +27,10 @@
           default = dev;
         };
 
-        devShell = pkgs.callPackage ./shell.nix { };
+        devShell = with pkgs; mkShell {
+          nativeBuildInputs = [ cargo cargo-outdated cargo-zigbuild clippy gcc protobuf rust-analyzer rustc rustfmt ];
+
+          RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+        };
       });
 }
