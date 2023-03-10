@@ -14,7 +14,7 @@ rustPlatform.buildRustPackage {
   pname = "pict-rs";
   version = "0.4.0-rc.1";
   src = ./.;
-  cargoSha256 = "Nsg386jz51jlQGTsmXFffzCrofUioHMEaiNwOuaOjKg=";
+  cargoSha256 = "v2DetSD9mLkWxERVIpT2cu26u1iNAp8+Y/XffErCu/U=";
 
   PROTOC = "${protobuf}/bin/protoc";
   PROTOC_INCLUDE = "${protobuf}/include";
