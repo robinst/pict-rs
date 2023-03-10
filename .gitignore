@@ -6,3 +6,5 @@
 /docker/object-storage/pict-rs-garage.toml
 /result
 /.ash_history
+/.direnv
+/.envrc
