@@ -28,7 +28,20 @@
         };
 
         devShell = with pkgs; mkShell {
-          nativeBuildInputs = [ cargo cargo-outdated cargo-zigbuild clippy gcc protobuf rust-analyzer rustc rustfmt ];
+          nativeBuildInputs = [
+            cargo
+            cargo-outdated
+            cargo-zigbuild
+            clippy
+            imagemagick
+            ffmpeg_5-full
+            gcc
+            imagemagick
+            protobuf
+            rust-analyzer
+            rustc
+            rustfmt
+          ];
 
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
         };
