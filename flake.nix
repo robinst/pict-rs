@@ -41,6 +41,7 @@
             rust-analyzer
             rustc
             rustfmt
+            taplo
           ];
 
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
