@@ -1699,7 +1699,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "pin-project-lite",
- "quick-xml",
+ "quick-xml 0.28.2",
  "rusty-s3",
  "serde",
  "serde_cbor",
@@ -1842,6 +1842,16 @@ name = "quick-xml"
 version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffc053f057dd768a56f62cd7e434c42c831d296968997e9ac1f76ea7c2d14c41"
+dependencies = [
+ "memchr",
+ "serde",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.28.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce5e73202a820a31f8a0ee32ada5e21029c81fd9e3ebf668a40832e4219d9d1"
 dependencies = [
  "memchr",
  "serde",
@@ -2038,7 +2048,7 @@ dependencies = [
  "hmac",
  "md-5",
  "percent-encoding",
- "quick-xml",
+ "quick-xml 0.27.1",
  "serde",
  "serde_json",
  "sha2",
