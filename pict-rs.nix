@@ -14,7 +14,14 @@ rustPlatform.buildRustPackage {
   pname = "pict-rs";
   version = "0.4.0-rc.1";
   src = ./.;
-  cargoSha256 = "v2DetSD9mLkWxERVIpT2cu26u1iNAp8+Y/XffErCu/U=";
+
+  cargoLock = {
+    lockFile = ./Cargo.lock;
+    outputHashes = {
+      "tracing-actix-web-0.7.5" = "R59NCuirD3TVUux3Ohor6Pz8mjPIO8KbFxv5Vwd46UQ=";
+      "tracing-awc-0.1.7" = "IsaXUSRL2dSAHauhNbApvRDJ46ltXWgbrxtiZjQ/HMg=";
+    };
+  };
 
   PROTOC = "${protobuf}/bin/protoc";
   PROTOC_INCLUDE = "${protobuf}/include";

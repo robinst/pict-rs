@@ -38,8 +38,8 @@ md-5 = "0.10.5"
 mime = "0.3.1"
 num_cpus = "1.13"
 once_cell = "1.4.0"
-opentelemetry = { version = "0.18", features = ["rt-tokio"] }
-opentelemetry-otlp = "0.11"
+opentelemetry = { version = "0.19", features = ["rt-tokio"] }
+opentelemetry-otlp = "0.12"
 pin-project-lite = "0.2.7"
 quick-xml = { version = "0.28.0", features = ["serialize"] }
 rusty-s3 = "0.4.1"
@@ -63,7 +63,7 @@ tracing = "0.1.15"
 tracing-error = "0.2.0"
 tracing-futures = "0.2.4"
 tracing-log = "0.1.2"
-tracing-opentelemetry = "0.18"
+tracing-opentelemetry = "0.19"
 tracing-subscriber = { version = "0.3.0", features = [
   "ansi",
   "env-filter",
@@ -76,11 +76,14 @@ url = { version = "2.2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 [dependencies.tracing-actix-web]
-version = "0.7.1"
+version = "0.7.5"
+git = "https://github.com/asonix/tracing-actix-web"
+branch = "asonix/opentelemetry-19"
 default-features = false
-features = ["opentelemetry_0_18"]
+features = ["opentelemetry_0_19"]
 
 [dependencies.tracing-awc]
-version = "0.1.6"
+version = "0.1.7"
+git = "https://git.asonix.dog/asonix/tracing-awc"
 default-features = false
-features = ["opentelemetry_0_18"]
+features = ["opentelemetry_0_19"]
