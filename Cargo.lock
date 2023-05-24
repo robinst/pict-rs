@@ -1162,9 +1162,9 @@ dependencies = [
 
 [[package]]
 name = "io-lifetimes"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c66c74d2ae7e79a5a8f7ac924adbe38ee42a859c6539ad869eb51f0b52dc220"
+checksum = "eae7b9aee968036d54dce06cebaefd919e4472e753296daccd6d344e3e2df0c2"
 dependencies = [
  "hermit-abi 0.3.1",
  "libc",
@@ -1643,7 +1643,7 @@ dependencies = [
 
 [[package]]
 name = "pict-rs"
-version = "0.4.0-rc.1"
+version = "0.4.0-rc.2"
 dependencies = [
  "actix-form-data",
  "actix-rt",
@@ -2529,7 +2529,8 @@ dependencies = [
 [[package]]
 name = "tracing-actix-web"
 version = "0.7.5"
-source = "git+https://github.com/asonix/tracing-actix-web?branch=asonix/opentelemetry-19#5cac8b6fe09b753bcea556c11aa069a88e12ff07"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce52ffaf2d544e317d3bef63f49a6a22022866505fa4840a4339b1756834a2a9"
 dependencies = [
  "actix-web",
  "opentelemetry",
@@ -2553,7 +2554,8 @@ dependencies = [
 [[package]]
 name = "tracing-awc"
 version = "0.1.7"
-source = "git+https://git.asonix.dog/asonix/tracing-awc#efa1d019f67ba734e0b62e8aa4053d211c591be8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaa1a68fce4d1a7fad459f81ddcafbdd7c6f6bcda5c7e07d5f42db637931fac7"
 dependencies = [
  "actix-http",
  "actix-service",

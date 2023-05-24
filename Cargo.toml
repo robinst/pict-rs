@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.4.0-rc.1"
+version = "0.4.0-rc.2"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -77,13 +77,10 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 [dependencies.tracing-actix-web]
 version = "0.7.5"
-git = "https://github.com/asonix/tracing-actix-web"
-branch = "asonix/opentelemetry-19"
 default-features = false
 features = ["opentelemetry_0_19"]
 
 [dependencies.tracing-awc]
 version = "0.1.7"
-git = "https://git.asonix.dog/asonix/tracing-awc"
 default-features = false
 features = ["opentelemetry_0_19"]
