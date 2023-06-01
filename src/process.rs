@@ -99,6 +99,8 @@ impl Process {
         })
     }
 
+    #[allow(unknown_lints)]
+    #[allow(clippy::let_with_type_underscore)]
     #[tracing::instrument(level = "trace", skip_all)]
     fn spawn_fn<F, Fut>(mut self, f: F) -> impl AsyncRead + Unpin
     where
