@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.4.0-rc.2"
+version = "0.4.0-rc.3"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -19,7 +19,7 @@ io-uring = [
 ]
 
 [dependencies]
-actix-form-data = "0.7.0-beta.0"
+actix-form-data = "0.7.0-beta.2"
 actix-rt = { version = "2.7.0", default-features = false }
 actix-server = "2.0.0"
 actix-web = { version = "4.0.0", default-features = false }
