@@ -33,7 +33,7 @@
             cargo-outdated
             cargo-zigbuild
             clippy
-            imagemagick
+            exiftool
             ffmpeg_5-full
             gcc
             imagemagick
