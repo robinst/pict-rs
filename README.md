@@ -363,6 +363,95 @@ let request = client
 ```
 
 
+## 0.3 to 0.4 Migration Guide
+pict-rs will automatically migrate from the 0.3 db format to the 0.4 db format on the first launch
+of 0.4. If you are running the provided docker container without any custom configuration, there are
+no additional steps.
+
+If you have any custom configuration for file paths, or you are running outside of docker, then
+there is some extra configuration that needs to be done.
+
+If your previous `PICTRS__PATH` variable or `path` config was set, it needs to be translated to the
+new configuration format.
+
+`PICTRS_PATH` has split into three separate config options:
+- `PICTRS__OLD_DB__PATH`: This should be set to the same value that `PICTRS__PATH` was. It is used
+    during the migration from 0.3 to 0.4
+- `PICTRS__REPO__PATH`: This is the location of the 0.4 database. It should be set to a subdirectory
+    of the previous `PICTRS__PATH` directory. I would recommend `/previous/path/sled-repo`
+- `PICTRS__STORE__PATH`: This is the location of the files. It should be the `files` subdirectory of
+    the previous PICTRS__PATH directory.
+
+if you configured via the configuration file, these would be
+```toml
+[old_db]
+path = "/previous/path"
+
+[repo]
+path = "/previous/path/sled-repo"
+
+[store]
+path = "/previous/path/files"
+```
+
+If the migration doesn't work due to a configuration error, the new sled-repo directory can be
+deleted and a new migration will be automatically triggered on the next launch.
+
+
+## Filesystem to Object Storage migration
+After migrating from 0.3 to 0.4, it is possible to migrate to object storage. This can be useful if
+hosting in a cloud environment, since object storage is generally far cheaper than block storage.
+
+The command will look something like this:
+```bash
+$ pict-rs \
+    filesystem \
+        -p /path/to/files \
+    object-storage \
+        -e https://object-storage-endpoint \
+        -b bucket-name \
+        -r region \
+        -a access-key \
+        -s secret-key \
+    sled \
+        -p /path/to/sled-repo
+```
+
+If you are running the docker container with default paths, it can be simplified to the following:
+```bash
+$ pict-rs \
+    filesystem \
+    object-storage \
+        -e https://object-storage-endpoint \
+        -b bucket-name \
+        -r region \
+        -a access-key \
+        -s secret-key
+```
+
+_This command must be run while pict-rs is offline._
+
+After you've completed the migration, update your pict-rs configuration to use object storage. If
+you configure using environment variables, make sure the following are set:
+- `PICTRS__STORE__TYPE=object_storage`
+- `PICTRS__STORE__ENDPOINT=https://object-storage-endpoint`
+- `PICTRS__STORE__BUCKET_NAME=bucket-name`
+- `PICTRS__STORE__REGION=region`
+- `PICTRS__STORE__ACCESS_KEY=access-key`
+- `PICTRS__STORE__SECRET_KEY=secret-key`
+
+If you use the configuration file, this would be
+```toml
+[store]
+type = "object_storage"
+endpoint = "https://object-storage-endpoint"
+bucket_name = "bucket-name"
+region = "region"
+access_key = "access-key"
+secret_key = "secret-key"
+```
+
+
 ## Contributing
 Feel free to open issues for anything you find an issue with. Please note that any contributed code will be licensed under the AGPLv3.
 
