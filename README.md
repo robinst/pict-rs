@@ -437,7 +437,7 @@ you configure using environment variables, make sure the following are set:
 - `PICTRS__STORE__ENDPOINT=https://object-storage-endpoint`
 - `PICTRS__STORE__BUCKET_NAME=bucket-name`
 - `PICTRS__STORE__REGION=region`
-- `PICTRS__STORE__USE_PATH_STYLE=false` (set to true if your object storage request path style access)
+- `PICTRS__STORE__USE_PATH_STYLE=false` (set to true if your object storage requires path style access)
 - `PICTRS__STORE__ACCESS_KEY=access-key`
 - `PICTRS__STORE__SECRET_KEY=secret-key`
 
