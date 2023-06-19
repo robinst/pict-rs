@@ -56,7 +56,7 @@ targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
 #
 # services:
 #   pictrs:
-#     image: asonix/pictrs:v0.4.0-alpha.1
+#     image: asonix/pictrs:v0.4.0-rc.5
 #     ports:
 #       - "127.0.0.1:8080:8080"
 #       - "127.0.0.1:6669:6669" # this is the line that exposes console
