@@ -101,13 +101,13 @@ struct SledDefaults {
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
-enum StoreDefaults {
+pub(super) enum StoreDefaults {
     Filesystem(FilesystemDefaults),
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-struct FilesystemDefaults {
+pub(super) struct FilesystemDefaults {
     path: PathBuf,
 }
 
@@ -219,5 +219,21 @@ impl Default for FilesystemDefaults {
         Self {
             path: PathBuf::from(String::from("/mnt/files")),
         }
+    }
+}
+
+impl From<crate::config::commandline::Filesystem> for crate::config::primitives::Filesystem {
+    fn from(value: crate::config::commandline::Filesystem) -> Self {
+        Self {
+            path: value
+                .path
+                .unwrap_or_else(|| FilesystemDefaults::default().path),
+        }
+    }
+}
+
+impl From<crate::config::commandline::Filesystem> for crate::config::primitives::Store {
+    fn from(value: crate::config::commandline::Filesystem) -> Self {
+        crate::config::primitives::Store::Filesystem(value.into())
     }
 }

@@ -417,17 +417,16 @@ $ pict-rs \
         -p /path/to/sled-repo
 ```
 
-~~If you are running the docker container with default paths, it can be simplified to the following:~~
-_currently broken, will fix for next release candidate_
+If you are running the docker container with default paths, it can be simplified to the following:
 ```bash
-# pict-rs \
-#    filesystem \
-#    object-storage \
-#        -e https://object-storage-endpoint \
-#        -b bucket-name \
-#        -r region \
-#        -a access-key \
-#        -s secret-key
+$ pict-rs \
+   filesystem \
+   object-storage \
+       -e https://object-storage-endpoint \
+       -b bucket-name \
+       -r region \
+       -a access-key \
+       -s secret-key
 ```
 
 _This command must be run while pict-rs is offline._

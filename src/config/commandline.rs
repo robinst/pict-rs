@@ -551,7 +551,7 @@ enum MigrateStoreInner {
 #[derive(Debug, Parser)]
 struct MigrateFilesystem {
     #[command(flatten)]
-    from: crate::config::primitives::Filesystem,
+    from: Filesystem,
 
     #[command(subcommand)]
     to: MigrateStoreInner,
@@ -561,7 +561,7 @@ struct MigrateFilesystem {
 #[derive(Debug, Parser)]
 struct MigrateFilesystemInner {
     #[command(flatten)]
-    to: crate::config::primitives::Filesystem,
+    to: Filesystem,
 
     #[command(subcommand)]
     repo: Option<Repo>,
@@ -619,10 +619,10 @@ enum Repo {
 /// Configuration for filesystem media storage
 #[derive(Clone, Debug, Parser, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-struct Filesystem {
+pub(super) struct Filesystem {
     /// The path to store uploaded media
     #[arg(short, long)]
-    path: Option<PathBuf>,
+    pub(super) path: Option<PathBuf>,
 }
 
 /// Configuration for Object Storage
