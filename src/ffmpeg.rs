@@ -50,6 +50,13 @@ impl TranscodeOptions {
         }
     }
 
+    pub(crate) const fn needs_reencode(&self) -> bool {
+        !matches!(
+            (self.input_format, &self.output),
+            (VideoFormat::Gif, TranscodeOutputOptions::Gif)
+        )
+    }
+
     const fn input_file_extension(&self) -> &'static str {
         self.input_format.to_file_extension()
     }
@@ -92,10 +99,12 @@ impl TranscodeOptions {
         match self.output {
             TranscodeOutputOptions::Gif => Process::run("ffmpeg", &[
                 "-hide_banner",
+                "-v",
+                "warning",
                 "-i",
                 input_path,
                 "-filter_complex",
-                "[0:v] split [a][b]; [a] palettegen=reserve_transparent=on:transparency_color=ffffff [p]; [b][p] paletteuse",
+                "[0:v] split [a][b]; [a] palettegen=stats_mode=single [p]; [b][p] paletteuse=new=1",
                 "-an",
                 "-f",
                 self.output_ffmpeg_format(),
@@ -108,6 +117,8 @@ impl TranscodeOptions {
                 "ffmpeg",
                 &[
                     "-hide_banner",
+                    "-v",
+                    "warning",
                     "-i",
                     input_path,
                     "-pix_fmt",
@@ -129,6 +140,8 @@ impl TranscodeOptions {
                 "ffmpeg",
                 &[
                     "-hide_banner",
+                    "-v",
+                    "warning",
                     "-i",
                     input_path,
                     "-pix_fmt",
@@ -576,6 +589,8 @@ pub(crate) async fn thumbnail<S: Store>(
         "ffmpeg",
         &[
             "-hide_banner",
+            "-v",
+            "warning",
             "-i",
             input_file_str,
             "-frames:v",

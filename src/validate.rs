@@ -59,12 +59,21 @@ pub(crate) async fn validate_bytes(
             }
             let transcode_options = TranscodeOptions::new(media, &details, video_format);
 
-            Ok((
-                transcode_options.output_type(),
-                Either::right(Either::left(Either::left(
-                    crate::ffmpeg::transcode_bytes(bytes, transcode_options).await?,
-                ))),
-            ))
+            if transcode_options.needs_reencode() {
+                Ok((
+                    transcode_options.output_type(),
+                    Either::right(Either::left(Either::left(
+                        crate::ffmpeg::transcode_bytes(bytes, transcode_options).await?,
+                    ))),
+                ))
+            } else {
+                Ok((
+                    transcode_options.output_type(),
+                    Either::right(Either::right(crate::exiftool::clear_metadata_bytes_read(
+                        bytes,
+                    )?)),
+                ))
+            }
         }
         (FileFormat::Image(image_format), Some(format)) if image_format != format => Ok((
             ValidInputType::from_format(format),
