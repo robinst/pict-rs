@@ -1,5 +1,5 @@
 { exiftool
-, ffmpeg_5-full
+, ffmpeg_6-full
 , imagemagick
 , lib
 , makeWrapper
@@ -12,7 +12,7 @@
 
 rustPlatform.buildRustPackage {
   pname = "pict-rs";
-  version = "0.4.0-rc.2";
+  version = "0.4.0-rc.5";
   src = ./.;
 
   cargoLock = {
@@ -27,7 +27,7 @@ rustPlatform.buildRustPackage {
 
   postInstall = ''
     wrapProgram $out/bin/pict-rs \
-        --prefix PATH : "${lib.makeBinPath [ imagemagick ffmpeg_5-full exiftool ]}"
+        --prefix PATH : "${lib.makeBinPath [ imagemagick ffmpeg_6-full exiftool ]}"
   '';
 
   passthru.tests = { inherit (nixosTests) pict-rs; };

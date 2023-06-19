@@ -34,7 +34,7 @@
             cargo-zigbuild
             clippy
             exiftool
-            ffmpeg_5-full
+            ffmpeg_6-full
             gcc
             imagemagick
             protobuf
