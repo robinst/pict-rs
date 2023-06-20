@@ -1,6 +1,32 @@
 # pict-rs
 _a simple image hosting service_
 
+## Navigation
+1. [Links](#links)
+2. [Usage](#usage)
+    1. [Running](#running)
+        1. [Commandline](#commandline)
+        2. [Docker](#docker)
+    2. [Api](#api)
+3. [Administration](#administration)
+    1. [0.3 to 0.4 Migration Guide](#0.3-to-0.4-migration-guide)
+    2. [Filesystem to Object Storage Migration](#filesystem-to-Object-Storage-migration)
+4. [Development](#development)
+    1. [Nix Development](#nix-development)
+        1. [With direnv and nix-direnv](#with-direnv-and-nix-direnv)
+        2. [With just Nix](#with-just-nix)
+    2. [Docker Development](#docker-development)
+        1. [With Arch](#with-arch)
+        2. [With Alpine](#with-alpine)
+5. [Contributing](#contributing)
+6. [FAQ](#faq)
+    1. [Is pict-rs stateless?](#question-is-pict-rs-stateless)
+    2. [Can I use a different database?](#question-can-i-use-a-different-database-with-pict-rs)
+    3. [How can I submit changes?](#question-how-can-i-submit-changes)
+    4. [I want to configure with $format](#question-i-want-to-configure-it-with-yaml-instead-of-toml)
+    5. [How do I donate?](#question-how-do-i-donate-to-pict-rs)
+7. [License](#license)
+
 ## Links
 - Find the code on [gitea](https://git.asonix.dog/asonix/pict-rs)
 - Join the discussion on [matrix](https://matrix.to/#/#pictrs:matrix.asonix.dog?via=matrix.asonix.dog)
@@ -8,6 +34,7 @@ _a simple image hosting service_
 
 ## Usage
 ### Running
+#### Commandline
 ```
 $ pict-rs -h
 A simple image hosting service
@@ -106,7 +133,7 @@ $ pict-rs run object-storage sled -h
 See [`pict-rs.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/pict-rs.toml) for more
 configuration
 
-#### Example:
+##### Example:
 Run with the default configuration
 ```
 $ ./pict-rs run
@@ -151,24 +178,6 @@ $ sudo docker-compose up -d
 - pict-rs makes use of the system's temporary folder. This is generally `/tmp` on linux
 - pict-rs makes use of an imagemagick security policy at
     `/usr/lib/ImageMagick-$VERSION/config-Q16HDRI/policy.xml`
-
-#### Docker Development
-###### With Arch
-```
-$ cargo build
-$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" archlinux:latest
-# pacman -Syu imagemagick ffmepg perl-image-exiftool
-# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.0/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.0/config-Q16HDRI/
-# PATH=$PATH:/usr/bin/vendor_perl RUST_LOG=debug /mnt/target/debug/pict-rs run
-```
-###### With Alpine
-```
-$ cross build --target=x86_64-unknown-linux-musl
-$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt alpine:3.15
-# apk add imagemagick ffmpeg exiftool
-# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.0/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.0/config-Q16HDRI/
-# RUST_LOG=debug /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs RUN
-```
 
 ### API
 pict-rs offers the following endpoints:
@@ -363,7 +372,8 @@ let request = client
 ```
 
 
-## 0.3 to 0.4 Migration Guide
+## Administration
+### 0.3 to 0.4 Migration Guide
 pict-rs will automatically migrate from the 0.3 db format to the 0.4 db format on the first launch
 of 0.4. If you are running the provided docker container without any custom configuration, there are
 no additional steps.
@@ -398,7 +408,7 @@ If the migration doesn't work due to a configuration error, the new sled-repo di
 deleted and a new migration will be automatically triggered on the next launch.
 
 
-## Filesystem to Object Storage migration
+### Filesystem to Object Storage migration
 After migrating from 0.3 to 0.4, it is possible to migrate to object storage. This can be useful if
 hosting in a cloud environment, since object storage is generally far cheaper than block storage.
 
@@ -454,8 +464,77 @@ secret_key = "secret-key"
 ```
 
 
+## Development
+pict-rs has a few native dependencies that need to be installed in order for it to run properly.
+Currently these are as follows:
+
+- imagemagick 7.1.1 (although 7.0 and 7.1.0 may also work)
+- ffmpeg 6 (although 4.4 and 5 may also work)
+- exiftool 12.62 (although 12.50 or newer may also work)
+
+Additionally, pict-rs requires a protobuf during the compilation step to support tokio-console, a
+runtime debug tool.
+
+Installing these from your favorite package manager should be sufficient. Below are some fun ways to
+develop and test a pict-rs binary.
+
+### Nix Development
+I personally use nix for development. The provided [`flake.nix`](./flake.nix) file should be
+sufficient to create a development environment for pict-rs on any linux distribution, provided nix
+is installed.
+
+#### With direnv and nix-direnv
+With these tools, the pict-rs development environment can be automatically loaded when entering the pict-rs directory
+
+Setup (only once):
+```
+$ echo 'use flake' > .envrc
+$ direnv allow
+```
+
+Running:
+```
+$ cargo run -- -c dev.toml run
+```
+#### With just Nix
+```
+$ nix develop
+$ cargo run -- -c dev.toml run
+```
+
+### Docker Development
+Previously, I have run pict-rs from inside containers that include the correct dependencies. The two
+options listed below are ones I have personally tried.
+
+#### With Arch
+This option doesn't take much configuration, just compile the binary and run it from inside the container
+
+```
+$ cargo build
+$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" archlinux:latest
+# pacman -Syu imagemagick ffmepg perl-image-exiftool
+# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.1/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.1/config-Q16HDRI/
+# PATH=$PATH:/usr/bin/vendor_perl /mnt/target/debug/pict-rs --log-targets debug run
+```
+
+#### With Alpine
+This option requires `cargo-zigbuild` to be installed. Cargo Zigbuild is a tool that links rust
+binaries with Zig's linker, enabling easy cross-compiles to many targets. Zig has put a lot of
+effort into seamless cross-compiling, and it is nice to be able to take advantage of that work from
+rust.
+
+```
+$ cargo zigbuild --target=x86_64-unknown-linux-musl
+$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt alpine:3.18
+# apk add imagemagick ffmpeg exiftool
+# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.1/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.1/config-Q16HDRI/
+# /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs --log-targets debug run
+```
+
+
 ## Contributing
 Feel free to open issues for anything you find an issue with. Please note that any contributed code will be licensed under the AGPLv3.
+
 
 ## FAQ
 ### Question: Is pict-rs stateless
