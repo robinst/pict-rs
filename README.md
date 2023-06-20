@@ -176,7 +176,7 @@ Migrating to object storage from filesystem storage. For more detailed info, see
 [Filesystem to Object Storage Migration](#filesystem-to-object-storage-migration)
 ```bash
 $ ./pict-rs \
-    filesystem -p data/sled-repo \
+    filesystem -p data/files \
     object-storage \
         -a ACCESS_KEY \
         -b BUCKET_NAME \
