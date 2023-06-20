@@ -7,6 +7,10 @@ _a simple image hosting service_
     1. [Running](#running)
         1. [Commandline](#commandline)
         2. [Docker](#docker)
+        3. [Bare Metal](#bare-metal)
+            1. [Distro Package](#distro-package)
+            2. [Binary Download](#binary-download)
+            3. [Compile from Source](#compile-from-source)
     2. [Api](#api)
 3. [Administration](#administration)
     1. [0.3 to 0.4 Migration Guide](#0-3-to-0-4-migration-guide)
@@ -178,6 +182,40 @@ $ sudo docker-compose up -d
 - pict-rs makes use of the system's temporary folder. This is generally `/tmp` on linux
 - pict-rs makes use of an imagemagick security policy at
     `/usr/lib/ImageMagick-$VERSION/config-Q16HDRI/policy.xml`
+
+#### Bare Metal
+There are a few options for acquiring pict-rs to run outside of docker.
+1. Packaged via your distro of choice
+2. Binary download from [the releases page](https://git.asonix.dog/asonix/pict-rs/tags)
+3. Compiled from source
+
+##### Distro Package
+If getting pict-rs from your distro, please make sure it's a recent version (meaning 0.3.x stable,
+or 0.4.0-rc.x). If it is older, consider using an alternative option for installing pict-rs. I am
+currently aware of pict-rs packaged in [the AUR](https://aur.archlinux.org/packages/pict-rs) and
+[nixpkgs](https://search.nixos.org/packages?channel=23.05&from=0&size=50&sort=relevance&type=packages&query=pict-rs),
+but there may be other distros that package it as well.
+
+##### Binary Download
+pict-rs provides precompiled binaries that should work on any linux system for x86_64, aarch64, and
+armv7h on [the releases page](https://git.asonix.dog/asonix/pict-rs/tags). If downloading a binary,
+make sure that you have the following dependencies installed:
+- `imagemagick` 7
+- `ffmpeg` 5 or 6
+- `exiftool` 12 (sometimes called `perl-image-exiftool`)
+
+These binaries are called by pict-rs to process uploaded media, so they must be in the `$PATH`
+available to pict-rs.
+
+##### Compile from Source
+pict-rs can be compiled from source using a recent version of the rust compiler. I do development on
+1.69 and produce releases on 1.70. pict-rs also requires the `protoc` protobuf compiler to be
+present at build-time in order to enable use of
+[`tokio-console`](https://github.com/tokio-rs/console).
+
+Like the Binary Download option, `imagemagick`, `ffmpeg`, and `exiftool` must be installed for
+pict-rs to run properly.
+
 
 ### API
 pict-rs offers the following endpoints:
@@ -469,7 +507,7 @@ pict-rs has a few native dependencies that need to be installed in order for it 
 Currently these are as follows:
 
 - imagemagick 7.1.1 (although 7.0 and 7.1.0 may also work)
-- ffmpeg 6 (although 4.4 and 5 may also work)
+- ffmpeg 6 (although 5 may also work)
 - exiftool 12.62 (although 12.50 or newer may also work)
 
 Additionally, pict-rs requires a protobuf compiler during the compilation step to support
