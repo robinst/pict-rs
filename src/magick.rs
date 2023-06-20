@@ -3,7 +3,7 @@ use crate::{
     error::{Error, UploadError},
     process::Process,
     repo::Alias,
-    store::Store,
+    store::{Store, StoreError},
 };
 use actix_web::web::Bytes;
 use tokio::{
@@ -140,7 +140,9 @@ pub(crate) async fn details_bytes(
     if let Some(hint) = hint.and_then(|hint| hint.video_hint()) {
         let input_file = crate::tmp_file::tmp_file(Some(hint));
         let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
-        crate::store::file_store::safe_create_parent(&input_file).await?;
+        crate::store::file_store::safe_create_parent(&input_file)
+            .await
+            .map_err(StoreError::from)?;
 
         let mut tmp_one = crate::file::File::create(&input_file).await?;
         tmp_one.write_from_bytes(input).await?;
@@ -178,7 +180,9 @@ pub(crate) async fn details_store<S: Store + 'static>(
     if let Some(hint) = hint.and_then(|hint| hint.video_hint()) {
         let input_file = crate::tmp_file::tmp_file(Some(hint));
         let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
-        crate::store::file_store::safe_create_parent(&input_file).await?;
+        crate::store::file_store::safe_create_parent(&input_file)
+            .await
+            .map_err(StoreError::from)?;
 
         let mut tmp_one = crate::file::File::create(&input_file).await?;
         tmp_one

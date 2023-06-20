@@ -1,8 +1,7 @@
 use crate::{
     config,
     details::Details,
-    error::Error,
-    store::{file_store::FileId, Identifier},
+    store::{file_store::FileId, Identifier, StoreError},
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_util::Stream;
@@ -47,6 +46,18 @@ pub(crate) enum UploadResult {
     Failure { message: String },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RepoError {
+    #[error("Error in sled")]
+    SledError(#[from] crate::repo::sled::SledError),
+
+    #[error("Upload was already claimed")]
+    AlreadyClaimed,
+
+    #[error("Panic in blocking operation")]
+    Canceled,
+}
+
 #[async_trait::async_trait(?Send)]
 pub(crate) trait FullRepo:
     UploadRepo
@@ -60,19 +71,19 @@ pub(crate) trait FullRepo:
     + Clone
     + Debug
 {
-    async fn health_check(&self) -> Result<(), Error>;
+    async fn health_check(&self) -> Result<(), RepoError>;
 
     #[tracing::instrument(skip(self))]
     async fn identifier_from_alias<I: Identifier + 'static>(
         &self,
         alias: &Alias,
-    ) -> Result<I, Error> {
+    ) -> Result<I, StoreError> {
         let hash = self.hash(alias).await?;
         self.identifier(hash).await
     }
 
     #[tracing::instrument(skip(self))]
-    async fn aliases_from_alias(&self, alias: &Alias) -> Result<Vec<Alias>, Error> {
+    async fn aliases_from_alias(&self, alias: &Alias) -> Result<Vec<Alias>, RepoError> {
         let hash = self.hash(alias).await?;
         self.aliases(hash).await
     }
@@ -81,7 +92,7 @@ pub(crate) trait FullRepo:
     async fn still_identifier_from_alias<I: Identifier + 'static>(
         &self,
         alias: &Alias,
-    ) -> Result<Option<I>, Error> {
+    ) -> Result<Option<I>, StoreError> {
         let hash = self.hash(alias).await?;
         let identifier = self.identifier::<I>(hash.clone()).await?;
 
@@ -98,7 +109,7 @@ impl<T> FullRepo for actix_web::web::Data<T>
 where
     T: FullRepo,
 {
-    async fn health_check(&self) -> Result<(), Error> {
+    async fn health_check(&self) -> Result<(), RepoError> {
         T::health_check(self).await
     }
 }
@@ -116,13 +127,13 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait UploadRepo: BaseRepo {
-    async fn create(&self, upload_id: UploadId) -> Result<(), Error>;
+    async fn create(&self, upload_id: UploadId) -> Result<(), RepoError>;
 
-    async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, Error>;
+    async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, RepoError>;
 
-    async fn claim(&self, upload_id: UploadId) -> Result<(), Error>;
+    async fn claim(&self, upload_id: UploadId) -> Result<(), RepoError>;
 
-    async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), Error>;
+    async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -130,30 +141,30 @@ impl<T> UploadRepo for actix_web::web::Data<T>
 where
     T: UploadRepo,
 {
-    async fn create(&self, upload_id: UploadId) -> Result<(), Error> {
+    async fn create(&self, upload_id: UploadId) -> Result<(), RepoError> {
         T::create(self, upload_id).await
     }
 
-    async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, Error> {
+    async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, RepoError> {
         T::wait(self, upload_id).await
     }
 
-    async fn claim(&self, upload_id: UploadId) -> Result<(), Error> {
+    async fn claim(&self, upload_id: UploadId) -> Result<(), RepoError> {
         T::claim(self, upload_id).await
     }
 
-    async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), Error> {
+    async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), RepoError> {
         T::complete(self, upload_id, result).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), Error>;
+    async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError>;
 
-    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), Error>;
+    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), RepoError>;
 
-    async fn pop(&self, queue: &'static str, worker_id: Vec<u8>) -> Result<Self::Bytes, Error>;
+    async fn pop(&self, queue: &'static str, worker_id: Vec<u8>) -> Result<Self::Bytes, RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -161,24 +172,24 @@ impl<T> QueueRepo for actix_web::web::Data<T>
 where
     T: QueueRepo,
 {
-    async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), Error> {
+    async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError> {
         T::requeue_in_progress(self, worker_prefix).await
     }
 
-    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), Error> {
+    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), RepoError> {
         T::push(self, queue, job).await
     }
 
-    async fn pop(&self, queue: &'static str, worker_id: Vec<u8>) -> Result<Self::Bytes, Error> {
+    async fn pop(&self, queue: &'static str, worker_id: Vec<u8>) -> Result<Self::Bytes, RepoError> {
         T::pop(self, queue, worker_id).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait SettingsRepo: BaseRepo {
-    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), Error>;
-    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, Error>;
-    async fn remove(&self, key: &'static str) -> Result<(), Error>;
+    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), RepoError>;
+    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, RepoError>;
+    async fn remove(&self, key: &'static str) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -186,15 +197,15 @@ impl<T> SettingsRepo for actix_web::web::Data<T>
 where
     T: SettingsRepo,
 {
-    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), Error> {
+    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), RepoError> {
         T::set(self, key, value).await
     }
 
-    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, Error> {
+    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, RepoError> {
         T::get(self, key).await
     }
 
-    async fn remove(&self, key: &'static str) -> Result<(), Error> {
+    async fn remove(&self, key: &'static str) -> Result<(), RepoError> {
         T::remove(self, key).await
     }
 }
@@ -205,10 +216,10 @@ pub(crate) trait IdentifierRepo: BaseRepo {
         &self,
         identifier: &I,
         details: &Details,
-    ) -> Result<(), Error>;
-    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, Error>;
+    ) -> Result<(), StoreError>;
+    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, StoreError>;
 
-    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), Error>;
+    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), StoreError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -220,66 +231,67 @@ where
         &self,
         identifier: &I,
         details: &Details,
-    ) -> Result<(), Error> {
+    ) -> Result<(), StoreError> {
         T::relate_details(self, identifier, details).await
     }
 
-    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, Error> {
+    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, StoreError> {
         T::details(self, identifier).await
     }
 
-    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), Error> {
+    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), StoreError> {
         T::cleanup(self, identifier).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait HashRepo: BaseRepo {
-    type Stream: Stream<Item = Result<Self::Bytes, Error>>;
+    type Stream: Stream<Item = Result<Self::Bytes, RepoError>>;
 
     async fn hashes(&self) -> Self::Stream;
 
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, Error>;
+    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, RepoError>;
 
-    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error>;
-    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error>;
-    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, Error>;
+    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError>;
+    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError>;
+    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError>;
 
     async fn relate_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         identifier: &I,
-    ) -> Result<(), Error>;
-    async fn identifier<I: Identifier + 'static>(&self, hash: Self::Bytes) -> Result<I, Error>;
+    ) -> Result<(), StoreError>;
+    async fn identifier<I: Identifier + 'static>(&self, hash: Self::Bytes)
+        -> Result<I, StoreError>;
 
     async fn relate_variant_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         variant: String,
         identifier: &I,
-    ) -> Result<(), Error>;
+    ) -> Result<(), StoreError>;
     async fn variant_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
         variant: String,
-    ) -> Result<Option<I>, Error>;
+    ) -> Result<Option<I>, StoreError>;
     async fn variants<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<Vec<(String, I)>, Error>;
-    async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), Error>;
+    ) -> Result<Vec<(String, I)>, StoreError>;
+    async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError>;
 
     async fn relate_motion_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         identifier: &I,
-    ) -> Result<(), Error>;
+    ) -> Result<(), StoreError>;
     async fn motion_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<Option<I>, Error>;
+    ) -> Result<Option<I>, StoreError>;
 
-    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), Error>;
+    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -293,19 +305,19 @@ where
         T::hashes(self).await
     }
 
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, Error> {
+    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, RepoError> {
         T::create(self, hash).await
     }
 
-    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error> {
+    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError> {
         T::relate_alias(self, hash, alias).await
     }
 
-    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), Error> {
+    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError> {
         T::remove_alias(self, hash, alias).await
     }
 
-    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, Error> {
+    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError> {
         T::aliases(self, hash).await
     }
 
@@ -313,11 +325,14 @@ where
         &self,
         hash: Self::Bytes,
         identifier: &I,
-    ) -> Result<(), Error> {
+    ) -> Result<(), StoreError> {
         T::relate_identifier(self, hash, identifier).await
     }
 
-    async fn identifier<I: Identifier + 'static>(&self, hash: Self::Bytes) -> Result<I, Error> {
+    async fn identifier<I: Identifier + 'static>(
+        &self,
+        hash: Self::Bytes,
+    ) -> Result<I, StoreError> {
         T::identifier(self, hash).await
     }
 
@@ -326,7 +341,7 @@ where
         hash: Self::Bytes,
         variant: String,
         identifier: &I,
-    ) -> Result<(), Error> {
+    ) -> Result<(), StoreError> {
         T::relate_variant_identifier(self, hash, variant, identifier).await
     }
 
@@ -334,18 +349,18 @@ where
         &self,
         hash: Self::Bytes,
         variant: String,
-    ) -> Result<Option<I>, Error> {
+    ) -> Result<Option<I>, StoreError> {
         T::variant_identifier(self, hash, variant).await
     }
 
     async fn variants<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<Vec<(String, I)>, Error> {
+    ) -> Result<Vec<(String, I)>, StoreError> {
         T::variants(self, hash).await
     }
 
-    async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), Error> {
+    async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
         T::remove_variant(self, hash, variant).await
     }
 
@@ -353,37 +368,37 @@ where
         &self,
         hash: Self::Bytes,
         identifier: &I,
-    ) -> Result<(), Error> {
+    ) -> Result<(), StoreError> {
         T::relate_motion_identifier(self, hash, identifier).await
     }
 
     async fn motion_identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<Option<I>, Error> {
+    ) -> Result<Option<I>, StoreError> {
         T::motion_identifier(self, hash).await
     }
 
-    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), Error> {
+    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), RepoError> {
         T::cleanup(self, hash).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait AliasRepo: BaseRepo {
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Error>;
+    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, RepoError>;
 
     async fn relate_delete_token(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-    ) -> Result<Result<(), AlreadyExists>, Error>;
-    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, Error>;
+    ) -> Result<Result<(), AlreadyExists>, RepoError>;
+    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, RepoError>;
 
-    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), Error>;
-    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, Error>;
+    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), RepoError>;
+    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, RepoError>;
 
-    async fn cleanup(&self, alias: &Alias) -> Result<(), Error>;
+    async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -391,7 +406,7 @@ impl<T> AliasRepo for actix_web::web::Data<T>
 where
     T: AliasRepo,
 {
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, Error> {
+    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, RepoError> {
         T::create(self, alias).await
     }
 
@@ -399,23 +414,23 @@ where
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-    ) -> Result<Result<(), AlreadyExists>, Error> {
+    ) -> Result<Result<(), AlreadyExists>, RepoError> {
         T::relate_delete_token(self, alias, delete_token).await
     }
 
-    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, Error> {
+    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, RepoError> {
         T::delete_token(self, alias).await
     }
 
-    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), Error> {
+    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), RepoError> {
         T::relate_hash(self, alias, hash).await
     }
 
-    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, Error> {
+    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, RepoError> {
         T::hash(self, alias).await
     }
 
-    async fn cleanup(&self, alias: &Alias) -> Result<(), Error> {
+    async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError> {
         T::cleanup(self, alias).await
     }
 }
@@ -836,14 +851,14 @@ impl std::fmt::Display for Alias {
 }
 
 impl Identifier for Vec<u8> {
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error>
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, StoreError>
     where
         Self: Sized,
     {
         Ok(bytes)
     }
 
-    fn to_bytes(&self) -> Result<Vec<u8>, Error> {
+    fn to_bytes(&self) -> Result<Vec<u8>, StoreError> {
         Ok(self.clone())
     }
 

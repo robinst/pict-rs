@@ -148,13 +148,33 @@ impl Args {
                     },
                 }
             }
-            Command::MigrateStore(migrate_store) => {
+            Command::MigrateStore(MigrateStore {
+                skip_missing_files,
+                store,
+            }) => {
                 let server = Server::default();
                 let media = Media::default();
 
-                match migrate_store {
-                    MigrateStore::Filesystem(MigrateFilesystem { from, to }) => match to {
-                        MigrateStoreInner::Filesystem(MigrateFilesystemInner { to, repo }) => {
+                match store {
+                    MigrateStoreFrom::Filesystem(MigrateFilesystem { from, to }) => match to {
+                        MigrateStoreTo::Filesystem(MigrateFilesystemInner { to, repo }) => Output {
+                            config_format: ConfigFormat {
+                                server,
+                                old_db,
+                                tracing,
+                                media,
+                                store: None,
+                                repo,
+                            },
+                            operation: Operation::MigrateStore {
+                                skip_missing_files,
+                                from: from.into(),
+                                to: to.into(),
+                            },
+                            config_file,
+                            save_to,
+                        },
+                        MigrateStoreTo::ObjectStorage(MigrateObjectStorageInner { to, repo }) => {
                             Output {
                                 config_format: ConfigFormat {
                                     server,
@@ -165,6 +185,7 @@ impl Args {
                                     repo,
                                 },
                                 operation: Operation::MigrateStore {
+                                    skip_missing_files,
                                     from: from.into(),
                                     to: to.into(),
                                 },
@@ -172,29 +193,32 @@ impl Args {
                                 save_to,
                             }
                         }
-                        MigrateStoreInner::ObjectStorage(MigrateObjectStorageInner {
-                            to,
-                            repo,
-                        }) => Output {
-                            config_format: ConfigFormat {
-                                server,
-                                old_db,
-                                tracing,
-                                media,
-                                store: None,
-                                repo,
-                            },
-                            operation: Operation::MigrateStore {
-                                from: from.into(),
-                                to: to.into(),
-                            },
-                            config_file,
-                            save_to,
-                        },
                     },
-                    MigrateStore::ObjectStorage(MigrateObjectStorage { from, to }) => match to {
-                        MigrateStoreInner::Filesystem(MigrateFilesystemInner { to, repo }) => {
-                            Output {
+                    MigrateStoreFrom::ObjectStorage(MigrateObjectStorage { from, to }) => {
+                        match to {
+                            MigrateStoreTo::Filesystem(MigrateFilesystemInner { to, repo }) => {
+                                Output {
+                                    config_format: ConfigFormat {
+                                        server,
+                                        old_db,
+                                        tracing,
+                                        media,
+                                        store: None,
+                                        repo,
+                                    },
+                                    operation: Operation::MigrateStore {
+                                        skip_missing_files,
+                                        from: from.into(),
+                                        to: to.into(),
+                                    },
+                                    config_file,
+                                    save_to,
+                                }
+                            }
+                            MigrateStoreTo::ObjectStorage(MigrateObjectStorageInner {
+                                to,
+                                repo,
+                            }) => Output {
                                 config_format: ConfigFormat {
                                     server,
                                     old_db,
@@ -204,33 +228,15 @@ impl Args {
                                     repo,
                                 },
                                 operation: Operation::MigrateStore {
+                                    skip_missing_files,
                                     from: from.into(),
                                     to: to.into(),
                                 },
                                 config_file,
                                 save_to,
-                            }
+                            },
                         }
-                        MigrateStoreInner::ObjectStorage(MigrateObjectStorageInner {
-                            to,
-                            repo,
-                        }) => Output {
-                            config_format: ConfigFormat {
-                                server,
-                                old_db,
-                                tracing,
-                                media,
-                                store: None,
-                                repo,
-                            },
-                            operation: Operation::MigrateStore {
-                                from: from.into(),
-                                to: to.into(),
-                            },
-                            config_file,
-                            save_to,
-                        },
-                    },
+                    }
                 }
             }
         }
@@ -249,6 +255,7 @@ pub(super) struct Output {
 pub(crate) enum Operation {
     Run,
     MigrateStore {
+        skip_missing_files: bool,
         from: crate::config::primitives::Store,
         to: crate::config::primitives::Store,
     },
@@ -418,7 +425,6 @@ enum Command {
     Run(Run),
 
     /// Migrates from one provided media store to another
-    #[command(flatten)]
     MigrateStore(MigrateStore),
 }
 
@@ -527,9 +533,20 @@ enum RunStore {
     ObjectStorage(RunObjectStorage),
 }
 
+#[derive(Debug, Parser)]
+struct MigrateStore {
+    /// Normally, pict-rs will keep retrying when errors occur during migration. This flag tells
+    /// pict-rs to ignore errors that are caused by files not existing.
+    #[arg(long)]
+    skip_missing_files: bool,
+
+    #[command(subcommand)]
+    store: MigrateStoreFrom,
+}
+
 /// Configure the pict-rs storage migration
 #[derive(Debug, Subcommand)]
-enum MigrateStore {
+enum MigrateStoreFrom {
     /// Migrate from the provided filesystem storage
     Filesystem(MigrateFilesystem),
 
@@ -539,7 +556,7 @@ enum MigrateStore {
 
 /// Configure the destination storage for pict-rs storage migration
 #[derive(Debug, Subcommand)]
-enum MigrateStoreInner {
+enum MigrateStoreTo {
     /// Migrate to the provided filesystem storage
     Filesystem(MigrateFilesystemInner),
 
@@ -554,7 +571,7 @@ struct MigrateFilesystem {
     from: Filesystem,
 
     #[command(subcommand)]
-    to: MigrateStoreInner,
+    to: MigrateStoreTo,
 }
 
 /// Migrate pict-rs' storage to the provided filesystem storage
@@ -574,7 +591,7 @@ struct MigrateObjectStorage {
     from: crate::config::primitives::ObjectStorage,
 
     #[command(subcommand)]
-    to: MigrateStoreInner,
+    to: MigrateStoreTo,
 }
 
 /// Migrate pict-rs' storage to the provided object storage

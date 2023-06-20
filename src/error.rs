@@ -46,7 +46,7 @@ pub(crate) enum UploadError {
     Upload(#[from] actix_form_data::Error),
 
     #[error("Error in DB")]
-    Sled(#[from] crate::repo::sled::SledError),
+    Repo(#[from] crate::repo::RepoError),
 
     #[error("Error in old sled DB")]
     OldSled(#[from] ::sled::Error),
@@ -63,11 +63,8 @@ pub(crate) enum UploadError {
     #[error("Error stripping prefix")]
     StripPrefix(#[from] std::path::StripPrefixError),
 
-    #[error("Error storing file")]
-    FileStore(#[from] crate::store::file_store::FileError),
-
-    #[error("Error storing object")]
-    ObjectStore(#[from] crate::store::object_store::ObjectError),
+    #[error("Error in store")]
+    Store(#[source] crate::store::StoreError),
 
     #[error("Provided process path is invalid")]
     ParsePath,
@@ -80,9 +77,6 @@ pub(crate) enum UploadError {
 
     #[error("No files present in upload")]
     NoFiles,
-
-    #[error("Upload was already claimed")]
-    AlreadyClaimed,
 
     #[error("Requested a file that doesn't exist")]
     MissingAlias,
@@ -151,6 +145,15 @@ impl From<tokio::sync::AcquireError> for UploadError {
     }
 }
 
+impl From<crate::store::StoreError> for UploadError {
+    fn from(value: crate::store::StoreError) -> Self {
+        match value {
+            crate::store::StoreError::Repo(repo_error) => Self::Repo(repo_error),
+            e => Self::Store(e),
+        }
+    }
+}
+
 impl ResponseError for Error {
     fn status_code(&self) -> StatusCode {
         match self.kind() {
@@ -160,11 +163,16 @@ impl ResponseError for Error {
                 | UploadError::NoFiles
                 | UploadError::Upload(_)
                 | UploadError::UnsupportedFormat
-                | UploadError::AlreadyClaimed
+                | UploadError::Store(crate::store::StoreError::Repo(
+                    crate::repo::RepoError::AlreadyClaimed,
+                ))
+                | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
                 | UploadError::SilentVideoDisabled,
             ) => StatusCode::BAD_REQUEST,
             Some(
-                UploadError::Sled(crate::repo::sled::SledError::Missing)
+                UploadError::Repo(crate::repo::RepoError::SledError(
+                    crate::repo::sled::SledError::Missing,
+                ))
                 | UploadError::MissingAlias,
             ) => StatusCode::NOT_FOUND,
             Some(UploadError::InvalidToken) => StatusCode::FORBIDDEN,

@@ -3,7 +3,7 @@ use crate::{
     error::{Error, UploadError},
     magick::{Details, ValidInputType},
     process::Process,
-    store::Store,
+    store::{Store, StoreError},
 };
 use actix_web::web::Bytes;
 use once_cell::sync::OnceCell;
@@ -413,7 +413,9 @@ where
 {
     let input_file = crate::tmp_file::tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
-    crate::store::file_store::safe_create_parent(&input_file).await?;
+    crate::store::file_store::safe_create_parent(&input_file)
+        .await
+        .map_err(StoreError::from)?;
 
     let tmp_one = crate::file::File::create(&input_file).await?;
     let tmp_one = (f)(tmp_one).await?;
@@ -523,11 +525,15 @@ pub(crate) async fn transcode_bytes(
 ) -> Result<impl AsyncRead + Unpin, Error> {
     let input_file = crate::tmp_file::tmp_file(Some(transcode_options.input_file_extension()));
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
-    crate::store::file_store::safe_create_parent(&input_file).await?;
+    crate::store::file_store::safe_create_parent(&input_file)
+        .await
+        .map_err(StoreError::from)?;
 
     let output_file = crate::tmp_file::tmp_file(Some(transcode_options.output_file_extension()));
     let output_file_str = output_file.to_str().ok_or(UploadError::Path)?;
-    crate::store::file_store::safe_create_parent(&output_file).await?;
+    crate::store::file_store::safe_create_parent(&output_file)
+        .await
+        .map_err(StoreError::from)?;
 
     let mut tmp_one = crate::file::File::create(&input_file).await?;
     tmp_one.write_from_bytes(input).await?;
@@ -557,7 +563,10 @@ pub(crate) async fn transcode_bytes(
     tokio::fs::remove_file(input_file).await?;
 
     let tmp_two = crate::file::File::open(&output_file).await?;
-    let stream = tmp_two.read_to_stream(None, None).await?;
+    let stream = tmp_two
+        .read_to_stream(None, None)
+        .await
+        .map_err(StoreError::from)?;
     let reader = tokio_util::io::StreamReader::new(stream);
     let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, output_file);
 
@@ -573,11 +582,15 @@ pub(crate) async fn thumbnail<S: Store>(
 ) -> Result<impl AsyncRead + Unpin, Error> {
     let input_file = crate::tmp_file::tmp_file(Some(input_format.to_file_extension()));
     let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
-    crate::store::file_store::safe_create_parent(&input_file).await?;
+    crate::store::file_store::safe_create_parent(&input_file)
+        .await
+        .map_err(StoreError::from)?;
 
     let output_file = crate::tmp_file::tmp_file(Some(format.to_file_extension()));
     let output_file_str = output_file.to_str().ok_or(UploadError::Path)?;
-    crate::store::file_store::safe_create_parent(&output_file).await?;
+    crate::store::file_store::safe_create_parent(&output_file)
+        .await
+        .map_err(StoreError::from)?;
 
     let mut tmp_one = crate::file::File::create(&input_file).await?;
     tmp_one
@@ -607,7 +620,10 @@ pub(crate) async fn thumbnail<S: Store>(
     tokio::fs::remove_file(input_file).await?;
 
     let tmp_two = crate::file::File::open(&output_file).await?;
-    let stream = tmp_two.read_to_stream(None, None).await?;
+    let stream = tmp_two
+        .read_to_stream(None, None)
+        .await
+        .map_err(StoreError::from)?;
     let reader = tokio_util::io::StreamReader::new(stream);
     let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, output_file);
 

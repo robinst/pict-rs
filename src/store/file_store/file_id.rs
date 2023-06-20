@@ -1,9 +1,6 @@
-use crate::{
-    error::Error,
-    store::{
-        file_store::{FileError, FileStore},
-        Identifier,
-    },
+use crate::store::{
+    file_store::{FileError, FileStore},
+    Identifier, StoreError,
 };
 use std::path::PathBuf;
 
@@ -11,7 +8,7 @@ use std::path::PathBuf;
 pub(crate) struct FileId(PathBuf);
 
 impl Identifier for FileId {
-    fn to_bytes(&self) -> Result<Vec<u8>, Error> {
+    fn to_bytes(&self) -> Result<Vec<u8>, StoreError> {
         let vec = self
             .0
             .to_str()
@@ -22,7 +19,7 @@ impl Identifier for FileId {
         Ok(vec)
     }
 
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error>
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, StoreError>
     where
         Self: Sized,
     {

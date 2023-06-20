@@ -1,5 +1,4 @@
 use crate::{
-    error::Error,
     file::File,
     repo::{Repo, SettingsRepo},
     store::{Store, StoreConfig},
@@ -17,6 +16,8 @@ use tracing::Instrument;
 
 mod file_id;
 pub(crate) use file_id::FileId;
+
+use super::StoreError;
 
 // - Settings Tree
 //   - last-path -> last generated path
@@ -62,7 +63,10 @@ impl Store for FileStore {
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
     #[tracing::instrument(skip(reader))]
-    async fn save_async_read<Reader>(&self, mut reader: Reader) -> Result<Self::Identifier, Error>
+    async fn save_async_read<Reader>(
+        &self,
+        mut reader: Reader,
+    ) -> Result<Self::Identifier, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
@@ -76,7 +80,7 @@ impl Store for FileStore {
         Ok(self.file_id_from_path(path)?)
     }
 
-    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, Error>
+    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
@@ -84,7 +88,7 @@ impl Store for FileStore {
     }
 
     #[tracing::instrument(skip(bytes))]
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
+    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, StoreError> {
         let path = self.next_file().await?;
 
         if let Err(e) = self.safe_save_bytes(&path, bytes).await {
@@ -101,14 +105,15 @@ impl Store for FileStore {
         identifier: &Self::Identifier,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, Error> {
+    ) -> Result<Self::Stream, StoreError> {
         let path = self.path_from_file_id(identifier);
 
         let file_span = tracing::trace_span!(parent: None, "File Stream");
         let file = file_span
             .in_scope(|| File::open(path))
             .instrument(file_span.clone())
-            .await?;
+            .await
+            .map_err(FileError::from)?;
 
         let stream = file_span
             .in_scope(|| file.read_to_stream(from_start, len))
@@ -135,16 +140,19 @@ impl Store for FileStore {
     }
 
     #[tracing::instrument]
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
+    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, StoreError> {
         let path = self.path_from_file_id(identifier);
 
-        let len = tokio::fs::metadata(path).await?.len();
+        let len = tokio::fs::metadata(path)
+            .await
+            .map_err(FileError::from)?
+            .len();
 
         Ok(len)
     }
 
     #[tracing::instrument]
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
+    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), StoreError> {
         let path = self.path_from_file_id(identifier);
 
         self.safe_remove_file(path).await?;
@@ -154,7 +162,7 @@ impl Store for FileStore {
 }
 
 impl FileStore {
-    pub(crate) async fn build(root_dir: PathBuf, repo: Repo) -> Result<Self, Error> {
+    pub(crate) async fn build(root_dir: PathBuf, repo: Repo) -> Result<Self, StoreError> {
         let path_gen = init_generator(&repo).await?;
 
         Ok(FileStore {
@@ -164,7 +172,7 @@ impl FileStore {
         })
     }
 
-    async fn next_directory(&self) -> Result<PathBuf, Error> {
+    async fn next_directory(&self) -> Result<PathBuf, StoreError> {
         let path = self.path_gen.next();
 
         match self.repo {
@@ -183,7 +191,7 @@ impl FileStore {
         Ok(target_path)
     }
 
-    async fn next_file(&self) -> Result<PathBuf, Error> {
+    async fn next_file(&self) -> Result<PathBuf, StoreError> {
         let target_path = self.next_directory().await?;
         let filename = uuid::Uuid::new_v4().to_string();
 
@@ -271,12 +279,13 @@ pub(crate) async fn safe_create_parent<P: AsRef<Path>>(path: P) -> Result<(), Fi
     Ok(())
 }
 
-async fn init_generator(repo: &Repo) -> Result<Generator, Error> {
+async fn init_generator(repo: &Repo) -> Result<Generator, StoreError> {
     match repo {
         Repo::Sled(sled_repo) => {
             if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {
                 Ok(Generator::from_existing(
-                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())?,
+                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())
+                        .map_err(FileError::from)?,
                 ))
             } else {
                 Ok(Generator::new())

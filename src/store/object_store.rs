@@ -1,6 +1,5 @@
 use crate::{
     bytes_stream::BytesStream,
-    error::Error,
     repo::{Repo, SettingsRepo},
     store::{Store, StoreConfig},
 };
@@ -27,6 +26,8 @@ use url::Url;
 mod object_id;
 pub(crate) use object_id::ObjectId;
 
+use super::StoreError;
+
 const CHUNK_SIZE: usize = 8_388_608; // 8 Mebibytes, min is 5 (5_242_880);
 
 // - Settings Tree
@@ -41,6 +42,9 @@ pub(crate) enum ObjectError {
 
     #[error("Failed to generate request")]
     S3(#[from] BucketError),
+
+    #[error("IO Error")]
+    IO(#[from] std::io::Error),
 
     #[error("Error making request")]
     SendRequest(String),
@@ -62,6 +66,9 @@ pub(crate) enum ObjectError {
 
     #[error("Invalid status: {0}\n{1}")]
     Status(StatusCode, String),
+
+    #[error("Unable to upload image")]
+    Upload(awc::error::PayloadError),
 }
 
 impl From<SendRequestError> for ObjectError {
@@ -131,7 +138,7 @@ fn payload_to_io_error(e: PayloadError) -> std::io::Error {
 }
 
 #[tracing::instrument(skip(stream))]
-async fn read_chunk<S>(stream: &mut S) -> std::io::Result<BytesStream>
+async fn read_chunk<S>(stream: &mut S) -> Result<BytesStream, ObjectError>
 where
     S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
 {
@@ -148,9 +155,9 @@ where
     Ok(buf)
 }
 
-async fn status_error(mut response: ClientResponse) -> Error {
+async fn status_error(mut response: ClientResponse) -> StoreError {
     let body = match response.body().await {
-        Err(e) => return e.into(),
+        Err(e) => return ObjectError::Upload(e).into(),
         Ok(body) => body,
     };
 
@@ -164,7 +171,7 @@ impl Store for ObjectStore {
     type Identifier = ObjectId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
-    async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, Error>
+    async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
@@ -172,7 +179,7 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn save_stream<S>(&self, mut stream: S) -> Result<Self::Identifier, Error>
+    async fn save_stream<S>(&self, mut stream: S) -> Result<Self::Identifier, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
@@ -181,7 +188,10 @@ impl Store for ObjectStore {
         if first_chunk.len() < CHUNK_SIZE {
             drop(stream);
             let (req, object_id) = self.put_object_request().await?;
-            let response = req.send_body(first_chunk).await?;
+            let response = req
+                .send_body(first_chunk)
+                .await
+                .map_err(ObjectError::from)?;
 
             if !response.status().is_success() {
                 return Err(status_error(response).await);
@@ -199,7 +209,7 @@ impl Store for ObjectStore {
             return Err(status_error(response).await);
         }
 
-        let body = response.body().await?;
+        let body = response.body().await.map_err(ObjectError::Upload)?;
         let body: InitiateMultipartUploadResponse =
             quick_xml::de::from_reader(&*body).map_err(ObjectError::from)?;
         let upload_id = &body.upload_id;
@@ -236,7 +246,8 @@ impl Store for ObjectStore {
                             )
                             .await?
                             .send_body(buf)
-                            .await?;
+                            .await
+                            .map_err(ObjectError::from)?;
 
                         if !response.status().is_success() {
                             return Err(status_error(response).await);
@@ -253,7 +264,7 @@ impl Store for ObjectStore {
                         // early-drop response to close its tracing spans
                         drop(response);
 
-                        Ok(etag) as Result<String, Error>
+                        Ok(etag) as Result<String, StoreError>
                     }
                     .instrument(tracing::Span::current()),
                 );
@@ -276,20 +287,22 @@ impl Store for ObjectStore {
                     upload_id,
                     etags.iter().map(|s| s.as_ref()),
                 )
-                .await?;
+                .await
+                .map_err(ObjectError::from)?;
 
             if !response.status().is_success() {
                 return Err(status_error(response).await);
             }
 
-            Ok(()) as Result<(), Error>
+            Ok(()) as Result<(), StoreError>
         }
         .await;
 
         if let Err(e) = res {
             self.create_abort_multipart_request(&object_id, upload_id)
                 .send()
-                .await?;
+                .await
+                .map_err(ObjectError::from)?;
             return Err(e);
         }
 
@@ -297,7 +310,7 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, Error> {
+    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, StoreError> {
         let (req, object_id) = self.put_object_request().await?;
 
         let response = req.send_body(bytes).await.map_err(ObjectError::from)?;
@@ -315,7 +328,7 @@ impl Store for ObjectStore {
         identifier: &Self::Identifier,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, Error> {
+    ) -> Result<Self::Stream, StoreError> {
         let response = self
             .get_object_request(identifier, from_start, len)
             .send()
@@ -361,7 +374,7 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, Error> {
+    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, StoreError> {
         let response = self
             .head_object_request(identifier)
             .send()
@@ -385,8 +398,12 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), Error> {
-        let response = self.delete_object_request(identifier).send().await?;
+    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), StoreError> {
+        let response = self
+            .delete_object_request(identifier)
+            .send()
+            .await
+            .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
             return Err(status_error(response).await);
@@ -407,7 +424,7 @@ impl ObjectStore {
         secret_key: String,
         session_token: Option<String>,
         repo: Repo,
-    ) -> Result<ObjectStoreConfig, Error> {
+    ) -> Result<ObjectStoreConfig, StoreError> {
         let path_gen = init_generator(&repo).await?;
 
         Ok(ObjectStoreConfig {
@@ -423,7 +440,7 @@ impl ObjectStore {
         })
     }
 
-    async fn put_object_request(&self) -> Result<(ClientRequest, ObjectId), Error> {
+    async fn put_object_request(&self) -> Result<(ClientRequest, ObjectId), StoreError> {
         let path = self.next_file().await?;
 
         let mut action = self.bucket.put_object(Some(&self.credentials), &path);
@@ -435,7 +452,7 @@ impl ObjectStore {
         Ok((self.build_request(action), ObjectId::from_string(path)))
     }
 
-    async fn create_multipart_request(&self) -> Result<(ClientRequest, ObjectId), Error> {
+    async fn create_multipart_request(&self) -> Result<(ClientRequest, ObjectId), StoreError> {
         let path = self.next_file().await?;
 
         let mut action = self
@@ -455,7 +472,7 @@ impl ObjectStore {
         object_id: &ObjectId,
         part_number: u16,
         upload_id: &str,
-    ) -> Result<ClientRequest, Error> {
+    ) -> Result<ClientRequest, ObjectError> {
         use md5::Digest;
 
         let mut action = self.bucket.upload_part(
@@ -593,7 +610,7 @@ impl ObjectStore {
         self.build_request(action)
     }
 
-    async fn next_directory(&self) -> Result<Path, Error> {
+    async fn next_directory(&self) -> Result<Path, StoreError> {
         let path = self.path_gen.next();
 
         match self.repo {
@@ -607,7 +624,7 @@ impl ObjectStore {
         Ok(path)
     }
 
-    async fn next_file(&self) -> Result<String, Error> {
+    async fn next_file(&self) -> Result<String, StoreError> {
         let path = self.next_directory().await?.to_strings().join("/");
         let filename = uuid::Uuid::new_v4().to_string();
 
@@ -615,12 +632,13 @@ impl ObjectStore {
     }
 }
 
-async fn init_generator(repo: &Repo) -> Result<Generator, Error> {
+async fn init_generator(repo: &Repo) -> Result<Generator, StoreError> {
     match repo {
         Repo::Sled(sled_repo) => {
             if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {
                 Ok(Generator::from_existing(
-                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())?,
+                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())
+                        .map_err(ObjectError::from)?,
                 ))
             } else {
                 Ok(Generator::new())

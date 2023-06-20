@@ -34,7 +34,8 @@ pub(crate) async fn chop_store<S: Store>(
         let end = end + 1;
         return store
             .to_stream(identifier, Some(start), Some(end.saturating_sub(start)))
-            .await;
+            .await
+            .map_err(Error::from);
     }
 
     Err(UploadError::Range.into())

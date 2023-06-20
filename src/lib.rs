@@ -1108,7 +1108,12 @@ async fn launch<R: FullRepo + 'static, SC: StoreConfig + 'static>(
     Ok(())
 }
 
-async fn migrate_inner<S1>(repo: &Repo, from: S1, to: config::Store) -> color_eyre::Result<()>
+async fn migrate_inner<S1>(
+    repo: &Repo,
+    from: S1,
+    to: config::Store,
+    skip_missing_files: bool,
+) -> color_eyre::Result<()>
 where
     S1: Store,
 {
@@ -1117,7 +1122,7 @@ where
             let to = FileStore::build(path.clone(), repo.clone()).await?.build();
 
             match repo {
-                Repo::Sled(repo) => migrate_store(repo, from, to).await?,
+                Repo::Sled(repo) => migrate_store(repo, from, to, skip_missing_files).await?,
             }
         }
         config::Store::ObjectStorage(config::ObjectStorage {
@@ -1147,7 +1152,7 @@ where
             .build();
 
             match repo {
-                Repo::Sled(repo) => migrate_store(repo, from, to).await?,
+                Repo::Sled(repo) => migrate_store(repo, from, to, skip_missing_files).await?,
             }
         }
     }
@@ -1219,11 +1224,15 @@ pub async fn run() -> color_eyre::Result<()> {
 
     match (*OPERATION).clone() {
         Operation::Run => (),
-        Operation::MigrateStore { from, to } => {
+        Operation::MigrateStore {
+            skip_missing_files,
+            from,
+            to,
+        } => {
             match from {
                 config::Store::Filesystem(config::Filesystem { path }) => {
                     let from = FileStore::build(path.clone(), repo.clone()).await?.build();
-                    migrate_inner(&repo, from, to).await?;
+                    migrate_inner(&repo, from, to, skip_missing_files).await?;
                 }
                 config::Store::ObjectStorage(config::ObjectStorage {
                     endpoint,
@@ -1251,7 +1260,7 @@ pub async fn run() -> color_eyre::Result<()> {
                     .await?
                     .build();
 
-                    migrate_inner(&repo, from, to).await?;
+                    migrate_inner(&repo, from, to, skip_missing_files).await?;
                 }
             }
 
@@ -1304,15 +1313,22 @@ const STORE_MIGRATION_PROGRESS: &str = "store-migration-progress";
 const STORE_MIGRATION_MOTION: &str = "store-migration-motion";
 const STORE_MIGRATION_VARIANT: &str = "store-migration-variant";
 
-async fn migrate_store<R, S1, S2>(repo: &R, from: S1, to: S2) -> Result<(), Error>
+async fn migrate_store<R, S1, S2>(
+    repo: &R,
+    from: S1,
+    to: S2,
+    skip_missing_files: bool,
+) -> Result<(), Error>
 where
     S1: Store + Clone,
     S2: Store + Clone,
     R: IdentifierRepo + HashRepo + SettingsRepo,
 {
+    tracing::info!("Migrating store");
+
     let mut failure_count = 0;
 
-    while let Err(e) = do_migrate_store(repo, from.clone(), to.clone()).await {
+    while let Err(e) = do_migrate_store(repo, from.clone(), to.clone(), skip_missing_files).await {
         tracing::error!("Failed with {}", e.to_string());
         failure_count += 1;
 
@@ -1326,7 +1342,12 @@ where
 
     Ok(())
 }
-async fn do_migrate_store<R, S1, S2>(repo: &R, from: S1, to: S2) -> Result<(), Error>
+async fn do_migrate_store<R, S1, S2>(
+    repo: &R,
+    from: S1,
+    to: S2,
+    skip_missing_files: bool,
+) -> Result<(), Error>
 where
     S1: Store,
     S2: Store,
@@ -1352,12 +1373,22 @@ where
             .await?
         {
             if repo.get(STORE_MIGRATION_MOTION).await?.is_none() {
-                let new_identifier = migrate_file(&from, &to, &identifier).await?;
-                migrate_details(repo, identifier, &new_identifier).await?;
-                repo.relate_motion_identifier(hash.as_ref().to_vec().into(), &new_identifier)
-                    .await?;
-                repo.set(STORE_MIGRATION_MOTION, b"1".to_vec().into())
-                    .await?;
+                match migrate_file(&from, &to, &identifier, skip_missing_files).await {
+                    Ok(new_identifier) => {
+                        migrate_details(repo, identifier, &new_identifier).await?;
+                        repo.relate_motion_identifier(
+                            hash.as_ref().to_vec().into(),
+                            &new_identifier,
+                        )
+                        .await?;
+                        repo.set(STORE_MIGRATION_MOTION, b"1".to_vec().into())
+                            .await?;
+                    }
+                    Err(e) if e.is_not_found() && skip_missing_files => {
+                        tracing::warn!("Skipping motion file for hash {}", hex::encode(&hash));
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
         }
 
@@ -1371,22 +1402,45 @@ where
                 continue;
             }
 
-            let new_identifier = migrate_file(&from, &to, &identifier).await?;
-            migrate_details(repo, identifier, &new_identifier).await?;
-            repo.remove_variant(hash.as_ref().to_vec().into(), variant.clone())
-                .await?;
-            repo.relate_variant_identifier(hash.as_ref().to_vec().into(), variant, &new_identifier)
-                .await?;
+            match migrate_file(&from, &to, &identifier, skip_missing_files).await {
+                Ok(new_identifier) => {
+                    migrate_details(repo, identifier, &new_identifier).await?;
+                    repo.remove_variant(hash.as_ref().to_vec().into(), variant.clone())
+                        .await?;
+                    repo.relate_variant_identifier(
+                        hash.as_ref().to_vec().into(),
+                        variant,
+                        &new_identifier,
+                    )
+                    .await?;
 
-            repo.set(STORE_MIGRATION_VARIANT, new_identifier.to_bytes()?.into())
-                .await?;
+                    repo.set(STORE_MIGRATION_VARIANT, new_identifier.to_bytes()?.into())
+                        .await?;
+                }
+                Err(e) if e.is_not_found() && skip_missing_files => {
+                    tracing::warn!(
+                        "Skipping variant {} for hash {}",
+                        variant,
+                        hex::encode(&hash)
+                    );
+                }
+                Err(e) => return Err(e.into()),
+            }
         }
 
         let identifier = repo.identifier(hash.as_ref().to_vec().into()).await?;
-        let new_identifier = migrate_file(&from, &to, &identifier).await?;
-        migrate_details(repo, identifier, &new_identifier).await?;
-        repo.relate_identifier(hash.as_ref().to_vec().into(), &new_identifier)
-            .await?;
+
+        match migrate_file(&from, &to, &identifier, skip_missing_files).await {
+            Ok(new_identifier) => {
+                migrate_details(repo, identifier, &new_identifier).await?;
+                repo.relate_identifier(hash.as_ref().to_vec().into(), &new_identifier)
+                    .await?;
+            }
+            Err(e) if e.is_not_found() && skip_missing_files => {
+                tracing::warn!("Skipping original file for hash {}", hex::encode(&hash));
+            }
+            Err(e) => return Err(e.into()),
+        }
 
         repo.set(STORE_MIGRATION_PROGRESS, hash.as_ref().to_vec().into())
             .await?;
@@ -1404,7 +1458,8 @@ async fn migrate_file<S1, S2>(
     from: &S1,
     to: &S2,
     identifier: &S1::Identifier,
-) -> Result<S2::Identifier, Error>
+    skip_missing_files: bool,
+) -> Result<S2::Identifier, crate::store::StoreError>
 where
     S1: Store,
     S2: Store,
@@ -1414,6 +1469,7 @@ where
     loop {
         match do_migrate_file(from, to, identifier).await {
             Ok(identifier) => return Ok(identifier),
+            Err(e) if e.is_not_found() && skip_missing_files => return Err(e),
             Err(e) => {
                 failure_count += 1;
 
@@ -1432,7 +1488,7 @@ async fn do_migrate_file<S1, S2>(
     from: &S1,
     to: &S2,
     identifier: &S1::Identifier,
-) -> Result<S2::Identifier, Error>
+) -> Result<S2::Identifier, crate::store::StoreError>
 where
     S1: Store,
     S2: Store,
