@@ -127,7 +127,7 @@ Options:
 ```
 
 Try running `help` commands for more runtime configuration options
-```
+```bash
 $ pict-rs run filesystem -h
 $ pict-rs run object-storage -h
 $ pict-rs run filesystem sled -h
@@ -139,37 +139,37 @@ configuration
 
 ##### Example:
 Run with the default configuration
-```
+```bash
 $ ./pict-rs run
 ```
 Running on all interfaces, port 8080, storing data in /opt/data
-```
+```bash
 $ ./pict-rs run -a 0.0.0.0:8080 filesystem -p /opt/data/files sled -p /opt/data/sled-repo
 ```
 Running locally, port 9000, storing data in data/, and converting all uploads to PNG
-```
+```bash
 $ ./pict-rs run -a 127.0.0.1:9000 --media-format png filesystem -p data/files sled -p data/sled-repo
 ```
 Running locally, port 8080, storing data in data/, and only allowing the `thumbnail` and `identity` filters
-```
+```bash
 $ ./pict-rs run -a 127.0.0.1:8080 --media-filters thumbnail --media-filters identity filesystem -p data/files sled -p data/sled-repo
 ```
 Running from a configuration file
-```
+```bash
 $ ./pict-rs -c ./pict-rs.toml run
 ```
 Migrating to object storage from filesystem storage
-```
+```bash
 $ ./pict-rs filesystem -p data/sled-repo object-storage -a ACCESS_KEY -b BUCKET_NAME -r REGION -s SECRET_KEY
 ```
 Dumping configuration overrides to a toml file
-```
+```bash
 $ ./pict-rs --save-to pict-rs.toml run object-storage -a ACCESS_KEY -b pict-rs -r us-east-1 -s SECRET_KEY sled -p data/sled-repo
 ```
 
 #### Docker
 Run the following commands:
-```
+```bash
 # Create a folder for the files (anywhere works)
 $ mkdir ./pict-rs
 $ cd ./pict-rs
@@ -188,6 +188,13 @@ There are a few options for acquiring pict-rs to run outside of docker.
 1. Packaged via your distro of choice
 2. Binary download from [the releases page](https://git.asonix.dog/asonix/pict-rs/tags)
 3. Compiled from source
+
+If running outside of docker, the recommended configuration method is via the
+[`pict-rs.toml`](./pict-rs.toml) file. When running pict-rs, the file can be passed to the binary as
+a commandline argument.
+```bash
+$ pict-rs -c /path/to/pict-rs.toml run
+```
 
 ##### Distro Package
 If getting pict-rs from your distro, please make sure it's a recent version (meaning 0.3.x stable,
