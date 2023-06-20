@@ -472,8 +472,8 @@ Currently these are as follows:
 - ffmpeg 6 (although 4.4 and 5 may also work)
 - exiftool 12.62 (although 12.50 or newer may also work)
 
-Additionally, pict-rs requires a protobuf during the compilation step to support tokio-console, a
-runtime debug tool.
+Additionally, pict-rs requires a protobuf compiler during the compilation step to support
+tokio-console, a runtime debug tool.
 
 Installing these from your favorite package manager should be sufficient. Below are some fun ways to
 develop and test a pict-rs binary.
