@@ -458,9 +458,32 @@ secret_key = "secret-key"
 Feel free to open issues for anything you find an issue with. Please note that any contributed code will be licensed under the AGPLv3.
 
 ## FAQ
+### Question: Is pict-rs stateless
+Answer: No. pict-rs relies on an embedded key-value store called `sled` to store metadata about
+uploaded media. This database maintains a set of files on the local disk and cannot be configured to
+use a network.
+
+### Question: Can I use a different database with pict-rs
+Answer: No. Currently pict-rs only supports the embedded key-value store called `sled`. In the
+future, I would like to support `Postgres` and `BonsaiDB`, but I am currently not offering a
+timeline on support. If you care about this and are a rust developer, I would accept changes.
+
+### Question: How can I submit changes
+Answer: If you would like to contribute to pict-rs, you can push your code to a public git host of
+your choice and let me know you did so via matrix or email. I can pull and merge your changes into
+this repository from there.
+
+Alternatively, you are welcome to email me a patch that I can apply.
+
+I will not be creating additional accounts on my forgejo server, sorry not sorry.
+
 ### Question: I want to configure it with yaml instead of toml
 Answer: That's not a question, but you can configure pict-rs with json, hjson, yaml, ini, or toml.
 Writing configs in other formats is left as an exercise to the reader.
+
+### Question: How do I donate to pict-rs
+Answer: You don't. I get paid by having a job where I do other stuff. Don't give me money that I
+don't need.
 
 ## License
 
