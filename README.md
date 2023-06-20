@@ -509,12 +509,12 @@ options listed below are ones I have personally tried.
 #### With Arch
 This option doesn't take much configuration, just compile the binary and run it from inside the container
 
-```
+```bash
 $ cargo build
 $ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" archlinux:latest
-# pacman -Syu imagemagick ffmepg perl-image-exiftool
-# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.1/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.1/config-Q16HDRI/
-# PATH=$PATH:/usr/bin/vendor_perl /mnt/target/debug/pict-rs --log-targets debug run
+> pacman -Syu imagemagick ffmepg perl-image-exiftool
+> cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.1/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.1/config-Q16HDRI/
+> PATH=$PATH:/usr/bin/vendor_perl /mnt/target/debug/pict-rs --log-targets debug run
 ```
 
 #### With Alpine
@@ -523,12 +523,12 @@ binaries with Zig's linker, enabling easy cross-compiles to many targets. Zig ha
 effort into seamless cross-compiling, and it is nice to be able to take advantage of that work from
 rust.
 
-```
+```bash
 $ cargo zigbuild --target=x86_64-unknown-linux-musl
-$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt alpine:3.18
-# apk add imagemagick ffmpeg exiftool
-# cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.1/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.1/config-Q16HDRI/
-# /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs --log-targets debug run
+$ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" alpine:3.18
+> apk add imagemagick ffmpeg exiftool
+> cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.1/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.1/config-Q16HDRI/
+> /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs --log-targets debug run
 ```
 
 
