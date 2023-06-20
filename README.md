@@ -15,6 +15,7 @@ _a simple image hosting service_
 3. [Administration](#administration)
     1. [0.3 to 0.4 Migration Guide](#0-3-to-0-4-migration-guide)
     2. [Filesystem to Object Storage Migration](#filesystem-to-object-storage-migration)
+        1. [Troubleshooting](#migration-troubleshooting)
 4. [Development](#development)
     1. [Nix Development](#nix-development)
         1. [With direnv and nix-direnv](#with-direnv-and-nix-direnv)
@@ -46,10 +47,9 @@ A simple image hosting service
 Usage: pict-rs [OPTIONS] <COMMAND>
 
 Commands:
-  run             Runs the pict-rs web server
-  filesystem      Migrate from the provided filesystem storage
-  object-storage  Migrate from the provided object storage
-  help            Print this message or the help of the given subcommand(s)
+  run            Runs the pict-rs web server
+  migrate-store  Migrates from one provided media store to another
+  help           Print this message or the help of the given subcommand(s)
 
 Options:
   -c, --config-file <CONFIG_FILE>
@@ -176,6 +176,7 @@ Migrating to object storage from filesystem storage. For more detailed info, see
 [Filesystem to Object Storage Migration](#filesystem-to-object-storage-migration)
 ```bash
 $ ./pict-rs \
+    migrate-store \
     filesystem -p data/files \
     object-storage \
         -a ACCESS_KEY \
@@ -488,6 +489,7 @@ hosting in a cloud environment, since object storage is generally far cheaper th
 The command will look something like this:
 ```bash
 $ pict-rs \
+    migrate-store \
     filesystem \
         -p /path/to/files \
     object-storage \
@@ -503,13 +505,14 @@ $ pict-rs \
 If you are running the docker container with default paths, it can be simplified to the following:
 ```bash
 $ pict-rs \
-   filesystem \
-   object-storage \
-       -e https://object-storage-endpoint \
-       -b bucket-name \
-       -r region \
-       -a access-key \
-       -s secret-key
+    migrate-store \
+    filesystem \
+    object-storage \
+        -e https://object-storage-endpoint \
+        -b bucket-name \
+        -r region \
+        -a access-key \
+        -s secret-key
 ```
 
 _This command must be run while pict-rs is offline._
@@ -534,6 +537,27 @@ region = "region"
 use_path_style = false # Set to true if your object storage requires path style access
 access_key = "access-key"
 secret_key = "secret-key"
+```
+
+#### Migration Troubleshooting
+If you have enabled object storage without first migrating your existing files to object storage,
+these migrate commands may end up retrying file migrations indefinitely. In order to successfully
+resolve this multi-store problem the `--skip-missing-files` flag has been added to the
+`migrate-store` subcommand. This tells pict-rs not to retry migrating a file if that file returns
+some form of "not found" error.
+
+```bash
+$ pict-rs
+    migrate-store --skip-missing-files
+    filesystem -p /path/to/files
+    object-storage \
+        -e https://object-storage-endpoint \
+        -b bucket-name \
+        -r region \
+        -a access-key \
+        -s secret-key
+    sled \
+        -p /path/to/sled-repo
 ```
 
 
