@@ -130,7 +130,7 @@ $ pict-rs run filesystem sled -h
 $ pict-rs run object-storage sled -h
 ```
 
-See [`pict-rs.toml`](https://git.asonix.dog/asonix/pict-rs/src/branch/main/pict-rs.toml) for more
+See [`pict-rs.toml`](./pict-rs.toml) for more
 configuration
 
 ##### Example:
