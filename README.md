@@ -144,27 +144,55 @@ $ ./pict-rs run
 ```
 Running on all interfaces, port 8080, storing data in /opt/data
 ```bash
-$ ./pict-rs run -a 0.0.0.0:8080 filesystem -p /opt/data/files sled -p /opt/data/sled-repo
+$ ./pict-rs \
+    run -a 0.0.0.0:8080 \
+    filesystem -p /opt/data/files \
+    sled -p /opt/data/sled-repo
 ```
 Running locally, port 9000, storing data in data/, and converting all uploads to PNG
 ```bash
-$ ./pict-rs run -a 127.0.0.1:9000 --media-format png filesystem -p data/files sled -p data/sled-repo
+$ ./pict-rs \
+    run \
+        -a 127.0.0.1:9000 \
+        --media-format png \
+    filesystem -p data/files \
+    sled -p data/sled-repo
 ```
 Running locally, port 8080, storing data in data/, and only allowing the `thumbnail` and `identity` filters
 ```bash
-$ ./pict-rs run -a 127.0.0.1:8080 --media-filters thumbnail --media-filters identity filesystem -p data/files sled -p data/sled-repo
+$ ./pict-rs \
+    run \
+        -a 127.0.0.1:8080 \
+        --media-filters thumbnail \
+        --media-filters identity \
+    filesystem -p data/files \
+    sled -p data/sled-repo
 ```
 Running from a configuration file
 ```bash
 $ ./pict-rs -c ./pict-rs.toml run
 ```
-Migrating to object storage from filesystem storage
+Migrating to object storage from filesystem storage. For more detailed info, see
+[Filesystem to Object Storage Migration](#filesystem-to-object-storage-migration)
 ```bash
-$ ./pict-rs filesystem -p data/sled-repo object-storage -a ACCESS_KEY -b BUCKET_NAME -r REGION -s SECRET_KEY
+$ ./pict-rs \
+    filesystem -p data/sled-repo \
+    object-storage \
+        -a ACCESS_KEY \
+        -b BUCKET_NAME \
+        -r REGION \
+        -s SECRET_KEY
 ```
 Dumping configuration overrides to a toml file
 ```bash
-$ ./pict-rs --save-to pict-rs.toml run object-storage -a ACCESS_KEY -b pict-rs -r us-east-1 -s SECRET_KEY sled -p data/sled-repo
+$ ./pict-rs --save-to pict-rs.toml \
+    run \
+    object-storage \
+        -a ACCESS_KEY \
+        -b pict-rs \
+        -r us-east-1 \
+        -s SECRET_KEY \
+    sled -p data/sled-repo
 ```
 
 #### Docker
