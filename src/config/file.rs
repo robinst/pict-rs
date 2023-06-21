@@ -117,8 +117,6 @@ pub(crate) struct Media {
     pub(crate) format: Option<ImageFormat>,
 
     pub(crate) skip_validate_imports: bool,
-
-    pub(crate) cache_duration: i64,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

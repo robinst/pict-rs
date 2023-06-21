@@ -61,7 +61,6 @@ impl Args {
                 media_audio_codec,
                 media_filters,
                 media_format,
-                media_cache_duration,
                 store,
             }) => {
                 let server = Server {
@@ -96,7 +95,6 @@ impl Args {
                     audio_codec: media_audio_codec,
                     filters: media_filters,
                     format: media_format,
-                    cache_duration: media_cache_duration,
                 };
                 let operation = Operation::Run;
 
@@ -360,8 +358,6 @@ struct Media {
     format: Option<ImageFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
     skip_validate_imports: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cache_duration: Option<i64>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -502,10 +498,6 @@ struct Run {
     /// Enforce uploaded media is transcoded to the provided format
     #[arg(long)]
     media_format: Option<ImageFormat>,
-
-    /// How long, in hours, to keep media ingested through the "cached" endpoint
-    #[arg(long)]
-    media_cache_duration: Option<i64>,
 
     #[command(subcommand)]
     store: Option<RunStore>,
