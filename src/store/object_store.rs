@@ -46,7 +46,7 @@ pub(crate) enum ObjectError {
     #[error("IO Error")]
     IO(#[from] std::io::Error),
 
-    #[error("Error making request")]
+    #[error("Error making request: {0}")]
     SendRequest(String),
 
     #[error("Failed to parse string")]
