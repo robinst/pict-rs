@@ -188,10 +188,10 @@ filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 # environment variable: PICTRS__MEDIA__FORMAT
 # default: empty
 #
-# available options: png, jpeg, webp
-# When set, all uploaded still images will be converted to this file type. If you care about file
-# size, setting this to 'webp' is probably the best option. By default, images are stored in their
-# original file type.
+# available options: avif, png, jpeg, jxl, webp
+# When set, all uploaded still images will be converted to this file type. For balancing quality vs
+# file size vs browser support, 'avif', 'jxl', and 'webp' should be considered. By default, images
+# are stored in their original file type.
 format = "webp"
 
 ## Optional: whether to validate images uploaded through the `import` endpoint

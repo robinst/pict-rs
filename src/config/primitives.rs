@@ -40,9 +40,11 @@ pub(crate) enum LogFormat {
 )]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ImageFormat {
+    Avif,
     Jpeg,
-    Webp,
+    Jxl,
     Png,
+    Webp,
 }
 
 #[derive(
@@ -158,7 +160,9 @@ impl ImageFormat {
 
     pub(crate) fn as_magick_format(self) -> &'static str {
         match self {
+            Self::Avif => "AVIF",
             Self::Jpeg => "JPEG",
+            Self::Jxl => "JXL",
             Self::Png => "PNG",
             Self::Webp => "WEBP",
         }
@@ -166,7 +170,9 @@ impl ImageFormat {
 
     pub(crate) fn as_ext(self) -> &'static str {
         match self {
+            Self::Avif => ".avif",
             Self::Jpeg => ".jpeg",
+            Self::Jxl => ".jxl",
             Self::Png => ".png",
             Self::Webp => ".webp",
         }
@@ -243,7 +249,9 @@ impl FromStr for ImageFormat {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
+            "avif" => Ok(Self::Avif),
             "jpeg" | "jpg" => Ok(Self::Jpeg),
+            "jxl" => Ok(Self::Jxl),
             "png" => Ok(Self::Png),
             "webp" => Ok(Self::Webp),
             other => Err(format!("Invalid variant: {other}")),

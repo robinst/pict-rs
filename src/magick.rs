@@ -22,6 +22,14 @@ pub(crate) fn details_hint(alias: &Alias) -> Option<ValidInputType> {
     }
 }
 
+fn image_avif() -> mime::Mime {
+    "image/avif".parse().unwrap()
+}
+
+fn image_jxl() -> mime::Mime {
+    "image/jxl".parse().unwrap()
+}
+
 fn image_webp() -> mime::Mime {
     "image/webp".parse().unwrap()
 }
@@ -39,8 +47,10 @@ pub(crate) enum ValidInputType {
     Mp4,
     Webm,
     Gif,
-    Png,
+    Avif,
     Jpeg,
+    Jxl,
+    Png,
     Webp,
 }
 
@@ -50,8 +60,10 @@ impl ValidInputType {
             Self::Mp4 => "MP4",
             Self::Webm => "WEBM",
             Self::Gif => "GIF",
-            Self::Png => "PNG",
+            Self::Avif => "AVIF",
             Self::Jpeg => "JPEG",
+            Self::Jxl => "JXL",
+            Self::Png => "PNG",
             Self::Webp => "WEBP",
         }
     }
@@ -61,8 +73,10 @@ impl ValidInputType {
             Self::Mp4 => ".mp4",
             Self::Webm => ".webm",
             Self::Gif => ".gif",
-            Self::Png => ".png",
+            Self::Avif => ".avif",
             Self::Jpeg => ".jpeg",
+            Self::Jxl => ".jxl",
+            Self::Png => ".png",
             Self::Webp => ".webp",
         }
     }
@@ -89,7 +103,9 @@ impl ValidInputType {
 
     pub(crate) const fn from_format(format: ImageFormat) -> Self {
         match format {
+            ImageFormat::Avif => ValidInputType::Avif,
             ImageFormat::Jpeg => ValidInputType::Jpeg,
+            ImageFormat::Jxl => ValidInputType::Jxl,
             ImageFormat::Png => ValidInputType::Png,
             ImageFormat::Webp => ValidInputType::Webp,
         }
@@ -97,7 +113,9 @@ impl ValidInputType {
 
     pub(crate) const fn to_format(self) -> Option<ImageFormat> {
         match self {
+            Self::Avif => Some(ImageFormat::Avif),
             Self::Jpeg => Some(ImageFormat::Jpeg),
+            Self::Jxl => Some(ImageFormat::Jxl),
             Self::Png => Some(ImageFormat::Png),
             Self::Webp => Some(ImageFormat::Webp),
             _ => None,
@@ -273,8 +291,10 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
         "MP4" => video_mp4(),
         "WEBM" => video_webm(),
         "GIF" => mime::IMAGE_GIF,
-        "PNG" => mime::IMAGE_PNG,
+        "AVIF" => image_avif(),
         "JPEG" => mime::IMAGE_JPEG,
+        "JXL" => image_jxl(),
+        "PNG" => mime::IMAGE_PNG,
         "WEBP" => image_webp(),
         _ => return Err(UploadError::UnsupportedFormat.into()),
     };
@@ -343,8 +363,10 @@ impl Details {
             (mime::VIDEO, mime::MP4 | mime::MPEG) => ValidInputType::Mp4,
             (mime::VIDEO, subtype) if subtype.as_str() == "webm" => ValidInputType::Webm,
             (mime::IMAGE, mime::GIF) => ValidInputType::Gif,
-            (mime::IMAGE, mime::PNG) => ValidInputType::Png,
+            (mime::IMAGE, subtype) if subtype.as_str() == "avif" => ValidInputType::Avif,
             (mime::IMAGE, mime::JPEG) => ValidInputType::Jpeg,
+            (mime::IMAGE, subtype) if subtype.as_str() == "jxl" => ValidInputType::Jxl,
+            (mime::IMAGE, mime::PNG) => ValidInputType::Png,
             (mime::IMAGE, subtype) if subtype.as_str() == "webp" => ValidInputType::Webp,
             _ => return Err(UploadError::UnsupportedFormat.into()),
         };

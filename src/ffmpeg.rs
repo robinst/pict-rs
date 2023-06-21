@@ -222,7 +222,9 @@ impl ValidInputType {
             Self::Gif => FileFormat::Video(VideoFormat::Gif),
             Self::Mp4 => FileFormat::Video(VideoFormat::Mp4),
             Self::Webm => FileFormat::Video(VideoFormat::Webm),
+            Self::Avif => FileFormat::Image(ImageFormat::Avif),
             Self::Jpeg => FileFormat::Image(ImageFormat::Jpeg),
+            Self::Jxl => FileFormat::Image(ImageFormat::Jxl),
             Self::Png => FileFormat::Image(ImageFormat::Png),
             Self::Webp => FileFormat::Image(ImageFormat::Webp),
         }
@@ -472,7 +474,7 @@ fn parse_details(output: std::borrow::Cow<'_, str>) -> Result<Option<Details>, E
 
     for (k, v) in FORMAT_MAPPINGS {
         if formats.contains(k) {
-            return Ok(Some(parse_details_inner(width, height, frames, *v)?));
+            return parse_details_inner(width, height, frames, *v);
         }
     }
 
@@ -484,17 +486,22 @@ fn parse_details_inner(
     height: &str,
     frames: &str,
     format: VideoFormat,
-) -> Result<Details, Error> {
+) -> Result<Option<Details>, Error> {
     let width = width.parse().map_err(|_| UploadError::UnsupportedFormat)?;
     let height = height.parse().map_err(|_| UploadError::UnsupportedFormat)?;
     let frames = frames.parse().map_err(|_| UploadError::UnsupportedFormat)?;
 
-    Ok(Details {
+    // Probably a still image. ffmpeg thinks AVIF is an mp4
+    if frames == 1 {
+        return Ok(None);
+    }
+
+    Ok(Some(Details {
         mime_type: format.to_mime(),
         width,
         height,
         frames: Some(frames),
-    })
+    }))
 }
 
 async fn pixel_format(input_file: &str) -> Result<String, Error> {

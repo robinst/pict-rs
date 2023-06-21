@@ -121,7 +121,7 @@ Options:
       --media-filters <MEDIA_FILTERS>
           Which media filters should be enabled on the `process` endpoint
       --media-format <MEDIA_FORMAT>
-          Enforce uploaded media is transcoded to the provided format [possible values: jpeg, webp, png]
+          Enforce uploaded media is transcoded to the provided format [possible values: avif, jpeg, jxl, png, webp]
   -h, --help
           Print help information (use `--help` for more detail)
 ```
@@ -383,7 +383,7 @@ pict-rs offers the following endpoints:
         aspect ratio. For example, a 1600x900 image cropped with a 1x1 aspect ratio will become 900x900. A
         1600x1100 image cropped with a 16x9 aspect ratio will become 1600x900.
 
-    Supported `ext` file extensions include `png`, `jpg`, and `webp`
+    Supported `ext` file extensions include `avif`, `jpg`, `jxl`, `png`, and `webp`
 
     An example of usage could be
     ```
