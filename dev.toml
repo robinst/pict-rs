@@ -24,7 +24,6 @@ enable_silent_video = true
 enable_full_video = true
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 skip_validate_imports = false
-cache_duration = 168
 
 [repo]
 type = 'sled'

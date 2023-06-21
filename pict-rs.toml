@@ -201,11 +201,6 @@ format = "webp"
 # Set this to true if you want to avoid processing imported media
 skip_validate_imports = false
 
-## Optional: The duration, in hours, to keep media ingested through the "cache" endpoint
-# environment variable: PICTRS__MEDIA__CACHE_DURATION
-# default: 168 (1 week)
-cache_duration = 168
-
 ## Gif configuration 
 #
 # Making any of these bounds 0 will disable gif uploads
