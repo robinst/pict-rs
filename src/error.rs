@@ -42,7 +42,7 @@ where
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum UploadError {
-    #[error("Couln't upload file")]
+    #[error("Couldn't upload file")]
     Upload(#[from] actix_form_data::Error),
 
     #[error("Error in DB")]
