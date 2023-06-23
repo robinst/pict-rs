@@ -20,6 +20,7 @@ pub(crate) struct Defaults {
 struct ServerDefaults {
     address: SocketAddr,
     worker_id: String,
+    client_pool_size: usize,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -115,6 +116,7 @@ impl Default for ServerDefaults {
         ServerDefaults {
             address: "0.0.0.0:8080".parse().expect("Valid address string"),
             worker_id: String::from("pict-rs-1"),
+            client_pool_size: 100,
         }
     }
 }

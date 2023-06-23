@@ -1,7 +1,7 @@
 use crate::{
     file::File,
     repo::{Repo, SettingsRepo},
-    store::{Store, StoreConfig},
+    store::Store,
 };
 use actix_web::web::Bytes;
 use futures_util::stream::Stream;
@@ -47,14 +47,6 @@ pub(crate) struct FileStore {
     path_gen: Generator,
     root_dir: PathBuf,
     repo: Repo,
-}
-
-impl StoreConfig for FileStore {
-    type Store = FileStore;
-
-    fn build(self) -> Self::Store {
-        self
-    }
 }
 
 #[async_trait::async_trait(?Send)]

@@ -1,7 +1,7 @@
 use crate::{
     bytes_stream::BytesStream,
     repo::{Repo, SettingsRepo},
-    store::{Store, StoreConfig},
+    store::Store,
 };
 use actix_rt::task::JoinError;
 use actix_web::{
@@ -116,16 +116,14 @@ struct InitiateMultipartUploadResponse {
     upload_id: String,
 }
 
-impl StoreConfig for ObjectStoreConfig {
-    type Store = ObjectStore;
-
-    fn build(self) -> Self::Store {
+impl ObjectStoreConfig {
+    pub(crate) fn build(self, client: Client) -> ObjectStore {
         ObjectStore {
             path_gen: self.path_gen,
             repo: self.repo,
             bucket: self.bucket,
             credentials: self.credentials,
-            client: crate::build_client(),
+            client,
         }
     }
 }

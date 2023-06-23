@@ -1,6 +1,7 @@
 [server]
 address = "0.0.0.0:8080"
 worker_id = "pict-rs-1"
+client_pool_size = 100
 
 [tracing.logging]
 format = "normal"
@@ -33,7 +34,6 @@ filters = [
     "thumbnail",
 ]
 skip_validate_imports = false
-cache_duration = 168
 
 [media.gif]
 max_width = 128

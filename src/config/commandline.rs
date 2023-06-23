@@ -45,6 +45,7 @@ impl Args {
                 address,
                 api_key,
                 worker_id,
+                client_pool_size,
                 media_preprocess_steps,
                 media_skip_validate_imports,
                 media_max_width,
@@ -67,6 +68,7 @@ impl Args {
                     address,
                     api_key,
                     worker_id,
+                    client_pool_size,
                 };
                 let gif = if media_gif_max_width.is_none()
                     && media_gif_max_height.is_none()
@@ -281,6 +283,8 @@ struct Server {
     worker_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_pool_size: Option<usize>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -437,6 +441,14 @@ struct Run {
     /// ID of this pict-rs node. Doesn't do much yet
     #[arg(long)]
     worker_id: Option<String>,
+
+    /// Number of connections the internel HTTP client should maintain in its pool
+    ///
+    /// This number defaults to 100, and the total number is multiplied by the number of cores
+    /// available to the program. This means that running on a 2 core system will result in 200
+    /// pooled connections, and running on a 32 core system will result in 3200 pooled connections.
+    #[arg(long)]
+    client_pool_size: Option<usize>,
 
     /// Optional pre-processing steps for uploaded media.
     ///

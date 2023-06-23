@@ -38,6 +38,9 @@ pub(crate) struct Server {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) api_key: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) client_pool_size: Option<usize>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

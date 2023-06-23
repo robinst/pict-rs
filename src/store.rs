@@ -62,12 +62,6 @@ pub(crate) trait Identifier: Send + Sync + Clone + Debug {
     fn string_repr(&self) -> String;
 }
 
-pub(crate) trait StoreConfig: Send + Sync + Clone {
-    type Store: Store;
-
-    fn build(self) -> Self::Store;
-}
-
 #[async_trait::async_trait(?Send)]
 pub(crate) trait Store: Clone + Debug {
     type Identifier: Identifier + 'static;

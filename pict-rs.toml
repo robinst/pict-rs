@@ -20,6 +20,19 @@ worker_id = 'pict-rs-1'
 # Not specifying api_key disables internal endpoints
 api_key = 'API_KEY'
 
+## Optional: connection pool size for internal http client
+# environment variable: PICTRS__SERVER__CLIENT_POOL_SIZE
+# default: 100
+#
+# This number is multiplied the number of cores available to pict-rs. Running on a 2 core machine
+# with the default value will result in 200 pooled connections. Running on a 32 core machine with
+# the default value will result in 3200 pooled connections.
+#
+# This number can be lowered to keep pict-rs within ulimit bounds if you encounter errors related to
+# "Too many open files". Alternatively, increasing the ulimit of your system can solve this problem
+# as well.
+client_pool_size = 100
+
 
 ## Logging configuration
 [tracing.logging]

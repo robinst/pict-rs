@@ -30,7 +30,7 @@ use actix_web::{
     http::header::{CacheControl, CacheDirective, LastModified, Range, ACCEPT_RANGES},
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
-use awc::Client;
+use awc::{Client, Connector};
 use futures_util::{
     stream::{empty, once},
     Stream, StreamExt, TryStreamExt,
@@ -61,14 +61,14 @@ use self::{
     middleware::{Deadline, Internal},
     queue::queue_generate,
     repo::{
-        Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, Repo, SettingsRepo, UploadId,
-        UploadResult,
+        Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, QueueRepo, Repo, SettingsRepo,
+        UploadId, UploadResult,
     },
     serde_str::Serde,
     store::{
         file_store::FileStore,
         object_store::{ObjectStore, ObjectStoreConfig},
-        Identifier, Store, StoreConfig,
+        Identifier, Store,
     },
     stream::{StreamLimit, StreamTimeout},
 };
@@ -981,7 +981,14 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
 }
 
 fn build_client() -> awc::Client {
+    let connector = CONFIG
+        .server
+        .client_pool_size
+        .map(|size| Connector::new().limit(size))
+        .unwrap_or_else(Connector::new);
+
     Client::builder()
+        .connector(connector)
         .wrap(Tracing)
         .add_default_header(("User-Agent", "pict-rs v0.4.0-main"))
         .timeout(Duration::from_secs(30))
@@ -996,15 +1003,88 @@ fn next_worker_id() -> String {
     format!("{}-{}", CONFIG.server.worker_id, next_id)
 }
 
-async fn launch<R: FullRepo + 'static, SC: StoreConfig + 'static>(
+fn configure_endpoints<R: FullRepo + 'static, S: Store + 'static>(
+    config: &mut web::ServiceConfig,
     repo: R,
-    store_config: SC,
-) -> color_eyre::Result<()> {
-    repo.requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
-        .await?;
+    store: S,
+    client: Client,
+) {
+    config
+        .app_data(web::Data::new(repo))
+        .app_data(web::Data::new(store))
+        .app_data(web::Data::new(client))
+        .route("/healthz", web::get().to(healthz::<R>))
+        .service(
+            web::scope("/image")
+                .service(
+                    web::resource("")
+                        .guard(guard::Post())
+                        .route(web::post().to(upload::<R, S>)),
+                )
+                .service(
+                    web::scope("/backgrounded")
+                        .service(
+                            web::resource("")
+                                .guard(guard::Post())
+                                .route(web::post().to(upload_backgrounded::<R, S>)),
+                        )
+                        .service(
+                            web::resource("/claim").route(web::get().to(claim_upload::<R, S>)),
+                        ),
+                )
+                .service(web::resource("/download").route(web::get().to(download::<R, S>)))
+                .service(
+                    web::resource("/delete/{delete_token}/{filename}")
+                        .route(web::delete().to(delete::<R>))
+                        .route(web::get().to(delete::<R>)),
+                )
+                .service(
+                    web::resource("/original/{filename}")
+                        .route(web::get().to(serve::<R, S>))
+                        .route(web::head().to(serve_head::<R, S>)),
+                )
+                .service(
+                    web::resource("/process.{ext}")
+                        .route(web::get().to(process::<R, S>))
+                        .route(web::head().to(process_head::<R, S>)),
+                )
+                .service(
+                    web::resource("/process_backgrounded.{ext}")
+                        .route(web::get().to(process_backgrounded::<R, S>)),
+                )
+                .service(
+                    web::scope("/details")
+                        .service(
+                            web::resource("/original/{filename}")
+                                .route(web::get().to(details::<R, S>)),
+                        )
+                        .service(
+                            web::resource("/process.{ext}")
+                                .route(web::get().to(process_details::<R, S>)),
+                        ),
+                ),
+        )
+        .service(
+            web::scope("/internal")
+                .wrap(Internal(
+                    CONFIG.server.api_key.as_ref().map(|s| s.to_owned()),
+                ))
+                .service(web::resource("/import").route(web::post().to(import::<R, S>)))
+                .service(web::resource("/variants").route(web::delete().to(clean_variants::<R>)))
+                .service(web::resource("/purge").route(web::post().to(purge::<R>)))
+                .service(web::resource("/aliases").route(web::get().to(aliases::<R>)))
+                .service(web::resource("/identifier").route(web::get().to(identifier::<R, S>))),
+        );
+}
 
+async fn launch_file_store<R: FullRepo + 'static>(
+    repo: R,
+    store: FileStore,
+) -> std::io::Result<()> {
     HttpServer::new(move || {
-        let store = store_config.clone().build();
+        let client = build_client();
+
+        let store = store.clone();
         let repo = repo.clone();
 
         tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
@@ -1025,91 +1105,51 @@ async fn launch<R: FullRepo + 'static, SC: StoreConfig + 'static>(
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
-            .app_data(web::Data::new(repo))
-            .app_data(web::Data::new(store))
-            .app_data(web::Data::new(build_client()))
-            .route("/healthz", web::get().to(healthz::<R>))
-            .service(
-                web::scope("/image")
-                    .service(
-                        web::resource("")
-                            .guard(guard::Post())
-                            .route(web::post().to(upload::<R, SC::Store>)),
-                    )
-                    .service(
-                        web::scope("/backgrounded")
-                            .service(
-                                web::resource("")
-                                    .guard(guard::Post())
-                                    .route(web::post().to(upload_backgrounded::<R, SC::Store>)),
-                            )
-                            .service(
-                                web::resource("/claim")
-                                    .route(web::get().to(claim_upload::<R, SC::Store>)),
-                            ),
-                    )
-                    .service(
-                        web::resource("/download").route(web::get().to(download::<R, SC::Store>)),
-                    )
-                    .service(
-                        web::resource("/delete/{delete_token}/{filename}")
-                            .route(web::delete().to(delete::<R>))
-                            .route(web::get().to(delete::<R>)),
-                    )
-                    .service(
-                        web::resource("/original/{filename}")
-                            .route(web::get().to(serve::<R, SC::Store>))
-                            .route(web::head().to(serve_head::<R, SC::Store>)),
-                    )
-                    .service(
-                        web::resource("/process.{ext}")
-                            .route(web::get().to(process::<R, SC::Store>))
-                            .route(web::head().to(process_head::<R, SC::Store>)),
-                    )
-                    .service(
-                        web::resource("/process_backgrounded.{ext}")
-                            .route(web::get().to(process_backgrounded::<R, SC::Store>)),
-                    )
-                    .service(
-                        web::scope("/details")
-                            .service(
-                                web::resource("/original/{filename}")
-                                    .route(web::get().to(details::<R, SC::Store>)),
-                            )
-                            .service(
-                                web::resource("/process.{ext}")
-                                    .route(web::get().to(process_details::<R, SC::Store>)),
-                            ),
-                    ),
-            )
-            .service(
-                web::scope("/internal")
-                    .wrap(Internal(
-                        CONFIG.server.api_key.as_ref().map(|s| s.to_owned()),
-                    ))
-                    .service(web::resource("/import").route(web::post().to(import::<R, SC::Store>)))
-                    .service(
-                        web::resource("/variants").route(web::delete().to(clean_variants::<R>)),
-                    )
-                    .service(web::resource("/purge").route(web::post().to(purge::<R>)))
-                    .service(web::resource("/aliases").route(web::get().to(aliases::<R>)))
-                    .service(
-                        web::resource("/identifier")
-                            .route(web::get().to(identifier::<R, SC::Store>)),
-                    ),
-            )
+            .configure(move |sc| configure_endpoints(sc, repo, store, client))
     })
     .bind(CONFIG.server.address)?
     .run()
-    .await?;
+    .await
+}
 
-    self::tmp_file::remove_tmp_dir().await?;
+async fn launch_object_store<R: FullRepo + 'static>(
+    repo: R,
+    store_config: ObjectStoreConfig,
+) -> std::io::Result<()> {
+    HttpServer::new(move || {
+        let client = build_client();
 
-    Ok(())
+        let store = store_config.clone().build(client.clone());
+        let repo = repo.clone();
+
+        tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+            actix_rt::spawn(queue::process_cleanup(
+                repo.clone(),
+                store.clone(),
+                next_worker_id(),
+            ))
+        });
+        tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+            actix_rt::spawn(queue::process_images(
+                repo.clone(),
+                store.clone(),
+                next_worker_id(),
+            ))
+        });
+
+        App::new()
+            .wrap(TracingLogger::default())
+            .wrap(Deadline)
+            .configure(move |sc| configure_endpoints(sc, repo, store, client))
+    })
+    .bind(CONFIG.server.address)?
+    .run()
+    .await
 }
 
 async fn migrate_inner<S1>(
     repo: &Repo,
+    client: Client,
     from: S1,
     to: config::Store,
     skip_missing_files: bool,
@@ -1119,7 +1159,7 @@ where
 {
     match to {
         config::Store::Filesystem(config::Filesystem { path }) => {
-            let to = FileStore::build(path.clone(), repo.clone()).await?.build();
+            let to = FileStore::build(path.clone(), repo.clone()).await?;
 
             match repo {
                 Repo::Sled(repo) => migrate_store(repo, from, to, skip_missing_files).await?,
@@ -1149,7 +1189,7 @@ where
                 repo.clone(),
             )
             .await?
-            .build();
+            .build(client);
 
             match repo {
                 Repo::Sled(repo) => migrate_store(repo, from, to, skip_missing_files).await?,
@@ -1229,10 +1269,12 @@ pub async fn run() -> color_eyre::Result<()> {
             from,
             to,
         } => {
+            let client = build_client();
+
             match from {
                 config::Store::Filesystem(config::Filesystem { path }) => {
-                    let from = FileStore::build(path.clone(), repo.clone()).await?.build();
-                    migrate_inner(&repo, from, to, skip_missing_files).await?;
+                    let from = FileStore::build(path.clone(), repo.clone()).await?;
+                    migrate_inner(&repo, client, from, to, skip_missing_files).await?;
                 }
                 config::Store::ObjectStorage(config::ObjectStorage {
                     endpoint,
@@ -1258,9 +1300,9 @@ pub async fn run() -> color_eyre::Result<()> {
                         repo.clone(),
                     )
                     .await?
-                    .build();
+                    .build(client.clone());
 
-                    migrate_inner(&repo, from, to, skip_missing_files).await?;
+                    migrate_inner(&repo, client, from, to, skip_missing_files).await?;
                 }
             }
 
@@ -1274,7 +1316,13 @@ pub async fn run() -> color_eyre::Result<()> {
 
             let store = FileStore::build(path, repo.clone()).await?;
             match repo {
-                Repo::Sled(sled_repo) => launch::<_, FileStore>(sled_repo, store).await,
+                Repo::Sled(sled_repo) => {
+                    sled_repo
+                        .requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
+                        .await?;
+
+                    launch_file_store(sled_repo, store).await?;
+                }
             }
         }
         config::Store::ObjectStorage(config::ObjectStorage {
@@ -1303,10 +1351,20 @@ pub async fn run() -> color_eyre::Result<()> {
             .await?;
 
             match repo {
-                Repo::Sled(sled_repo) => launch::<_, ObjectStoreConfig>(sled_repo, store).await,
+                Repo::Sled(sled_repo) => {
+                    sled_repo
+                        .requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
+                        .await?;
+
+                    launch_object_store(sled_repo, store).await?;
+                }
             }
         }
     }
+
+    self::tmp_file::remove_tmp_dir().await?;
+
+    Ok(())
 }
 
 const STORE_MIGRATION_PROGRESS: &str = "store-migration-progress";
