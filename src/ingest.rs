@@ -92,9 +92,7 @@ where
 
     let hash = hasher.borrow_mut().finalize_reset().to_vec();
 
-    session.hash = Some(hash.clone());
-
-    save_upload(repo, store, &hash, &identifier).await?;
+    save_upload(&mut session, repo, store, &hash, &identifier).await?;
 
     if let Some(alias) = declared_alias {
         session.add_existing_alias(&hash, alias).await?
@@ -107,6 +105,7 @@ where
 
 #[tracing::instrument(level = "trace", skip_all)]
 async fn save_upload<R, S>(
+    session: &mut Session<R, S>,
     repo: &R,
     store: &S,
     hash: &[u8],
@@ -117,9 +116,13 @@ where
     R: FullRepo,
 {
     if HashRepo::create(repo, hash.to_vec().into()).await?.is_err() {
+        // duplicate upload
         store.remove(identifier).await?;
         return Ok(());
     }
+
+    // Set hash after upload uniquness check so we don't clean existing files on failure
+    session.hash = Some(Vec::from(hash));
 
     repo.relate_identifier(hash.to_vec().into(), identifier)
         .await?;
