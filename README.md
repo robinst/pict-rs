@@ -244,10 +244,9 @@ These binaries are called by pict-rs to process uploaded media, so they must be 
 available to pict-rs.
 
 ##### Compile from Source
-pict-rs can be compiled from source using a recent version of the rust compiler. I do development on
-1.69 and produce releases on 1.70. pict-rs also requires the `protoc` protobuf compiler to be
-present at build-time in order to enable use of
-[`tokio-console`](https://github.com/tokio-rs/console).
+pict-rs can be compiled from source using a recent version of the rust compiler. I do development
+and produce releases on 1.70. pict-rs also requires the `protoc` protobuf compiler to be present at
+build-time in order to enable use of [`tokio-console`](https://github.com/tokio-rs/console).
 
 Like the Binary Download option, `imagemagick`, `ffmpeg`, and `exiftool` must be installed for
 pict-rs to run properly.
