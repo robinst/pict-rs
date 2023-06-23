@@ -118,6 +118,7 @@ where
     if HashRepo::create(repo, hash.to_vec().into()).await?.is_err() {
         // duplicate upload
         store.remove(identifier).await?;
+        session.identifier.take();
         return Ok(());
     }
 
