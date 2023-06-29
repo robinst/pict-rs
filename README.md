@@ -13,8 +13,9 @@ _a simple image hosting service_
             3. [Compile from Source](#compile-from-source)
     2. [Api](#api)
 3. [Administration](#administration)
-    1. [0.3 to 0.4 Migration Guide](#0-3-to-0-4-migration-guide)
-    2. [Filesystem to Object Storage Migration](#filesystem-to-object-storage-migration)
+    1. [Backups](#backups)
+    2. [0.3 to 0.4 Migration Guide](#0-3-to-0-4-migration-guide)
+    3. [Filesystem to Object Storage Migration](#filesystem-to-object-storage-migration)
         1. [Troubleshooting](#migration-troubleshooting)
 4. [Development](#development)
     1. [Nix Development](#nix-development)
@@ -30,7 +31,8 @@ _a simple image hosting service_
     3. [How can I submit changes?](#question-how-can-i-submit-changes)
     4. [I want to configure with $format](#question-i-want-to-configure-it-with-yaml-instead-of-toml)
     5. [How do I donate?](#question-how-do-i-donate-to-pict-rs)
-7. [License](#license)
+7. [Common Problems](#common-problems)
+8. [License](#license)
 
 ## Links
 - Find the code on [gitea](https://git.asonix.dog/asonix/pict-rs)
@@ -446,6 +448,15 @@ let request = client
 
 
 ## Administration
+### Backups
+pict-rs maintains two folders that matter: the `sled-repo` directory, and the `files` directory.
+`sled-repo` is where it keeps metadata about files such as: their location, their aliases, their
+processed versions' locations, their dimensions, mime type, etc. `files` is where it puts uploaded
+files when storing on the local filesystem.
+
+The `sled-repo` folder is generally small compared to the `files` folder, and backing it up can be
+as simple as copying the folder somewhere else. I recommend doing so while pict-rs is not running.
+
 ### 0.3 to 0.4 Migration Guide
 pict-rs will automatically migrate from the 0.3 db format to the 0.4 db format on the first launch
 of 0.4. If you are running the provided docker container without any custom configuration, there are
@@ -482,6 +493,9 @@ deleted and a new migration will be automatically triggered on the next launch.
 
 
 ### Filesystem to Object Storage migration
+_Make sure you take a backup of the sled-repo directory before running this command!!! Migrating to
+object storage updates the database and if you need to revert for any reason, you'll want a backup._
+
 After migrating from 0.3 to 0.4, it is possible to migrate to object storage. This can be useful if
 hosting in a cloud environment, since object storage is generally far cheaper than block storage.
 
@@ -546,18 +560,47 @@ resolve this multi-store problem the `--skip-missing-files` flag has been added 
 some form of "not found" error.
 
 ```bash
-$ pict-rs
-    migrate-store --skip-missing-files
-    filesystem -p /path/to/files
+$ pict-rs \
+    migrate-store --skip-missing-files \
+    filesystem -p /path/to/files \
     object-storage \
         -e https://object-storage-endpoint \
         -b bucket-name \
         -r region \
         -a access-key \
-        -s secret-key
+        -s secret-key \
     sled \
         -p /path/to/sled-repo
 ```
+
+If you have trouble getting pict-rs to upload to your object storage, check a few things:
+Does your object storage require path-style access? Some object storage providers, like Contabo,
+don't support virtual hosted buckets. Here's a basic example:
+
+Path style URL: `https://region.example.com/bucket-name`
+Virtual host style URL: `https://bucket-name.region.example.com`
+
+If you do need to use path style, your command might look like this:
+```
+$ pict-rs \
+    migrate-store \
+    filesystem -p /path/to/files \
+    object-storage \
+        --use-path-style \
+        -e https://object-storage-endpoint \
+        -b bucket-name \
+        -r region \
+        -a access-key \
+        -s secret-key \
+    sled \
+        -p /path/to/sled-repo
+```
+
+Additionally, some providers might require you include the `region` in your endpoint URL:
+`https://region.host.com`, while others might just require a top-level endpoint:
+`https://example.com`.
+
+Check your object storage provider's documentation to be sure you're setting the right values.
 
 
 ## Development
@@ -659,6 +702,17 @@ Writing configs in other formats is left as an exercise to the reader.
 ### Question: How do I donate to pict-rs
 Answer: You don't. I get paid by having a job where I do other stuff. Don't give me money that I
 don't need.
+
+## Common Problems
+In some cases, pict-rs might crash and be unable to start again. The most common reason for this is
+the filesystem reached 100% and pict-rs could not write to the disk, but this could also happen if
+pict-rs is killed at an unfortunate time. If this occurs, the solution is to first get more disk for
+your server, and then look in the `sled-repo` directory for pict-rs. It's likely that pict-rs
+created a zero-sized file called `snap.somehash.generating`. Delete that file and restart pict-rs.
+
+When running with the provided docker container, pict-rs might fail to start with an IO error saying
+"permission denied". This problably means pict-rs' volume is not owned by the correct user. Changing
+the ownership on the pict-rs volume to `991:991` should solve this problem.
 
 ## License
 
