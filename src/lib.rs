@@ -226,7 +226,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
     }
 }
 
-/// Handle responding to succesful uploads
+/// Handle responding to successful uploads
 #[tracing::instrument(name = "Uploaded files", skip(value, repo, store))]
 async fn upload<R: FullRepo, S: Store + 'static>(
     Multipart(Upload(value)): Multipart<Upload<R, S>>,
@@ -236,7 +236,7 @@ async fn upload<R: FullRepo, S: Store + 'static>(
     handle_upload(value, repo, store).await
 }
 
-/// Handle responding to succesful uploads
+/// Handle responding to successful uploads
 #[tracing::instrument(name = "Imported files", skip(value, repo, store))]
 async fn import<R: FullRepo, S: Store + 'static>(
     Multipart(Import(value)): Multipart<Import<R, S>>,
@@ -246,7 +246,7 @@ async fn import<R: FullRepo, S: Store + 'static>(
     handle_upload(value, repo, store).await
 }
 
-/// Handle responding to succesful uploads
+/// Handle responding to successful uploads
 #[tracing::instrument(name = "Uploaded files", skip(value, repo, store))]
 async fn handle_upload<R: FullRepo, S: Store + 'static>(
     value: Value<Session<R, S>>,
@@ -1537,6 +1537,8 @@ where
 
     // clean up the migration key to avoid interfering with future migrations
     repo.remove(STORE_MIGRATION_PROGRESS).await?;
+
+    tracing::warn!("Migration completed successfully");
 
     Ok(())
 }
