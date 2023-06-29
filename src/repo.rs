@@ -248,6 +248,8 @@ where
 pub(crate) trait HashRepo: BaseRepo {
     type Stream: Stream<Item = Result<Self::Bytes, RepoError>>;
 
+    async fn size(&self) -> Result<u64, RepoError>;
+
     async fn hashes(&self) -> Self::Stream;
 
     async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, RepoError>;
@@ -300,6 +302,10 @@ where
     T: HashRepo,
 {
     type Stream = T::Stream;
+
+    async fn size(&self) -> Result<u64, RepoError> {
+        T::size(self).await
+    }
 
     async fn hashes(&self) -> Self::Stream {
         T::hashes(self).await

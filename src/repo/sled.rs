@@ -431,6 +431,14 @@ fn hash_alias_key(hash: &IVec, alias: &Alias) -> Vec<u8> {
 impl HashRepo for SledRepo {
     type Stream = LocalBoxStream<'static, StreamItem>;
 
+    async fn size(&self) -> Result<u64, RepoError> {
+        Ok(b!(
+            self.hashes,
+            Ok(u64::try_from(hashes.len()).expect("Length is reasonable"))
+                as Result<u64, SledError>
+        ))
+    }
+
     async fn hashes(&self) -> Self::Stream {
         let iter = self
             .hashes
