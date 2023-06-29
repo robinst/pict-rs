@@ -488,6 +488,22 @@ path = "/previous/path/sled-repo"
 path = "/previous/path/files"
 ```
 
+If your previous `RUST_LOG` variable was set, it has been split into two different configuration
+options:
+- `PICTRS__TRACING__LOGGING__TARGETS`: This dictates what logs should be printed in the console while
+    pict-rs is running.
+- `PICTRS__TRACING__OPENTELEMETRY__TARGETS`: This dictates what spans and events should be exported
+    as opentelemetry data, if enabled.
+
+You can also configure these options via the configuration file:
+```toml
+[tracing.logging]
+targets = "debug"
+
+[tracing.opentelemetry]
+targets = "debug"
+```
+
 If the migration doesn't work due to a configuration error, the new sled-repo directory can be
 deleted and a new migration will be automatically triggered on the next launch.
 
