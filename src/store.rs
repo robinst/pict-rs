@@ -18,12 +18,15 @@ pub(crate) enum StoreError {
     Repo(#[from] crate::repo::RepoError),
 
     #[error("Requested file is not found")]
-    NotFound,
+    FileNotFound(#[source] std::io::Error),
+
+    #[error("Requested object is not found")]
+    ObjectNotFound(#[source] crate::store::object_store::ObjectError),
 }
 
 impl StoreError {
     pub(crate) const fn is_not_found(&self) -> bool {
-        matches!(self, Self::NotFound)
+        matches!(self, Self::FileNotFound(_)) || matches!(self, Self::ObjectNotFound(_))
     }
 }
 
@@ -33,7 +36,7 @@ impl From<crate::store::file_store::FileError> for StoreError {
             crate::store::file_store::FileError::Io(e)
                 if e.kind() == std::io::ErrorKind::NotFound =>
             {
-                Self::NotFound
+                Self::FileNotFound(e)
             }
             e => Self::FileStore(e),
         }
@@ -43,10 +46,10 @@ impl From<crate::store::file_store::FileError> for StoreError {
 impl From<crate::store::object_store::ObjectError> for StoreError {
     fn from(value: crate::store::object_store::ObjectError) -> Self {
         match value {
-            crate::store::object_store::ObjectError::Status(
+            e @ crate::store::object_store::ObjectError::Status(
                 actix_web::http::StatusCode::NOT_FOUND,
                 _,
-            ) => Self::NotFound,
+            ) => Self::ObjectNotFound(e),
             e => Self::ObjectStore(e),
         }
     }

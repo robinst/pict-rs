@@ -1387,15 +1387,18 @@ where
     let mut failure_count = 0;
 
     while let Err(e) = do_migrate_store(repo, from.clone(), to.clone(), skip_missing_files).await {
-        tracing::error!("Failed with {}", e.to_string());
-        failure_count += 1;
+        tracing::error!("Migration failed with {}", format!("{e:?}"));
 
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        failure_count += 1;
 
         if failure_count >= 50 {
             tracing::error!("Exceeded 50 errors");
             return Err(e);
+        } else {
+            tracing::warn!("Retrying migration +{failure_count}");
         }
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
     }
 
     Ok(())
@@ -1562,12 +1565,14 @@ where
             Err(e) => {
                 failure_count += 1;
 
-                tokio::time::sleep(Duration::from_secs(5)).await;
-
-                if failure_count > 50 {
-                    tracing::error!("Error migrating file: {}", e.to_string());
+                if failure_count > 10 {
+                    tracing::error!("Error migrating file, not retrying");
                     return Err(e);
+                } else {
+                    tracing::warn!("Failed moving file. Retrying +{failure_count}");
                 }
+
+                tokio::time::sleep(Duration::from_secs(3)).await;
             }
         }
     }
