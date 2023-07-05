@@ -614,8 +614,8 @@ Error:
           <Message>Authorization header's Credential is malformed</Message>
       </Error>
 ```
-Cause: the endpoint was configured for path-style access but `--use-path-style` was not passed as a
-migration flag
+Cause: the region was set improperly. Additionaly a path-style endpoint was used without passing
+`--use-path-style`
 
 Error:
 ```
