@@ -219,6 +219,7 @@ mod io_uring {
             Ok(())
         }
 
+        #[tracing::instrument(level = "debug", skip_all)]
         pub(crate) async fn write_from_async_read<R>(
             &mut self,
             mut reader: R,
@@ -232,7 +233,7 @@ mod io_uring {
                 let max_size = 65_536;
                 let mut buf = Vec::with_capacity(max_size.try_into().unwrap());
 
-                let n = (&mut reader).take(max_size).read_to_end(&mut buf).await?;
+                let n = (&mut reader).take(max_size).read_buf(&mut buf).await?;
 
                 if n == 0 {
                     break;
