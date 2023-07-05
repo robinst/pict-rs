@@ -546,6 +546,29 @@ $ pict-rs \
 
 _This command must be run while pict-rs is offline._
 
+If you're running with docker-compose, this could look like the following:
+```bash
+$ sudo docker compose stop pictrs # stop the pict-rs container
+$ sudo docker compose run pictrs sh # launch a shell in the pict-rs container
+> pict-rs --version # verify pict-rs version is recent (should probably be 0.4.0-rc.10 or later)
+> pict-rs \
+    migrate-store \
+    filesystem \
+    object-storage \
+        -e endpoint \
+        -b bucket \
+        -r region \
+        -a -access-key \
+        -s secret-key
+> exit
+$ vi docker-compose.yml # edit the docker-compose yaml however you like to edit it, make sure all the variables described below are set
+$ sudo docker-compose start pictrs # start pict-rs again after the migration
+```
+depending on your version of docker or docker-compose, you might need to use the following command to open a shell:
+```bash
+$ sudo docker-compose run -i pictrs sh
+```
+
 After you've completed the migration, update your pict-rs configuration to use object storage. If
 you configure using environment variables, make sure the following are set:
 - `PICTRS__STORE__TYPE=object_storage`
@@ -569,6 +592,45 @@ secret_key = "secret-key"
 ```
 
 #### Migration Troubleshooting
+If you see an error while trying to launch the migration that looks like this:
+```
+   0: IO error: could not acquire lock on "/mnt/sled-repo/v0.4.0-alpha.1/db": Os { code: 11, kind: WouldBlock, message: "Resource temporarily unavailable" }
+```
+This means that pict-rs could not open it's database. This is probably because another copy of
+pict-rs is currently running. Make sure to stop all running pict-rs processes before migrating.
+
+If you are trying to migrate and seeing "Failed moving file. Retrying +1", Do not cancel the
+migration. Let it reach 10 retries. It will print a more meaningful error afterwards. Here are some
+examples of errors and their casuses:
+
+Error:
+```
+   0: Error in store
+   1: Error in object store
+   2: Invalid status: 400 Bad Request
+   2: <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+      <Error>
+          <Code>InvalidRequest</Code>
+          <Message>Authorization header's Credential is malformed</Message>
+      </Error>
+```
+Cause: the endpoint was configured for path-style access but `--use-path-style` was not passed as a
+migration flag
+
+Error:
+```
+   0: Error in store
+   1: Error in object store
+   2: Invalid status: 403 Forbidden
+   2: <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+      <Error>
+          <Code>InvalidAccessKeyId</Code>
+          <Message>Malformed Access Key Id</Message>
+      </Error>
+```
+Cause: the access key was set improperly
+
+
 If you have enabled object storage without first migrating your existing files to object storage,
 these migrate commands may end up retrying file migrations indefinitely. In order to successfully
 resolve this multi-store problem the `--skip-missing-files` flag has been added to the
