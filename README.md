@@ -575,7 +575,7 @@ $ sudo docker compose run pictrs sh # launch a shell in the pict-rs container
         -s secret-key
 > exit
 $ vi docker-compose.yml # edit the docker-compose yaml however you like to edit it, make sure all the variables described below are set
-$ sudo docker-compose start pictrs # start pict-rs again after the migration
+$ sudo docker compose up -d pictrs # start pict-rs again after the migration. Note that this is not 'docker compose start'. using the `up` subcommand explicitly reloads configurations
 ```
 depending on your version of docker or docker-compose, you might need to use the following command to open a shell:
 ```bash
