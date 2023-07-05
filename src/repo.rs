@@ -58,6 +58,15 @@ pub(crate) enum RepoError {
     Canceled,
 }
 
+impl RepoError {
+    pub(crate) const fn is_missing(&self) -> bool {
+        match self {
+            Self::SledError(e) => e.is_missing(),
+            _ => false,
+        }
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 pub(crate) trait FullRepo:
     UploadRepo

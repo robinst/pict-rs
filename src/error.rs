@@ -171,7 +171,7 @@ impl ResponseError for Error {
             ) => StatusCode::BAD_REQUEST,
             Some(
                 UploadError::Repo(crate::repo::RepoError::SledError(
-                    crate::repo::sled::SledError::Missing,
+                    crate::repo::sled::SledError::Missing(_),
                 ))
                 | UploadError::MissingAlias,
             ) => StatusCode::NOT_FOUND,

@@ -1077,6 +1077,22 @@ fn configure_endpoints<R: FullRepo + 'static, S: Store + 'static>(
         );
 }
 
+fn spawn_workers<R, S>(repo: R, store: S)
+where
+    R: FullRepo + 'static,
+    S: Store + 'static,
+{
+    tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+        actix_rt::spawn(queue::process_cleanup(
+            repo.clone(),
+            store.clone(),
+            next_worker_id(),
+        ))
+    });
+    tracing::trace_span!(parent: None, "Spawn task")
+        .in_scope(|| actix_rt::spawn(queue::process_images(repo, store, next_worker_id())));
+}
+
 async fn launch_file_store<R: FullRepo + 'static>(
     repo: R,
     store: FileStore,
@@ -1087,20 +1103,7 @@ async fn launch_file_store<R: FullRepo + 'static>(
         let store = store.clone();
         let repo = repo.clone();
 
-        tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-            actix_rt::spawn(queue::process_cleanup(
-                repo.clone(),
-                store.clone(),
-                next_worker_id(),
-            ))
-        });
-        tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-            actix_rt::spawn(queue::process_images(
-                repo.clone(),
-                store.clone(),
-                next_worker_id(),
-            ))
-        });
+        spawn_workers(repo.clone(), store.clone());
 
         App::new()
             .wrap(TracingLogger::default())
@@ -1122,20 +1125,7 @@ async fn launch_object_store<R: FullRepo + 'static>(
         let store = store_config.clone().build(client.clone());
         let repo = repo.clone();
 
-        tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-            actix_rt::spawn(queue::process_cleanup(
-                repo.clone(),
-                store.clone(),
-                next_worker_id(),
-            ))
-        });
-        tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-            actix_rt::spawn(queue::process_images(
-                repo.clone(),
-                store.clone(),
-                next_worker_id(),
-            ))
-        });
+        spawn_workers(repo.clone(), store.clone());
 
         App::new()
             .wrap(TracingLogger::default())
@@ -1380,7 +1370,7 @@ async fn migrate_store<R, S1, S2>(
 where
     S1: Store + Clone,
     S2: Store + Clone,
-    R: IdentifierRepo + HashRepo + SettingsRepo,
+    R: IdentifierRepo + HashRepo + SettingsRepo + QueueRepo,
 {
     tracing::warn!("Migrating store");
 
@@ -1412,7 +1402,7 @@ async fn do_migrate_store<R, S1, S2>(
 where
     S1: Store,
     S2: Store,
-    R: IdentifierRepo + HashRepo + SettingsRepo,
+    R: IdentifierRepo + HashRepo + SettingsRepo + QueueRepo,
 {
     let repo_size = repo.size().await?;
 
@@ -1442,6 +1432,19 @@ where
             }
             continue;
         }
+
+        let original_identifier = match repo.identifier(hash.as_ref().to_vec().into()).await {
+            Ok(identifier) => identifier,
+            Err(e) if e.is_missing() => {
+                tracing::warn!(
+                    "Original File identifier for hash {} is missing, queue cleanup task",
+                    hex::encode(&hash)
+                );
+                crate::queue::cleanup_hash(repo, hash).await?;
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         if let Some(identifier) = repo
             .motion_identifier(hash.as_ref().to_vec().into())
@@ -1503,11 +1506,9 @@ where
             }
         }
 
-        let identifier = repo.identifier(hash.as_ref().to_vec().into()).await?;
-
-        match migrate_file(&from, &to, &identifier, skip_missing_files).await {
+        match migrate_file(&from, &to, &original_identifier, skip_missing_files).await {
             Ok(new_identifier) => {
-                migrate_details(repo, identifier, &new_identifier).await?;
+                migrate_details(repo, original_identifier, &new_identifier).await?;
                 repo.relate_identifier(hash.as_ref().to_vec().into(), &new_identifier)
                     .await?;
             }

@@ -44,11 +44,17 @@ pub(crate) enum SledError {
     #[error("Invalid details json")]
     Details(#[from] serde_json::Error),
 
-    #[error("Required field was not present")]
-    Missing,
+    #[error("Required field was not present: {0}")]
+    Missing(&'static str),
 
     #[error("Operation panicked")]
     Panic,
+}
+
+impl SledError {
+    pub(super) const fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing(_))
+    }
 }
 
 #[derive(Clone)]
@@ -512,7 +518,7 @@ impl HashRepo for SledRepo {
     ) -> Result<I, StoreError> {
         let opt = b!(self.hash_identifiers, hash_identifiers.get(hash));
 
-        opt.ok_or(SledError::Missing)
+        opt.ok_or(SledError::Missing("hash -> identifier"))
             .map_err(RepoError::from)
             .map_err(StoreError::from)
             .and_then(|ivec| I::from_bytes(ivec.to_vec()))
@@ -709,7 +715,7 @@ impl AliasRepo for SledRepo {
         let opt = b!(self.alias_delete_tokens, alias_delete_tokens.get(key));
 
         opt.and_then(|ivec| DeleteToken::from_slice(&ivec))
-            .ok_or(SledError::Missing)
+            .ok_or(SledError::Missing("alias -> delete-token"))
             .map_err(RepoError::from)
     }
 
@@ -728,7 +734,8 @@ impl AliasRepo for SledRepo {
 
         let opt = b!(self.alias_hashes, alias_hashes.get(key));
 
-        opt.ok_or(SledError::Missing).map_err(RepoError::from)
+        opt.ok_or(SledError::Missing("alias -> hash"))
+            .map_err(RepoError::from)
     }
 
     #[tracing::instrument(skip(self))]
