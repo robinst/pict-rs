@@ -515,6 +515,19 @@ object storage updates the database and if you need to revert for any reason, yo
 After migrating from 0.3 to 0.4, it is possible to migrate to object storage. This can be useful if
 hosting in a cloud environment, since object storage is generally far cheaper than block storage.
 
+There's a few required configuration options for object storage. I will try to explain:
+- endpoint: this is the URL at which the object storage is available. Generally this URL will look
+    like `https://<bucket-name>.<region>.s3.example.com`, but sometimes it could look like
+    `https://<region>.s3.example.com` or just `https://s3.example.com`
+- bucket-name: this is name of the "bucket" in which the objects will reside. A bucket must already
+    exist for the migration to work - pict-rs will not create the bucket on it's own. It is up to
+    you to create a bucket with your storage provider ahead of time.
+- region: this is the "location" in which your bucket resides. It may not be meaningful depending on
+    your cloud provider, but it is always required.
+- access-key: this is a secret your cloud provider will give to you in order to access the bucket
+- secret-key: this is a second secret your cloud provider will give to you in order to access the
+    bucket
+
 The command will look something like this:
 ```bash
 $ pict-rs \
@@ -567,6 +580,35 @@ $ sudo docker-compose start pictrs # start pict-rs again after the migration
 depending on your version of docker or docker-compose, you might need to use the following command to open a shell:
 ```bash
 $ sudo docker-compose run -i pictrs sh
+```
+
+Here's an example based on my own object storage that I host myself on kubernetes with
+[`garage`](https://garagehq.deuxfleurs.fr/):
+```bash
+$ pict-rs \
+    migrate-store \
+    filesystem \
+    object-storage \
+        --use-path-style \
+        -e http://garage-daemon.garage.svc:3900 \
+        -b pict-rs \
+        -r garage \
+        -a <redacted> \
+        -s <redacted>
+```
+
+Here's an example based on a backblaze b2 user's configuration;
+```bash
+$ pict-rs \
+    migrate-store \
+    filesystem \
+    object-storage \
+        --use-path-style \
+        -e https://s3.us-east-005.backblazeb2.com \
+        -r us-east-005 \
+        -b SitenamePictrs \
+        -a redacted \
+        -s redacted
 ```
 
 After you've completed the migration, update your pict-rs configuration to use object storage. If
