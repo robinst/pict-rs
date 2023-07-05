@@ -125,7 +125,10 @@ async fn generate<R: FullRepo, S: Store + 'static>(
     process_path: PathBuf,
     process_args: Vec<String>,
 ) -> Result<(), Error> {
-    let hash = repo.hash(&source).await?;
+    let Some(hash) = repo.hash(&source).await? else {
+        // Nothing to do
+        return Ok(());
+    };
 
     let path_string = process_path.to_string_lossy().to_string();
     let identifier_opt = repo

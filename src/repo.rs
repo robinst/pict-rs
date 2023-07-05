@@ -86,14 +86,20 @@ pub(crate) trait FullRepo:
     async fn identifier_from_alias<I: Identifier + 'static>(
         &self,
         alias: &Alias,
-    ) -> Result<I, StoreError> {
-        let hash = self.hash(alias).await?;
-        self.identifier(hash).await
+    ) -> Result<Option<I>, StoreError> {
+        let Some(hash) = self.hash(alias).await? else {
+            return Ok(None);
+        };
+
+        self.identifier(hash).await.map(Some)
     }
 
     #[tracing::instrument(skip(self))]
     async fn aliases_from_alias(&self, alias: &Alias) -> Result<Vec<Alias>, RepoError> {
-        let hash = self.hash(alias).await?;
+        let Some(hash) = self.hash(alias).await? else {
+            return Ok(vec![]);
+        };
+
         self.aliases(hash).await
     }
 
@@ -102,7 +108,10 @@ pub(crate) trait FullRepo:
         &self,
         alias: &Alias,
     ) -> Result<Option<I>, StoreError> {
-        let hash = self.hash(alias).await?;
+        let Some(hash) = self.hash(alias).await? else {
+            return Ok(None);
+        };
+
         let identifier = self.identifier::<I>(hash.clone()).await?;
 
         match self.details(&identifier).await? {
@@ -411,7 +420,7 @@ pub(crate) trait AliasRepo: BaseRepo {
     async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, RepoError>;
 
     async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), RepoError>;
-    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, RepoError>;
+    async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError>;
 
     async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError>;
 }
@@ -441,7 +450,7 @@ where
         T::relate_hash(self, alias, hash).await
     }
 
-    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, RepoError> {
+    async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError> {
         T::hash(self, alias).await
     }
 

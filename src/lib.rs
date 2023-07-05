@@ -105,7 +105,10 @@ async fn ensure_details<R: FullRepo, S: Store + 'static>(
     store: &S,
     alias: &Alias,
 ) -> Result<Details, Error> {
-    let identifier = repo.identifier_from_alias::<S::Identifier>(alias).await?;
+    let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(alias).await? else {
+        return Err(UploadError::MissingAlias.into());
+    };
+
     let details = repo.details(&identifier).await?;
 
     if let Some(details) = details {
@@ -573,7 +576,13 @@ async fn process_details<R: FullRepo, S: Store>(
 ) -> Result<HttpResponse, Error> {
     let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
 
-    let hash = repo.hash(&alias).await?;
+    let Some(hash) = repo.hash(&alias).await? else {
+        // Invalid alias
+        return Ok(HttpResponse::NotFound().json(&serde_json::json!({
+            "msg": "No images associated with provided alias",
+        })));
+    };
+
     let identifier = repo
         .variant_identifier::<S::Identifier>(hash, thumbnail_path.to_string_lossy().to_string())
         .await?
@@ -598,7 +607,11 @@ async fn process<R: FullRepo, S: Store + 'static>(
     let (format, alias, thumbnail_path, thumbnail_args) = prepare_process(query, ext.as_str())?;
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
-    let hash = repo.hash(&alias).await?;
+    let Some(hash) = repo.hash(&alias).await? else {
+        // Invalid alias
+        // TODO: placeholder 404 image
+        return Ok(HttpResponse::NotFound().finish());
+    };
 
     let identifier_opt = repo
         .variant_identifier::<S::Identifier>(hash.clone(), path_string)
@@ -685,7 +698,11 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
     let (format, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
-    let hash = repo.hash(&alias).await?;
+    let Some(hash) = repo.hash(&alias).await? else {
+        // Invalid alias
+        return Ok(HttpResponse::NotFound().finish());
+    };
+
     let identifier_opt = repo
         .variant_identifier::<S::Identifier>(hash.clone(), path_string)
         .await?;
@@ -726,7 +743,11 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
     let (target_format, source, process_path, process_args) = prepare_process(query, ext.as_str())?;
 
     let path_string = process_path.to_string_lossy().to_string();
-    let hash = repo.hash(&source).await?;
+    let Some(hash) = repo.hash(&source).await? else {
+        // Invalid alias
+        return Ok(HttpResponse::BadRequest().finish());
+    };
+
     let identifier_opt = repo
         .variant_identifier::<S::Identifier>(hash.clone(), path_string)
         .await?;
@@ -764,7 +785,11 @@ async fn serve<R: FullRepo, S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
 
-    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
+    let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(&alias).await? else {
+        // Invalid alias
+        // TODO: placeholder 404 image
+        return Ok(HttpResponse::NotFound().finish());
+    };
 
     let details = ensure_details(&repo, &store, &alias).await?;
 
@@ -780,7 +805,10 @@ async fn serve_head<R: FullRepo, S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
 
-    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
+    let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(&alias).await? else {
+        // Invalid alias
+        return Ok(HttpResponse::NotFound().finish());
+    };
 
     let details = ensure_details(&repo, &store, &alias).await?;
 
@@ -932,7 +960,11 @@ async fn purge<R: FullRepo>(
     let alias = query.into_inner().alias;
     let aliases = repo.aliases_from_alias(&alias).await?;
 
-    let hash = repo.hash(&alias).await?;
+    let Some(hash) = repo.hash(&alias).await? else {
+        return Ok(HttpResponse::BadRequest().json(&serde_json::json!({
+            "msg": "No images associated with provided alias",
+        })));
+    };
     queue::cleanup_hash(&repo, hash).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
@@ -961,7 +993,12 @@ async fn identifier<R: FullRepo, S: Store>(
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
     let alias = query.into_inner().alias;
-    let identifier = repo.identifier_from_alias::<S::Identifier>(&alias).await?;
+    let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(&alias).await? else {
+        // Invalid alias
+        return Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "msg": "No identifiers associated with provided alias"
+        })));
+    };
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",

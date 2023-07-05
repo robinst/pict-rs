@@ -729,13 +729,12 @@ impl AliasRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn hash(&self, alias: &Alias) -> Result<Self::Bytes, RepoError> {
+    async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError> {
         let key = alias.to_bytes();
 
         let opt = b!(self.alias_hashes, alias_hashes.get(key));
 
-        opt.ok_or(SledError::Missing("alias -> hash"))
-            .map_err(RepoError::from)
+        Ok(opt)
     }
 
     #[tracing::instrument(skip(self))]
