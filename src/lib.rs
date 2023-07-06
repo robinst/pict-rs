@@ -80,6 +80,8 @@ const MINUTES: u32 = 60;
 const HOURS: u32 = 60 * MINUTES;
 const DAYS: u32 = 24 * HOURS;
 
+const NOT_FOUND_KEY: &str = "404-alias";
+
 static DO_CONFIG: OnceCell<(Configuration, Operation)> = OnceCell::new();
 static CONFIG: Lazy<Configuration> = Lazy::new(|| {
     DO_CONFIG
@@ -595,6 +597,21 @@ async fn process_details<R: FullRepo, S: Store>(
     Ok(HttpResponse::Ok().json(&details))
 }
 
+async fn not_found_hash<R: FullRepo>(repo: &R) -> Result<Option<(Alias, R::Bytes)>, Error> {
+    let Some(not_found) = repo.get(NOT_FOUND_KEY).await? else {
+        return Ok(None);
+    };
+
+    let alias = String::from_utf8_lossy(not_found.as_ref())
+        .parse::<Alias>()
+        .expect("Infallible");
+
+    repo.hash(&alias)
+        .await
+        .map(|opt| opt.map(|hash| (alias, hash)))
+        .map_err(Error::from)
+}
+
 /// Process files
 #[tracing::instrument(name = "Serving processed image", skip(repo, store))]
 async fn process<R: FullRepo, S: Store + 'static>(
@@ -607,10 +624,15 @@ async fn process<R: FullRepo, S: Store + 'static>(
     let (format, alias, thumbnail_path, thumbnail_args) = prepare_process(query, ext.as_str())?;
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
-    let Some(hash) = repo.hash(&alias).await? else {
-        // Invalid alias
-        // TODO: placeholder 404 image
-        return Ok(HttpResponse::NotFound().finish());
+
+    let (hash, alias, not_found) = if let Some(hash) = repo.hash(&alias).await? {
+        (hash, alias, false)
+    } else {
+        let Some((alias, hash)) = not_found_hash(&repo).await? else {
+            return Ok(HttpResponse::NotFound().finish());
+        };
+
+        (hash, alias, true)
     };
 
     let identifier_opt = repo
@@ -637,7 +659,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
             new_details
         };
 
-        return ranged_file_resp(&store, identifier, range, details).await;
+        return ranged_file_resp(&store, identifier, range, details, not_found).await;
     }
 
     let original_details = ensure_details(&repo, &store, &alias).await?;
@@ -674,6 +696,11 @@ async fn process<R: FullRepo, S: Store + 'static>(
         } else {
             return Err(UploadError::Range.into());
         }
+    } else if not_found {
+        (
+            HttpResponse::NotFound(),
+            Either::right(once(ready(Ok(bytes)))),
+        )
     } else {
         (HttpResponse::Ok(), Either::right(once(ready(Ok(bytes)))))
     };
@@ -785,15 +812,21 @@ async fn serve<R: FullRepo, S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
 
-    let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(&alias).await? else {
-        // Invalid alias
-        // TODO: placeholder 404 image
-        return Ok(HttpResponse::NotFound().finish());
+    let (hash, alias, not_found) = if let Some(hash) = repo.hash(&alias).await? {
+        (hash, Serde::into_inner(alias), false)
+    } else {
+        let Some((alias, hash)) = not_found_hash(&repo).await? else {
+            return Ok(HttpResponse::NotFound().finish());
+        };
+
+        (hash, alias, true)
     };
+
+    let identifier = repo.identifier(hash).await?;
 
     let details = ensure_details(&repo, &store, &alias).await?;
 
-    ranged_file_resp(&store, identifier, range, details).await
+    ranged_file_resp(&store, identifier, range, details, not_found).await
 }
 
 #[tracing::instrument(name = "Serving file headers", skip(repo, store))]
@@ -855,6 +888,7 @@ async fn ranged_file_resp<S: Store + 'static>(
     identifier: S::Identifier,
     range: Option<web::Header<Range>>,
     details: Details,
+    not_found: bool,
 ) -> Result<HttpResponse, Error> {
     let (builder, stream) = if let Some(web::Header(range_header)) = range {
         //Range header exists - return as ranged
@@ -887,7 +921,12 @@ async fn ranged_file_resp<S: Store + 'static>(
             .to_stream(&identifier, None, None)
             .await?
             .map_err(Error::from);
-        (HttpResponse::Ok(), Either::right(stream))
+
+        if not_found {
+            (HttpResponse::NotFound(), Either::right(stream))
+        } else {
+            (HttpResponse::Ok(), Either::right(stream))
+        }
     };
 
     Ok(srv_response(
@@ -950,6 +989,21 @@ async fn clean_variants<R: FullRepo>(repo: web::Data<R>) -> Result<HttpResponse,
 #[derive(Debug, serde::Deserialize)]
 struct AliasQuery {
     alias: Serde<Alias>,
+}
+
+#[tracing::instrument(name = "Setting 404 Image", skip(repo))]
+async fn set_not_found<R: FullRepo>(
+    json: web::Json<AliasQuery>,
+    repo: web::Data<R>,
+) -> Result<HttpResponse, Error> {
+    let alias = json.into_inner().alias;
+
+    repo.set(NOT_FOUND_KEY, Vec::from(alias.to_string()).into())
+        .await?;
+
+    Ok(HttpResponse::Created().json(serde_json::json!({
+        "msg": "ok",
+    })))
 }
 
 #[tracing::instrument(name = "Purging file", skip(repo))]
@@ -1110,7 +1164,8 @@ fn configure_endpoints<R: FullRepo + 'static, S: Store + 'static>(
                 .service(web::resource("/variants").route(web::delete().to(clean_variants::<R>)))
                 .service(web::resource("/purge").route(web::post().to(purge::<R>)))
                 .service(web::resource("/aliases").route(web::get().to(aliases::<R>)))
-                .service(web::resource("/identifier").route(web::get().to(identifier::<R, S>))),
+                .service(web::resource("/identifier").route(web::get().to(identifier::<R, S>)))
+                .service(web::resource("/set_not_found").route(web::post().to(set_not_found::<R>))),
         );
 }
 

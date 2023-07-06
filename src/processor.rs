@@ -295,7 +295,7 @@ impl Processor for Blur {
     }
 
     fn command(&self, mut args: Vec<String>) -> Vec<String> {
-        args.extend(["-gaussian-blur".to_string(), self.0.to_string()]);
+        args.extend(["-gaussian-blur".to_string(), format!("0x{}", self.0)]);
 
         args
     }
