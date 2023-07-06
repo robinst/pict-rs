@@ -1496,20 +1496,25 @@ where
     S2: Store,
     R: IdentifierRepo + HashRepo + SettingsRepo + QueueRepo,
 {
-    let repo_size = repo.size().await?;
+    let mut repo_size = repo.size().await?;
 
-    tracing::warn!("{repo_size} Hashes will be migrated");
+    let mut progress_opt = repo.get(STORE_MIGRATION_PROGRESS).await?;
+
+    if progress_opt.is_some() {
+        tracing::warn!("Continuing previous migration of {repo_size} total hashes");
+    } else {
+        tracing::warn!("{repo_size} hashes will be migrated");
+    }
 
     if repo_size == 0 {
         return Ok(());
     }
 
-    let pct = repo_size / 100;
+    let mut pct = repo_size / 100;
 
+    // Hashes are read in a consistent order
     let stream = repo.hashes().await;
     let mut stream = Box::pin(stream);
-
-    let mut progress_opt = repo.get(STORE_MIGRATION_PROGRESS).await?;
 
     let now = Instant::now();
     let mut index = 0;
@@ -1519,8 +1524,21 @@ where
         let hash = hash?;
 
         if let Some(progress) = &progress_opt {
+            // we've reached the most recently migrated hash.
             if progress.as_ref() == hash.as_ref() {
                 progress_opt.take();
+
+                // update repo size to remaining size
+                repo_size = repo_size.saturating_sub(index);
+                // update pct to be proportional to remainging size
+                pct = repo_size / 100;
+
+                // reset index to 0 for proper percent scaling
+                index = 0;
+
+                tracing::warn!(
+                    "Caught up to previous migration's end. {repo_size} hashes will be migrated"
+                );
             }
             continue;
         }
@@ -1615,7 +1633,7 @@ where
         repo.remove(STORE_MIGRATION_VARIANT).await?;
         repo.remove(STORE_MIGRATION_MOTION).await?;
 
-        if index % pct == 0 {
+        if pct > 0 && index % pct == 0 {
             let percent = u32::try_from(index / pct).expect("values 0-100 are always in u32 range");
             if percent == 0 {
                 continue;
