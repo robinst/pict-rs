@@ -1572,10 +1572,17 @@ where
                         repo.set(STORE_MIGRATION_MOTION, b"1".to_vec().into())
                             .await?;
                     }
-                    Err(e) if e.is_not_found() && skip_missing_files => {
+                    Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                         tracing::warn!("Skipping motion file for hash {}", hex::encode(&hash));
                     }
-                    Err(e) => return Err(e.into()),
+                    Err(MigrateError::From(e)) => {
+                        tracing::warn!("Error migrating motion file from old store");
+                        return Err(e.into());
+                    }
+                    Err(MigrateError::To(e)) => {
+                        tracing::warn!("Error migrating motion file to new store");
+                        return Err(e.into());
+                    }
                 }
             }
         }
@@ -1605,14 +1612,21 @@ where
                     repo.set(STORE_MIGRATION_VARIANT, new_identifier.to_bytes()?.into())
                         .await?;
                 }
-                Err(e) if e.is_not_found() && skip_missing_files => {
+                Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                     tracing::warn!(
                         "Skipping variant {} for hash {}",
                         variant,
                         hex::encode(&hash)
                     );
                 }
-                Err(e) => return Err(e.into()),
+                Err(MigrateError::From(e)) => {
+                    tracing::warn!("Error migrating variant file from old store");
+                    return Err(e.into());
+                }
+                Err(MigrateError::To(e)) => {
+                    tracing::warn!("Error migrating variant file to new store");
+                    return Err(e.into());
+                }
             }
         }
 
@@ -1622,10 +1636,17 @@ where
                 repo.relate_identifier(hash.as_ref().to_vec().into(), &new_identifier)
                     .await?;
             }
-            Err(e) if e.is_not_found() && skip_missing_files => {
+            Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                 tracing::warn!("Skipping original file for hash {}", hex::encode(&hash));
             }
-            Err(e) => return Err(e.into()),
+            Err(MigrateError::From(e)) => {
+                tracing::warn!("Error migrating original file from old store");
+                return Err(e.into());
+            }
+            Err(MigrateError::To(e)) => {
+                tracing::warn!("Error migrating original file to new store");
+                return Err(e.into());
+            }
         }
 
         repo.set(STORE_MIGRATION_PROGRESS, hash.as_ref().to_vec().into())
@@ -1662,7 +1683,7 @@ async fn migrate_file<S1, S2>(
     to: &S2,
     identifier: &S1::Identifier,
     skip_missing_files: bool,
-) -> Result<S2::Identifier, crate::store::StoreError>
+) -> Result<S2::Identifier, MigrateError>
 where
     S1: Store,
     S2: Store,
@@ -1672,21 +1693,15 @@ where
     loop {
         match do_migrate_file(from, to, identifier).await {
             Ok(identifier) => return Ok(identifier),
-            Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => return Err(e),
+            Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
+                return Err(MigrateError::From(e));
+            }
             Err(migrate_error) => {
                 failure_count += 1;
 
                 if failure_count > 10 {
-                    match migrate_error {
-                        MigrateError::From(e) => {
-                            tracing::error!("Error migrating file FROM old store, not retrying");
-                            return Err(e);
-                        }
-                        MigrateError::To(e) => {
-                            tracing::error!("Error migrating file TO new store, not retrying");
-                            return Err(e);
-                        }
-                    }
+                    tracing::error!("Error migrating file, not retrying");
+                    return Err(migrate_error);
                 } else {
                     tracing::warn!("Failed moving file. Retrying +{failure_count}");
                 }
