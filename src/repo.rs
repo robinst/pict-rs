@@ -746,7 +746,7 @@ impl Alias {
         self.extension.as_deref()
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let mut v = self.id.as_bytes().to_vec();
 
         if let Some(ext) = self.extension() {
@@ -756,7 +756,7 @@ impl Alias {
         v
     }
 
-    fn from_slice(bytes: &[u8]) -> Option<Self> {
+    pub(crate) fn from_slice(bytes: &[u8]) -> Option<Self> {
         if let Ok(s) = std::str::from_utf8(bytes) {
             Some(Self::from_existing(s))
         } else if bytes.len() >= 16 {

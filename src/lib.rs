@@ -602,14 +602,17 @@ async fn not_found_hash<R: FullRepo>(repo: &R) -> Result<Option<(Alias, R::Bytes
         return Ok(None);
     };
 
-    let alias = String::from_utf8_lossy(not_found.as_ref())
-        .parse::<Alias>()
-        .expect("Infallible");
+    let Some(alias) = Alias::from_slice(not_found.as_ref()) else {
+        tracing::warn!("Couldn't parse not-found alias");
+        return Ok(None);
+    };
 
-    repo.hash(&alias)
-        .await
-        .map(|opt| opt.map(|hash| (alias, hash)))
-        .map_err(Error::from)
+    let Some(hash) = repo.hash(&alias).await? else {
+        tracing::warn!("No hash found for not-found alias");
+        return Ok(None);
+    };
+
+    Ok(Some((alias, hash)))
 }
 
 /// Process files
@@ -1005,8 +1008,13 @@ async fn set_not_found<R: FullRepo>(
 ) -> Result<HttpResponse, Error> {
     let alias = json.into_inner().alias;
 
-    repo.set(NOT_FOUND_KEY, Vec::from(alias.to_string()).into())
-        .await?;
+    if repo.hash(&alias).await?.is_none() {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "msg": "No hash associated with provided alias"
+        })));
+    }
+
+    repo.set(NOT_FOUND_KEY, alias.to_bytes().into()).await?;
 
     Ok(HttpResponse::Created().json(serde_json::json!({
         "msg": "ok",
