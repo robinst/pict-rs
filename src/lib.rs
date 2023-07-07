@@ -1483,7 +1483,18 @@ where
     S2: Store + Clone,
     R: IdentifierRepo + HashRepo + SettingsRepo + QueueRepo,
 {
-    tracing::warn!("Migrating store");
+    tracing::warn!("Running checks");
+
+    if let Err(e) = from.health_check().await {
+        tracing::warn!("Old store is not configured correctly");
+        return Err(e.into());
+    }
+    if let Err(e) = to.health_check().await {
+        tracing::warn!("New store is not configured correctly");
+        return Err(e.into());
+    }
+
+    tracing::warn!("Checks complete, migrating store");
 
     let mut failure_count = 0;
 
