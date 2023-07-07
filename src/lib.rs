@@ -1672,13 +1672,21 @@ where
     loop {
         match do_migrate_file(from, to, identifier).await {
             Ok(identifier) => return Ok(identifier),
-            Err(e) if e.is_not_found() && skip_missing_files => return Err(e),
-            Err(e) => {
+            Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => return Err(e),
+            Err(migrate_error) => {
                 failure_count += 1;
 
                 if failure_count > 10 {
-                    tracing::error!("Error migrating file, not retrying");
-                    return Err(e);
+                    match migrate_error {
+                        MigrateError::From(e) => {
+                            tracing::error!("Error migrating file FROM old store, not retrying");
+                            return Err(e);
+                        }
+                        MigrateError::To(e) => {
+                            tracing::error!("Error migrating file TO new store, not retrying");
+                            return Err(e);
+                        }
+                    }
                 } else {
                     tracing::warn!("Failed moving file. Retrying +{failure_count}");
                 }
@@ -1689,18 +1697,27 @@ where
     }
 }
 
+#[derive(Debug)]
+enum MigrateError {
+    From(crate::store::StoreError),
+    To(crate::store::StoreError),
+}
+
 async fn do_migrate_file<S1, S2>(
     from: &S1,
     to: &S2,
     identifier: &S1::Identifier,
-) -> Result<S2::Identifier, crate::store::StoreError>
+) -> Result<S2::Identifier, MigrateError>
 where
     S1: Store,
     S2: Store,
 {
-    let stream = from.to_stream(identifier, None, None).await?;
+    let stream = from
+        .to_stream(identifier, None, None)
+        .await
+        .map_err(MigrateError::From)?;
 
-    let new_identifier = to.save_stream(stream).await?;
+    let new_identifier = to.save_stream(stream).await.map_err(MigrateError::To)?;
 
     Ok(new_identifier)
 }
