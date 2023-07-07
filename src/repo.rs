@@ -34,7 +34,10 @@ pub(crate) struct DeleteToken {
     id: MaybeUuid,
 }
 
-pub(crate) struct AlreadyExists;
+pub(crate) struct HashAlreadyExists;
+pub(crate) struct AliasAlreadyExists;
+
+pub(crate) struct AlreadyExists(pub(super) DeleteToken);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct UploadId {
@@ -56,15 +59,9 @@ pub(crate) enum RepoError {
 
     #[error("Panic in blocking operation")]
     Canceled,
-}
 
-impl RepoError {
-    pub(crate) const fn is_missing(&self) -> bool {
-        match self {
-            Self::SledError(e) => e.is_missing(),
-            _ => false,
-        }
-    }
+    #[error("Required field is missing {0}")]
+    Missing(&'static str),
 }
 
 #[async_trait::async_trait(?Send)]
@@ -91,7 +88,7 @@ pub(crate) trait FullRepo:
             return Ok(None);
         };
 
-        self.identifier(hash).await.map(Some)
+        self.identifier(hash).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -112,7 +109,9 @@ pub(crate) trait FullRepo:
             return Ok(None);
         };
 
-        let identifier = self.identifier::<I>(hash.clone()).await?;
+        let Some(identifier) = self.identifier::<I>(hash.clone()).await? else {
+            return Ok(None);
+        };
 
         match self.details(&identifier).await? {
             Some(details) if details.is_motion() => self.motion_identifier::<I>(hash).await,
@@ -270,7 +269,7 @@ pub(crate) trait HashRepo: BaseRepo {
 
     async fn hashes(&self) -> Self::Stream;
 
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, RepoError>;
+    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), HashAlreadyExists>, RepoError>;
 
     async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError>;
     async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError>;
@@ -281,8 +280,10 @@ pub(crate) trait HashRepo: BaseRepo {
         hash: Self::Bytes,
         identifier: &I,
     ) -> Result<(), StoreError>;
-    async fn identifier<I: Identifier + 'static>(&self, hash: Self::Bytes)
-        -> Result<I, StoreError>;
+    async fn identifier<I: Identifier + 'static>(
+        &self,
+        hash: Self::Bytes,
+    ) -> Result<Option<I>, StoreError>;
 
     async fn relate_variant_identifier<I: Identifier>(
         &self,
@@ -329,7 +330,7 @@ where
         T::hashes(self).await
     }
 
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, RepoError> {
+    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), HashAlreadyExists>, RepoError> {
         T::create(self, hash).await
     }
 
@@ -356,7 +357,7 @@ where
     async fn identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<I, StoreError> {
+    ) -> Result<Option<I>, StoreError> {
         T::identifier(self, hash).await
     }
 
@@ -410,14 +411,14 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait AliasRepo: BaseRepo {
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, RepoError>;
+    async fn create(&self, alias: &Alias) -> Result<Result<(), AliasAlreadyExists>, RepoError>;
 
     async fn relate_delete_token(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
     ) -> Result<Result<(), AlreadyExists>, RepoError>;
-    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, RepoError>;
+    async fn delete_token(&self, alias: &Alias) -> Result<Option<DeleteToken>, RepoError>;
 
     async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), RepoError>;
     async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError>;
@@ -430,7 +431,7 @@ impl<T> AliasRepo for actix_web::web::Data<T>
 where
     T: AliasRepo,
 {
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, RepoError> {
+    async fn create(&self, alias: &Alias) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
         T::create(self, alias).await
     }
 
@@ -442,7 +443,7 @@ where
         T::relate_delete_token(self, alias, delete_token).await
     }
 
-    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, RepoError> {
+    async fn delete_token(&self, alias: &Alias) -> Result<Option<DeleteToken>, RepoError> {
         T::delete_token(self, alias).await
     }
 
@@ -612,7 +613,11 @@ where
         }
     }
 
-    let main_identifier = repo.identifier::<FileId>(hash.clone()).await?;
+    let Some(main_identifier) = repo.identifier::<FileId>(hash.clone()).await? else {
+        tracing::warn!("Missing identifier for hash {}, queueing cleanup", hex::encode(&hash));
+        crate::queue::cleanup_hash(repo, hash.clone()).await?;
+        return Err(RepoError::Missing("hash -> identifier").into());
+    };
 
     if let Some(new_main_identifier) = main_identifier.normalize_for_migration() {
         migrate_identifier_details(repo, &main_identifier, &new_main_identifier).await?;

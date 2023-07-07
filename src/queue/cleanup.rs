@@ -92,8 +92,10 @@ where
 
     if !aliases.is_empty() {
         for alias in aliases {
-            let token = repo.delete_token(&alias).await?;
-            super::cleanup_alias(repo, alias, token).await?;
+            // TODO: decide if it is okay to skip aliases without tokens
+            if let Some(token) = repo.delete_token(&alias).await? {
+                super::cleanup_alias(repo, alias, token).await?;
+            }
         }
         // Return after queueing cleanup alias, since we will be requeued when the last alias is cleaned
         return Ok(());
@@ -105,7 +107,7 @@ where
         .into_iter()
         .map(|(_, v)| v)
         .collect::<Vec<_>>();
-    idents.push(repo.identifier(hash.clone()).await?);
+    idents.extend(repo.identifier(hash.clone()).await?);
     idents.extend(repo.motion_identifier(hash.clone()).await?);
 
     for identifier in idents {
@@ -123,7 +125,8 @@ where
     R: FullRepo,
 {
     let saved_delete_token = repo.delete_token(&alias).await?;
-    if saved_delete_token != token {
+
+    if saved_delete_token.is_some() && saved_delete_token != Some(token) {
         return Err(UploadError::InvalidToken.into());
     }
 

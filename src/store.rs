@@ -28,13 +28,6 @@ impl StoreError {
     pub(crate) const fn is_not_found(&self) -> bool {
         matches!(self, Self::FileNotFound(_)) || matches!(self, Self::ObjectNotFound(_))
     }
-
-    pub(crate) const fn is_missing(&self) -> bool {
-        match self {
-            Self::Repo(e) => e.is_missing(),
-            _ => false,
-        }
-    }
 }
 
 impl From<crate::store::file_store::FileError> for StoreError {

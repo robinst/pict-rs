@@ -1,14 +1,15 @@
 use crate::{
     repo::{
-        Alias, AliasRepo, AlreadyExists, BaseRepo, DeleteToken, Details, FullRepo, HashRepo,
-        Identifier, IdentifierRepo, QueueRepo, SettingsRepo, UploadId, UploadRepo, UploadResult,
+        Alias, AliasAlreadyExists, AliasRepo, AlreadyExists, BaseRepo, DeleteToken, Details,
+        FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, QueueRepo, SettingsRepo,
+        UploadId, UploadRepo, UploadResult,
     },
     serde_str::Serde,
     store::StoreError,
     stream::from_iterator,
 };
 use futures_util::Stream;
-use sled::{Db, IVec, Tree};
+use sled::{CompareAndSwapError, Db, IVec, Tree};
 use std::{
     collections::HashMap,
     pin::Pin,
@@ -44,17 +45,8 @@ pub(crate) enum SledError {
     #[error("Invalid details json")]
     Details(#[from] serde_json::Error),
 
-    #[error("Required field was not present: {0}")]
-    Missing(&'static str),
-
     #[error("Operation panicked")]
     Panic,
-}
-
-impl SledError {
-    pub(super) const fn is_missing(&self) -> bool {
-        matches!(self, Self::Missing(_))
-    }
 }
 
 #[derive(Clone)]
@@ -456,13 +448,13 @@ impl HashRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), AlreadyExists>, RepoError> {
+    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), HashAlreadyExists>, RepoError> {
         let res = b!(self.hashes, {
             let hash2 = hash.clone();
             hashes.compare_and_swap(hash, None as Option<Self::Bytes>, Some(hash2))
         });
 
-        Ok(res.map_err(|_| AlreadyExists))
+        Ok(res.map_err(|_| HashAlreadyExists))
     }
 
     #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
@@ -515,13 +507,12 @@ impl HashRepo for SledRepo {
     async fn identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
-    ) -> Result<I, StoreError> {
-        let opt = b!(self.hash_identifiers, hash_identifiers.get(hash));
+    ) -> Result<Option<I>, StoreError> {
+        let Some(ivec) = b!(self.hash_identifiers, hash_identifiers.get(hash)) else {
+            return Ok(None);
+        };
 
-        opt.ok_or(SledError::Missing("hash -> identifier"))
-            .map_err(RepoError::from)
-            .map_err(StoreError::from)
-            .and_then(|ivec| I::from_bytes(ivec.to_vec()))
+        Ok(Some(I::from_bytes(ivec.to_vec())?))
     }
 
     #[tracing::instrument(level = "trace", skip(self, hash, identifier), fields(hash = hex::encode(&hash), identifier = identifier.string_repr()))]
@@ -679,7 +670,7 @@ impl HashRepo for SledRepo {
 #[async_trait::async_trait(?Send)]
 impl AliasRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AlreadyExists>, RepoError> {
+    async fn create(&self, alias: &Alias) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
         let bytes = alias.to_bytes();
         let bytes2 = bytes.clone();
 
@@ -688,7 +679,7 @@ impl AliasRepo for SledRepo {
             aliases.compare_and_swap(bytes, None as Option<Self::Bytes>, Some(bytes2))
         );
 
-        Ok(res.map_err(|_| AlreadyExists))
+        Ok(res.map_err(|_| AliasAlreadyExists))
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -700,23 +691,50 @@ impl AliasRepo for SledRepo {
         let key = alias.to_bytes();
         let token = delete_token.to_bytes();
 
-        let res = b!(
-            self.alias_delete_tokens,
-            alias_delete_tokens.compare_and_swap(key, None as Option<Self::Bytes>, Some(token))
-        );
+        let res = b!(self.alias_delete_tokens, {
+            let mut prev: Option<Self::Bytes> = None;
 
-        Ok(res.map_err(|_| AlreadyExists))
+            loop {
+                let key = key.clone();
+                let token = token.clone();
+
+                let res = alias_delete_tokens.compare_and_swap(key, prev, Some(token))?;
+
+                match res {
+                    Ok(()) => return Ok(Ok(())) as Result<_, SledError>,
+                    Err(CompareAndSwapError {
+                        current: Some(token),
+                        ..
+                    }) => {
+                        if let Some(token) = DeleteToken::from_slice(&token) {
+                            return Ok(Err(AlreadyExists(token)));
+                        } else {
+                            prev = Some(token);
+                        };
+                    }
+                    Err(CompareAndSwapError { current: None, .. }) => {
+                        prev = None;
+                    }
+                }
+            }
+        });
+
+        Ok(res)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn delete_token(&self, alias: &Alias) -> Result<DeleteToken, RepoError> {
+    async fn delete_token(&self, alias: &Alias) -> Result<Option<DeleteToken>, RepoError> {
         let key = alias.to_bytes();
 
-        let opt = b!(self.alias_delete_tokens, alias_delete_tokens.get(key));
+        let Some(ivec) = b!(self.alias_delete_tokens, alias_delete_tokens.get(key)) else {
+            return Ok(None);
+        };
 
-        opt.and_then(|ivec| DeleteToken::from_slice(&ivec))
-            .ok_or(SledError::Missing("alias -> delete-token"))
-            .map_err(RepoError::from)
+        let Some(token) = DeleteToken::from_slice(&ivec) else {
+            return Ok(None);
+        };
+
+        Ok(Some(token))
     }
 
     #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]

@@ -2,7 +2,7 @@ use crate::{
     concurrent_processor::CancelSafeProcessor,
     config::ImageFormat,
     details::Details,
-    error::Error,
+    error::{Error, UploadError},
     ffmpeg::{ThumbnailFormat, VideoFormat},
     repo::{Alias, FullRepo},
     store::Store,
@@ -64,7 +64,10 @@ async fn process<R: FullRepo, S: Store + 'static>(
     {
         identifier
     } else {
-        let identifier = repo.identifier(hash.clone()).await?;
+        let Some(identifier) = repo.identifier(hash.clone()).await? else {
+            return Err(UploadError::MissingIdentifier.into());
+        };
+
         let reader = crate::ffmpeg::thumbnail(
             store.clone(),
             identifier,

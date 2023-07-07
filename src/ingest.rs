@@ -3,7 +3,7 @@ use crate::{
     either::Either,
     error::{Error, UploadError},
     magick::ValidInputType,
-    repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo},
+    repo::{Alias, AliasRepo, AlreadyExists, DeleteToken, FullRepo, HashRepo},
     store::Store,
     CONFIG,
 };
@@ -156,8 +156,7 @@ where
         tracing::trace!("Saving delete token");
         let res = self.repo.relate_delete_token(&alias, &delete_token).await?;
 
-        if res.is_err() {
-            let delete_token = self.repo.delete_token(&alias).await?;
+        if let Err(AlreadyExists(delete_token)) = res {
             tracing::trace!("Returning existing delete token, {:?}", delete_token);
             return Ok(delete_token);
         }
@@ -232,7 +231,7 @@ where
                 tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                     actix_rt::spawn(
                         async move {
-                            if let Ok(token) = repo.delete_token(&alias).await {
+                            if let Ok(Some(token)) = repo.delete_token(&alias).await {
                                 let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
                             } else {
                                 let token = DeleteToken::generate();

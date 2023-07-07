@@ -822,7 +822,14 @@ async fn serve<R: FullRepo, S: Store + 'static>(
         (hash, alias, true)
     };
 
-    let identifier = repo.identifier(hash).await?;
+    let Some(identifier) = repo.identifier(hash.clone()).await? else {
+        tracing::warn!(
+            "Original File identifier for hash {} is missing, queue cleanup task",
+            hex::encode(&hash)
+        );
+        crate::queue::cleanup_hash(&repo, hash).await?;
+        return Ok(HttpResponse::NotFound().finish());
+    };
 
     let details = ensure_details(&repo, &store, &alias).await?;
 
@@ -1548,8 +1555,8 @@ where
         }
 
         let original_identifier = match repo.identifier(hash.as_ref().to_vec().into()).await {
-            Ok(identifier) => identifier,
-            Err(e) if e.is_missing() => {
+            Ok(Some(identifier)) => identifier,
+            Ok(None) => {
                 tracing::warn!(
                     "Original File identifier for hash {} is missing, queue cleanup task",
                     hex::encode(&hash)

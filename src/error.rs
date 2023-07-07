@@ -81,6 +81,9 @@ pub(crate) enum UploadError {
     #[error("Requested a file that doesn't exist")]
     MissingAlias,
 
+    #[error("Requested a file that pict-rs lost track of")]
+    MissingIdentifier,
+
     #[error("Provided token did not match expected token")]
     InvalidToken,
 
@@ -169,12 +172,7 @@ impl ResponseError for Error {
                 | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
                 | UploadError::SilentVideoDisabled,
             ) => StatusCode::BAD_REQUEST,
-            Some(
-                UploadError::Repo(crate::repo::RepoError::SledError(
-                    crate::repo::sled::SledError::Missing(_),
-                ))
-                | UploadError::MissingAlias,
-            ) => StatusCode::NOT_FOUND,
+            Some(UploadError::MissingAlias) => StatusCode::NOT_FOUND,
             Some(UploadError::InvalidToken) => StatusCode::FORBIDDEN,
             Some(UploadError::Range) => StatusCode::RANGE_NOT_SATISFIABLE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
