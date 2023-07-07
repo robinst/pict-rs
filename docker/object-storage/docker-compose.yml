@@ -1,28 +1,28 @@
 version: '3.3'
 
 services:
-  pictrs:
-    build:
-      context: .
-      dockerfile: ./Dockerfile
-      args:
-        UID: "${USER_ID:-1000}"
-        GID: "${GROUP_ID:-1000}"
-    ports:
-      - "8080:8080"
-      - "6669:6669"
-    environment:
-      - PICTRS__TRACING__CONSOLE__ADDRESS=0.0.0.0:6669
-      - PICTRS__TRACING__OPENTELEMETRY__URL=http://otel:4137
-      - RUST_BACKTRACE=1
-    stdin_open: true
-    tty: true
-    volumes:
-      - ./storage/pict-rs:/mnt
-      - ../../:/opt/app
+  #  pictrs:
+  #    build:
+  #      context: .
+  #      dockerfile: ./Dockerfile
+  #      args:
+  #        UID: "${USER_ID:-1000}"
+  #        GID: "${GROUP_ID:-1000}"
+  #    ports:
+  #      - "8080:8080"
+  #      - "6669:6669"
+  #    environment:
+  #      - PICTRS__TRACING__CONSOLE__ADDRESS=0.0.0.0:6669
+  #      - PICTRS__TRACING__OPENTELEMETRY__URL=http://otel:4137
+  #      - RUST_BACKTRACE=1
+  #    stdin_open: true
+  #    tty: true
+  #    volumes:
+  #      - ./storage/pict-rs:/mnt
+  #      - ../../:/opt/app
 
   pictrs_proxy:
-    image: asonix/pictrs-proxy:0.4.0-beta.1
+    image: asonix/pictrs-proxy:0.4.0-rc.2
     ports:
       - "8081:8081"
     environment:

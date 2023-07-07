@@ -35,3 +35,12 @@ cache_capacity = 67108864
 [store]
 type = 'filesystem'
 path = 'data/files-local'
+
+# [store]
+# type = 'object_storage'
+# endpoint = 'http://localhost:3900'
+# use_path_style = true
+# bucket_name = 'pict-rs'
+# region = 'garage'
+# access_key = 'GK75d220d95cac26da41a574c6'
+# secret_key = '96fa2dc421aaa0026a7e651764958be111fdfdf5260c405b38d85a85f5cd9ea0'
