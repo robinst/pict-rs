@@ -54,6 +54,14 @@ impl Store for FileStore {
     type Identifier = FileId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
+    async fn health_check(&self) -> Result<(), StoreError> {
+        tokio::fs::metadata(&self.root_dir)
+            .await
+            .map_err(FileError::from)?;
+
+        Ok(())
+    }
+
     #[tracing::instrument(skip(reader))]
     async fn save_async_read<Reader>(
         &self,
@@ -156,6 +164,10 @@ impl Store for FileStore {
 impl FileStore {
     pub(crate) async fn build(root_dir: PathBuf, repo: Repo) -> Result<Self, StoreError> {
         let path_gen = init_generator(&repo).await?;
+
+        tokio::fs::create_dir_all(&root_dir)
+            .await
+            .map_err(FileError::from)?;
 
         Ok(FileStore {
             root_dir,

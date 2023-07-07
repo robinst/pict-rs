@@ -1060,8 +1060,12 @@ async fn identifier<R: FullRepo, S: Store>(
     })))
 }
 
-async fn healthz<R: FullRepo>(repo: web::Data<R>) -> Result<HttpResponse, Error> {
+async fn healthz<R: FullRepo, S: Store>(
+    repo: web::Data<R>,
+    store: web::Data<S>,
+) -> Result<HttpResponse, Error> {
     repo.health_check().await?;
+    store.health_check().await?;
     Ok(HttpResponse::Ok().finish())
 }
 
@@ -1104,7 +1108,7 @@ fn configure_endpoints<R: FullRepo + 'static, S: Store + 'static>(
         .app_data(web::Data::new(repo))
         .app_data(web::Data::new(store))
         .app_data(web::Data::new(client))
-        .route("/healthz", web::get().to(healthz::<R>))
+        .route("/healthz", web::get().to(healthz::<R, S>))
         .service(
             web::scope("/image")
                 .service(

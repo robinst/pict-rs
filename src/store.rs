@@ -77,6 +77,8 @@ pub(crate) trait Store: Clone + Debug {
     type Identifier: Identifier + 'static;
     type Stream: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static;
 
+    async fn health_check(&self) -> Result<(), StoreError>;
+
     async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static;
@@ -114,6 +116,10 @@ where
 {
     type Identifier = T::Identifier;
     type Stream = T::Stream;
+
+    async fn health_check(&self) -> Result<(), StoreError> {
+        T::health_check(self).await
+    }
 
     async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, StoreError>
     where
@@ -169,6 +175,10 @@ where
 {
     type Identifier = T::Identifier;
     type Stream = T::Stream;
+
+    async fn health_check(&self) -> Result<(), StoreError> {
+        T::health_check(self).await
+    }
 
     async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, StoreError>
     where

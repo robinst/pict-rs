@@ -169,6 +169,21 @@ impl Store for ObjectStore {
     type Identifier = ObjectId;
     type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
 
+    async fn health_check(&self) -> Result<(), StoreError> {
+        let response = self
+            .head_bucket_request()
+            .await?
+            .send()
+            .await
+            .map_err(ObjectError::from)?;
+
+        if !response.status().is_success() {
+            return Err(status_error(response).await);
+        }
+
+        Ok(())
+    }
+
     async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
@@ -436,6 +451,12 @@ impl ObjectStore {
                 Credentials::new(access_key, secret_key)
             },
         })
+    }
+
+    async fn head_bucket_request(&self) -> Result<ClientRequest, StoreError> {
+        let action = self.bucket.head_bucket(Some(&self.credentials));
+
+        Ok(self.build_request(action))
     }
 
     async fn put_object_request(&self) -> Result<(ClientRequest, ObjectId), StoreError> {
