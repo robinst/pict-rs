@@ -590,7 +590,7 @@ If you're running with docker-compose, this could look like the following:
 ```bash
 $ sudo docker compose stop pictrs # stop the pict-rs container
 $ sudo docker compose run pictrs sh # launch a shell in the pict-rs container
-> pict-rs --version # verify pict-rs version is recent (should probably be 0.4.0-rc.13 or later)
+> pict-rs --version # verify pict-rs version is recent (should probably be 0.4.0-rc.14 or later)
 > pict-rs \
     migrate-store \
     filesystem \
