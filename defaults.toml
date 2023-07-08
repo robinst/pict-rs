@@ -45,6 +45,7 @@ max_frame_count = 100
 type = "sled"
 path = "/mnt/sled-repo"
 cache_capacity = 67108864
+export_path = "/mnt/exports"
 
 [store]
 type = "filesystem"

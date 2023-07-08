@@ -31,6 +31,7 @@ skip_validate_imports = false
 type = 'sled'
 path = 'data/sled-repo-local'
 cache_capacity = 67108864
+export_path = "data/exports-local"
 
 [store]
 type = 'filesystem'

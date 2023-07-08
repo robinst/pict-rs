@@ -36,6 +36,7 @@ use futures_util::{
     Stream, StreamExt, TryStreamExt,
 };
 use once_cell::sync::{Lazy, OnceCell};
+use repo::sled::SledRepo;
 use rusty_s3::UrlStyle;
 use std::{
     future::ready,
@@ -1113,11 +1114,16 @@ fn next_worker_id() -> String {
     format!("{}-{}", CONFIG.server.worker_id, next_id)
 }
 
-fn configure_endpoints<R: FullRepo + 'static, S: Store + 'static>(
+fn configure_endpoints<
+    R: FullRepo + 'static,
+    S: Store + 'static,
+    F: Fn(&mut web::ServiceConfig),
+>(
     config: &mut web::ServiceConfig,
     repo: R,
     store: S,
     client: Client,
+    extra_config: F,
 ) {
     config
         .app_data(web::Data::new(repo))
@@ -1184,7 +1190,8 @@ fn configure_endpoints<R: FullRepo + 'static, S: Store + 'static>(
                 .service(web::resource("/purge").route(web::post().to(purge::<R>)))
                 .service(web::resource("/aliases").route(web::get().to(aliases::<R>)))
                 .service(web::resource("/identifier").route(web::get().to(identifier::<R, S>)))
-                .service(web::resource("/set_not_found").route(web::post().to(set_not_found::<R>))),
+                .service(web::resource("/set_not_found").route(web::post().to(set_not_found::<R>)))
+                .configure(extra_config),
         );
 }
 
@@ -1204,44 +1211,51 @@ where
         .in_scope(|| actix_rt::spawn(queue::process_images(repo, store, next_worker_id())));
 }
 
-async fn launch_file_store<R: FullRepo + 'static>(
+async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig) + Send + Clone>(
     repo: R,
     store: FileStore,
+    extra_config: F,
 ) -> std::io::Result<()> {
     HttpServer::new(move || {
         let client = build_client();
 
         let store = store.clone();
         let repo = repo.clone();
+        let extra_config = extra_config.clone();
 
         spawn_workers(repo.clone(), store.clone());
 
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
-            .configure(move |sc| configure_endpoints(sc, repo, store, client))
+            .configure(move |sc| configure_endpoints(sc, repo, store, client, extra_config))
     })
     .bind(CONFIG.server.address)?
     .run()
     .await
 }
 
-async fn launch_object_store<R: FullRepo + 'static>(
+async fn launch_object_store<
+    R: FullRepo + 'static,
+    F: Fn(&mut web::ServiceConfig) + Send + Clone,
+>(
     repo: R,
     store_config: ObjectStoreConfig,
+    extra_config: F,
 ) -> std::io::Result<()> {
     HttpServer::new(move || {
         let client = build_client();
 
         let store = store_config.clone().build(client.clone());
         let repo = repo.clone();
+        let extra_config = extra_config.clone();
 
         spawn_workers(repo.clone(), store.clone());
 
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
-            .configure(move |sc| configure_endpoints(sc, repo, store, client))
+            .configure(move |sc| configure_endpoints(sc, repo, store, client, extra_config))
     })
     .bind(CONFIG.server.address)?
     .run()
@@ -1355,6 +1369,18 @@ pub fn install_tracing() -> color_eyre::Result<()> {
     init_tracing(&CONFIG.tracing)
 }
 
+async fn export_handler(repo: web::Data<SledRepo>) -> Result<HttpResponse, Error> {
+    repo.export().await?;
+
+    Ok(HttpResponse::Created().json(&serde_json::json!({
+        "msg": "ok"
+    })))
+}
+
+fn sled_extra_config(sc: &mut web::ServiceConfig) {
+    sc.service(web::resource("/export").route(web::post().to(export_handler)));
+}
+
 /// Run the pict-rs application
 ///
 /// This must be called after `init_config`, or else the default configuration builder will run and
@@ -1422,7 +1448,7 @@ pub async fn run() -> color_eyre::Result<()> {
                         .requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
                         .await?;
 
-                    launch_file_store(sled_repo, store).await?;
+                    launch_file_store(sled_repo, store, sled_extra_config).await?;
                 }
             }
         }
@@ -1457,7 +1483,7 @@ pub async fn run() -> color_eyre::Result<()> {
                         .requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
                         .await?;
 
-                    launch_object_store(sled_repo, store).await?;
+                    launch_object_store(sled_repo, store, sled_extra_config).await?;
                 }
             }
         }

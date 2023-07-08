@@ -96,6 +96,7 @@ enum RepoDefaults {
 struct SledDefaults {
     path: PathBuf,
     cache_capacity: u64,
+    export_path: PathBuf,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -203,6 +204,7 @@ impl Default for SledDefaults {
         SledDefaults {
             path: PathBuf::from(String::from("/mnt/sled-repo")),
             cache_capacity: 1024 * 1024 * 64,
+            export_path: PathBuf::from(String::from("/mnt/exports")),
         }
     }
 }

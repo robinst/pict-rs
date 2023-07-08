@@ -465,17 +465,13 @@ impl Repo {
     pub(crate) fn open(config: config::Repo) -> color_eyre::Result<Self> {
         match config {
             config::Repo::Sled(config::Sled {
-                mut path,
+                path,
                 cache_capacity,
+                export_path,
             }) => {
-                path.push("v0.4.0-alpha.1");
+                let repo = self::sled::SledRepo::build(path, cache_capacity, export_path)?;
 
-                let db = ::sled::Config::new()
-                    .cache_capacity(cache_capacity)
-                    .path(path)
-                    .open()?;
-
-                Ok(Self::Sled(self::sled::SledRepo::new(db)?))
+                Ok(Self::Sled(repo))
             }
         }
     }

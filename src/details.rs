@@ -6,10 +6,11 @@ use crate::{
     store::Store,
 };
 use actix_web::web;
+use time::format_description::well_known::Rfc3339;
 
 #[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(untagged)]
-enum MaybeHumanDate {
+pub(crate) enum MaybeHumanDate {
     HumanDate(#[serde(with = "time::serde::rfc3339")] time::OffsetDateTime),
     OldDate(#[serde(serialize_with = "time::serde::rfc3339::serialize")] time::OffsetDateTime),
 }
@@ -120,6 +121,18 @@ impl From<MaybeHumanDate> for std::time::SystemTime {
         match this {
             MaybeHumanDate::OldDate(old) => old.into(),
             MaybeHumanDate::HumanDate(human) => human.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for MaybeHumanDate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OldDate(date) | Self::HumanDate(date) => {
+                let s = date.format(&Rfc3339).map_err(|_| std::fmt::Error)?;
+
+                f.write_str(&s)
+            }
         }
     }
 }

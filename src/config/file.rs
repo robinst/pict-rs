@@ -158,4 +158,6 @@ pub(crate) struct Sled {
     pub(crate) path: PathBuf,
 
     pub(crate) cache_capacity: u64,
+
+    pub(crate) export_path: PathBuf,
 }

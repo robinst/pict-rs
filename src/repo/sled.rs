@@ -1,4 +1,5 @@
 use crate::{
+    details::MaybeHumanDate,
     repo::{
         Alias, AliasAlreadyExists, AliasRepo, AlreadyExists, BaseRepo, DeleteToken, Details,
         FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, QueueRepo, SettingsRepo,
@@ -12,6 +13,7 @@ use futures_util::Stream;
 use sled::{CompareAndSwapError, Db, IVec, Tree};
 use std::{
     collections::HashMap,
+    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -67,12 +69,20 @@ pub(crate) struct SledRepo {
     in_progress_queue: Tree,
     queue_notifier: Arc<RwLock<HashMap<&'static str, Arc<Notify>>>>,
     uploads: Tree,
+    cache_capacity: u64,
+    export_path: PathBuf,
     db: Db,
 }
 
 impl SledRepo {
-    #[tracing::instrument(skip(db))]
-    pub(crate) fn new(db: Db) -> Result<Self, SledError> {
+    #[tracing::instrument]
+    pub(crate) fn build(
+        path: PathBuf,
+        cache_capacity: u64,
+        export_path: PathBuf,
+    ) -> color_eyre::Result<Self> {
+        let db = Self::open(path, cache_capacity)?;
+
         Ok(SledRepo {
             healthz_count: Arc::new(AtomicU64::new(0)),
             healthz: db.open_tree("pict-rs-healthz-tree")?,
@@ -90,8 +100,41 @@ impl SledRepo {
             in_progress_queue: db.open_tree("pict-rs-in-progress-queue-tree")?,
             queue_notifier: Arc::new(RwLock::new(HashMap::new())),
             uploads: db.open_tree("pict-rs-uploads-tree")?,
+            cache_capacity,
+            export_path,
             db,
         })
+    }
+
+    fn open(mut path: PathBuf, cache_capacity: u64) -> Result<Db, SledError> {
+        path.push("v0.4.0-alpha.1");
+
+        let db = ::sled::Config::new()
+            .cache_capacity(cache_capacity)
+            .path(path)
+            .open()?;
+
+        Ok(db)
+    }
+
+    #[tracing::instrument(level = "warn")]
+    pub(crate) async fn export(&self) -> Result<(), RepoError> {
+        let path = self
+            .export_path
+            .join(MaybeHumanDate::HumanDate(time::OffsetDateTime::now_utc()).to_string());
+
+        let export_db = Self::open(path, self.cache_capacity)?;
+
+        let this = self.db.clone();
+
+        actix_rt::task::spawn_blocking(move || {
+            let export = this.export();
+            export_db.import(export);
+        })
+        .await
+        .map_err(SledError::from)?;
+
+        Ok(())
     }
 }
 
@@ -289,6 +332,7 @@ impl QueueRepo for SledRepo {
             let worker_id = worker_id.clone();
             let job = b!(self.queue, {
                 in_progress_queue.remove(&worker_id)?;
+                in_progress_queue.flush()?;
 
                 while let Some((key, job)) = queue
                     .scan_prefix(queue_name.as_bytes())
