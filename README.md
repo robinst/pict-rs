@@ -11,6 +11,7 @@ _a simple image hosting service_
             1. [Distro Package](#distro-package)
             2. [Binary Download](#binary-download)
             3. [Compile from Source](#compile-from-source)
+            4. [Nix](#nix)
     2. [Api](#api)
 3. [Administration](#administration)
     1. [Backups](#backups)
@@ -245,6 +246,10 @@ make sure that you have the following dependencies installed:
 These binaries are called by pict-rs to process uploaded media, so they must be in the `$PATH`
 available to pict-rs.
 
+A notable issue here is imagemagick 7, which is not packaged in Debian Sid and therefore unavailable
+in any version of Debian or Ubuntu. If you are running an ubuntu or debian system, consider using
+the [Nix](#nix) installation and run method.
+
 ##### Compile from Source
 pict-rs can be compiled from source using a recent version of the rust compiler. I do development
 and produce releases on 1.70. pict-rs also requires the `protoc` protobuf compiler to be present at
@@ -252,6 +257,31 @@ build-time in order to enable use of [`tokio-console`](https://github.com/tokio-
 
 Like the Binary Download option, `imagemagick`, `ffmpeg`, and `exiftool` must be installed for
 pict-rs to run properly.
+
+##### Nix
+pict-rs comes with an associated nix flake. This is useful for the development environment, but can
+also be used to run a "production" version of pict-rs with all the neccessary dependencies already
+provided.
+
+The Nix package manager can be installed with [these instructions](https://nixos.org/download.html).
+After installation, two experimental features must be enabled: `flake` and `nix-command`. These need
+to be added in `/etc/nix/nix.conf`:
+```
+experimental-features = nix-command flakes
+```
+
+After enabling flakes, you can run `nix build` from the pict-rs source directory. This will produce
+a nix package containing pict-rs and its dependencies. It will also create a `result` symlink in the
+pict-rs directory that links to the newly built package. The contents of `result` should be a single
+folder `bin` with a single file `pict-rs` inside. This file is a shell script that invokes the
+`pict-rs` binary with the required `$PATH` to find imagemagick 7, ffmpeg 6, and exiftool. You can
+treat this shell script as if it were the true pict-rs binary, passing it the same arguments you
+would pict-rs.
+
+Example:
+```
+./result/bin/pict-rs -c dev.toml run
+```
 
 
 ### API
