@@ -461,6 +461,7 @@ where
 }
 
 impl Repo {
+    #[tracing::instrument]
     pub(crate) fn open(config: config::Repo) -> color_eyre::Result<Self> {
         match config {
             config::Repo::Sled(config::Sled {

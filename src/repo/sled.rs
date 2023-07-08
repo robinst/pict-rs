@@ -71,6 +71,7 @@ pub(crate) struct SledRepo {
 }
 
 impl SledRepo {
+    #[tracing::instrument(skip(db))]
     pub(crate) fn new(db: Db) -> Result<Self, SledError> {
         Ok(SledRepo {
             healthz_count: Arc::new(AtomicU64::new(0)),

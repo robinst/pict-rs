@@ -44,6 +44,7 @@ pub(super) struct Old {
 }
 
 impl Old {
+    #[tracing::instrument]
     pub(super) fn open(path: PathBuf) -> color_eyre::Result<Option<Self>> {
         if let Some(db) = migrate::LatestDb::exists(path).migrate()? {
             Ok(Some(Self {

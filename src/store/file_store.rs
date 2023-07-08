@@ -162,12 +162,11 @@ impl Store for FileStore {
 }
 
 impl FileStore {
-    pub(crate) async fn build(root_dir: PathBuf, repo: Repo) -> Result<Self, StoreError> {
+    #[tracing::instrument(skip(repo))]
+    pub(crate) async fn build(root_dir: PathBuf, repo: Repo) -> color_eyre::Result<Self> {
         let path_gen = init_generator(&repo).await?;
 
-        tokio::fs::create_dir_all(&root_dir)
-            .await
-            .map_err(FileError::from)?;
+        tokio::fs::create_dir_all(&root_dir).await?;
 
         Ok(FileStore {
             root_dir,

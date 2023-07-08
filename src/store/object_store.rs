@@ -428,6 +428,7 @@ impl Store for ObjectStore {
 
 impl ObjectStore {
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(skip(access_key, secret_key, session_token, repo))]
     pub(crate) async fn build(
         endpoint: Url,
         bucket_name: String,
