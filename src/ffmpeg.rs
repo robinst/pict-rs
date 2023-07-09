@@ -4,7 +4,7 @@ mod tests;
 use crate::{
     config::{AudioCodec, ImageFormat, MediaConfiguration, VideoCodec},
     error::{Error, UploadError},
-    magick::{Details, ValidInputType},
+    magick::{Details, ParseDetailsError, ValidInputType},
     process::Process,
     store::{Store, StoreError},
 };
@@ -498,7 +498,8 @@ fn parse_details(output: DetailsOutput) -> Result<Option<Details>, Error> {
                 stream.height,
                 stream.nb_read_frames.as_deref(),
                 *v,
-            );
+            )
+            .map_err(Error::from);
         }
     }
 
@@ -510,9 +511,13 @@ fn parse_details_inner(
     height: usize,
     frames: Option<&str>,
     format: VideoFormat,
-) -> Result<Option<Details>, Error> {
+) -> Result<Option<Details>, ParseDetailsError> {
     let frames = frames
-        .map(|frames| frames.parse().map_err(|_| UploadError::UnsupportedFormat))
+        .map(|frames| {
+            frames
+                .parse()
+                .map_err(|_| ParseDetailsError::ParseFrames(String::from(frames)))
+        })
         .transpose()?
         .unwrap_or(1);
 

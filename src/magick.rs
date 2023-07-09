@@ -272,6 +272,9 @@ pub(crate) enum ParseDetailsError {
 
     #[error("Format is unsupported: {0}")]
     Unsupported(String),
+
+    #[error("Could not parse frame count from {0}")]
+    ParseFrames(String),
 }
 
 fn parse_details(details_output: Vec<DetailsOutput>) -> Result<Details, Error> {
@@ -297,7 +300,7 @@ fn parse_details(details_output: Vec<DetailsOutput>) -> Result<Details, Error> {
 
     if !details_output
         .iter()
-        .all(|details| &details.image.format == format)
+        .all(|details| details.image.format == format)
     {
         return Err(ParseDetailsError::MixedFormats.into());
     }

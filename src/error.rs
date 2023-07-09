@@ -90,8 +90,8 @@ pub(crate) enum UploadError {
     #[error("Provided token did not match expected token")]
     InvalidToken,
 
-    #[error("Unsupported image format")]
-    UnsupportedFormat,
+    #[error("Process endpoint was called with invalid extension")]
+    UnsupportedProcessExtension,
 
     #[error("Gif uploads are not enabled")]
     SilentVideoDisabled,
@@ -168,11 +168,11 @@ impl ResponseError for Error {
                 | UploadError::Limit(_)
                 | UploadError::NoFiles
                 | UploadError::Upload(_)
-                | UploadError::UnsupportedFormat
                 | UploadError::Store(crate::store::StoreError::Repo(
                     crate::repo::RepoError::AlreadyClaimed,
                 ))
                 | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
+                | UploadError::UnsupportedProcessExtension
                 | UploadError::SilentVideoDisabled,
             ) => StatusCode::BAD_REQUEST,
             Some(UploadError::MissingAlias) => StatusCode::NOT_FOUND,

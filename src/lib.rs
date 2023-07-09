@@ -562,7 +562,7 @@ fn prepare_process(
 
     let format = ext
         .parse::<ImageFormat>()
-        .map_err(|_| UploadError::UnsupportedFormat)?;
+        .map_err(|_| UploadError::UnsupportedProcessExtension)?;
 
     let ext = format.to_string();
 
