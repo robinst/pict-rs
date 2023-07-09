@@ -702,6 +702,7 @@ struct Sled {
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_capacity: Option<u64>,
 
+    #[arg(short, long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     export_path: Option<PathBuf>,
 }
