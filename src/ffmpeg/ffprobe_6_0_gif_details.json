@@ -1,0 +1,15 @@
+{
+    "programs": [
+
+    ],
+    "streams": [
+        {
+            "width": 160,
+            "height": 227,
+            "nb_read_frames": "28"
+        }
+    ],
+    "format": {
+        "format_name": "gif"
+    }
+}

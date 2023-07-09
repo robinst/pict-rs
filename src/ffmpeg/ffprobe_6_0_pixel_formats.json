@@ -1,0 +1,1336 @@
+{
+    "pixel_formats": [
+        {
+            "name": "yuv420p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuyv422",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb24",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr24",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv410p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv411p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "monow",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "monob",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "pal8",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuvj420p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuvj422p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuvj444p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "uyvy422",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "uyyvyy411",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr8",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr4",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr4_byte",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb8",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb4",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb4_byte",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "nv12",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "nv21",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "argb",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "rgba",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "abgr",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "bgra",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "gray16be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray16le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv440p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuvj440p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuva420p",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "rgb48be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb48le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb565be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb565le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb555be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb555le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr565be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr565le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr555be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr555le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "vaapi",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p16le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p16be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p16le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p16be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p16le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p16be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "dxva2_vld",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb444le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb444be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr444le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr444be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "ya8",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "bgr48be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr48le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p9be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p9le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p10be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p10le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p10be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p10le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p9be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p9le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p10be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p10le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p9be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p9le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp9be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp9le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp10be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp10le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp16be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp16le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuva422p",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva444p",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva420p9be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva420p9le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva422p9be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva422p9le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva444p9be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva444p9le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva420p10be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva420p10le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva422p10be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva422p10le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva444p10be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva444p10le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva420p16be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva420p16le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva422p16be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva422p16le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva444p16be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva444p16le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "vdpau",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "xyz12le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "xyz12be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "nv16",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "nv20le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "nv20be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgba64be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "rgba64le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "bgra64be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "bgra64le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yvyu422",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "ya16be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "ya16le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "gbrap",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "gbrap16be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "gbrap16le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "qsv",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "mmal",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "d3d11va_vld",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "cuda",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "0rgb",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgb0",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "0bgr",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bgr0",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p12be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p12le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p14be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv420p14le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p12be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p12le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p14be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv422p14le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p12be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p12le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p14be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv444p14le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp12be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp12le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp14be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrp14le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuvj411p",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_bggr8",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_rggb8",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_gbrg8",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_grbg8",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_bggr16le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_bggr16be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_rggb16le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_rggb16be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_gbrg16le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_gbrg16be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_grbg16le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "bayer_grbg16be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "xvmc",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv440p10le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv440p10be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv440p12le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuv440p12be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "ayuv64le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "ayuv64be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "videotoolbox_vld",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p010le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p010be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrap12be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "gbrap12le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "gbrap10be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "gbrap10le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "mediacodec",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray12be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray12le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray10be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray10le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p016le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p016be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "d3d11",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray9be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray9le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrpf32be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrpf32le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gbrapf32be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "gbrapf32le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "drm_prime",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "opencl",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray14be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "gray14le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "grayf32be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "grayf32le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "yuva422p12be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva422p12le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva444p12be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "yuva444p12le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "nv24",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "nv42",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "vulkan",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "y210be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "y210le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "x2rgb10le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "x2rgb10be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "x2bgr10le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "x2bgr10be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p210be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p210le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p410be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p410le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p216be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p216le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p416be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p416le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "vuya",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "rgbaf16be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "rgbaf16le",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "vuyx",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p012le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "p012be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "y212be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "y212le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "xv30be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "xv30le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "xv36be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "xv36le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgbf32be",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgbf32le",
+            "flags": {
+                "alpha": 0
+            }
+        },
+        {
+            "name": "rgbaf32be",
+            "flags": {
+                "alpha": 1
+            }
+        },
+        {
+            "name": "rgbaf32le",
+            "flags": {
+                "alpha": 1
+            }
+        }
+    ]
+}

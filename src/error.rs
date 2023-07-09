@@ -66,6 +66,9 @@ pub(crate) enum UploadError {
     #[error("Error in store")]
     Store(#[source] crate::store::StoreError),
 
+    #[error("Error parsing image details")]
+    ParseDetails(#[from] crate::magick::ParseDetailsError),
+
     #[error("Provided process path is invalid")]
     ParsePath,
 

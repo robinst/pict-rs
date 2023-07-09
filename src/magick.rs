@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate::{
     config::{ImageFormat, VideoCodec},
     error::{Error, UploadError},
@@ -123,7 +126,7 @@ impl ValidInputType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Details {
     pub(crate) mime_type: mime::Mime,
     pub(crate) width: usize,
@@ -175,18 +178,33 @@ pub(crate) async fn details_bytes(
         "-".to_owned()
     };
 
-    let process = Process::run(
-        "magick",
-        &["identify", "-ping", "-format", "%w %h | %m\n", &last_arg],
-    )?;
+    let process = Process::run("magick", &["convert", "-ping", &last_arg, "JSON:"])?;
 
     let mut reader = process.bytes_read(input);
 
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes).await?;
-    let s = String::from_utf8_lossy(&bytes);
 
-    parse_details(s)
+    let details_output: Vec<DetailsOutput> = serde_json::from_slice(&bytes)?;
+
+    parse_details(details_output)
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DetailsOutput {
+    image: Image,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct Image {
+    format: String,
+    geometry: Geometry,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct Geometry {
+    width: usize,
+    height: usize,
 }
 
 #[tracing::instrument(skip(store))]
@@ -217,27 +235,21 @@ pub(crate) async fn details_store<S: Store + 'static>(
         "-".to_owned()
     };
 
-    let process = Process::run(
-        "magick",
-        &["identify", "-ping", "-format", "%w %h | %m\n", &last_arg],
-    )?;
+    let process = Process::run("magick", &["convert", "-ping", &last_arg, "JSON:"])?;
 
     let mut reader = process.store_read(store, identifier);
 
     let mut output = Vec::new();
     reader.read_to_end(&mut output).await?;
 
-    let s = String::from_utf8_lossy(&output);
+    let details_output: Vec<DetailsOutput> = serde_json::from_slice(&output)?;
 
-    parse_details(s)
+    parse_details(details_output)
 }
 
 #[tracing::instrument]
 pub(crate) async fn details_file(path_str: &str) -> Result<Details, Error> {
-    let process = Process::run(
-        "magick",
-        &["identify", "-ping", "-format", "%w %h | %m\n", path_str],
-    )?;
+    let process = Process::run("magick", &["convert", "-ping", path_str, "JSON:"])?;
 
     let mut reader = process.read();
 
@@ -245,46 +257,49 @@ pub(crate) async fn details_file(path_str: &str) -> Result<Details, Error> {
     reader.read_to_end(&mut output).await?;
     tokio::fs::remove_file(path_str).await?;
 
-    let s = String::from_utf8_lossy(&output);
+    let details_output: Vec<DetailsOutput> = serde_json::from_slice(&output)?;
 
-    parse_details(s)
+    parse_details(details_output)
 }
 
-fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
-    let frames = s.lines().count();
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ParseDetailsError {
+    #[error("No frames present in image")]
+    NoFrames,
 
-    let mut lines = s.lines();
-    let first = lines.next().ok_or(UploadError::UnsupportedFormat)?;
+    #[error("Multiple image formats used in same file")]
+    MixedFormats,
 
-    let mut segments = first.split('|');
+    #[error("Format is unsupported: {0}")]
+    Unsupported(String),
+}
 
-    let dimensions = segments
-        .next()
-        .ok_or(UploadError::UnsupportedFormat)?
-        .trim();
-    tracing::debug!("dimensions: {}", dimensions);
-    let mut dims = dimensions.split(' ');
-    let width = dims
-        .next()
-        .ok_or(UploadError::UnsupportedFormat)?
-        .trim()
-        .parse()
-        .map_err(|_| UploadError::UnsupportedFormat)?;
-    let height = dims
-        .next()
-        .ok_or(UploadError::UnsupportedFormat)?
-        .trim()
-        .parse()
-        .map_err(|_| UploadError::UnsupportedFormat)?;
+fn parse_details(details_output: Vec<DetailsOutput>) -> Result<Details, Error> {
+    let frames = details_output.len();
 
-    let format = segments
-        .next()
-        .ok_or(UploadError::UnsupportedFormat)?
-        .trim();
+    if frames == 0 {
+        return Err(ParseDetailsError::NoFrames.into());
+    }
+
+    let width = details_output
+        .iter()
+        .map(|details| details.image.geometry.width)
+        .max()
+        .expect("Nonempty vector");
+    let height = details_output
+        .iter()
+        .map(|details| details.image.geometry.height)
+        .max()
+        .expect("Nonempty vector");
+
+    let format = details_output[0].image.format.as_str();
     tracing::debug!("format: {}", format);
 
-    if !lines.all(|item| item.ends_with(format)) {
-        return Err(UploadError::UnsupportedFormat.into());
+    if !details_output
+        .iter()
+        .all(|details| &details.image.format == format)
+    {
+        return Err(ParseDetailsError::MixedFormats.into());
     }
 
     let mime_type = match format {
@@ -296,7 +311,7 @@ fn parse_details(s: std::borrow::Cow<'_, str>) -> Result<Details, Error> {
         "JXL" => image_jxl(),
         "PNG" => mime::IMAGE_PNG,
         "WEBP" => image_webp(),
-        _ => return Err(UploadError::UnsupportedFormat.into()),
+        e => return Err(ParseDetailsError::Unsupported(String::from(e)).into()),
     };
 
     Ok(Details {
@@ -368,7 +383,7 @@ impl Details {
             (mime::IMAGE, subtype) if subtype.as_str() == "jxl" => ValidInputType::Jxl,
             (mime::IMAGE, mime::PNG) => ValidInputType::Png,
             (mime::IMAGE, subtype) if subtype.as_str() == "webp" => ValidInputType::Webp,
-            _ => return Err(UploadError::UnsupportedFormat.into()),
+            _ => return Err(ParseDetailsError::Unsupported(self.mime_type.to_string()).into()),
         };
 
         Ok(input_type)

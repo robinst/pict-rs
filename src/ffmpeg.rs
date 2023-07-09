@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate::{
     config::{AudioCodec, ImageFormat, MediaConfiguration, VideoCodec},
     error::{Error, UploadError},
@@ -368,6 +371,22 @@ pub(crate) async fn details_bytes(input: Bytes) -> Result<Option<Details>, Error
     .await
 }
 
+#[derive(serde::Deserialize)]
+struct PixelFormatOutput {
+    pixel_formats: Vec<PixelFormat>,
+}
+
+#[derive(serde::Deserialize)]
+struct PixelFormat {
+    name: String,
+    flags: Flags,
+}
+
+#[derive(serde::Deserialize)]
+struct Flags {
+    alpha: usize,
+}
+
 async fn alpha_pixel_formats() -> Result<HashSet<String>, Error> {
     let process = Process::run(
         "ffprobe",
@@ -378,33 +397,49 @@ async fn alpha_pixel_formats() -> Result<HashSet<String>, Error> {
             "pixel_format=name:flags=alpha",
             "-of",
             "compact=p=0",
+            "-print_format",
+            "json",
         ],
     )?;
 
     let mut output = Vec::new();
     process.read().read_to_end(&mut output).await?;
-    let output = String::from_utf8_lossy(&output);
-    let formats = output
-        .split('\n')
-        .filter_map(|format| {
-            if format.is_empty() {
+
+    let formats: PixelFormatOutput = serde_json::from_slice(&output)?;
+
+    Ok(parse_pixel_formats(formats))
+}
+
+fn parse_pixel_formats(formats: PixelFormatOutput) -> HashSet<String> {
+    formats
+        .pixel_formats
+        .into_iter()
+        .filter_map(|PixelFormat { name, flags }| {
+            if flags.alpha == 0 {
                 return None;
             }
 
-            if !format.ends_with('1') {
-                return None;
-            }
-
-            Some(
-                format
-                    .trim_start_matches("name=")
-                    .trim_end_matches("|flags:alpha=1")
-                    .to_string(),
-            )
+            Some(name)
         })
-        .collect();
+        .collect()
+}
 
-    Ok(formats)
+#[derive(Debug, serde::Deserialize)]
+struct DetailsOutput {
+    streams: [Stream; 1],
+    format: Format,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct Stream {
+    width: usize,
+    height: usize,
+    nb_read_frames: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct Format {
+    format_name: String,
 }
 
 #[tracing::instrument(skip(f))]
@@ -435,46 +470,35 @@ where
             "stream=width,height,nb_read_frames:format=format_name",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
+            "-print_format",
+            "json",
             input_file_str,
         ],
     )?;
 
     let mut output = Vec::new();
     process.read().read_to_end(&mut output).await?;
-    let output = String::from_utf8_lossy(&output);
     tokio::fs::remove_file(input_file_str).await?;
+
+    let output: DetailsOutput = serde_json::from_slice(&output)?;
 
     parse_details(output)
 }
 
-fn parse_details(output: std::borrow::Cow<'_, str>) -> Result<Option<Details>, Error> {
-    tracing::debug!("OUTPUT: {}", output);
+fn parse_details(output: DetailsOutput) -> Result<Option<Details>, Error> {
+    tracing::debug!("OUTPUT: {:?}", output);
 
-    let mut lines = output.lines();
-
-    let width = match lines.next() {
-        Some(line) => line,
-        None => return Ok(None),
-    };
-
-    let height = match lines.next() {
-        Some(line) => line,
-        None => return Ok(None),
-    };
-
-    let frames = match lines.next() {
-        Some(line) => line,
-        None => return Ok(None),
-    };
-
-    let formats = match lines.next() {
-        Some(line) => line,
-        None => return Ok(None),
-    };
+    let [stream] = output.streams;
+    let Format { format_name } = output.format;
 
     for (k, v) in FORMAT_MAPPINGS {
-        if formats.contains(k) {
-            return parse_details_inner(width, height, frames, *v);
+        if format_name.contains(k) {
+            return parse_details_inner(
+                stream.width,
+                stream.height,
+                stream.nb_read_frames.as_deref(),
+                *v,
+            );
         }
     }
 
@@ -482,14 +506,15 @@ fn parse_details(output: std::borrow::Cow<'_, str>) -> Result<Option<Details>, E
 }
 
 fn parse_details_inner(
-    width: &str,
-    height: &str,
-    frames: &str,
+    width: usize,
+    height: usize,
+    frames: Option<&str>,
     format: VideoFormat,
 ) -> Result<Option<Details>, Error> {
-    let width = width.parse().map_err(|_| UploadError::UnsupportedFormat)?;
-    let height = height.parse().map_err(|_| UploadError::UnsupportedFormat)?;
-    let frames = frames.parse().map_err(|_| UploadError::UnsupportedFormat)?;
+    let frames = frames
+        .map(|frames| frames.parse().map_err(|_| UploadError::UnsupportedFormat))
+        .transpose()?
+        .unwrap_or(1);
 
     // Probably a still image. ffmpeg thinks AVIF is an mp4
     if frames == 1 {
