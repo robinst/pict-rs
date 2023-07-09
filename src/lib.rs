@@ -1101,7 +1101,7 @@ fn build_client() -> awc::Client {
     Client::builder()
         .connector(connector)
         .wrap(Tracing)
-        .add_default_header(("User-Agent", "pict-rs v0.4.0-main"))
+        .add_default_header(("User-Agent", "pict-rs v0.4.1"))
         .timeout(Duration::from_secs(30))
         .finish()
 }
