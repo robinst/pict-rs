@@ -536,6 +536,10 @@ files when storing on the local filesystem.
 The `sled-repo` folder is generally small compared to the `files` folder, and backing it up can be
 as simple as copying the folder somewhere else. I recommend doing so while pict-rs is not running.
 
+If you can't stop pict-rs, but would like to back up the database, there is an internal endpoint at
+`/internal/export` documented in [Api](#api) that can be used to produce a copy of the current
+database for easy backups.
+
 ### 0.3 to 0.4 Migration Guide
 pict-rs will automatically migrate from the 0.3 db format to the 0.4 db format on the first launch
 of 0.4. If you are running the provided docker container without any custom configuration, there are
