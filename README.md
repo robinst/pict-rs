@@ -375,8 +375,9 @@ pict-rs offers the following endpoints:
         ```
     - 204 No Content (Upload validation and ingest is not complete, and waiting timed out)
         In this case, trying again is fine
-- `GET /image/original/{file}` for getting a full-resolution image. `file` here is the `file` key from the
+- `GET /image/original/{file}` get a full-resolution image. `file` here is the `file` key from the
     `/image` endpoint's JSON
+- `HEAD /image/original/{file}` Returns just the headers from the analogous `GET` request.
 - `GET /image/details/original/{file}` for getting the details of a full-resolution image.
     The returned JSON is structured like so:
     ```json
@@ -421,6 +422,8 @@ pict-rs offers the following endpoints:
     GET /image/process.jpg?src=asdf.png&thumbnail=256&blur=3.0
     ```
     which would create a 256x256px JPEG thumbnail and blur it
+- `HEAD /image/process.{ext}?src={file}` Returns just the headers from the analogous `GET` request.
+    Returns 404 if the processed image has not been generated yet.
 - `GET /image/process_backgrounded.{ext}?src={file}&...` queue transformations to be applied to a
     given file. This accepts the same arguments as the `process.{ext}` endpoint, but does not wait
     for the processing to complete.
