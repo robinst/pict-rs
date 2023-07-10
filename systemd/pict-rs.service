@@ -1,14 +1,16 @@
 [Unit]
 Description=A simple image host
 Documentation=https://git.asonix.dog/asonix/pict-rs
-After=network-online.target firewalld.service
+After=network-online.target
 
 [Service]
 Type=simple
 Environment="PICTRS__SERVER__ADDRESS=127.0.0.1:8080"
+Environment="PICTRS__SERVER__API_KEY=SOME-REALLY-SECRET-KEY"
 Environment="PICTRS__TRACING__LOGGING__TARGETS=warn"
 Environment="PICTRS__MEDIA__FORMAT=avif"
-Environment="PICTRS__REPO__PATH=/opt/pict-rs/sled"
-Environment="PICTRS__STORE__PATH=/opt/pict-rs/files"
+Environment="PICTRS__REPO__PATH=/var/lib/pict-rs/sled"
+Environment="PICTRS__REPO__EXPORT_PATH=/var/lib/pict-rs/sled"
+Environment="PICTRS__STORE__PATH=/var/lib/pict-rs/files"
 ExecStart=/usr/local/bin/pict-rs run
 Restart=on-failure
