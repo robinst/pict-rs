@@ -31,7 +31,6 @@
           nativeBuildInputs = [
             cargo
             cargo-outdated
-            cargo-zigbuild
             clippy
             exiftool
             ffmpeg_6-full
