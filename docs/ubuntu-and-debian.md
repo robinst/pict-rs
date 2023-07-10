@@ -109,7 +109,7 @@ too.
 ```service
 [Service]
 Type=simple
-ExecStart=/nix/store/lblq0ns1p86qnpm3kd86ljpg2yx2i06b-pict-rs-0.4.1 run
+ExecStart=/nix/store/lblq0ns1p86qnpm3kd86ljpg2yx2i06b-pict-rs-0.4.1/bin/pict-rs run
 Restart=on-failure
 ```
 
@@ -145,7 +145,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/nix/store/lblq0ns1p86qnpm3kd86ljpg2yx2i06b-pict-rs-0.4.1 run
+ExecStart=/nix/store/lblq0ns1p86qnpm3kd86ljpg2yx2i06b-pict-rs-0.4.1/bin/pict-rs run
 Restart=on-failure
 Environment="PICTRS__SERVER__ADDRESS=127.0.0.1:8080"
 Environment="PICTRS__SERVER__API_KEY=SOME-REALLY-SECRET-KEY"
@@ -165,7 +165,7 @@ Instead of configuring pict-rs with environment variables, we can instead use a 
 First, we'll update our `ExecStart` entry to tell pict-rs to load the configuration file. 
 
 ```service
-ExecStart=/nix/store/lblq0ns1p86qnpm3kd86ljpg2yx2i06b-pict-rs-0.4.1 -c /etc/pict-rs.toml run
+ExecStart=/nix/store/lblq0ns1p86qnpm3kd86ljpg2yx2i06b-pict-rs-0.4.1/bin/pict-rs -c /etc/pict-rs.toml run
 ```
 
 Our full service file should now look like this:
@@ -177,7 +177,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/nix/store/lblq0ns1p86qnpm3kd86ljpg2yx2i06b-pict-rs-0.4.1 -c /etc/pict-rs.toml run
+ExecStart=/nix/store/lblq0ns1p86qnpm3kd86ljpg2yx2i06b-pict-rs-0.4.1/bin/pict-rs -c /etc/pict-rs.toml run
 Restart=on-failure
 ```
 
