@@ -12,5 +12,26 @@ Environment="PICTRS__MEDIA__FORMAT=avif"
 Environment="PICTRS__REPO__PATH=/var/lib/pict-rs/sled"
 Environment="PICTRS__REPO__EXPORT_PATH=/var/lib/pict-rs/sled"
 Environment="PICTRS__STORE__PATH=/var/lib/pict-rs/files"
+
+# Replace with the path to your installation of pict-rs
 ExecStart=/usr/local/bin/pict-rs run
 Restart=on-failure
+
+# Hardening, taken from user cablepick on matrix
+#
+# CAP_DAC_OVERRIDE - bypass file read, write, execute permission checks
+# CAP_KILL - bypass permission checks for sending signals
+# CAP_SYS_ADMIN - does a lot, can probably be replaced with more fine-grained capabilities
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_KILL CAP_SYS_ADMIN
+# Makes unique /tmp folder for pict-rs, separate from system /tmp
+PrivateTmp=true
+# Makes /usr, /boot, /efi , and /etc read-only for pict-rs
+# Could maybe be replaced with ProtectSystem=strict if ReadWritePaths is set to /var/lib/pict-rs
+ProtectSystem=full
+# Makes /home and /root directories appear empty to pict-rs
+ProtectHome=true
+# Only useful if running as non-root
+RemoveIPC=true
+
+[Install]
+WantedBy=multi-user.target
