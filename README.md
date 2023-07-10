@@ -250,6 +250,8 @@ A notable issue here is imagemagick 7, which is not packaged in Debian Sid and t
 in any version of Debian or Ubuntu. If you are running an ubuntu or debian system, consider using
 the [Nix](#nix) installation and run method.
 
+More information is available in the [Ubuntu and Debian docs](./docs/ubuntu-and-debian.md)
+
 ##### Compile from Source
 pict-rs can be compiled from source using a recent version of the rust compiler. I do development
 and produce releases on 1.70. pict-rs also requires the `protoc` protobuf compiler to be present at
