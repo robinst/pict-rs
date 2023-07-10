@@ -4,7 +4,7 @@ use actix_web::web::Bytes;
 use std::{
     future::Future,
     pin::Pin,
-    process::Stdio,
+    process::{ExitStatus, Stdio},
     task::{Context, Poll},
 };
 use tokio::{
@@ -41,27 +41,56 @@ pin_project_lite::pin_project! {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ProcessError {
+    #[error("Required commend {0} not found")]
+    NotFound(String),
+
+    #[error("Reached process spawn limit")]
+    LimitReached,
+
+    #[error("Failed with status {0}")]
+    Status(ExitStatus),
+
+    #[error("Unknown process error")]
+    Other(#[source] std::io::Error),
+}
+
 impl Process {
-    pub(crate) fn run(command: &str, args: &[&str]) -> std::io::Result<Self> {
-        tracing::trace_span!(parent: None, "Create command")
-            .in_scope(|| Self::spawn(Command::new(command).args(args)))
+    pub(crate) fn run(command: &str, args: &[&str]) -> Result<Self, ProcessError> {
+        let res = tracing::trace_span!(parent: None, "Create command")
+            .in_scope(|| Self::spawn(Command::new(command).args(args)));
+
+        match res {
+            Ok(this) => Ok(this),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => Err(ProcessError::NotFound(command.to_string())),
+                std::io::ErrorKind::WouldBlock => Err(ProcessError::LimitReached),
+                _ => Err(ProcessError::Other(e)),
+            },
+        }
     }
 
-    pub(crate) fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
+    fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
         tracing::trace_span!(parent: None, "Spawn command").in_scope(|| {
-            let cmd = cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+            let cmd = cmd
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .kill_on_drop(true);
 
             cmd.spawn().map(|child| Process { child })
         })
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) async fn wait(mut self) -> std::io::Result<()> {
-        let status = self.child.wait().await?;
-        if !status.success() {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, &StatusError));
+    pub(crate) async fn wait(mut self) -> Result<(), ProcessError> {
+        let res = self.child.wait().await;
+
+        match res {
+            Ok(status) if status.success() => Ok(()),
+            Ok(status) => Err(ProcessError::Status(status)),
+            Err(e) => Err(ProcessError::Other(e)),
         }
-        Ok(())
     }
 
     pub(crate) fn bytes_read(self, input: Bytes) -> impl AsyncRead + Unpin {

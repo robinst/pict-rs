@@ -3,9 +3,8 @@ mod tests;
 
 use crate::{
     config::{AudioCodec, ImageFormat, MediaConfiguration, VideoCodec},
-    error::{Error, UploadError},
-    magick::{Details, ParseDetailsError, ValidInputType},
-    process::Process,
+    magick::{Details, ParseDetailsError, ValidInputType, ValidateDetailsError},
+    process::{Process, ProcessError},
     store::{Store, StoreError},
 };
 use actix_web::web::Bytes;
@@ -26,6 +25,108 @@ enum TranscodeOutputOptions {
         video_codec: VideoCodec,
         audio_codec: Option<AudioCodec>,
     },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum VideoFormat {
+    Gif,
+    Mp4,
+    Webm,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum OutputFormat {
+    Mp4,
+    Webm,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ThumbnailFormat {
+    Jpeg,
+    // Webp,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum FileFormat {
+    Image(ImageFormat),
+    Video(VideoFormat),
+}
+
+#[derive(serde::Deserialize)]
+struct PixelFormatOutput {
+    pixel_formats: Vec<PixelFormat>,
+}
+
+#[derive(serde::Deserialize)]
+struct PixelFormat {
+    name: String,
+    flags: Flags,
+}
+
+#[derive(serde::Deserialize)]
+struct Flags {
+    alpha: usize,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FfMpegError {
+    #[error("Error in ffmpeg process")]
+    Process(#[source] ProcessError),
+
+    #[error("Error reading output")]
+    Read(#[source] std::io::Error),
+
+    #[error("Error writing bytes")]
+    Write(#[source] std::io::Error),
+
+    #[error("Invalid output format")]
+    Json(#[source] serde_json::Error),
+
+    #[error("Error creating parent directory")]
+    CreateDir(#[source] crate::store::file_store::FileError),
+
+    #[error("Error reading file to stream")]
+    ReadFile(#[source] crate::store::file_store::FileError),
+
+    #[error("Error opening file")]
+    OpenFile(#[source] std::io::Error),
+
+    #[error("Error creating file")]
+    CreateFile(#[source] std::io::Error),
+
+    #[error("Error closing file")]
+    CloseFile(#[source] std::io::Error),
+
+    #[error("Error removing file")]
+    RemoveFile(#[source] std::io::Error),
+
+    #[error("Error parsing details")]
+    Details(#[source] ParseDetailsError),
+
+    #[error("Media details are invalid")]
+    ValidateDetails(#[source] ValidateDetailsError),
+
+    #[error("Error in store")]
+    Store(#[source] StoreError),
+
+    #[error("Invalid file path")]
+    Path,
+}
+
+impl FfMpegError {
+    pub(crate) fn is_client_error(&self) -> bool {
+        // Failing validation or ffmpeg bailing probably means bad input
+        matches!(self, Self::ValidateDetails(_))
+            || matches!(self, Self::Process(ProcessError::Status(_)))
+    }
+
+    pub(crate) fn is_not_found(&self) -> bool {
+        if let Self::Store(e) = self {
+            return e.is_not_found();
+        }
+
+        false
+    }
 }
 
 impl TranscodeOptions {
@@ -98,7 +199,7 @@ impl TranscodeOptions {
         input_path: &str,
         output_path: &str,
         alpha: bool,
-    ) -> Result<Process, std::io::Error> {
+    ) -> Result<Process, ProcessError> {
         match self.output {
             TranscodeOutputOptions::Gif => Process::run("ffmpeg", &[
                 "-hide_banner",
@@ -192,31 +293,6 @@ impl TranscodeOutputOptions {
     const fn gif() -> Self {
         Self::Gif
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum VideoFormat {
-    Gif,
-    Mp4,
-    Webm,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum OutputFormat {
-    Mp4,
-    Webm,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ThumbnailFormat {
-    Jpeg,
-    // Webp,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum FileFormat {
-    Image(ImageFormat),
-    Video(VideoFormat),
 }
 
 impl ValidInputType {
@@ -342,9 +418,12 @@ const FORMAT_MAPPINGS: &[(&str, VideoFormat)] = &[
 
 pub(crate) async fn input_type_bytes(
     input: Bytes,
-) -> Result<Option<(Details, ValidInputType)>, Error> {
+) -> Result<Option<(Details, ValidInputType)>, FfMpegError> {
     if let Some(details) = details_bytes(input).await? {
-        let input_type = details.validate_input()?;
+        let input_type = details
+            .validate_input()
+            .map_err(FfMpegError::ValidateDetails)?;
+
         return Ok(Some((details, input_type)));
     }
 
@@ -354,40 +433,33 @@ pub(crate) async fn input_type_bytes(
 pub(crate) async fn details_store<S: Store>(
     store: &S,
     identifier: &S::Identifier,
-) -> Result<Option<Details>, Error> {
+) -> Result<Option<Details>, FfMpegError> {
     details_file(move |mut tmp_one| async move {
-        let stream = store.to_stream(identifier, None, None).await?;
-        tmp_one.write_from_stream(stream).await?;
+        let stream = store
+            .to_stream(identifier, None, None)
+            .await
+            .map_err(FfMpegError::Store)?;
+        tmp_one
+            .write_from_stream(stream)
+            .await
+            .map_err(FfMpegError::Write)?;
         Ok(tmp_one)
     })
     .await
 }
 
-pub(crate) async fn details_bytes(input: Bytes) -> Result<Option<Details>, Error> {
+pub(crate) async fn details_bytes(input: Bytes) -> Result<Option<Details>, FfMpegError> {
     details_file(move |mut tmp_one| async move {
-        tmp_one.write_from_bytes(input).await?;
+        tmp_one
+            .write_from_bytes(input)
+            .await
+            .map_err(FfMpegError::Write)?;
         Ok(tmp_one)
     })
     .await
 }
 
-#[derive(serde::Deserialize)]
-struct PixelFormatOutput {
-    pixel_formats: Vec<PixelFormat>,
-}
-
-#[derive(serde::Deserialize)]
-struct PixelFormat {
-    name: String,
-    flags: Flags,
-}
-
-#[derive(serde::Deserialize)]
-struct Flags {
-    alpha: usize,
-}
-
-async fn alpha_pixel_formats() -> Result<HashSet<String>, Error> {
+async fn alpha_pixel_formats() -> Result<HashSet<String>, FfMpegError> {
     let process = Process::run(
         "ffprobe",
         &[
@@ -400,12 +472,17 @@ async fn alpha_pixel_formats() -> Result<HashSet<String>, Error> {
             "-print_format",
             "json",
         ],
-    )?;
+    )
+    .map_err(FfMpegError::Process)?;
 
     let mut output = Vec::new();
-    process.read().read_to_end(&mut output).await?;
+    process
+        .read()
+        .read_to_end(&mut output)
+        .await
+        .map_err(FfMpegError::Read)?;
 
-    let formats: PixelFormatOutput = serde_json::from_slice(&output)?;
+    let formats: PixelFormatOutput = serde_json::from_slice(&output).map_err(FfMpegError::Json)?;
 
     Ok(parse_pixel_formats(formats))
 }
@@ -443,20 +520,22 @@ struct Format {
 }
 
 #[tracing::instrument(skip(f))]
-async fn details_file<F, Fut>(f: F) -> Result<Option<Details>, Error>
+async fn details_file<F, Fut>(f: F) -> Result<Option<Details>, FfMpegError>
 where
     F: FnOnce(crate::file::File) -> Fut,
-    Fut: std::future::Future<Output = Result<crate::file::File, Error>>,
+    Fut: std::future::Future<Output = Result<crate::file::File, FfMpegError>>,
 {
     let input_file = crate::tmp_file::tmp_file(None);
-    let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
+    let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
-        .map_err(StoreError::from)?;
+        .map_err(FfMpegError::CreateDir)?;
 
-    let tmp_one = crate::file::File::create(&input_file).await?;
+    let tmp_one = crate::file::File::create(&input_file)
+        .await
+        .map_err(FfMpegError::CreateFile)?;
     let tmp_one = (f)(tmp_one).await?;
-    tmp_one.close().await?;
+    tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
 
     let process = Process::run(
         "ffprobe",
@@ -474,18 +553,25 @@ where
             "json",
             input_file_str,
         ],
-    )?;
+    )
+    .map_err(FfMpegError::Process)?;
 
     let mut output = Vec::new();
-    process.read().read_to_end(&mut output).await?;
-    tokio::fs::remove_file(input_file_str).await?;
+    process
+        .read()
+        .read_to_end(&mut output)
+        .await
+        .map_err(FfMpegError::Read)?;
+    tokio::fs::remove_file(input_file_str)
+        .await
+        .map_err(FfMpegError::RemoveFile)?;
 
-    let output: DetailsOutput = serde_json::from_slice(&output)?;
+    let output: DetailsOutput = serde_json::from_slice(&output).map_err(FfMpegError::Json)?;
 
     parse_details(output)
 }
 
-fn parse_details(output: DetailsOutput) -> Result<Option<Details>, Error> {
+fn parse_details(output: DetailsOutput) -> Result<Option<Details>, FfMpegError> {
     tracing::debug!("OUTPUT: {:?}", output);
 
     let [stream] = output.streams;
@@ -499,7 +585,7 @@ fn parse_details(output: DetailsOutput) -> Result<Option<Details>, Error> {
                 stream.nb_read_frames.as_deref(),
                 *v,
             )
-            .map_err(Error::from);
+            .map_err(FfMpegError::Details);
         }
     }
 
@@ -534,7 +620,7 @@ fn parse_details_inner(
     }))
 }
 
-async fn pixel_format(input_file: &str) -> Result<String, Error> {
+async fn pixel_format(input_file: &str) -> Result<String, FfMpegError> {
     let process = Process::run(
         "ffprobe",
         &[
@@ -548,10 +634,15 @@ async fn pixel_format(input_file: &str) -> Result<String, Error> {
             "compact=p=0:nk=1",
             input_file,
         ],
-    )?;
+    )
+    .map_err(FfMpegError::Process)?;
 
     let mut output = Vec::new();
-    process.read().read_to_end(&mut output).await?;
+    process
+        .read()
+        .read_to_end(&mut output)
+        .await
+        .map_err(FfMpegError::Read)?;
     Ok(String::from_utf8_lossy(&output).trim().to_string())
 }
 
@@ -559,22 +650,27 @@ async fn pixel_format(input_file: &str) -> Result<String, Error> {
 pub(crate) async fn transcode_bytes(
     input: Bytes,
     transcode_options: TranscodeOptions,
-) -> Result<impl AsyncRead + Unpin, Error> {
+) -> Result<impl AsyncRead + Unpin, FfMpegError> {
     let input_file = crate::tmp_file::tmp_file(Some(transcode_options.input_file_extension()));
-    let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
+    let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
-        .map_err(StoreError::from)?;
+        .map_err(FfMpegError::CreateDir)?;
 
     let output_file = crate::tmp_file::tmp_file(Some(transcode_options.output_file_extension()));
-    let output_file_str = output_file.to_str().ok_or(UploadError::Path)?;
+    let output_file_str = output_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&output_file)
         .await
-        .map_err(StoreError::from)?;
+        .map_err(FfMpegError::CreateDir)?;
 
-    let mut tmp_one = crate::file::File::create(&input_file).await?;
-    tmp_one.write_from_bytes(input).await?;
-    tmp_one.close().await?;
+    let mut tmp_one = crate::file::File::create(&input_file)
+        .await
+        .map_err(FfMpegError::CreateFile)?;
+    tmp_one
+        .write_from_bytes(input)
+        .await
+        .map_err(FfMpegError::Write)?;
+    tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
 
     let alpha = if transcode_options.supports_alpha() {
         static ALPHA_PIXEL_FORMATS: OnceCell<HashSet<String>> = OnceCell::new();
@@ -594,16 +690,22 @@ pub(crate) async fn transcode_bytes(
         false
     };
 
-    let process = transcode_options.execute(input_file_str, output_file_str, alpha)?;
+    let process = transcode_options
+        .execute(input_file_str, output_file_str, alpha)
+        .map_err(FfMpegError::Process)?;
 
-    process.wait().await?;
-    tokio::fs::remove_file(input_file).await?;
+    process.wait().await.map_err(FfMpegError::Process)?;
+    tokio::fs::remove_file(input_file)
+        .await
+        .map_err(FfMpegError::RemoveFile)?;
 
-    let tmp_two = crate::file::File::open(&output_file).await?;
+    let tmp_two = crate::file::File::open(&output_file)
+        .await
+        .map_err(FfMpegError::OpenFile)?;
     let stream = tmp_two
         .read_to_stream(None, None)
         .await
-        .map_err(StoreError::from)?;
+        .map_err(FfMpegError::ReadFile)?;
     let reader = tokio_util::io::StreamReader::new(stream);
     let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, output_file);
 
@@ -616,24 +718,31 @@ pub(crate) async fn thumbnail<S: Store>(
     from: S::Identifier,
     input_format: VideoFormat,
     format: ThumbnailFormat,
-) -> Result<impl AsyncRead + Unpin, Error> {
+) -> Result<impl AsyncRead + Unpin, FfMpegError> {
     let input_file = crate::tmp_file::tmp_file(Some(input_format.to_file_extension()));
-    let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
+    let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
-        .map_err(StoreError::from)?;
+        .map_err(FfMpegError::CreateDir)?;
 
     let output_file = crate::tmp_file::tmp_file(Some(format.to_file_extension()));
-    let output_file_str = output_file.to_str().ok_or(UploadError::Path)?;
+    let output_file_str = output_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&output_file)
         .await
-        .map_err(StoreError::from)?;
+        .map_err(FfMpegError::CreateDir)?;
 
-    let mut tmp_one = crate::file::File::create(&input_file).await?;
+    let mut tmp_one = crate::file::File::create(&input_file)
+        .await
+        .map_err(FfMpegError::CreateFile)?;
+    let stream = store
+        .to_stream(&from, None, None)
+        .await
+        .map_err(FfMpegError::Store)?;
     tmp_one
-        .write_from_stream(store.to_stream(&from, None, None).await?)
-        .await?;
-    tmp_one.close().await?;
+        .write_from_stream(stream)
+        .await
+        .map_err(FfMpegError::Write)?;
+    tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
 
     let process = Process::run(
         "ffmpeg",
@@ -651,16 +760,21 @@ pub(crate) async fn thumbnail<S: Store>(
             format.as_ffmpeg_format(),
             output_file_str,
         ],
-    )?;
+    )
+    .map_err(FfMpegError::Process)?;
 
-    process.wait().await?;
-    tokio::fs::remove_file(input_file).await?;
+    process.wait().await.map_err(FfMpegError::Process)?;
+    tokio::fs::remove_file(input_file)
+        .await
+        .map_err(FfMpegError::RemoveFile)?;
 
-    let tmp_two = crate::file::File::open(&output_file).await?;
+    let tmp_two = crate::file::File::open(&output_file)
+        .await
+        .map_err(FfMpegError::OpenFile)?;
     let stream = tmp_two
         .read_to_stream(None, None)
         .await
-        .map_err(StoreError::from)?;
+        .map_err(FfMpegError::ReadFile)?;
     let reader = tokio_util::io::StreamReader::new(stream);
     let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, output_file);
 

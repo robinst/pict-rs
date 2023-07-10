@@ -3,16 +3,67 @@ mod tests;
 
 use crate::{
     config::{ImageFormat, VideoCodec},
-    error::{Error, UploadError},
-    process::Process,
+    process::{Process, ProcessError},
     repo::Alias,
-    store::{Store, StoreError},
+    store::Store,
 };
 use actix_web::web::Bytes;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    process::Command,
-};
+use tokio::io::{AsyncRead, AsyncReadExt};
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum MagickError {
+    #[error("Error in imagemagick process")]
+    Process(#[source] ProcessError),
+
+    #[error("Error parsing details")]
+    ParseDetails(#[source] ParseDetailsError),
+
+    #[error("Media details are invalid")]
+    ValidateDetails(#[source] ValidateDetailsError),
+
+    #[error("Invalid output format")]
+    Json(#[source] serde_json::Error),
+
+    #[error("Error reading bytes")]
+    Read(#[source] std::io::Error),
+
+    #[error("Error writing bytes")]
+    Write(#[source] std::io::Error),
+
+    #[error("Error creating file")]
+    CreateFile(#[source] std::io::Error),
+
+    #[error("Error creating directory")]
+    CreateDir(#[source] crate::store::file_store::FileError),
+
+    #[error("Error reading file")]
+    Store(#[source] crate::store::StoreError),
+
+    #[error("Error closing file")]
+    CloseFile(#[source] std::io::Error),
+
+    #[error("Error removing file")]
+    RemoveFile(#[source] std::io::Error),
+
+    #[error("Invalid file path")]
+    Path,
+}
+
+impl MagickError {
+    pub(crate) fn is_client_error(&self) -> bool {
+        // Failing validation or imagemagick bailing probably means bad input
+        matches!(self, Self::ValidateDetails(_))
+            || matches!(self, Self::Process(ProcessError::Status(_)))
+    }
+
+    pub(crate) fn is_not_found(&self) -> bool {
+        if let Self::Store(e) = self {
+            return e.is_not_found();
+        }
+
+        false
+    }
+}
 
 pub(crate) fn details_hint(alias: &Alias) -> Option<ValidInputType> {
     let ext = alias.extension()?;
@@ -138,7 +189,7 @@ pub(crate) struct Details {
 pub(crate) fn convert_bytes_read(
     input: Bytes,
     format: ImageFormat,
-) -> std::io::Result<impl AsyncRead + Unpin> {
+) -> Result<impl AsyncRead + Unpin, MagickError> {
     let process = Process::run(
         "magick",
         &[
@@ -148,7 +199,8 @@ pub(crate) fn convert_bytes_read(
             "-strip",
             format!("{}:-", format.as_magick_format()).as_str(),
         ],
-    )?;
+    )
+    .map_err(MagickError::Process)?;
 
     Ok(process.bytes_read(input))
 }
@@ -157,17 +209,22 @@ pub(crate) fn convert_bytes_read(
 pub(crate) async fn details_bytes(
     input: Bytes,
     hint: Option<ValidInputType>,
-) -> Result<Details, Error> {
+) -> Result<Details, MagickError> {
     if let Some(hint) = hint.and_then(|hint| hint.video_hint()) {
         let input_file = crate::tmp_file::tmp_file(Some(hint));
-        let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
+        let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
         crate::store::file_store::safe_create_parent(&input_file)
             .await
-            .map_err(StoreError::from)?;
+            .map_err(MagickError::CreateDir)?;
 
-        let mut tmp_one = crate::file::File::create(&input_file).await?;
-        tmp_one.write_from_bytes(input).await?;
-        tmp_one.close().await?;
+        let mut tmp_one = crate::file::File::create(&input_file)
+            .await
+            .map_err(MagickError::CreateFile)?;
+        tmp_one
+            .write_from_bytes(input)
+            .await
+            .map_err(MagickError::Write)?;
+        tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
         return details_file(input_file_str).await;
     }
@@ -178,16 +235,21 @@ pub(crate) async fn details_bytes(
         "-".to_owned()
     };
 
-    let process = Process::run("magick", &["convert", "-ping", &last_arg, "JSON:"])?;
+    let process = Process::run("magick", &["convert", "-ping", &last_arg, "JSON:"])
+        .map_err(MagickError::Process)?;
 
     let mut reader = process.bytes_read(input);
 
     let mut bytes = Vec::new();
-    reader.read_to_end(&mut bytes).await?;
+    reader
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(MagickError::Read)?;
 
-    let details_output: Vec<DetailsOutput> = serde_json::from_slice(&bytes)?;
+    let details_output: Vec<DetailsOutput> =
+        serde_json::from_slice(&bytes).map_err(MagickError::Json)?;
 
-    parse_details(details_output)
+    parse_details(details_output).map_err(MagickError::ParseDetails)
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -212,19 +274,26 @@ pub(crate) async fn details_store<S: Store + 'static>(
     store: S,
     identifier: S::Identifier,
     hint: Option<ValidInputType>,
-) -> Result<Details, Error> {
+) -> Result<Details, MagickError> {
     if let Some(hint) = hint.and_then(|hint| hint.video_hint()) {
         let input_file = crate::tmp_file::tmp_file(Some(hint));
-        let input_file_str = input_file.to_str().ok_or(UploadError::Path)?;
+        let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
         crate::store::file_store::safe_create_parent(&input_file)
             .await
-            .map_err(StoreError::from)?;
+            .map_err(MagickError::CreateDir)?;
 
-        let mut tmp_one = crate::file::File::create(&input_file).await?;
+        let mut tmp_one = crate::file::File::create(&input_file)
+            .await
+            .map_err(MagickError::CreateFile)?;
+        let stream = store
+            .to_stream(&identifier, None, None)
+            .await
+            .map_err(MagickError::Store)?;
         tmp_one
-            .write_from_stream(store.to_stream(&identifier, None, None).await?)
-            .await?;
-        tmp_one.close().await?;
+            .write_from_stream(stream)
+            .await
+            .map_err(MagickError::Write)?;
+        tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
         return details_file(input_file_str).await;
     }
@@ -235,31 +304,43 @@ pub(crate) async fn details_store<S: Store + 'static>(
         "-".to_owned()
     };
 
-    let process = Process::run("magick", &["convert", "-ping", &last_arg, "JSON:"])?;
+    let process = Process::run("magick", &["convert", "-ping", &last_arg, "JSON:"])
+        .map_err(MagickError::Process)?;
 
     let mut reader = process.store_read(store, identifier);
 
     let mut output = Vec::new();
-    reader.read_to_end(&mut output).await?;
+    reader
+        .read_to_end(&mut output)
+        .await
+        .map_err(MagickError::Read)?;
 
-    let details_output: Vec<DetailsOutput> = serde_json::from_slice(&output)?;
+    let details_output: Vec<DetailsOutput> =
+        serde_json::from_slice(&output).map_err(MagickError::Json)?;
 
-    parse_details(details_output)
+    parse_details(details_output).map_err(MagickError::ParseDetails)
 }
 
 #[tracing::instrument]
-pub(crate) async fn details_file(path_str: &str) -> Result<Details, Error> {
-    let process = Process::run("magick", &["convert", "-ping", path_str, "JSON:"])?;
+pub(crate) async fn details_file(path_str: &str) -> Result<Details, MagickError> {
+    let process = Process::run("magick", &["convert", "-ping", path_str, "JSON:"])
+        .map_err(MagickError::Process)?;
 
     let mut reader = process.read();
 
     let mut output = Vec::new();
-    reader.read_to_end(&mut output).await?;
-    tokio::fs::remove_file(path_str).await?;
+    reader
+        .read_to_end(&mut output)
+        .await
+        .map_err(MagickError::Read)?;
+    tokio::fs::remove_file(path_str)
+        .await
+        .map_err(MagickError::RemoveFile)?;
 
-    let details_output: Vec<DetailsOutput> = serde_json::from_slice(&output)?;
+    let details_output: Vec<DetailsOutput> =
+        serde_json::from_slice(&output).map_err(MagickError::Json)?;
 
-    parse_details(details_output)
+    parse_details(details_output).map_err(MagickError::ParseDetails)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -277,11 +358,11 @@ pub(crate) enum ParseDetailsError {
     ParseFrames(String),
 }
 
-fn parse_details(details_output: Vec<DetailsOutput>) -> Result<Details, Error> {
+fn parse_details(details_output: Vec<DetailsOutput>) -> Result<Details, ParseDetailsError> {
     let frames = details_output.len();
 
     if frames == 0 {
-        return Err(ParseDetailsError::NoFrames.into());
+        return Err(ParseDetailsError::NoFrames);
     }
 
     let width = details_output
@@ -302,7 +383,7 @@ fn parse_details(details_output: Vec<DetailsOutput>) -> Result<Details, Error> {
         .iter()
         .all(|details| details.image.format == format)
     {
-        return Err(ParseDetailsError::MixedFormats.into());
+        return Err(ParseDetailsError::MixedFormats);
     }
 
     let mime_type = match format {
@@ -314,7 +395,7 @@ fn parse_details(details_output: Vec<DetailsOutput>) -> Result<Details, Error> {
         "JXL" => image_jxl(),
         "PNG" => mime::IMAGE_PNG,
         "WEBP" => image_webp(),
-        e => return Err(ParseDetailsError::Unsupported(String::from(e)).into()),
+        e => return Err(ParseDetailsError::Unsupported(String::from(e))),
     };
 
     Ok(Details {
@@ -325,23 +406,27 @@ fn parse_details(details_output: Vec<DetailsOutput>) -> Result<Details, Error> {
     })
 }
 
-pub(crate) async fn input_type_bytes(input: Bytes) -> Result<(Details, ValidInputType), Error> {
+pub(crate) async fn input_type_bytes(
+    input: Bytes,
+) -> Result<(Details, ValidInputType), MagickError> {
     let details = details_bytes(input, None).await?;
-    let input_type = details.validate_input()?;
+    let input_type = details
+        .validate_input()
+        .map_err(MagickError::ValidateDetails)?;
     Ok((details, input_type))
 }
 
-fn process_image(args: Vec<String>, format: ImageFormat) -> std::io::Result<Process> {
+fn process_image(process_args: Vec<String>, format: ImageFormat) -> Result<Process, ProcessError> {
     let command = "magick";
     let convert_args = ["convert", "-"];
     let last_arg = format!("{}:-", format.as_magick_format());
 
-    Process::spawn(
-        Command::new(command)
-            .args(convert_args)
-            .args(args)
-            .arg(last_arg),
-    )
+    let mut args = Vec::with_capacity(process_args.len() + 3);
+    args.extend_from_slice(&convert_args[..]);
+    args.extend(process_args.iter().map(|s| s.as_str()));
+    args.push(&last_arg);
+
+    Process::run(command, &args)
 }
 
 pub(crate) fn process_image_store_read<S: Store + 'static>(
@@ -349,31 +434,47 @@ pub(crate) fn process_image_store_read<S: Store + 'static>(
     identifier: S::Identifier,
     args: Vec<String>,
     format: ImageFormat,
-) -> std::io::Result<impl AsyncRead + Unpin> {
-    Ok(process_image(args, format)?.store_read(store, identifier))
+) -> Result<impl AsyncRead + Unpin, MagickError> {
+    Ok(process_image(args, format)
+        .map_err(MagickError::Process)?
+        .store_read(store, identifier))
 }
 
 pub(crate) fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
     async_read: A,
     args: Vec<String>,
     format: ImageFormat,
-) -> std::io::Result<impl AsyncRead + Unpin> {
-    Ok(process_image(args, format)?.pipe_async_read(async_read))
+) -> Result<impl AsyncRead + Unpin, MagickError> {
+    Ok(process_image(args, format)
+        .map_err(MagickError::Process)?
+        .pipe_async_read(async_read))
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ValidateDetailsError {
+    #[error("Exceeded maximum dimensions")]
+    ExceededDimensions,
+
+    #[error("Exceeded maximum frame count")]
+    TooManyFrames,
+
+    #[error("Unsupported media type: {0}")]
+    UnsupportedMediaType(String),
 }
 
 impl Details {
     #[tracing::instrument(level = "debug", name = "Validating input type")]
-    pub(crate) fn validate_input(&self) -> Result<ValidInputType, Error> {
+    pub(crate) fn validate_input(&self) -> Result<ValidInputType, ValidateDetailsError> {
         if self.width > crate::CONFIG.media.max_width
             || self.height > crate::CONFIG.media.max_height
             || self.width * self.height > crate::CONFIG.media.max_area
         {
-            return Err(UploadError::Dimensions.into());
+            return Err(ValidateDetailsError::ExceededDimensions);
         }
 
         if let Some(frames) = self.frames {
             if frames > crate::CONFIG.media.max_frame_count {
-                return Err(UploadError::Frames.into());
+                return Err(ValidateDetailsError::TooManyFrames);
             }
         }
 
@@ -386,7 +487,11 @@ impl Details {
             (mime::IMAGE, subtype) if subtype.as_str() == "jxl" => ValidInputType::Jxl,
             (mime::IMAGE, mime::PNG) => ValidInputType::Png,
             (mime::IMAGE, subtype) if subtype.as_str() == "webp" => ValidInputType::Webp,
-            _ => return Err(ParseDetailsError::Unsupported(self.mime_type.to_string()).into()),
+            _ => {
+                return Err(ValidateDetailsError::UnsupportedMediaType(
+                    self.mime_type.to_string(),
+                ))
+            }
         };
 
         Ok(input_type)

@@ -66,8 +66,14 @@ pub(crate) enum UploadError {
     #[error("Error in store")]
     Store(#[source] crate::store::StoreError),
 
-    #[error("Error parsing image details")]
-    ParseDetails(#[from] crate::magick::ParseDetailsError),
+    #[error("Error in ffmpeg")]
+    Ffmpeg(#[from] crate::ffmpeg::FfMpegError),
+
+    #[error("Error in imagemagick")]
+    Magick(#[from] crate::magick::MagickError),
+
+    #[error("Error in exiftool")]
+    Exiftool(#[from] crate::exiftool::ExifError),
 
     #[error("Provided process path is invalid")]
     ParsePath,
@@ -96,12 +102,6 @@ pub(crate) enum UploadError {
     #[error("Gif uploads are not enabled")]
     SilentVideoDisabled,
 
-    #[error("Invalid media dimensions")]
-    Dimensions,
-
-    #[error("Too many frames")]
-    Frames,
-
     #[error("Unable to download image, bad response {0}")]
     Download(actix_web::http::StatusCode),
 
@@ -110,9 +110,6 @@ pub(crate) enum UploadError {
 
     #[error("Unable to send request, {0}")]
     SendRequest(String),
-
-    #[error("Error converting Path to String")]
-    Path,
 
     #[error("Tried to save an image with an already-taken name")]
     DuplicateAlias,
@@ -175,7 +172,12 @@ impl ResponseError for Error {
                 | UploadError::UnsupportedProcessExtension
                 | UploadError::SilentVideoDisabled,
             ) => StatusCode::BAD_REQUEST,
+            Some(UploadError::Magick(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
+            Some(UploadError::Ffmpeg(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
+            Some(UploadError::Exiftool(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::MissingAlias) => StatusCode::NOT_FOUND,
+            Some(UploadError::Magick(e)) if e.is_not_found() => StatusCode::NOT_FOUND,
+            Some(UploadError::Ffmpeg(e)) if e.is_not_found() => StatusCode::NOT_FOUND,
             Some(UploadError::InvalidToken) => StatusCode::FORBIDDEN,
             Some(UploadError::Range) => StatusCode::RANGE_NOT_SATISFIABLE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
