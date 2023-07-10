@@ -17,7 +17,7 @@ Running pict-rs on an Ubuntu or Debian system can be done in the following ways:
 1. Download the [ImageMagick AppImage](https://imagemagick.org/script/download.php). This is option
     only works for running pict-rs on x86_64
 2. Compile ImageMagick 7 from source. User MichelSup in the [pict-rs matrix
-    channel]https://matrix.to/#/%23pictrs:matrix.asonix.dog?via=matrix.asonix.dog() has done this.
+    channel](https://matrix.to/#/%23pictrs:matrix.asonix.dog?via=matrix.asonix.dog) has done this.
 3. Run pict-rs with `Nix`
 
 Since I do my development for pict-rs on NixOS, I will document running pict-rs with Nix here.
