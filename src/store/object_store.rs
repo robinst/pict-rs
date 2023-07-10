@@ -580,7 +580,7 @@ impl ObjectStore {
             rusty_s3::Method::Delete => awc::http::Method::DELETE,
         };
 
-        let url = action.sign(Duration::from_secs(5));
+        let url = action.sign(Duration::from_secs(15));
 
         let req = self.client.request(method, url.as_str());
 
