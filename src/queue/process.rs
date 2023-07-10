@@ -103,7 +103,7 @@ where
             result
         }
         Err(e) => {
-            tracing::warn!("Failed to ingest {}, {}", format!("{e}"), format!("{e:?}"));
+            tracing::warn!("Failed to ingest\n{}\n{}", format!("{e}"), format!("{e:?}"));
 
             UploadResult::Failure {
                 message: e.to_string(),

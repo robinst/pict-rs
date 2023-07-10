@@ -43,7 +43,7 @@ pin_project_lite::pin_project! {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ProcessError {
-    #[error("Required commend {0} not found")]
+    #[error("Required command {0} not found")]
     NotFound(String),
 
     #[error("Reached process spawn limit")]
