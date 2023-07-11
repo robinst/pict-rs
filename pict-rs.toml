@@ -334,6 +334,22 @@ secret_key = 'SECRET_KEY'
 # default: empty
 session_token = 'SESSION_TOKEN'
 
+## Optional: set how long object storage signatures are valid for (in seconds)
+# environment variable: PICTRS__STORE__SIGNATURE_EXPIRATION
+# default: 15
+#
+# This can be useful if your object storage might take a while to process requests. It should not be
+# increased more than needed to prevent replay attacks.
+signature_expiration = 15
+
+## Optional: set how long pict-rs will wait (in seconds) for a response from object storage
+# environment variable: PICTRS__STORE__CLIENT_TIMEOUT
+# default: 30
+#
+# This value is the total wait time, and not additional wait time on top of the
+# signature_expiration.
+client_timeout = 30
+
 ## Filesystem media storage example
 # ## Media storage configuration
 # [store]
