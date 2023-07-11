@@ -142,11 +142,27 @@ pub(crate) struct ObjectStorage {
     #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) session_token: Option<String>,
+
+    /// How long signatures for object storage requests are valid (in seconds)
+    ///
+    /// This defaults to 15 seconds
+    #[arg(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) signature_duration: Option<u64>,
+
+    /// How long a client can wait on an object storage request before giving up (in seconds)
+    ///
+    /// This defaults to 30 seconds
+    #[arg(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) client_timeout: Option<u64>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
+// allow large enum variant - this is an instantiated-once config
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Store {
     Filesystem(Filesystem),
 

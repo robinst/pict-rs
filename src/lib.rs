@@ -1266,21 +1266,21 @@ async fn migrate_inner<S1>(
     repo: &Repo,
     client: Client,
     from: S1,
-    to: config::Store,
+    to: config::primitives::Store,
     skip_missing_files: bool,
 ) -> color_eyre::Result<()>
 where
     S1: Store,
 {
     match to {
-        config::Store::Filesystem(config::Filesystem { path }) => {
+        config::primitives::Store::Filesystem(config::Filesystem { path }) => {
             let to = FileStore::build(path.clone(), repo.clone()).await?;
 
             match repo {
                 Repo::Sled(repo) => migrate_store(repo, from, to, skip_missing_files).await?,
             }
         }
-        config::Store::ObjectStorage(config::ObjectStorage {
+        config::primitives::Store::ObjectStorage(config::primitives::ObjectStorage {
             endpoint,
             bucket_name,
             use_path_style,
@@ -1288,6 +1288,8 @@ where
             access_key,
             secret_key,
             session_token,
+            signature_duration,
+            client_timeout,
         }) => {
             let to = ObjectStore::build(
                 endpoint.clone(),
@@ -1301,6 +1303,8 @@ where
                 access_key,
                 secret_key,
                 session_token,
+                signature_duration.unwrap_or(15),
+                client_timeout.unwrap_or(30),
                 repo.clone(),
             )
             .await?
@@ -1399,11 +1403,11 @@ pub async fn run() -> color_eyre::Result<()> {
             let client = build_client();
 
             match from {
-                config::Store::Filesystem(config::Filesystem { path }) => {
+                config::primitives::Store::Filesystem(config::Filesystem { path }) => {
                     let from = FileStore::build(path.clone(), repo.clone()).await?;
                     migrate_inner(&repo, client, from, to, skip_missing_files).await?;
                 }
-                config::Store::ObjectStorage(config::ObjectStorage {
+                config::primitives::Store::ObjectStorage(config::primitives::ObjectStorage {
                     endpoint,
                     bucket_name,
                     use_path_style,
@@ -1411,6 +1415,8 @@ pub async fn run() -> color_eyre::Result<()> {
                     access_key,
                     secret_key,
                     session_token,
+                    signature_duration,
+                    client_timeout,
                 }) => {
                     let from = ObjectStore::build(
                         endpoint,
@@ -1424,6 +1430,8 @@ pub async fn run() -> color_eyre::Result<()> {
                         access_key,
                         secret_key,
                         session_token,
+                        signature_duration.unwrap_or(15),
+                        client_timeout.unwrap_or(30),
                         repo.clone(),
                     )
                     .await?
@@ -1460,6 +1468,8 @@ pub async fn run() -> color_eyre::Result<()> {
             access_key,
             secret_key,
             session_token,
+            signature_duration,
+            client_timeout,
         }) => {
             let store = ObjectStore::build(
                 endpoint,
@@ -1473,6 +1483,8 @@ pub async fn run() -> color_eyre::Result<()> {
                 access_key,
                 secret_key,
                 session_token,
+                signature_duration,
+                client_timeout,
                 repo.clone(),
             )
             .await?;

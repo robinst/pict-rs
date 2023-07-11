@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 mod commandline;
 mod defaults;
 mod file;
-mod primitives;
+pub mod primitives;
 
 use commandline::{Args, Output};
 use config::Config;
@@ -12,11 +12,10 @@ use defaults::Defaults;
 
 pub(crate) use commandline::Operation;
 pub(crate) use file::{
-    ConfigFile as Configuration, Media as MediaConfiguration, OpenTelemetry, Repo, Sled, Tracing,
+    ConfigFile as Configuration, Media as MediaConfiguration, ObjectStorage, OpenTelemetry, Repo,
+    Sled, Store, Tracing,
 };
-pub(crate) use primitives::{
-    AudioCodec, Filesystem, ImageFormat, LogFormat, ObjectStorage, Store, VideoCodec,
-};
+pub(crate) use primitives::{AudioCodec, Filesystem, ImageFormat, LogFormat, VideoCodec};
 
 /// Source for pict-rs configuration when embedding as a library
 pub enum ConfigSource<P, T> {

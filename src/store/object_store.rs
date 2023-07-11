@@ -96,6 +96,8 @@ pub(crate) struct ObjectStore {
     bucket: Bucket,
     credentials: Credentials,
     client: Client,
+    signature_expiration: Duration,
+    client_timeout: Duration,
 }
 
 #[derive(Clone)]
@@ -104,6 +106,8 @@ pub(crate) struct ObjectStoreConfig {
     repo: Repo,
     bucket: Bucket,
     credentials: Credentials,
+    signature_expiration: u64,
+    client_timeout: u64,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -124,6 +128,8 @@ impl ObjectStoreConfig {
             bucket: self.bucket,
             credentials: self.credentials,
             client,
+            signature_expiration: Duration::from_secs(self.signature_expiration),
+            client_timeout: Duration::from_secs(self.client_timeout),
         }
     }
 }
@@ -437,6 +443,8 @@ impl ObjectStore {
         access_key: String,
         secret_key: String,
         session_token: Option<String>,
+        signature_expiration: u64,
+        client_timeout: u64,
         repo: Repo,
     ) -> Result<ObjectStoreConfig, StoreError> {
         let path_gen = init_generator(&repo).await?;
@@ -451,6 +459,8 @@ impl ObjectStore {
             } else {
                 Credentials::new(access_key, secret_key)
             },
+            signature_expiration,
+            client_timeout,
         })
     }
 
@@ -580,9 +590,12 @@ impl ObjectStore {
             rusty_s3::Method::Delete => awc::http::Method::DELETE,
         };
 
-        let url = action.sign(Duration::from_secs(15));
+        let url = action.sign(self.signature_expiration);
 
-        let req = self.client.request(method, url.as_str());
+        let req = self
+            .client
+            .request(method, url.as_str())
+            .timeout(self.client_timeout);
 
         let req = action
             .headers_mut()

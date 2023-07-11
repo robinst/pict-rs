@@ -1,5 +1,5 @@
 use crate::{
-    config::primitives::{AudioCodec, ImageFormat, LogFormat, Store, Targets, VideoCodec},
+    config::primitives::{AudioCodec, Filesystem, ImageFormat, LogFormat, Targets, VideoCodec},
     serde_str::Serde,
 };
 use once_cell::sync::OnceCell;
@@ -20,6 +20,59 @@ pub(crate) struct ConfigFile {
     pub(crate) repo: Repo,
 
     pub(crate) store: Store,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type")]
+// allow large enum variant - this is an instantiated-once config
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum Store {
+    Filesystem(Filesystem),
+    ObjectStorage(ObjectStorage),
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct ObjectStorage {
+    /// The base endpoint for the object storage
+    ///
+    /// Examples:
+    /// - `http://localhost:9000`
+    /// - `https://s3.dualstack.eu-west-1.amazonaws.com`
+    pub(crate) endpoint: Url,
+
+    /// Determines whether to use path style or virtualhost style for accessing objects
+    ///
+    /// When this is true, objects will be fetched from {endpoint}/{bucket_name}/{object}
+    /// When false, objects will be fetched from {bucket_name}.{endpoint}/{object}
+    pub(crate) use_path_style: bool,
+
+    /// The bucket in which to store media
+    pub(crate) bucket_name: String,
+
+    /// The region the bucket is located in
+    pub(crate) region: String,
+
+    /// The Access Key for the user accessing the bucket
+    pub(crate) access_key: String,
+
+    /// The secret key for the user accessing the bucket
+    pub(crate) secret_key: String,
+
+    /// The session token for accessing the bucket
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) session_token: Option<String>,
+
+    /// How long signatures for object storage requests are valid (in seconds)
+    ///
+    /// This defaults to 15 seconds
+    pub(crate) signature_duration: u64,
+
+    /// How long a client can wait on an object storage request before giving up (in seconds)
+    ///
+    /// This defaults to 30 seconds
+    pub(crate) client_timeout: u64,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

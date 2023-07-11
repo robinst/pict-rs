@@ -519,6 +519,8 @@ struct Run {
 #[derive(Clone, Debug, Subcommand, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
+// allow large enum variant - this is an instantiated-once config
+#[allow(clippy::large_enum_variant)]
 enum Store {
     /// configure filesystem storage
     Filesystem(Filesystem),
@@ -529,6 +531,8 @@ enum Store {
 
 /// Run pict-rs with the provided storage
 #[derive(Debug, Subcommand)]
+// allow large enum variant - this is an instantiated-once config
+#[allow(clippy::large_enum_variant)]
 enum RunStore {
     /// Run pict-rs with filesystem storage
     Filesystem(RunFilesystem),
@@ -550,6 +554,8 @@ struct MigrateStore {
 
 /// Configure the pict-rs storage migration
 #[derive(Debug, Subcommand)]
+// allow large enum variant - this is an instantiated-once config
+#[allow(clippy::large_enum_variant)]
 enum MigrateStoreFrom {
     /// Migrate from the provided filesystem storage
     Filesystem(MigrateFilesystem),
@@ -560,6 +566,8 @@ enum MigrateStoreFrom {
 
 /// Configure the destination storage for pict-rs storage migration
 #[derive(Debug, Subcommand)]
+// allow large enum variant - this is an instantiated-once config
+#[allow(clippy::large_enum_variant)]
 enum MigrateStoreTo {
     /// Migrate to the provided filesystem storage
     Filesystem(MigrateFilesystemInner),
@@ -667,25 +675,44 @@ struct ObjectStorage {
 
     /// The bucket in which to store media
     #[arg(short, long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     bucket_name: Option<String>,
 
     /// The region the bucket is located in
     ///
     /// For minio deployments, this can just be 'minio'
     #[arg(short, long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     region: Option<String>,
 
     /// The Access Key for the user accessing the bucket
     #[arg(short, long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     access_key: Option<String>,
 
     /// The secret key for the user accessing the bucket
     #[arg(short, long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     secret_key: Option<String>,
 
     /// The session token for accessing the bucket
     #[arg(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     session_token: Option<String>,
+
+    /// How long signatures for object storage requests are valid (in seconds)
+    ///
+    /// This defaults to 15 seconds
+    #[arg(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature_duration: Option<u64>,
+
+    /// How long a client can wait on an object storage request before giving up (in seconds)
+    ///
+    /// This defaults to 30 seconds
+    #[arg(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_timeout: Option<u64>,
 }
 
 /// Configuration for the sled-backed data repository

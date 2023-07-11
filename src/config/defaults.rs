@@ -101,15 +101,29 @@ struct SledDefaults {
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
-pub(super) enum StoreDefaults {
-    Filesystem(FilesystemDefaults),
+pub(super) struct StoreDefaults {
+    #[serde(rename = "type")]
+    type_: String,
+
+    #[serde(flatten)]
+    pub(super) filesystem: FilesystemDefaults,
+
+    #[serde(flatten)]
+    pub(super) object_storage: ObjectStorageDefaults,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) struct FilesystemDefaults {
     path: PathBuf,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) struct ObjectStorageDefaults {
+    signature_duration: u64,
+
+    client_timeout: u64,
 }
 
 impl Default for ServerDefaults {
@@ -211,7 +225,11 @@ impl Default for SledDefaults {
 
 impl Default for StoreDefaults {
     fn default() -> Self {
-        Self::Filesystem(FilesystemDefaults::default())
+        Self {
+            type_: String::from("filesystem"),
+            filesystem: FilesystemDefaults::default(),
+            object_storage: ObjectStorageDefaults::default(),
+        }
     }
 }
 
@@ -219,6 +237,15 @@ impl Default for FilesystemDefaults {
     fn default() -> Self {
         Self {
             path: PathBuf::from(String::from("/mnt/files")),
+        }
+    }
+}
+
+impl Default for ObjectStorageDefaults {
+    fn default() -> Self {
+        Self {
+            signature_duration: 15,
+            client_timeout: 30,
         }
     }
 }
