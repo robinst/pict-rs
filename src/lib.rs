@@ -8,6 +8,7 @@ mod error;
 mod exiftool;
 mod ffmpeg;
 mod file;
+mod formats;
 mod generate;
 mod ingest;
 mod init_tracing;
