@@ -2,10 +2,9 @@ use crate::{
     bytes_stream::BytesStream,
     either::Either,
     error::{Error, UploadError},
-    formats::{InternalFormat, PrescribedFormats},
+    formats::{InternalFormat, Validations},
     repo::{Alias, AliasRepo, AlreadyExists, DeleteToken, FullRepo, HashRepo},
     store::Store,
-    CONFIG,
 };
 use actix_web::web::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -47,6 +46,7 @@ pub(crate) async fn ingest<R, S>(
     store: &S,
     stream: impl Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     declared_alias: Option<Alias>,
+    media: &crate::config::Media,
 ) -> Result<Session<R, S>, Error>
 where
     R: FullRepo + 'static,
@@ -57,18 +57,16 @@ where
     let bytes = aggregate(stream).await?;
 
     // TODO: load from config
-    let prescribed = PrescribedFormats {
-        image: None,
-        animation: None,
-        video: None,
-        allow_audio: true,
+    let prescribed = Validations {
+        image: &media.image,
+        animation: &media.animation,
+        video: &media.video,
     };
 
     tracing::trace!("Validating bytes");
-    let (input_type, validated_reader) =
-        crate::validate::validate_bytes(bytes, &prescribed).await?;
+    let (input_type, validated_reader) = crate::validate::validate_bytes(bytes, prescribed).await?;
 
-    let processed_reader = if let Some(operations) = CONFIG.media.preprocess_steps() {
+    let processed_reader = if let Some(operations) = media.preprocess_steps() {
         if let Some(format) = input_type.processable_format() {
             let (_, magick_args) =
                 crate::processor::build_chain(operations, format.file_extension())?;

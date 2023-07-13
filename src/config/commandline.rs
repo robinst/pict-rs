@@ -1,6 +1,6 @@
 use crate::{
-    config::primitives::{AudioCodec, LogFormat, Targets, VideoCodec},
-    formats::ImageFormat,
+    config::primitives::{LogFormat, Targets},
+    formats::{AnimationFormat, AudioCodec, ImageFormat, VideoCodec},
     serde_str::Serde,
 };
 use clap::{Parser, Subcommand};
@@ -48,21 +48,28 @@ impl Args {
                 worker_id,
                 client_pool_size,
                 media_preprocess_steps,
-                media_skip_validate_imports,
-                media_max_width,
-                media_max_height,
-                media_max_area,
                 media_max_file_size,
-                media_max_frame_count,
-                media_gif_max_width,
-                media_gif_max_height,
-                media_gif_max_area,
-                media_enable_silent_video,
-                media_enable_full_video,
+                media_image_max_width,
+                media_image_max_height,
+                media_image_max_area,
+                media_image_max_file_size,
+                media_image_format,
+                media_animation_max_width,
+                media_animation_max_height,
+                media_animation_max_area,
+                media_animation_max_file_size,
+                media_animation_max_frame_count,
+                media_animation_format,
+                media_video_enable,
+                media_video_allow_audio,
+                media_video_max_width,
+                media_video_max_height,
+                media_video_max_area,
+                media_video_max_file_size,
+                media_video_max_frame_count,
                 media_video_codec,
-                media_audio_codec,
+                media_video_audio_codec,
                 media_filters,
-                media_format,
                 store,
             }) => {
                 let server = Server {
@@ -71,33 +78,43 @@ impl Args {
                     worker_id,
                     client_pool_size,
                 };
-                let gif = if media_gif_max_width.is_none()
-                    && media_gif_max_height.is_none()
-                    && media_gif_max_area.is_none()
-                {
-                    None
-                } else {
-                    Some(Gif {
-                        max_width: media_gif_max_width,
-                        max_height: media_gif_max_height,
-                        max_area: media_gif_max_area,
-                    })
+
+                let image = Image {
+                    max_file_size: media_image_max_file_size,
+                    max_width: media_image_max_width,
+                    max_height: media_image_max_height,
+                    max_area: media_image_max_area,
+                    format: media_image_format,
                 };
-                let media = Media {
-                    preprocess_steps: media_preprocess_steps,
-                    skip_validate_imports: media_skip_validate_imports,
-                    max_width: media_max_width,
-                    max_height: media_max_height,
-                    max_area: media_max_area,
-                    max_file_size: media_max_file_size,
-                    max_frame_count: media_max_frame_count,
-                    gif,
-                    enable_silent_video: media_enable_silent_video,
-                    enable_full_video: media_enable_full_video,
+
+                let animation = Animation {
+                    max_file_size: media_animation_max_file_size,
+                    max_width: media_animation_max_width,
+                    max_height: media_animation_max_height,
+                    max_area: media_animation_max_area,
+                    max_frame_count: media_animation_max_frame_count,
+                    format: media_animation_format,
+                };
+
+                let video = Video {
+                    enable: media_video_enable,
+                    allow_audio: media_video_allow_audio,
+                    max_file_size: media_video_max_file_size,
+                    max_width: media_video_max_width,
+                    max_height: media_video_max_height,
+                    max_area: media_video_max_area,
+                    max_frame_count: media_video_max_frame_count,
                     video_codec: media_video_codec,
-                    audio_codec: media_audio_codec,
+                    audio_codec: media_video_audio_codec,
+                };
+
+                let media = Media {
+                    max_file_size: media_max_file_size,
+                    preprocess_steps: media_preprocess_steps,
                     filters: media_filters,
-                    format: media_format,
+                    image: image.set(),
+                    animation: animation.set(),
+                    video: video.set(),
                 };
                 let operation = Operation::Run;
 
@@ -336,44 +353,125 @@ struct OldDb {
 #[serde(rename_all = "snake_case")]
 struct Media {
     #[serde(skip_serializing_if = "Option::is_none")]
-    preprocess_steps: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_width: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_height: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_area: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     max_file_size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    max_frame_count: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    gif: Option<Gif>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    enable_silent_video: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    enable_full_video: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    video_codec: Option<VideoCodec>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    audio_codec: Option<AudioCodec>,
+    preprocess_steps: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     filters: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    format: Option<ImageFormat>,
+    image: Option<Image>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    skip_validate_imports: Option<bool>,
+    animation: Option<Animation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    video: Option<Video>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-struct Gif {
+struct Image {
     #[serde(skip_serializing_if = "Option::is_none")]
-    max_width: Option<usize>,
+    max_width: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    max_height: Option<usize>,
+    max_height: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    max_area: Option<usize>,
+    max_area: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_file_size: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<ImageFormat>,
+}
+
+impl Image {
+    fn set(self) -> Option<Self> {
+        let any_set = self.max_width.is_some()
+            || self.max_height.is_some()
+            || self.max_area.is_some()
+            || self.max_file_size.is_some()
+            || self.format.is_some();
+
+        if any_set {
+            Some(self)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct Animation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_width: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_height: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_area: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_frame_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_file_size: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<AnimationFormat>,
+}
+
+impl Animation {
+    fn set(self) -> Option<Self> {
+        let any_set = self.max_width.is_some()
+            || self.max_height.is_some()
+            || self.max_area.is_some()
+            || self.max_frame_count.is_some()
+            || self.max_file_size.is_some()
+            || self.format.is_some();
+
+        if any_set {
+            Some(self)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct Video {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allow_audio: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_width: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_height: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_area: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_frame_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_file_size: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    video_codec: Option<VideoCodec>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_codec: Option<AudioCodec>,
+}
+
+impl Video {
+    fn set(self) -> Option<Self> {
+        let any_set = self.enable.is_some()
+            || self.allow_audio.is_some()
+            || self.max_width.is_some()
+            || self.max_height.is_some()
+            || self.max_area.is_some()
+            || self.max_frame_count.is_some()
+            || self.max_file_size.is_some()
+            || self.video_codec.is_some()
+            || self.audio_codec.is_some();
+
+        if any_set {
+            Some(self)
+        } else {
+            None
+        }
+    }
 }
 
 /// Run the pict-rs application
@@ -457,60 +555,75 @@ struct Run {
     #[arg(long)]
     media_preprocess_steps: Option<String>,
 
-    /// Whether to validate media on the "import" endpoint
+    /// Which media filters should be enabled on the `process` endpoint
     #[arg(long)]
-    media_skip_validate_imports: Option<bool>,
-    /// The maximum width, in pixels, for uploaded media
-    #[arg(long)]
-    media_max_width: Option<usize>,
-    /// The maximum height, in pixels, for uploaded media
-    #[arg(long)]
-    media_max_height: Option<usize>,
-    /// The maximum area, in pixels, for uploaded media
-    #[arg(long)]
-    media_max_area: Option<usize>,
-    /// The maximum size, in megabytes, for uploaded media
+    media_filters: Option<Vec<String>>,
+
+    /// The maximum size, in megabytes, for all uploaded media
     #[arg(long)]
     media_max_file_size: Option<usize>,
-    /// The maximum number of frames allowed for uploaded GIF and MP4s.
+
+    /// The maximum width, in pixels, for uploaded images
     #[arg(long)]
-    media_max_frame_count: Option<usize>,
-    /// Maximum width allowed for gif uploads.
-    ///
-    /// If an upload exceeds this value, it will be transcoded to a video format or rejected,
-    /// depending on whether video uploads are enabled.
+    media_image_max_width: Option<u16>,
+    /// The maximum height, in pixels, for uploaded images
     #[arg(long)]
-    media_gif_max_width: Option<usize>,
-    /// Maximum height allowed for gif uploads
-    ///
-    /// If an upload exceeds this value, it will be transcoded to a video format or rejected,
-    /// depending on whether video uploads are enabled.
+    media_image_max_height: Option<u16>,
+    /// The maximum area, in pixels, for uploaded images
     #[arg(long)]
-    media_gif_max_height: Option<usize>,
-    /// Maximum area allowed for gif uploads
-    ///
-    /// If an upload exceeds this value, it will be transcoded to a video format or rejected,
-    /// depending on whether video uploads are enabled.
+    media_image_max_area: Option<u32>,
+    /// The maximum size, in megabytes, for uploaded images
     #[arg(long)]
-    media_gif_max_area: Option<usize>,
-    /// Whether to enable GIF and silent video uploads
+    media_image_max_file_size: Option<usize>,
+    /// Enforce a specific format for uploaded images
     #[arg(long)]
-    media_enable_silent_video: Option<bool>,
-    /// Whether to enable full video uploads
+    media_image_format: Option<ImageFormat>,
+
+    /// The maximum width, in pixels, for uploaded animations
     #[arg(long)]
-    media_enable_full_video: Option<bool>,
+    media_animation_max_width: Option<u16>,
+    /// The maximum height, in pixels, for uploaded animations
+    #[arg(long)]
+    media_animation_max_height: Option<u16>,
+    /// The maximum area, in pixels, for uploaded animations
+    #[arg(long)]
+    media_animation_max_area: Option<u32>,
+    /// The maximum number of frames allowed for uploaded animations
+    #[arg(long)]
+    media_animation_max_frame_count: Option<u32>,
+    /// The maximum size, in megabytes, for uploaded animations
+    #[arg(long)]
+    media_animation_max_file_size: Option<usize>,
+    /// Enforce a specific format for uploaded animations
+    #[arg(long)]
+    media_animation_format: Option<AnimationFormat>,
+
+    /// Whether to enable video uploads
+    #[arg(long)]
+    media_video_enable: Option<bool>,
+    /// Whether to enable audio in video uploads
+    media_video_allow_audio: Option<bool>,
+    /// The maximum width, in pixels, for uploaded videos
+    #[arg(long)]
+    media_video_max_width: Option<u16>,
+    /// The maximum height, in pixels, for uploaded videos
+    #[arg(long)]
+    media_video_max_height: Option<u16>,
+    /// The maximum area, in pixels, for uploaded videos
+    #[arg(long)]
+    media_video_max_area: Option<u32>,
+    /// The maximum number of frames allowed for uploaded videos
+    #[arg(long)]
+    media_video_max_frame_count: Option<u32>,
+    /// The maximum size, in megabytes, for uploaded videos
+    #[arg(long)]
+    media_video_max_file_size: Option<usize>,
     /// Enforce a specific video codec for uploaded videos
     #[arg(long)]
     media_video_codec: Option<VideoCodec>,
     /// Enforce a specific audio codec for uploaded videos
     #[arg(long)]
-    media_audio_codec: Option<AudioCodec>,
-    /// Which media filters should be enabled on the `process` endpoint
-    #[arg(long)]
-    media_filters: Option<Vec<String>>,
-    /// Enforce uploaded media is transcoded to the provided format
-    #[arg(long)]
-    media_format: Option<ImageFormat>,
+    media_video_audio_codec: Option<AudioCodec>,
 
     #[command(subcommand)]
     store: Option<RunStore>,

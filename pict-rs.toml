@@ -128,6 +128,11 @@ path = '/mnt'
 
 ## Media Processing Configuration
 [media]
+## Optional: max file size (in Megabytes)
+# environment variable: PICTRS__MEDIA__MAX_FILE_SIZE
+# default: 40
+max_file_size = 40
+
 ## Optional: preprocessing steps for uploaded images
 # environment variable: PICTRS__MEDIA__PREPROCESS_STEPS
 # default: empty
@@ -135,70 +140,35 @@ path = '/mnt'
 # This configuration is the same format as the process endpoint's query arguments
 preprocess_steps = 'crop=16x9&resize=1200&blur=0.2'
 
-## Optional: max media width (in pixels)
-# environment variable: PICTRS__MEDIA__MAX_WIDTH
-# default: 10,000
-max_width = 10000
-
-## Optional: max media height (in pixels)
-# environment variable: PICTRS__MEDIA__MAX_HEIGHT
-# default: 10,000
-max_height = 10000
-
-## Optional: max media area (in pixels)
-# environment variable: PICTRS__MEDIA__MAX_AREA
-# default: 40,000,000
-max_area = 40000000
-
-## Optional: max file size (in Megabytes)
-# environment variable: PICTRS__MEDIA__MAX_FILE_SIZE
-# default: 40
-max_file_size = 40
-
-## Optional: max frame count
-# environment variable: PICTRS__MEDIA__MAX_FRAME_COUNT
-# default: # 900
-max_frame_count = 900
-
-## Optional: enable GIF, MP4, and WEBM uploads (without sound)
-# environment variable: PICTRS__MEDIA__ENABLE_SILENT_VIDEO
-# default: true
-#
-# Set this to false to serve static images only
-enable_silent_video = true
-
-## Optional: enable MP4, and WEBM uploads (with sound) and GIF (without sound)
-# environment variable: PICTRS__MEDIA__ENABLE_FULL_VIDEO
-# default: false
-enable_full_video = false
-
-## Optional: set the default video codec
-# environment variable: PICTRS__MEDIA__VIDEO_CODEC
-# default: vp9
-#
-# available options: av1, h264, h265, vp8, vp9
-# this setting does nothing if video is not enabled
-video_codec = "vp9"
-
-## Optional: set the default audio codec
-# environment variable: PICTRS__MEDIA__AUDIO_CODEC
-# default: empty
-#
-# available options: aac, opus, vorbis
-# The audio codec is automatically selected based on video codec, but can be overriden
-# av1, vp8, and vp9 map to opus
-# h264 and h265 map to aac
-# vorbis is not default for any codec
-# this setting does nothing if full video is not enabled
-audio_codec = "aac"
-
 ## Optional: set allowed filters for image processing
 # environment variable: PICTRS__MEDIA__FILTERS
 # default: ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 
-## Optional: set file type for all uploads
-# environment variable: PICTRS__MEDIA__FORMAT
+
+[media.image]
+## Optional: max media width (in pixels)
+# environment variable: PICTRS__MEDIA__IMAGE__MAX_WIDTH
+# default: 10,000
+max_width = 10000
+
+## Optional: max media height (in pixels)
+# environment variable: PICTRS__MEDIA__IMAGE__MAX_HEIGHT
+# default: 10,000
+max_height = 10000
+
+## Optional: max media area (in pixels)
+# environment variable: PICTRS__MEDIA__IMAGE__MAX_AREA
+# default: 40,000,000
+max_area = 40000000
+
+## Optional: max file size (in Megabytes)
+# environment variable: PICTRS__MEDIA__IMAGE__MAX_FILE_SIZE
+# default: 40
+max_file_size = 40
+
+## Optional: set file type for all images
+# environment variable: PICTRS__MEDIA__IMAGE__FORMAT
 # default: empty
 #
 # available options: avif, png, jpeg, jxl, webp
@@ -207,48 +177,125 @@ filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 # are stored in their original file type.
 format = "webp"
 
-## Optional: whether to validate images uploaded through the `import` endpoint
-# environment variable: PICTRS__MEDIA__SKIP_VALIDATE_IMPORTS
-# default: false
-#
-# Set this to true if you want to avoid processing imported media
-skip_validate_imports = false
 
-## Gif configuration 
+[media.animation]
+## Optional: max animation width (in pixels)
+# environment variable: PICTRS__MEDIA__ANIMATION__MAX_WIDTH
+# default: 256
 #
-# Making any of these bounds 0 will disable gif uploads
-[media.gif]
-# Optional: Maximum width in pixels for uploaded gifs
-# environment variable: PICTRS__MEDIA__GIF__MAX_WIDTH
-# default: 128
-#
-# If a gif does not fit within this bound, it will either be transcoded to a video or rejected,
-# depending on whether video uploads are enabled
-max_width = 128
+# If an animation exceeds this value, it may be converted to a silent video
+max_width = 256
 
-# Optional: Maximum height in pixels for uploaded gifs
-# environment variable: PICTRS__MEDIA__GIF__MAX_HEIGHT
-# default: 128
+## Optional: max animation height (in pixels)
+# environment variable: PICTRS__MEDIA__ANIMATION__MAX_HEIGHT
+# default: 256
 #
-# If a gif does not fit within this bound, it will either be transcoded to a video or rejected,
-# depending on whether video uploads are enabled
-max_height = 128
+# If an animation exceeds this value, it may be converted to a silent video
+max_height = 256
 
-# Optional: Maximum area in pixels for uploaded gifs
-# environment variable: PICTRS__MEDIA__GIF__MAX_AREA
-# default: 16384 (128 * 128)
+## Optional: max animation area (in pixels)
+# environment variable: PICTRS__MEDIA__ANIMATION__MAX_AREA
+# default: 65,526
 #
-# If a gif does not fit within this bound, it will either be transcoded to a video or rejected,
-# depending on whether video uploads are enabled
-max_area = 16384
+# If an animation exceeds this value, it may be converted to a silent video
+max_area = 65536
 
-# Optional: Maximum number of frames permitted in uploaded gifs
-# environment variable: PICTRS__MEDIA__GIF__MAX_FRAME_COUNT
+## Optional: max animation size (in Megabytes)
+# environment variable: PICTRS__MEDIA__ANIMATION__MAX_FILE_SIZE
+# default: 40
+#
+# If an animation exceeds this value, it may be converted to a silent video
+max_file_size = 40
+
+## Optional: max frame count
+# environment variable: PICTRS__MEDIA__ANIMATION__MAX_FRAME_COUNT
 # default: 100
 #
-# If a gif does not fit within this bound, it will either be transcoded to a video or rejected,
-# depending on whether video uploads are enabled
+# If an animation exceeds this value, it may be converted to a silent video
 max_frame_count = 100
+
+## Optional: set file type for all animations
+# environment variable: PICTRS__MEDIA__ANIMATION__FORMAT
+# default: empty
+#
+# available options: apng, avif, gif, webp
+# When set, all uploaded still images will be converted to this file type. For balancing quality vs
+# file size vs browser support, 'avif', 'jxl', and 'webp' should be considered. By default, images
+# are stored in their original file type.
+format = "webp"
+
+
+[media.video]
+## Optional: enable MP4 and WEBM uploads (without sound)
+# environment variable: PICTRS__MEDIA__VIDEO__ENABLE
+# default: true
+#
+# Set this to false to serve static images only
+enable = true
+
+## Optional: enable Sound for MP4 and WEBM uploads
+# environment variable: PICTRS__MEDIA__VIDEO__ALLOW_AUDIO
+# default: false
+#
+# this setting does nothing if video is not enabled
+allow_audio = false
+
+## Optional: max video width (in pixels)
+# environment variable: PICTRS__MEDIA__VIDEO__MAX_WIDTH
+# default: 3,840
+#
+# this setting does nothing if video is not enabled
+max_width = 3840
+
+## Optional: max video height (in pixels)
+# environment variable: PICTRS__MEDIA__VIDEO__MAX_HEIGHT
+# default: 3,840
+#
+# this setting does nothing if video is not enabled
+max_height = 3840
+
+## Optional: max video area (in pixels)
+# environment variable: PICTRS__MEDIA__VIDEO__MAX_AREA
+# default: 8,294,400
+#
+# this setting does nothing if video is not enabled
+max_area = 8294400
+
+## Optional: max video size (in Megabytes)
+# environment variable: PICTRS__MEDIA__VIDEO__MAX_FILE_SIZE
+# default: 40
+#
+# this setting does nothing if video is not enabled
+max_file_size = 40
+
+## Optional: max frame count
+# environment variable: PICTRS__MEDIA__VIDEO__MAX_FRAME_COUNT
+# default: 900
+#
+# this setting does nothing if video is not enabled
+max_frame_count = 900
+
+## Optional: set the default video codec
+# environment variable: PICTRS__MEDIA__VIDEO__VIDEO_CODEC
+# default: vp9
+#
+# available options: av1, h264, h265, vp8, vp9
+# this setting does nothing if video is not enabled
+video_codec = "vp9"
+
+## Optional: set the default audio codec
+# environment variable: PICTRS__MEDIA__VIDEO__AUDIO_CODEC
+# default: empty
+#
+# available options: aac, opus, vorbis
+# The audio codec is automatically selected based on video codec, but can be overriden to `vorbis`
+# for webm uploads
+# automatic mappings:
+# - av1, vp8, and vp9 map to opus
+# - h264 and h265 map to aac
+# - vorbis is not default for any codec
+# this setting does nothing if full video is not enabled
+audio_codec = "opus"
 
 
 ## Database configuration

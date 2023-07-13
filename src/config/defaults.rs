@@ -1,5 +1,6 @@
 use crate::{
-    config::primitives::{LogFormat, Targets, VideoCodec},
+    config::primitives::{LogFormat, Targets},
+    formats::VideoCodec,
     serde_str::Serde,
 };
 use std::{net::SocketAddr, path::PathBuf};
@@ -62,26 +63,43 @@ struct OldDbDefaults {
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 struct MediaDefaults {
-    max_width: usize,
-    max_height: usize,
-    max_area: usize,
     max_file_size: usize,
-    max_frame_count: usize,
-    gif: GifDefaults,
-    enable_silent_video: bool,
-    enable_full_video: bool,
-    video_codec: VideoCodec,
     filters: Vec<String>,
-    skip_validate_imports: bool,
+    image: ImageDefaults,
+    animation: AnimationDefaults,
+    video: VideoDefaults,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-struct GifDefaults {
-    max_height: usize,
-    max_width: usize,
-    max_area: usize,
-    max_frame_count: usize,
+struct ImageDefaults {
+    max_width: u16,
+    max_height: u16,
+    max_area: u32,
+    max_file_size: usize,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct AnimationDefaults {
+    max_width: u16,
+    max_height: u16,
+    max_area: u32,
+    max_frame_count: u32,
+    max_file_size: usize,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct VideoDefaults {
+    enable: bool,
+    allow_audio: bool,
+    max_height: u16,
+    max_width: u16,
+    max_area: u32,
+    max_frame_count: u32,
+    max_file_size: usize,
+    video_codec: VideoCodec,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -175,15 +193,7 @@ impl Default for OldDbDefaults {
 impl Default for MediaDefaults {
     fn default() -> Self {
         MediaDefaults {
-            max_width: 10_000,
-            max_height: 10_000,
-            max_area: 40_000_000,
             max_file_size: 40,
-            max_frame_count: 900,
-            gif: Default::default(),
-            enable_silent_video: true,
-            enable_full_video: false,
-            video_codec: VideoCodec::Vp9,
             filters: vec![
                 "blur".into(),
                 "crop".into(),
@@ -191,18 +201,47 @@ impl Default for MediaDefaults {
                 "resize".into(),
                 "thumbnail".into(),
             ],
-            skip_validate_imports: false,
+            image: Default::default(),
+            animation: Default::default(),
+            video: Default::default(),
         }
     }
 }
 
-impl Default for GifDefaults {
+impl Default for ImageDefaults {
     fn default() -> Self {
-        GifDefaults {
-            max_height: 128,
-            max_width: 128,
-            max_area: 16384,
+        ImageDefaults {
+            max_width: 10_000,
+            max_height: 10_000,
+            max_area: 40_000_000,
+            max_file_size: 40,
+        }
+    }
+}
+
+impl Default for AnimationDefaults {
+    fn default() -> Self {
+        AnimationDefaults {
+            max_height: 256,
+            max_width: 256,
+            max_area: 65_536,
             max_frame_count: 100,
+            max_file_size: 40,
+        }
+    }
+}
+
+impl Default for VideoDefaults {
+    fn default() -> Self {
+        VideoDefaults {
+            enable: true,
+            allow_audio: false,
+            max_height: 3_840,
+            max_width: 3_840,
+            max_area: 8_294_400,
+            max_frame_count: 900,
+            max_file_size: 40,
+            video_codec: VideoCodec::Vp9,
         }
     }
 }

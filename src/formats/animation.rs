@@ -1,5 +1,15 @@
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize, serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Deserialize,
+    serde::Serialize,
+    clap::ValueEnum,
 )]
 pub(crate) enum AnimationFormat {
     #[serde(rename = "apng")]
@@ -13,23 +23,15 @@ pub(crate) enum AnimationFormat {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize)]
-pub(crate) struct AnimationInput {
-    pub(crate) format: AnimationFormat,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize)]
 pub(crate) struct AnimationOutput {
     pub(crate) format: AnimationFormat,
     pub(crate) needs_transcode: bool,
 }
 
-impl AnimationInput {
-    pub(crate) const fn build_output(
-        &self,
-        prescribed: Option<AnimationFormat>,
-    ) -> AnimationOutput {
+impl AnimationFormat {
+    pub(crate) const fn build_output(self, prescribed: Option<AnimationFormat>) -> AnimationOutput {
         if let Some(prescribed) = prescribed {
-            let needs_transcode = !self.format.const_eq(prescribed);
+            let needs_transcode = !self.const_eq(prescribed);
 
             return AnimationOutput {
                 format: prescribed,
@@ -38,13 +40,11 @@ impl AnimationInput {
         }
 
         AnimationOutput {
-            format: self.format,
+            format: self,
             needs_transcode: false,
         }
     }
-}
 
-impl AnimationFormat {
     const fn const_eq(self, rhs: Self) -> bool {
         match (self, rhs) {
             (Self::Apng, Self::Apng)

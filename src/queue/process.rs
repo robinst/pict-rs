@@ -6,6 +6,7 @@ use crate::{
     repo::{Alias, DeleteToken, FullRepo, UploadId, UploadResult},
     serde_str::Serde,
     store::{Identifier, Store},
+    CONFIG,
 };
 use futures_util::TryStreamExt;
 use std::path::PathBuf;
@@ -33,6 +34,7 @@ where
                         identifier,
                         Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
+                        &CONFIG.media,
                     )
                     .await?
                 }
@@ -69,6 +71,7 @@ async fn process_ingest<R, S>(
     unprocessed_identifier: Vec<u8>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
+    media: &crate::config::Media,
 ) -> Result<(), Error>
 where
     R: FullRepo + 'static,
@@ -82,7 +85,7 @@ where
             .await?
             .map_err(Error::from);
 
-        let session = crate::ingest::ingest(repo, store, stream, declared_alias).await?;
+        let session = crate::ingest::ingest(repo, store, stream, declared_alias, media).await?;
 
         let token = session.delete_token().await?;
 

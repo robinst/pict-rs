@@ -18,14 +18,7 @@ targets = "info"
 path = "/mnt"
 
 [media]
-max_width = 10000
-max_height = 10000
-max_area = 40000000
 max_file_size = 40
-max_frame_count = 900
-enable_silent_video = true
-enable_full_video = false
-video_codec = "vp9"
 filters = [
     "blur",
     "crop",
@@ -33,13 +26,29 @@ filters = [
     "resize",
     "thumbnail",
 ]
-skip_validate_imports = false
 
-[media.gif]
-max_width = 128
-max_height = 128
-max_area = 16384
+[media.image]
+max_width = 10000
+max_height = 10000
+max_area = 40000000
+max_file_size = 40
+
+[media.animation]
+max_width = 256
+max_height = 256
+max_area = 65536
+max_file_size = 40
 max_frame_count = 100
+
+[media.video]
+enable = true
+allow_audio = false
+max_width = 3840
+max_height = 3840
+max_area = 8294400
+max_file_size = 40
+max_frame_count = 900
+video_codec = "vp9"
 
 [repo]
 type = "sled"

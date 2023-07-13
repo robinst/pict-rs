@@ -169,8 +169,10 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
                     let stream = stream.map_err(Error::from);
 
                     Box::pin(
-                        async move { ingest::ingest(&**repo, &**store, stream, None).await }
-                            .instrument(span),
+                        async move {
+                            ingest::ingest(&**repo, &**store, stream, None, &CONFIG.media).await
+                        }
+                        .instrument(span),
                     )
                 })),
             )
@@ -221,6 +223,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
                                 &**store,
                                 stream,
                                 Some(Alias::from_existing(&filename)),
+                                &CONFIG.media,
                             )
                             .await
                         }
@@ -475,7 +478,7 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
-    let mut session = ingest::ingest(&repo, &store, stream, None).await?;
+    let mut session = ingest::ingest(&repo, &store, stream, None, &CONFIG.media).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
     let delete_token = session.delete_token().await?;

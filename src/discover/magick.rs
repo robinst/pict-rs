@@ -6,7 +6,7 @@ use futures_util::Stream;
 use tokio::io::AsyncReadExt;
 
 use crate::{
-    formats::{AnimationFormat, AnimationInput, ImageFormat, ImageInput, InputFile, VideoFormat},
+    formats::{AnimationFormat, ImageFormat, ImageInput, InputFile, VideoFormat},
     magick::MagickError,
     process::Process,
 };
@@ -78,9 +78,7 @@ pub(super) async fn confirm_bytes(
     match discovery {
         Some(Discovery {
             input:
-                InputFile::Animation(AnimationInput {
-                    format: AnimationFormat::Avif,
-                }),
+                InputFile::Animation( AnimationFormat::Avif,),
             width,
             height,
             ..
@@ -94,9 +92,7 @@ pub(super) async fn confirm_bytes(
             .await?;
 
             return Ok(Discovery {
-                input: InputFile::Animation(AnimationInput {
-                    format: AnimationFormat::Avif,
-                }),
+                input: InputFile::Animation( AnimationFormat::Avif,),
                 width,
                 height,
                 frames: Some(frames),
@@ -104,9 +100,7 @@ pub(super) async fn confirm_bytes(
         }
         Some(Discovery {
             input:
-                InputFile::Animation(AnimationInput {
-                    format: AnimationFormat::Webp,
-                }),
+                InputFile::Animation( AnimationFormat::Webp,),
             ..
         }) => {
             // continue
@@ -265,9 +259,7 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickErro
         "AVIF" => {
             if frames > 1 {
                 Ok(Discovery {
-                    input: InputFile::Animation(AnimationInput {
-                        format: AnimationFormat::Avif,
-                    }),
+                    input: InputFile::Animation( AnimationFormat::Avif,),
                     width,
                     height,
                     frames: Some(frames),
@@ -285,17 +277,13 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickErro
             }
         }
         "APNG" => Ok(Discovery {
-            input: InputFile::Animation(AnimationInput {
-                format: AnimationFormat::Apng,
-            }),
+            input: InputFile::Animation( AnimationFormat::Apng,),
             width,
             height,
             frames: Some(frames),
         }),
         "GIF" => Ok(Discovery {
-            input: InputFile::Animation(AnimationInput {
-                format: AnimationFormat::Gif,
-            }),
+            input: InputFile::Animation( AnimationFormat::Gif,),
             width,
             height,
             frames: Some(frames),
@@ -336,9 +324,7 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickErro
         "WEBP" => {
             if frames > 1 {
                 Ok(Discovery {
-                    input: InputFile::Animation(AnimationInput {
-                        format: AnimationFormat::Webp,
-                    }),
+                    input: InputFile::Animation( AnimationFormat::Webp,),
                     width,
                     height,
                     frames: Some(frames),

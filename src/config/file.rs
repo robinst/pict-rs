@@ -1,6 +1,6 @@
 use crate::{
-    config::primitives::{AudioCodec, Filesystem, LogFormat, Targets, VideoCodec},
-    formats::ImageFormat,
+    config::primitives::{Filesystem, LogFormat, Targets},
+    formats::{AnimationFormat, AudioCodec, ImageFormat, VideoCodec},
     serde_str::Serde,
 };
 use once_cell::sync::OnceCell;
@@ -144,47 +144,70 @@ pub(crate) struct OldDb {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Media {
+    pub(crate) max_file_size: usize,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) preprocess_steps: Option<String>,
 
-    pub(crate) max_width: usize,
+    pub(crate) filters: BTreeSet<String>,
 
-    pub(crate) max_height: usize,
+    pub(crate) image: Image,
 
-    pub(crate) max_area: usize,
+    pub(crate) animation: Animation,
+
+    pub(crate) video: Video,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Image {
+    pub(crate) max_width: u16,
+
+    pub(crate) max_height: u16,
+
+    pub(crate) max_area: u32,
 
     pub(crate) max_file_size: usize,
 
-    pub(crate) max_frame_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) format: Option<ImageFormat>,
+}
 
-    pub(crate) gif: Gif,
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Animation {
+    pub(crate) max_width: u16,
 
-    pub(crate) enable_silent_video: bool,
+    pub(crate) max_height: u16,
 
-    pub(crate) enable_full_video: bool,
+    pub(crate) max_area: u32,
+
+    pub(crate) max_file_size: usize,
+
+    pub(crate) max_frame_count: u32,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) format: Option<AnimationFormat>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Video {
+    pub(crate) enable: bool,
+
+    pub(crate) allow_audio: bool,
+
+    pub(crate) max_width: u16,
+
+    pub(crate) max_height: u16,
+
+    pub(crate) max_area: u32,
+
+    pub(crate) max_file_size: usize,
+
+    pub(crate) max_frame_count: u32,
 
     pub(crate) video_codec: VideoCodec,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) audio_codec: Option<AudioCodec>,
-
-    pub(crate) filters: BTreeSet<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) format: Option<ImageFormat>,
-
-    pub(crate) skip_validate_imports: bool,
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub(crate) struct Gif {
-    pub(crate) max_width: usize,
-
-    pub(crate) max_height: usize,
-
-    pub(crate) max_area: usize,
-
-    pub(crate) max_frame_count: usize,
 }
 
 impl Media {

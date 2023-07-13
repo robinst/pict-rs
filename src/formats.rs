@@ -5,22 +5,21 @@ mod video;
 
 use std::str::FromStr;
 
-pub(crate) use animation::{AnimationFormat, AnimationInput, AnimationOutput};
+pub(crate) use animation::{AnimationFormat, AnimationOutput};
 pub(crate) use image::{ImageFormat, ImageInput, ImageOutput};
-pub(crate) use video::{InternalVideoFormat, OutputVideoFormat, VideoFormat};
+pub(crate) use video::{InternalVideoFormat, OutputVideoFormat, VideoFormat, VideoCodec, AudioCodec};
 
 #[derive(Clone, Debug)]
-pub(crate) struct PrescribedFormats {
-    pub(crate) image: Option<ImageFormat>,
-    pub(crate) animation: Option<AnimationFormat>,
-    pub(crate) video: Option<OutputVideoFormat>,
-    pub(crate) allow_audio: bool,
+pub(crate) struct Validations<'a> {
+    pub(crate) image: &'a crate::config::Image,
+    pub(crate) animation: &'a crate::config::Animation,
+    pub(crate) video: &'a crate::config::Video,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InputFile {
     Image(ImageInput),
-    Animation(AnimationInput),
+    Animation(AnimationFormat),
     Video(VideoFormat),
 }
 
@@ -61,7 +60,7 @@ impl InputFile {
     pub(crate) const fn internal_format(&self) -> InternalFormat {
         match self {
             Self::Image(ImageInput { format, .. }) => InternalFormat::Image(*format),
-            Self::Animation(AnimationInput { format }) => InternalFormat::Animation(*format),
+            Self::Animation(format) => InternalFormat::Animation(*format),
             Self::Video(format) => InternalFormat::Video(format.internal_format()),
         }
     }

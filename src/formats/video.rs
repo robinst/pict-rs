@@ -18,7 +18,19 @@ pub(crate) enum OutputVideoFormat {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Deserialize,
+    serde::Serialize,
+    clap::ValueEnum,
+)]
 pub(crate) enum VideoCodec {
     #[serde(rename = "av1")]
     Av1,
@@ -33,7 +45,17 @@ pub(crate) enum VideoCodec {
 }
 
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize, serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Deserialize,
+    serde::Serialize,
+    clap::ValueEnum,
 )]
 pub(crate) enum AudioCodec {
     #[serde(rename = "aac")]
@@ -120,40 +142,92 @@ impl VideoFormat {
 
     pub(crate) const fn build_output(
         self,
-        prescribed: Option<OutputVideoFormat>,
+        video_codec: VideoCodec,
+        audio_codec: Option<AudioCodec>,
         allow_audio: bool,
     ) -> OutputVideoFormat {
-        match (prescribed, self) {
-            (
-                Some(OutputVideoFormat::Webm {
-                    video_codec: WebmCodec::Alpha(AlphaCodec { codec, .. }),
-                    audio_codec,
+        match (video_codec, self) {
+            (VideoCodec::Vp8, Self::Webm { alpha }) => OutputVideoFormat::Webm {
+                video_codec: WebmCodec::Alpha(AlphaCodec {
+                    alpha,
+                    codec: WebmAlphaCodec::Vp8,
                 }),
-                Self::Webm { alpha },
-            ) => OutputVideoFormat::Webm {
-                video_codec: WebmCodec::Alpha(AlphaCodec { alpha, codec }),
-                audio_codec,
-            },
-            (Some(prescribed), _) => prescribed,
-            (None, format) => match format {
-                VideoFormat::Mp4 => OutputVideoFormat::Mp4 {
-                    video_codec: Mp4Codec::H264,
-                    audio_codec: if allow_audio {
-                        Some(Mp4AudioCodec::Aac)
-                    } else {
-                        None
-                    },
+                audio_codec: if allow_audio {
+                    match audio_codec {
+                        Some(AudioCodec::Vorbis) => Some(WebmAudioCodec::Vorbis),
+                        _ => Some(WebmAudioCodec::Opus),
+                    }
+                } else {
+                    None
                 },
-                VideoFormat::Webm { alpha } => OutputVideoFormat::Webm {
-                    video_codec: WebmCodec::Alpha(AlphaCodec {
-                        alpha,
-                        codec: WebmAlphaCodec::Vp9,
-                    }),
-                    audio_codec: if allow_audio {
-                        Some(WebmAudioCodec::Opus)
-                    } else {
-                        None
-                    },
+            },
+            (VideoCodec::Vp8, _) => OutputVideoFormat::Webm {
+                video_codec: WebmCodec::Alpha(AlphaCodec {
+                    alpha: false,
+                    codec: WebmAlphaCodec::Vp8,
+                }),
+                audio_codec: if allow_audio {
+                    match audio_codec {
+                        Some(AudioCodec::Vorbis) => Some(WebmAudioCodec::Vorbis),
+                        _ => Some(WebmAudioCodec::Opus),
+                    }
+                } else {
+                    None
+                },
+            },
+            (VideoCodec::Vp9, Self::Webm { alpha }) => OutputVideoFormat::Webm {
+                video_codec: WebmCodec::Alpha(AlphaCodec {
+                    alpha,
+                    codec: WebmAlphaCodec::Vp9,
+                }),
+                audio_codec: if allow_audio {
+                    match audio_codec {
+                        Some(AudioCodec::Vorbis) => Some(WebmAudioCodec::Vorbis),
+                        _ => Some(WebmAudioCodec::Opus),
+                    }
+                } else {
+                    None
+                },
+            },
+            (VideoCodec::Vp9, _) => OutputVideoFormat::Webm {
+                video_codec: WebmCodec::Alpha(AlphaCodec {
+                    alpha: false,
+                    codec: WebmAlphaCodec::Vp9,
+                }),
+                audio_codec: if allow_audio {
+                    match audio_codec {
+                        Some(AudioCodec::Vorbis) => Some(WebmAudioCodec::Vorbis),
+                        _ => Some(WebmAudioCodec::Opus),
+                    }
+                } else {
+                    None
+                },
+            },
+            (VideoCodec::Av1, _) => OutputVideoFormat::Webm {
+                video_codec: WebmCodec::Av1,
+                audio_codec: if allow_audio {
+                    match audio_codec {
+                        Some(AudioCodec::Vorbis) => Some(WebmAudioCodec::Vorbis),
+                        _ => Some(WebmAudioCodec::Opus),
+                    }
+                } else {
+                    None
+                },
+            },
+            (VideoCodec::H264, _) => OutputVideoFormat::Mp4 {
+                video_codec: Mp4Codec::H264,
+                audio_codec: if allow_audio {
+                    Some(Mp4AudioCodec::Aac)
+                } else {
+                    None
+                },
+            },
+            (VideoCodec::H265, _) => OutputVideoFormat::Mp4 {
+                video_codec: Mp4Codec::H265,
+                audio_codec: if allow_audio {
+                    Some(Mp4AudioCodec::Aac)
+                } else {
+                    None
                 },
             },
         }
@@ -161,7 +235,7 @@ impl VideoFormat {
 }
 
 impl OutputVideoFormat {
-    pub(super) const fn from_parts(
+    pub(crate) const fn from_parts(
         video_codec: VideoCodec,
         audio_codec: Option<AudioCodec>,
         allow_audio: bool,
@@ -237,6 +311,13 @@ impl OutputVideoFormat {
                 }),
                 audio_codec: None,
             },
+        }
+    }
+
+    pub(crate) const fn magick_format(self) -> &'static str {
+        match self {
+            Self::Mp4 { .. } => "MP4",
+            Self::Webm { .. } => "WEBM",
         }
     }
 

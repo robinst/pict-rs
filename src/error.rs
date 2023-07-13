@@ -57,6 +57,9 @@ pub(crate) enum UploadError {
     #[error("Error interacting with filesystem")]
     Io(#[from] std::io::Error),
 
+    #[error("Error validating upload")]
+    Validation(#[from] crate::validate::ValidationError),
+
     #[error("Error generating path")]
     PathGenerator(#[from] storage_path_generator::PathError),
 
@@ -166,6 +169,7 @@ impl ResponseError for Error {
                     crate::repo::RepoError::AlreadyClaimed,
                 ))
                 | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
+                | UploadError::Validation(_)
                 | UploadError::UnsupportedProcessExtension,
             ) => StatusCode::BAD_REQUEST,
             Some(UploadError::Magick(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,

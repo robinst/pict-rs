@@ -6,7 +6,7 @@ use std::{collections::HashSet, sync::OnceLock};
 use crate::{
     ffmpeg::FfMpegError,
     formats::{
-        AnimationFormat, AnimationInput, ImageFormat, ImageInput, InputFile, InternalFormat,
+        AnimationFormat, ImageFormat, ImageInput, InputFile, InternalFormat,
         InternalVideoFormat, VideoFormat,
     },
     process::Process,
@@ -169,7 +169,7 @@ where
             frames,
         })),
         InternalFormat::Animation(format) => Ok(Some(Discovery {
-            input: InputFile::Animation(AnimationInput { format }),
+            input: InputFile::Animation(format),
             width,
             height,
             frames,
