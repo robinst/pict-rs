@@ -1,4 +1,5 @@
 use actix_web::web::Bytes;
+use futures_util::Stream;
 use tokio::io::AsyncReadExt;
 
 use crate::{
@@ -7,7 +8,7 @@ use crate::{
     process::Process,
 };
 
-use super::Discovery;
+use super::{Discovery, DiscoveryLite};
 
 #[derive(Debug, serde::Deserialize)]
 struct MagickDiscovery {
@@ -24,6 +25,29 @@ struct Image {
 struct Geometry {
     width: u16,
     height: u16,
+}
+
+pub(super) async fn discover_bytes_lite(bytes: Bytes) -> Result<DiscoveryLite, MagickError> {
+    discover_file_lite(move |mut file| async move {
+        file.write_from_bytes(bytes)
+            .await
+            .map_err(MagickError::Write)?;
+        Ok(file)
+    })
+    .await
+}
+
+pub(super) async fn discover_stream_lite<S>(stream: S) -> Result<DiscoveryLite, MagickError>
+where
+    S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+{
+    discover_file_lite(move |mut file| async move {
+        file.write_from_stream(stream)
+            .await
+            .map_err(MagickError::Write)?;
+        Ok(file)
+    })
+    .await
 }
 
 pub(super) async fn confirm_bytes(
@@ -123,6 +147,26 @@ where
     }
 
     Ok(lines)
+}
+
+async fn discover_file_lite<F, Fut>(f: F) -> Result<DiscoveryLite, MagickError>
+where
+    F: FnOnce(crate::file::File) -> Fut,
+    Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
+{
+    let Discovery {
+        input,
+        width,
+        height,
+        frames,
+    } = discover_file(f).await?;
+
+    Ok(DiscoveryLite {
+        format: input.internal_format(),
+        width,
+        height,
+        frames,
+    })
 }
 
 async fn discover_file<F, Fut>(f: F) -> Result<Discovery, MagickError>

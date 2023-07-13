@@ -1,5 +1,6 @@
 use crate::{
-    config::primitives::{AudioCodec, Filesystem, ImageFormat, LogFormat, Targets, VideoCodec},
+    config::primitives::{AudioCodec, Filesystem, LogFormat, Targets, VideoCodec},
+    formats::ImageFormat,
     serde_str::Serde,
 };
 use once_cell::sync::OnceCell;

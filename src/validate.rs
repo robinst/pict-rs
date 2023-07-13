@@ -10,33 +10,6 @@ use crate::{
 use actix_web::web::Bytes;
 use tokio::io::AsyncRead;
 
-struct UnvalidatedBytes {
-    bytes: Bytes,
-    written: usize,
-}
-
-impl UnvalidatedBytes {
-    fn new(bytes: Bytes) -> Self {
-        UnvalidatedBytes { bytes, written: 0 }
-    }
-}
-
-impl AsyncRead for UnvalidatedBytes {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        let bytes_to_write = (self.bytes.len() - self.written).min(buf.remaining());
-        if bytes_to_write > 0 {
-            let end = self.written + bytes_to_write;
-            buf.put_slice(&self.bytes[self.written..end]);
-            self.written = end;
-        }
-        std::task::Poll::Ready(Ok(()))
-    }
-}
-
 #[tracing::instrument(skip_all)]
 pub(crate) async fn validate_bytes(
     bytes: Bytes,

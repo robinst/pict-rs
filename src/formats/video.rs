@@ -104,13 +104,6 @@ pub(crate) enum InternalVideoFormat {
 }
 
 impl VideoFormat {
-    pub(crate) const fn file_extension(self) -> &'static str {
-        match self {
-            Self::Mp4 => ".mp4",
-            Self::Webm { .. } => ".webm",
-        }
-    }
-
     pub(crate) const fn ffmpeg_format(self) -> &'static str {
         match self {
             Self::Mp4 => "mp4",
@@ -247,13 +240,6 @@ impl OutputVideoFormat {
         }
     }
 
-    pub(super) const fn file_extension(self) -> &'static str {
-        match self {
-            Self::Mp4 { .. } => ".mp4",
-            Self::Webm { .. } => ".webm",
-        }
-    }
-
     pub(crate) const fn ffmpeg_format(self) -> &'static str {
         match self {
             Self::Mp4 { .. } => "mp4",
@@ -289,14 +275,7 @@ impl OutputVideoFormat {
         }
     }
 
-    pub(super) fn media_type(self) -> mime::Mime {
-        match self {
-            Self::Mp4 { .. } => super::mimes::video_mp4(),
-            Self::Webm { .. } => super::mimes::video_webm(),
-        }
-    }
-
-    pub(crate) fn internal_format(self) -> InternalVideoFormat {
+    pub(crate) const fn internal_format(self) -> InternalVideoFormat {
         match self {
             Self::Mp4 { .. } => InternalVideoFormat::Mp4,
             Self::Webm { .. } => InternalVideoFormat::Webm,

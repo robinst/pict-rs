@@ -1,7 +1,7 @@
 use crate::{
+    discover::DiscoveryLite,
     error::Error,
     formats::{InternalFormat, InternalVideoFormat},
-    magick::{video_mp4, video_webm, ValidInputType},
     serde_str::Serde,
     store::Store,
 };
@@ -17,9 +17,9 @@ pub(crate) enum MaybeHumanDate {
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub(crate) struct Details {
-    width: usize,
-    height: usize,
-    frames: Option<usize>,
+    width: u16,
+    height: u16,
+    frames: Option<u32>,
     content_type: Serde<mime::Mime>,
     created_at: MaybeHumanDate,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -27,71 +27,41 @@ pub(crate) struct Details {
 }
 
 impl Details {
-    pub(crate) fn is_motion(&self) -> bool {
+    pub(crate) fn is_video(&self) -> bool {
         self.content_type.type_() == "video"
-            || self.content_type.type_() == "image" && self.content_type.subtype() == "gif"
     }
 
-    pub(crate) async fn from_bytes(input: web::Bytes, hint: ValidInputType) -> Result<Self, Error> {
-        let details = if hint.is_video() {
-            crate::ffmpeg::details_bytes(input.clone()).await?
-        } else {
-            None
-        };
-
-        let details = if let Some(details) = details {
-            details
-        } else {
-            crate::magick::details_bytes(input, Some(hint)).await?
-        };
-
-        Ok(Details::now(
-            details.width,
-            details.height,
-            details.mime_type,
-            details.frames,
-        ))
-    }
-
-    pub(crate) async fn from_store<S: Store + 'static>(
-        store: S,
-        identifier: S::Identifier,
-        expected_format: Option<ValidInputType>,
-    ) -> Result<Self, Error> {
-        let details = if expected_format.map(|t| t.is_video()).unwrap_or(true) {
-            crate::ffmpeg::details_store(&store, &identifier).await?
-        } else {
-            None
-        };
-
-        let details = if let Some(details) = details {
-            details
-        } else {
-            crate::magick::details_store(store, identifier, expected_format).await?
-        };
-
-        Ok(Details::now(
-            details.width,
-            details.height,
-            details.mime_type,
-            details.frames,
-        ))
-    }
-
-    pub(crate) fn now(
-        width: usize,
-        height: usize,
-        content_type: mime::Mime,
-        frames: Option<usize>,
-    ) -> Self {
-        Details {
+    pub(crate) async fn from_bytes(input: web::Bytes) -> Result<Self, Error> {
+        let DiscoveryLite {
+            format,
             width,
             height,
             frames,
-            content_type: Serde::new(content_type),
-            created_at: MaybeHumanDate::HumanDate(time::OffsetDateTime::now_utc()),
-            format: None,
+        } = crate::discover::discover_bytes_lite(input).await?;
+
+        Ok(Details::from_parts(format, width, height, frames))
+    }
+
+    pub(crate) async fn from_store<S: Store + 'static>(
+        store: &S,
+        identifier: &S::Identifier,
+    ) -> Result<Self, Error> {
+        let DiscoveryLite {
+            format,
+            width,
+            height,
+            frames,
+        } = crate::discover::discover_store_lite(store, identifier).await?;
+
+        Ok(Details::from_parts(format, width, height, frames))
+    }
+
+    pub(crate) fn internal_format(&self) -> Option<InternalFormat> {
+        if let Some(format) = self.format {
+            return Some(format);
         }
+
+        InternalFormat::maybe_from_media_type(&self.content_type, self.frames.is_some())
     }
 
     pub(crate) fn content_type(&self) -> mime::Mime {
@@ -102,12 +72,12 @@ impl Details {
         self.created_at.into()
     }
 
-    pub(crate) fn input_format(&self) -> Option<InternalVideoFormat> {
-        if *self.content_type == video_mp4() {
+    pub(crate) fn video_format(&self) -> Option<InternalVideoFormat> {
+        if *self.content_type == crate::formats::mimes::video_mp4() {
             return Some(InternalVideoFormat::Mp4);
         }
 
-        if *self.content_type == video_webm() {
+        if *self.content_type == crate::formats::mimes::video_webm() {
             return Some(InternalVideoFormat::Webm);
         }
 
@@ -121,9 +91,9 @@ impl Details {
         frames: Option<u32>,
     ) -> Self {
         Self {
-            width: width.into(),
-            height: height.into(),
-            frames: frames.map(|f| f.try_into().expect("Reasonable size")),
+            width,
+            height,
+            frames,
             content_type: Serde::new(format.media_type()),
             created_at: MaybeHumanDate::HumanDate(OffsetDateTime::now_utc()),
             format: Some(format),

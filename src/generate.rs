@@ -48,7 +48,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
 async fn process<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
-    format: InputProcessableFormat,
+    output_format: InputProcessableFormat,
     alias: Alias,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
@@ -83,6 +83,24 @@ async fn process<R: FullRepo, S: Store + 'static>(
         motion_identifier
     };
 
+    let input_details = if let Some(details) = repo.details(&identifier).await? {
+        details
+    } else {
+        let details = Details::from_store(store, &identifier).await?;
+
+        repo.relate_details(&identifier, &details).await?;
+
+        details
+    };
+
+    let Some(format) = input_details.internal_format().and_then(|format| format.processable_format()) else {
+        todo!("Error")
+    };
+
+    let Some(format) = format.process_to(output_format) else {
+        todo!("Error")
+    };
+
     let mut processed_reader =
         crate::magick::process_image_store_read(store.clone(), identifier, thumbnail_args, format)?;
 
@@ -95,14 +113,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
 
     drop(permit);
 
-    let discovery = crate::discover::discover_bytes(bytes.clone()).await?;
-
-    let details = Details::from_parts(
-        discovery.input.internal_format(),
-        discovery.width,
-        discovery.height,
-        discovery.frames,
-    );
+    let details = Details::from_bytes(bytes.clone()).await?;
 
     let identifier = store.save_bytes(bytes.clone()).await?;
     repo.relate_details(&identifier, &details).await?;

@@ -144,7 +144,7 @@ async fn generate<R: FullRepo, S: Store + 'static>(
         source,
         process_path,
         process_args,
-        original_details.input_format(),
+        original_details.video_format(),
         None,
         hash,
     )

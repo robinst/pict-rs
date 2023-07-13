@@ -12,10 +12,9 @@ use defaults::Defaults;
 
 pub(crate) use commandline::Operation;
 pub(crate) use file::{
-    ConfigFile as Configuration, Media as MediaConfiguration, ObjectStorage, OpenTelemetry, Repo,
-    Sled, Store, Tracing,
+    ConfigFile as Configuration, ObjectStorage, OpenTelemetry, Repo, Sled, Store, Tracing,
 };
-pub(crate) use primitives::{AudioCodec, Filesystem, ImageFormat, LogFormat, VideoCodec};
+pub(crate) use primitives::{Filesystem, LogFormat};
 
 /// Source for pict-rs configuration when embedding as a library
 pub enum ConfigSource<P, T> {

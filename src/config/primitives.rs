@@ -1,4 +1,3 @@
-use crate::magick::ValidInputType;
 use clap::ValueEnum;
 use std::{fmt::Display, path::PathBuf, str::FromStr};
 use tracing::Level;
@@ -23,28 +22,6 @@ pub(crate) enum LogFormat {
     Json,
     Normal,
     Pretty,
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Deserialize,
-    serde::Serialize,
-    ValueEnum,
-)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ImageFormat {
-    Avif,
-    Jpeg,
-    Jxl,
-    Png,
-    Webp,
 }
 
 #[derive(
@@ -169,32 +146,6 @@ pub(crate) enum Store {
     ObjectStorage(ObjectStorage),
 }
 
-impl ImageFormat {
-    pub(crate) fn as_hint(self) -> ValidInputType {
-        ValidInputType::from_format(self)
-    }
-
-    pub(crate) fn as_magick_format(self) -> &'static str {
-        match self {
-            Self::Avif => "AVIF",
-            Self::Jpeg => "JPEG",
-            Self::Jxl => "JXL",
-            Self::Png => "PNG",
-            Self::Webp => "WEBP",
-        }
-    }
-
-    pub(crate) fn as_ext(self) -> &'static str {
-        match self {
-            Self::Avif => ".avif",
-            Self::Jpeg => ".jpeg",
-            Self::Jxl => ".jxl",
-            Self::Png => ".png",
-            Self::Webp => ".webp",
-        }
-    }
-}
-
 impl From<Filesystem> for Store {
     fn from(f: Filesystem) -> Self {
         Self::Filesystem(f)
@@ -260,21 +211,6 @@ impl Display for Targets {
     }
 }
 
-impl FromStr for ImageFormat {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "avif" => Ok(Self::Avif),
-            "jpeg" | "jpg" => Ok(Self::Jpeg),
-            "jxl" => Ok(Self::Jxl),
-            "png" => Ok(Self::Png),
-            "webp" => Ok(Self::Webp),
-            other => Err(format!("Invalid variant: {other}")),
-        }
-    }
-}
-
 impl FromStr for LogFormat {
     type Err = String;
 
@@ -285,15 +221,6 @@ impl FromStr for LogFormat {
             }
         }
         Err(format!("Invalid variant: {s}"))
-    }
-}
-
-impl Display for ImageFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.to_possible_value()
-            .expect("no values are skipped")
-            .get_name()
-            .fmt(f)
     }
 }
 

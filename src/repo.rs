@@ -114,7 +114,7 @@ pub(crate) trait FullRepo:
         };
 
         match self.details(&identifier).await? {
-            Some(details) if details.is_motion() => self.motion_identifier::<I>(hash).await,
+            Some(details) if details.is_video() => self.motion_identifier::<I>(hash).await,
             Some(_) => Ok(Some(identifier)),
             None => Ok(None),
         }

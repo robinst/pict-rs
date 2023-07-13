@@ -33,7 +33,7 @@ use actix_web::{
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::{Client, Connector};
-use formats::{InputProcessableFormat, ProcessableFormat};
+use formats::InputProcessableFormat;
 use futures_util::{
     stream::{empty, once},
     Stream, StreamExt, TryStreamExt,
@@ -55,13 +55,12 @@ use tracing_futures::Instrument;
 
 use self::{
     backgrounded::Backgrounded,
-    config::{Configuration, ImageFormat, Operation},
+    config::{Configuration, Operation},
     details::Details,
     either::Either,
     error::{Error, UploadError},
     ingest::Session,
     init_tracing::init_tracing,
-    magick::{details_hint, ValidInputType},
     middleware::{Deadline, Internal},
     queue::queue_generate,
     repo::{
@@ -115,15 +114,20 @@ async fn ensure_details<R: FullRepo, S: Store + 'static>(
         return Err(UploadError::MissingAlias.into());
     };
 
-    let details = repo.details(&identifier).await?;
+    let details = repo.details(&identifier).await?.and_then(|details| {
+        if details.internal_format().is_some() {
+            Some(details)
+        } else {
+            None
+        }
+    });
 
     if let Some(details) = details {
         tracing::debug!("details exist");
         Ok(details)
     } else {
         tracing::debug!("generating new details from {:?}", identifier);
-        let hint = details_hint(alias);
-        let new_details = Details::from_store(store.clone(), identifier.clone(), hint).await?;
+        let new_details = Details::from_store(store, &identifier).await?;
         tracing::debug!("storing details for {:?}", identifier);
         repo.relate_details(&identifier, &new_details).await?;
         tracing::debug!("stored");
@@ -645,19 +649,20 @@ async fn process<R: FullRepo, S: Store + 'static>(
         .await?;
 
     if let Some(identifier) = identifier_opt {
-        let details = repo.details(&identifier).await?;
+        let details = repo.details(&identifier).await?.and_then(|details| {
+            if details.internal_format().is_some() {
+                Some(details)
+            } else {
+                None
+            }
+        });
 
         let details = if let Some(details) = details {
             tracing::debug!("details exist");
             details
         } else {
             tracing::debug!("generating new details from {:?}", identifier);
-            let new_details = Details::from_store(
-                (**store).clone(),
-                identifier.clone(),
-                Some(ValidInputType::from_format(format)),
-            )
-            .await?;
+            let new_details = Details::from_store(&store, &identifier).await?;
             tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
             tracing::debug!("stored");
@@ -676,7 +681,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
         alias,
         thumbnail_path,
         thumbnail_args,
-        original_details.to_input_format(),
+        original_details.video_format(),
         None,
         hash,
     )
@@ -727,7 +732,7 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
     repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
-    let (format, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
+    let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
     let Some(hash) = repo.hash(&alias).await? else {
@@ -740,19 +745,20 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
         .await?;
 
     if let Some(identifier) = identifier_opt {
-        let details = repo.details(&identifier).await?;
+        let details = repo.details(&identifier).await?.and_then(|details| {
+            if details.internal_format().is_some() {
+                Some(details)
+            } else {
+                None
+            }
+        });
 
         let details = if let Some(details) = details {
             tracing::debug!("details exist");
             details
         } else {
             tracing::debug!("generating new details from {:?}", identifier);
-            let new_details = Details::from_store(
-                (**store).clone(),
-                identifier.clone(),
-                Some(ValidInputType::from_format(format)),
-            )
-            .await?;
+            let new_details = Details::from_store(&store, &identifier).await?;
             tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
             tracing::debug!("stored");

@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    formats::ProcessableFormat,
+    formats::InputProcessableFormat,
     repo::{
         Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, QueueRepo, UploadId,
     },
@@ -69,7 +69,7 @@ enum Process {
         declared_alias: Option<Serde<Alias>>,
     },
     Generate {
-        target_format: ProcessableFormat,
+        target_format: InputProcessableFormat,
         source: Serde<Alias>,
         process_path: PathBuf,
         process_args: Vec<String>,
@@ -139,7 +139,7 @@ pub(crate) async fn queue_ingest<R: QueueRepo>(
 
 pub(crate) async fn queue_generate<R: QueueRepo>(
     repo: &R,
-    target_format: ProcessableFormat,
+    target_format: InputProcessableFormat,
     source: Alias,
     process_path: PathBuf,
     process_args: Vec<String>,

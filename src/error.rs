@@ -99,9 +99,6 @@ pub(crate) enum UploadError {
     #[error("Process endpoint was called with invalid extension")]
     UnsupportedProcessExtension,
 
-    #[error("Gif uploads are not enabled")]
-    SilentVideoDisabled,
-
     #[error("Unable to download image, bad response {0}")]
     Download(actix_web::http::StatusCode),
 
@@ -169,14 +166,12 @@ impl ResponseError for Error {
                     crate::repo::RepoError::AlreadyClaimed,
                 ))
                 | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
-                | UploadError::UnsupportedProcessExtension
-                | UploadError::SilentVideoDisabled,
+                | UploadError::UnsupportedProcessExtension,
             ) => StatusCode::BAD_REQUEST,
             Some(UploadError::Magick(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::Ffmpeg(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::Exiftool(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::MissingAlias) => StatusCode::NOT_FOUND,
-            Some(UploadError::Magick(e)) if e.is_not_found() => StatusCode::NOT_FOUND,
             Some(UploadError::Ffmpeg(e)) if e.is_not_found() => StatusCode::NOT_FOUND,
             Some(UploadError::InvalidToken) => StatusCode::FORBIDDEN,
             Some(UploadError::Range) => StatusCode::RANGE_NOT_SATISFIABLE,

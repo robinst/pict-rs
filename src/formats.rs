@@ -24,13 +24,6 @@ pub(crate) enum InputFile {
     Video(VideoFormat),
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum OutputFile {
-    Image(ImageOutput),
-    Animation(AnimationOutput),
-    Video(OutputVideoFormat),
-}
-
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) enum InternalFormat {
     Image(ImageFormat),
@@ -65,53 +58,10 @@ pub(crate) enum InputProcessableFormat {
 }
 
 impl InputFile {
-    const fn file_extension(&self) -> &'static str {
-        match self {
-            Self::Image(ImageInput { format, .. }) => format.file_extension(),
-            Self::Animation(AnimationInput { format }) => format.file_extension(),
-            Self::Video(format) => format.file_extension(),
-        }
-    }
-
-    const fn build_output(&self, prescribed: &PrescribedFormats) -> OutputFile {
-        match (self, prescribed) {
-            (InputFile::Image(input), PrescribedFormats { image, .. }) => {
-                OutputFile::Image(input.build_output(*image))
-            }
-            (InputFile::Animation(input), PrescribedFormats { animation, .. }) => {
-                OutputFile::Animation(input.build_output(*animation))
-            }
-            (
-                InputFile::Video(input),
-                PrescribedFormats {
-                    video, allow_audio, ..
-                },
-            ) => OutputFile::Video(input.build_output(*video, *allow_audio)),
-        }
-    }
-
     pub(crate) const fn internal_format(&self) -> InternalFormat {
         match self {
             Self::Image(ImageInput { format, .. }) => InternalFormat::Image(*format),
             Self::Animation(AnimationInput { format }) => InternalFormat::Animation(*format),
-            Self::Video(format) => InternalFormat::Video(format.internal_format()),
-        }
-    }
-}
-
-impl OutputFile {
-    const fn file_extension(&self) -> &'static str {
-        match self {
-            Self::Image(ImageOutput { format, .. }) => format.file_extension(),
-            Self::Animation(AnimationOutput { format, .. }) => format.file_extension(),
-            Self::Video(format) => format.file_extension(),
-        }
-    }
-
-    pub(crate) const fn internal_format(&self) -> InternalFormat {
-        match self {
-            Self::Image(ImageOutput { format, .. }) => InternalFormat::Image(*format),
-            Self::Animation(AnimationOutput { format, .. }) => InternalFormat::Animation(*format),
             Self::Video(format) => InternalFormat::Video(format.internal_format()),
         }
     }
@@ -123,6 +73,23 @@ impl InternalFormat {
             Self::Image(format) => format.media_type(),
             Self::Animation(format) => format.media_type(),
             Self::Video(format) => format.media_type(),
+        }
+    }
+
+    pub(crate) fn maybe_from_media_type(mime: &mime::Mime, has_frames: bool) -> Option<Self> {
+        match (mime.type_(), mime.subtype().as_str(), has_frames) {
+            (mime::IMAGE, "apng", _) => Some(Self::Animation(AnimationFormat::Apng)),
+            (mime::IMAGE, "avif", true) => Some(Self::Animation(AnimationFormat::Avif)),
+            (mime::IMAGE, "avif", false) => Some(Self::Image(ImageFormat::Avif)),
+            (mime::IMAGE, "gif", _) => Some(Self::Animation(AnimationFormat::Gif)),
+            (mime::IMAGE, "jpeg", _) => Some(Self::Image(ImageFormat::Jpeg)),
+            (mime::IMAGE, "jxl", _) => Some(Self::Image(ImageFormat::Jxl)),
+            (mime::IMAGE, "png", _) => Some(Self::Image(ImageFormat::Png)),
+            (mime::IMAGE, "webp", true) => Some(Self::Animation(AnimationFormat::Webp)),
+            (mime::IMAGE, "webp", false) => Some(Self::Image(ImageFormat::Webp)),
+            (mime::VIDEO, "mp4", _) => Some(Self::Video(InternalVideoFormat::Mp4)),
+            (mime::VIDEO, "webm", _) => Some(Self::Video(InternalVideoFormat::Webm)),
+            _ => None,
         }
     }
 
@@ -159,6 +126,33 @@ impl ProcessableFormat {
         match self {
             Self::Image(format) => format.magick_format(),
             Self::Animation(format) => format.magick_format(),
+        }
+    }
+
+    pub(crate) fn process_to(self, output: InputProcessableFormat) -> Option<Self> {
+        match (self, output) {
+            (Self::Image(_), InputProcessableFormat::Avif) => Some(Self::Image(ImageFormat::Avif)),
+            (Self::Image(_), InputProcessableFormat::Jpeg) => Some(Self::Image(ImageFormat::Jpeg)),
+            (Self::Image(_), InputProcessableFormat::Jxl) => Some(Self::Image(ImageFormat::Jxl)),
+            (Self::Image(_), InputProcessableFormat::Png) => Some(Self::Image(ImageFormat::Png)),
+            (Self::Image(_), InputProcessableFormat::Webp) => Some(Self::Image(ImageFormat::Webp)),
+            (Self::Animation(_), InputProcessableFormat::Apng) => {
+                Some(Self::Animation(AnimationFormat::Apng))
+            }
+            (Self::Animation(_), InputProcessableFormat::Avif) => {
+                Some(Self::Animation(AnimationFormat::Avif))
+            }
+            (Self::Animation(_), InputProcessableFormat::Gif) => {
+                Some(Self::Animation(AnimationFormat::Gif))
+            }
+            (Self::Animation(_), InputProcessableFormat::Webp) => {
+                Some(Self::Animation(AnimationFormat::Webp))
+            }
+            (Self::Image(_), InputProcessableFormat::Apng) => None,
+            (Self::Image(_), InputProcessableFormat::Gif) => None,
+            (Self::Animation(_), InputProcessableFormat::Jpeg) => None,
+            (Self::Animation(_), InputProcessableFormat::Jxl) => None,
+            (Self::Animation(_), InputProcessableFormat::Png) => None,
         }
     }
 }

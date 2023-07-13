@@ -1,5 +1,6 @@
 use crate::{
-    config::primitives::{AudioCodec, ImageFormat, LogFormat, Targets, VideoCodec},
+    config::primitives::{AudioCodec, LogFormat, Targets, VideoCodec},
+    formats::ImageFormat,
     serde_str::Serde,
 };
 use clap::{Parser, Subcommand};
