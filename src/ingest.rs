@@ -2,7 +2,7 @@ use crate::{
     bytes_stream::BytesStream,
     either::Either,
     error::{Error, UploadError},
-    magick::ValidInputType,
+    formats::{InternalFormat, PrescribedFormats},
     repo::{Alias, AliasRepo, AlreadyExists, DeleteToken, FullRepo, HashRepo},
     store::Store,
     CONFIG,
@@ -47,7 +47,6 @@ pub(crate) async fn ingest<R, S>(
     store: &S,
     stream: impl Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     declared_alias: Option<Alias>,
-    should_validate: bool,
 ) -> Result<Session<R, S>, Error>
 where
     R: FullRepo + 'static,
@@ -57,13 +56,22 @@ where
 
     let bytes = aggregate(stream).await?;
 
+    // TODO: load from config
+    let prescribed = PrescribedFormats {
+        image: None,
+        animation: None,
+        video: None,
+        allow_audio: true,
+    };
+
     tracing::trace!("Validating bytes");
     let (input_type, validated_reader) =
-        crate::validate::validate_bytes(bytes, &CONFIG.media, should_validate).await?;
+        crate::validate::validate_bytes(bytes, &prescribed).await?;
 
     let processed_reader = if let Some(operations) = CONFIG.media.preprocess_steps() {
-        if let Some(format) = input_type.to_format() {
-            let (_, magick_args) = crate::processor::build_chain(operations, format.as_ext())?;
+        if let Some(format) = input_type.processable_format() {
+            let (_, magick_args) =
+                crate::processor::build_chain(operations, format.file_extension())?;
 
             let processed_reader =
                 crate::magick::process_image_async_read(validated_reader, magick_args, format)?;
@@ -180,9 +188,9 @@ where
     }
 
     #[tracing::instrument(level = "debug", skip(self, hash))]
-    async fn create_alias(&mut self, hash: &[u8], input_type: ValidInputType) -> Result<(), Error> {
+    async fn create_alias(&mut self, hash: &[u8], input_type: InternalFormat) -> Result<(), Error> {
         loop {
-            let alias = Alias::generate(input_type.as_ext().to_string());
+            let alias = Alias::generate(input_type.file_extension().to_string());
 
             if AliasRepo::create(&self.repo, &alias).await?.is_ok() {
                 self.alias = Some(alias.clone());

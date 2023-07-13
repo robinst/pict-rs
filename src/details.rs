@@ -1,12 +1,12 @@
 use crate::{
     error::Error,
-    ffmpeg::VideoFormat,
+    formats::{InternalFormat, InternalVideoFormat},
     magick::{video_mp4, video_webm, ValidInputType},
     serde_str::Serde,
     store::Store,
 };
 use actix_web::web;
-use time::format_description::well_known::Rfc3339;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(untagged)]
@@ -22,6 +22,8 @@ pub(crate) struct Details {
     frames: Option<usize>,
     content_type: Serde<mime::Mime>,
     created_at: MaybeHumanDate,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<InternalFormat>,
 }
 
 impl Details {
@@ -88,6 +90,7 @@ impl Details {
             frames,
             content_type: Serde::new(content_type),
             created_at: MaybeHumanDate::HumanDate(time::OffsetDateTime::now_utc()),
+            format: None,
         }
     }
 
@@ -99,20 +102,32 @@ impl Details {
         self.created_at.into()
     }
 
-    pub(crate) fn to_input_format(&self) -> Option<VideoFormat> {
-        if *self.content_type == mime::IMAGE_GIF {
-            return Some(VideoFormat::Gif);
-        }
-
+    pub(crate) fn input_format(&self) -> Option<InternalVideoFormat> {
         if *self.content_type == video_mp4() {
-            return Some(VideoFormat::Mp4);
+            return Some(InternalVideoFormat::Mp4);
         }
 
         if *self.content_type == video_webm() {
-            return Some(VideoFormat::Webm);
+            return Some(InternalVideoFormat::Webm);
         }
 
         None
+    }
+
+    pub(crate) fn from_parts(
+        format: InternalFormat,
+        width: u16,
+        height: u16,
+        frames: Option<u32>,
+    ) -> Self {
+        Self {
+            width: width.into(),
+            height: height.into(),
+            frames: frames.map(|f| f.try_into().expect("Reasonable size")),
+            content_type: Serde::new(format.media_type()),
+            created_at: MaybeHumanDate::HumanDate(OffsetDateTime::now_utc()),
+            format: Some(format),
+        }
     }
 }
 

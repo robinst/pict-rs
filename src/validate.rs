@@ -1,9 +1,11 @@
+mod exiftool;
+mod ffmpeg;
+mod magick;
+
 use crate::{
-    config::{ImageFormat, MediaConfiguration},
     either::Either,
-    error::{Error, UploadError},
-    ffmpeg::{FileFormat, TranscodeOptions},
-    magick::ValidInputType,
+    error::Error,
+    formats::{AnimationOutput, ImageOutput, InputFile, InternalFormat, PrescribedFormats},
 };
 use actix_web::web::Bytes;
 use tokio::io::AsyncRead;
@@ -38,71 +40,56 @@ impl AsyncRead for UnvalidatedBytes {
 #[tracing::instrument(skip_all)]
 pub(crate) async fn validate_bytes(
     bytes: Bytes,
-    media: &MediaConfiguration,
-    validate: bool,
-) -> Result<(ValidInputType, impl AsyncRead + Unpin), Error> {
-    let (details, input_type) =
-        if let Some(tup) = crate::ffmpeg::input_type_bytes(bytes.clone()).await? {
-            tup
-        } else {
-            crate::magick::input_type_bytes(bytes.clone()).await?
-        };
+    prescribed: &PrescribedFormats,
+) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
+    let discovery = crate::discover::discover_bytes(bytes.clone()).await?;
 
-    if !validate {
-        return Ok((input_type, Either::left(UnvalidatedBytes::new(bytes))));
-    }
+    match &discovery.input {
+        InputFile::Image(input) => {
+            let ImageOutput {
+                format,
+                needs_transcode,
+            } = input.build_output(prescribed.image);
 
-    match (input_type.to_file_format(), media.format) {
-        (FileFormat::Video(video_format), _) => {
-            if !(media.enable_silent_video || media.enable_full_video) {
-                return Err(UploadError::SilentVideoDisabled.into());
-            }
-            let transcode_options = TranscodeOptions::new(media, &details, video_format);
-
-            if transcode_options.needs_reencode() {
-                Ok((
-                    transcode_options.output_type(),
-                    Either::right(Either::left(Either::left(
-                        crate::ffmpeg::transcode_bytes(bytes, transcode_options).await?,
-                    ))),
-                ))
+            let read = if needs_transcode {
+                Either::left(Either::left(magick::convert_image(
+                    input.format,
+                    format,
+                    bytes,
+                )?))
             } else {
-                Ok((
-                    transcode_options.output_type(),
-                    Either::right(Either::right(crate::exiftool::clear_metadata_bytes_read(
-                        bytes,
-                    )?)),
-                ))
-            }
+                Either::left(Either::right(exiftool::clear_metadata_bytes_read(bytes)?))
+            };
+
+            Ok((InternalFormat::Image(format), read))
         }
-        (FileFormat::Image(image_format), Some(format)) if image_format != format => Ok((
-            ValidInputType::from_format(format),
-            Either::right(Either::left(Either::right(
-                crate::magick::convert_bytes_read(bytes, format)?,
-            ))),
-        )),
-        (FileFormat::Image(ImageFormat::Webp), _) => Ok((
-            ValidInputType::Webp,
-            Either::right(Either::left(Either::right(
-                crate::magick::convert_bytes_read(bytes, ImageFormat::Webp)?,
-            ))),
-        )),
-        (FileFormat::Image(image_format), _) => {
-            if crate::exiftool::needs_reorienting(bytes.clone()).await? {
-                Ok((
-                    ValidInputType::from_format(image_format),
-                    Either::right(Either::left(Either::right(
-                        crate::magick::convert_bytes_read(bytes, image_format)?,
-                    ))),
-                ))
+        InputFile::Animation(input) => {
+            let AnimationOutput {
+                format,
+                needs_transcode,
+            } = input.build_output(prescribed.animation);
+
+            let read = if needs_transcode {
+                Either::right(Either::left(magick::convert_animation(
+                    input.format,
+                    format,
+                    bytes,
+                )?))
             } else {
-                Ok((
-                    ValidInputType::from_format(image_format),
-                    Either::right(Either::right(crate::exiftool::clear_metadata_bytes_read(
-                        bytes,
-                    )?)),
-                ))
-            }
+                Either::right(Either::right(Either::left(
+                    exiftool::clear_metadata_bytes_read(bytes)?,
+                )))
+            };
+
+            Ok((InternalFormat::Animation(format), read))
+        }
+        InputFile::Video(input) => {
+            let output = input.build_output(prescribed.video, prescribed.allow_audio);
+            let read = Either::right(Either::right(Either::right(
+                ffmpeg::transcode_bytes(*input, output, bytes).await?,
+            )));
+
+            Ok((InternalFormat::Video(output.internal_format()), read))
         }
     }
 }

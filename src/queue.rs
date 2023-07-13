@@ -1,6 +1,6 @@
 use crate::{
-    config::ImageFormat,
     error::Error,
+    formats::ProcessableFormat,
     repo::{
         Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, QueueRepo, UploadId,
     },
@@ -67,10 +67,9 @@ enum Process {
         identifier: Base64Bytes,
         upload_id: Serde<UploadId>,
         declared_alias: Option<Serde<Alias>>,
-        should_validate: bool,
     },
     Generate {
-        target_format: ImageFormat,
+        target_format: ProcessableFormat,
         source: Serde<Alias>,
         process_path: PathBuf,
         process_args: Vec<String>,
@@ -128,13 +127,11 @@ pub(crate) async fn queue_ingest<R: QueueRepo>(
     identifier: Vec<u8>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
-    should_validate: bool,
 ) -> Result<(), Error> {
     let job = serde_json::to_vec(&Process::Ingest {
         identifier: Base64Bytes(identifier),
         declared_alias: declared_alias.map(Serde::new),
         upload_id: Serde::new(upload_id),
-        should_validate,
     })?;
     repo.push(PROCESS_QUEUE, job.into()).await?;
     Ok(())
@@ -142,7 +139,7 @@ pub(crate) async fn queue_ingest<R: QueueRepo>(
 
 pub(crate) async fn queue_generate<R: QueueRepo>(
     repo: &R,
-    target_format: ImageFormat,
+    target_format: ProcessableFormat,
     source: Alias,
     process_path: PathBuf,
     process_args: Vec<String>,

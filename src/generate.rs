@@ -1,9 +1,9 @@
 use crate::{
     concurrent_processor::CancelSafeProcessor,
-    config::ImageFormat,
     details::Details,
     error::{Error, UploadError},
-    ffmpeg::{ThumbnailFormat, VideoFormat},
+    ffmpeg::ThumbnailFormat,
+    formats::{InputProcessableFormat, InternalVideoFormat},
     repo::{Alias, FullRepo},
     store::Store,
 };
@@ -17,11 +17,11 @@ use tracing::Instrument;
 pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
-    format: ImageFormat,
+    format: InputProcessableFormat,
     alias: Alias,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
-    input_format: Option<VideoFormat>,
+    input_format: Option<InternalVideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
@@ -48,11 +48,11 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
 async fn process<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
-    format: ImageFormat,
+    format: InputProcessableFormat,
     alias: Alias,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
-    input_format: Option<VideoFormat>,
+    input_format: Option<InternalVideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
@@ -71,7 +71,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
         let reader = crate::ffmpeg::thumbnail(
             store.clone(),
             identifier,
-            input_format.unwrap_or(VideoFormat::Mp4),
+            input_format.unwrap_or(InternalVideoFormat::Mp4),
             thumbnail_format.unwrap_or(ThumbnailFormat::Jpeg),
         )
         .await?;
@@ -95,7 +95,14 @@ async fn process<R: FullRepo, S: Store + 'static>(
 
     drop(permit);
 
-    let details = Details::from_bytes(bytes.clone(), format.as_hint()).await?;
+    let discovery = crate::discover::discover_bytes(bytes.clone()).await?;
+
+    let details = Details::from_parts(
+        discovery.input.internal_format(),
+        discovery.width,
+        discovery.height,
+        discovery.frames,
+    );
 
     let identifier = store.save_bytes(bytes.clone()).await?;
     repo.relate_details(&identifier, &details).await?;

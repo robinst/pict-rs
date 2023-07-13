@@ -1,7 +1,16 @@
 use super::{Details, DetailsOutput, PixelFormatOutput};
 
-fn details_tests() -> [(&'static str, Option<Details>); 9] {
+fn details_tests() -> [(&'static str, Option<Details>); 10] {
     [
+        (
+            "apng",
+            Some(Details {
+                mime_type: crate::formats::mimes::image_apng(),
+                width: 112,
+                height: 112,
+                frames: Some(27),
+            }),
+        ),
         ("avif", None),
         (
             "gif",
@@ -17,7 +26,7 @@ fn details_tests() -> [(&'static str, Option<Details>); 9] {
         (
             "mp4",
             Some(Details {
-                mime_type: crate::magick::video_mp4(),
+                mime_type: crate::formats::mimes::video_mp4(),
                 width: 852,
                 height: 480,
                 frames: Some(35364),
@@ -27,7 +36,7 @@ fn details_tests() -> [(&'static str, Option<Details>); 9] {
         (
             "webm",
             Some(Details {
-                mime_type: crate::magick::video_webm(),
+                mime_type: crate::formats::mimes::video_webm(),
                 width: 640,
                 height: 480,
                 frames: Some(34650),
@@ -36,7 +45,7 @@ fn details_tests() -> [(&'static str, Option<Details>); 9] {
         (
             "webm_av1",
             Some(Details {
-                mime_type: crate::magick::video_webm(),
+                mime_type: crate::formats::mimes::video_webm(),
                 width: 112,
                 height: 112,
                 frames: Some(27),

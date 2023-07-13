@@ -3,6 +3,7 @@ mod tests;
 
 use crate::{
     config::{AudioCodec, ImageFormat, MediaConfiguration, VideoCodec},
+    formats::InternalVideoFormat,
     magick::{Details, ParseDetailsError, ValidInputType, ValidateDetailsError},
     process::{Process, ProcessError},
     store::{Store, StoreError},
@@ -716,10 +717,10 @@ pub(crate) async fn transcode_bytes(
 pub(crate) async fn thumbnail<S: Store>(
     store: S,
     from: S::Identifier,
-    input_format: VideoFormat,
+    input_format: InternalVideoFormat,
     format: ThumbnailFormat,
 ) -> Result<impl AsyncRead + Unpin, FfMpegError> {
-    let input_file = crate::tmp_file::tmp_file(Some(input_format.to_file_extension()));
+    let input_file = crate::tmp_file::tmp_file(Some(input_format.file_extension()));
     let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await

@@ -3,6 +3,7 @@ mod tests;
 
 use crate::{
     config::{ImageFormat, VideoCodec},
+    formats::ProcessableFormat,
     process::{Process, ProcessError},
     repo::Alias,
     store::Store,
@@ -416,14 +417,26 @@ pub(crate) async fn input_type_bytes(
     Ok((details, input_type))
 }
 
-fn process_image(process_args: Vec<String>, format: ImageFormat) -> Result<Process, ProcessError> {
+fn process_image(
+    process_args: Vec<String>,
+    format: ProcessableFormat,
+) -> Result<Process, ProcessError> {
     let command = "magick";
     let convert_args = ["convert", "-"];
-    let last_arg = format!("{}:-", format.as_magick_format());
+    let last_arg = format!("{}:-", format.magick_format());
 
-    let mut args = Vec::with_capacity(process_args.len() + 3);
+    let len = if format.coalesce() {
+        process_args.len() + 4
+    } else {
+        process_args.len() + 3
+    };
+
+    let mut args = Vec::with_capacity(len);
     args.extend_from_slice(&convert_args[..]);
     args.extend(process_args.iter().map(|s| s.as_str()));
+    if format.coalesce() {
+        args.push("-coalesce");
+    }
     args.push(&last_arg);
 
     Process::run(command, &args)
@@ -433,7 +446,7 @@ pub(crate) fn process_image_store_read<S: Store + 'static>(
     store: S,
     identifier: S::Identifier,
     args: Vec<String>,
-    format: ImageFormat,
+    format: ProcessableFormat,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     Ok(process_image(args, format)
         .map_err(MagickError::Process)?
@@ -443,7 +456,7 @@ pub(crate) fn process_image_store_read<S: Store + 'static>(
 pub(crate) fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
     async_read: A,
     args: Vec<String>,
-    format: ImageFormat,
+    format: ProcessableFormat,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     Ok(process_image(args, format)
         .map_err(MagickError::Process)?

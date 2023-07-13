@@ -3,6 +3,7 @@ mod bytes_stream;
 mod concurrent_processor;
 mod config;
 mod details;
+mod discover;
 mod either;
 mod error;
 mod exiftool;
@@ -32,6 +33,7 @@ use actix_web::{
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use awc::{Client, Connector};
+use formats::{InputProcessableFormat, ProcessableFormat};
 use futures_util::{
     stream::{empty, once},
     Stream, StreamExt, TryStreamExt,
@@ -163,7 +165,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
                     let stream = stream.map_err(Error::from);
 
                     Box::pin(
-                        async move { ingest::ingest(&**repo, &**store, stream, None, true).await }
+                        async move { ingest::ingest(&**repo, &**store, stream, None).await }
                             .instrument(span),
                     )
                 })),
@@ -215,7 +217,6 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
                                 &**store,
                                 stream,
                                 Some(Alias::from_existing(&filename)),
-                                !CONFIG.media.skip_validate_imports,
                             )
                             .await
                         }
@@ -371,7 +372,7 @@ async fn upload_backgrounded<R: FullRepo, S: Store>(
             .expect("Identifier exists")
             .to_bytes()?;
 
-        queue::queue_ingest(&repo, identifier, upload_id, None, true).await?;
+        queue::queue_ingest(&repo, identifier, upload_id, None).await?;
 
         files.push(serde_json::json!({
             "upload_id": upload_id.to_string(),
@@ -470,7 +471,7 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
-    let mut session = ingest::ingest(&repo, &store, stream, None, true).await?;
+    let mut session = ingest::ingest(&repo, &store, stream, None).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
     let delete_token = session.delete_token().await?;
@@ -503,7 +504,7 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
         .expect("Identifier exists")
         .to_bytes()?;
 
-    queue::queue_ingest(&repo, identifier, upload_id, None, true).await?;
+    queue::queue_ingest(&repo, identifier, upload_id, None).await?;
 
     backgrounded.disarm();
 
@@ -536,7 +537,7 @@ type ProcessQuery = Vec<(String, String)>;
 fn prepare_process(
     query: web::Query<ProcessQuery>,
     ext: &str,
-) -> Result<(ImageFormat, Alias, PathBuf, Vec<String>), Error> {
+) -> Result<(InputProcessableFormat, Alias, PathBuf, Vec<String>), Error> {
     let (alias, operations) =
         query
             .into_inner()
@@ -562,12 +563,11 @@ fn prepare_process(
         .collect::<Vec<_>>();
 
     let format = ext
-        .parse::<ImageFormat>()
+        .parse::<InputProcessableFormat>()
         .map_err(|_| UploadError::UnsupportedProcessExtension)?;
 
-    let ext = format.to_string();
-
-    let (thumbnail_path, thumbnail_args) = self::processor::build_chain(&operations, &ext)?;
+    let (thumbnail_path, thumbnail_args) =
+        self::processor::build_chain(&operations, &format.to_string())?;
 
     Ok((format, alias, thumbnail_path, thumbnail_args))
 }

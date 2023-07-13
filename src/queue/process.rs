@@ -1,6 +1,6 @@
 use crate::{
-    config::ImageFormat,
     error::Error,
+    formats::InputProcessableFormat,
     ingest::Session,
     queue::{Base64Bytes, LocalBoxFuture, Process},
     repo::{Alias, DeleteToken, FullRepo, UploadId, UploadResult},
@@ -26,7 +26,6 @@ where
                     identifier: Base64Bytes(identifier),
                     upload_id,
                     declared_alias,
-                    should_validate,
                 } => {
                     process_ingest(
                         repo,
@@ -34,7 +33,6 @@ where
                         identifier,
                         Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
-                        should_validate,
                     )
                     .await?
                 }
@@ -71,7 +69,6 @@ async fn process_ingest<R, S>(
     unprocessed_identifier: Vec<u8>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
-    should_validate: bool,
 ) -> Result<(), Error>
 where
     R: FullRepo + 'static,
@@ -85,8 +82,7 @@ where
             .await?
             .map_err(Error::from);
 
-        let session =
-            crate::ingest::ingest(repo, store, stream, declared_alias, should_validate).await?;
+        let session = crate::ingest::ingest(repo, store, stream, declared_alias).await?;
 
         let token = session.delete_token().await?;
 
@@ -120,7 +116,7 @@ where
 async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
-    target_format: ImageFormat,
+    target_format: InputProcessableFormat,
     source: Alias,
     process_path: PathBuf,
     process_args: Vec<String>,
@@ -148,7 +144,7 @@ async fn generate<R: FullRepo, S: Store + 'static>(
         source,
         process_path,
         process_args,
-        original_details.to_input_format(),
+        original_details.input_format(),
         None,
         hash,
     )
