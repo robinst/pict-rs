@@ -1,0 +1,14 @@
+{
+    "programs": [
+
+    ],
+    "streams": [
+        {
+            "width": 0,
+            "height": 0
+        }
+    ],
+    "format": {
+        "format_name": "webp_pipe"
+    }
+}

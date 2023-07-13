@@ -17,14 +17,14 @@ pub(crate) struct PrescribedFormats {
     pub(crate) allow_audio: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InputFile {
     Image(ImageInput),
     Animation(AnimationInput),
     Video(VideoFormat),
 }
 
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum InternalFormat {
     Image(ImageFormat),
     Animation(AnimationFormat),

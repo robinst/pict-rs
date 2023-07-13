@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::{collections::HashSet, sync::OnceLock};
 
 use crate::{
@@ -14,13 +17,16 @@ use tokio::io::AsyncReadExt;
 
 use super::{Discovery, DiscoveryLite};
 
+const MP4: &str = "mp4";
+const WEBP: &str = "webp_pipe";
+
 const FFMPEG_FORMAT_MAPPINGS: &[(&str, InternalFormat)] = &[
     ("apng", InternalFormat::Animation(AnimationFormat::Apng)),
     ("gif", InternalFormat::Animation(AnimationFormat::Gif)),
-    ("mp4", InternalFormat::Video(InternalVideoFormat::Mp4)),
+    (MP4, InternalFormat::Video(InternalVideoFormat::Mp4)),
     ("png_pipe", InternalFormat::Image(ImageFormat::Png)),
     ("webm", InternalFormat::Video(InternalVideoFormat::Webm)),
-    ("webp_pipe", InternalFormat::Image(ImageFormat::Webp)),
+    (WEBP, InternalFormat::Image(ImageFormat::Webp)),
 ];
 
 #[derive(Debug, serde::Deserialize)]
@@ -229,7 +235,7 @@ where
 
     let output: FfMpegDiscovery = serde_json::from_slice(&output).map_err(FfMpegError::Json)?;
 
-    parse_discovery_ffmpeg(output)
+    parse_discovery(output)
 }
 
 async fn pixel_format<F, Fut>(f: F) -> Result<String, FfMpegError>
@@ -321,9 +327,7 @@ fn parse_pixel_formats(formats: PixelFormatOutput) -> HashSet<String> {
         .collect()
 }
 
-fn parse_discovery_ffmpeg(
-    discovery: FfMpegDiscovery,
-) -> Result<Option<DiscoveryLite>, FfMpegError> {
+fn parse_discovery(discovery: FfMpegDiscovery) -> Result<Option<DiscoveryLite>, FfMpegError> {
     let FfMpegDiscovery {
         streams:
             [FfMpegStream {
@@ -340,7 +344,7 @@ fn parse_discovery_ffmpeg(
     {
         let frames = nb_read_frames.and_then(|frames| frames.parse().ok());
 
-        if *name == "mp4" && frames.map(|nb| nb == 1).unwrap_or(false) {
+        if *name == MP4 && frames.map(|nb| nb == 1).unwrap_or(false) {
             // Might be AVIF, ffmpeg incorrectly detects AVIF as single-framed mp4 even when
             // animated
 
@@ -348,11 +352,11 @@ fn parse_discovery_ffmpeg(
                 format: InternalFormat::Animation(AnimationFormat::Avif),
                 width,
                 height,
-                frames,
+                frames: None,
             }));
         }
 
-        if *name == "webp" && (frames.is_none() || width == 0 || height == 0) {
+        if *name == WEBP && (frames.is_none() || width == 0 || height == 0) {
             // Might be Animated Webp, ffmpeg incorrectly detects animated webp as having no frames
             // and 0 dimensions
 
@@ -368,7 +372,7 @@ fn parse_discovery_ffmpeg(
             format: *value,
             width,
             height,
-            frames,
+            frames: frames.and_then(|frames| if frames > 1 { Some(frames) } else { None }),
         }));
     }
 

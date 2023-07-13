@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use actix_web::web::Bytes;
 use futures_util::Stream;
 use tokio::io::AsyncReadExt;
@@ -25,6 +28,24 @@ struct Image {
 struct Geometry {
     width: u16,
     height: u16,
+}
+
+impl Discovery {
+    fn lite(self) -> DiscoveryLite {
+        let Discovery {
+            input,
+            width,
+            height,
+            frames,
+        } = self;
+
+        DiscoveryLite {
+            format: input.internal_format(),
+            width,
+            height,
+            frames,
+        }
+    }
 }
 
 pub(super) async fn discover_bytes_lite(bytes: Bytes) -> Result<DiscoveryLite, MagickError> {
@@ -154,19 +175,7 @@ where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
-    let Discovery {
-        input,
-        width,
-        height,
-        frames,
-    } = discover_file(f).await?;
-
-    Ok(DiscoveryLite {
-        format: input.internal_format(),
-        width,
-        height,
-        frames,
-    })
+    discover_file(f).await.map(Discovery::lite)
 }
 
 async fn discover_file<F, Fut>(f: F) -> Result<Discovery, MagickError>
@@ -346,6 +355,12 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickErro
                 })
             }
         }
+        "WEBM" => Ok(Discovery {
+            input: InputFile::Video(VideoFormat::Webm { alpha: true }),
+            width,
+            height,
+            frames: Some(frames),
+        }),
         otherwise => todo!("Error {otherwise}"),
     }
 }

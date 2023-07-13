@@ -9,6 +9,7 @@ use crate::{
     store::Store,
 };
 
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Discovery {
     pub(crate) input: InputFile,
     pub(crate) width: u16,
@@ -16,6 +17,7 @@ pub(crate) struct Discovery {
     pub(crate) frames: Option<u32>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct DiscoveryLite {
     pub(crate) format: InternalFormat,
     pub(crate) width: u16,

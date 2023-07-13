@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use crate::{
     formats::InternalVideoFormat,
     process::{Process, ProcessError},
