@@ -94,9 +94,7 @@ pub(crate) trait Store: Clone + Debug {
         content_type: mime::Mime,
     ) -> Result<Self::Identifier, StoreError>;
 
-    fn public_url(&self, _: &Self::Identifier) -> Option<url::Url> {
-        None
-    }
+    fn public_url(&self, _: &Self::Identifier) -> Option<url::Url>;
 
     async fn to_stream(
         &self,
@@ -158,6 +156,10 @@ where
         content_type: mime::Mime,
     ) -> Result<Self::Identifier, StoreError> {
         T::save_bytes(self, bytes, content_type).await
+    }
+
+    fn public_url(&self, identifier: &Self::Identifier) -> Option<url::Url> {
+        T::public_url(self, identifier)
     }
 
     async fn to_stream(
@@ -229,6 +231,10 @@ where
         content_type: mime::Mime,
     ) -> Result<Self::Identifier, StoreError> {
         T::save_bytes(self, bytes, content_type).await
+    }
+
+    fn public_url(&self, identifier: &Self::Identifier) -> Option<url::Url> {
+        T::public_url(self, identifier)
     }
 
     async fn to_stream(

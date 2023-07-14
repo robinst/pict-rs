@@ -4,6 +4,7 @@
 /client-examples/javascript/node_modules
 /docker/object-storage/storage
 /docker/object-storage/pict-rs-garage.toml
+/docker/object-storage/*.log
 /result
 /.ash_history
 /.direnv

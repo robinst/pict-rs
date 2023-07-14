@@ -109,6 +109,10 @@ impl Store for FileStore {
         Ok(self.file_id_from_path(path)?)
     }
 
+    fn public_url(&self, _identifier: &Self::Identifier) -> Option<url::Url> {
+        None
+    }
+
     #[tracing::instrument]
     async fn to_stream(
         &self,
