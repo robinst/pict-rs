@@ -6,6 +6,7 @@ use futures_util::Stream;
 use tokio::io::AsyncReadExt;
 
 use crate::{
+    discover::DiscoverError,
     formats::{AnimationFormat, ImageFormat, ImageInput, InputFile, VideoFormat},
     magick::MagickError,
     process::Process,
@@ -77,8 +78,7 @@ pub(super) async fn confirm_bytes(
 ) -> Result<Discovery, MagickError> {
     match discovery {
         Some(Discovery {
-            input:
-                InputFile::Animation( AnimationFormat::Avif,),
+            input: InputFile::Animation(AnimationFormat::Avif),
             width,
             height,
             ..
@@ -92,15 +92,14 @@ pub(super) async fn confirm_bytes(
             .await?;
 
             return Ok(Discovery {
-                input: InputFile::Animation( AnimationFormat::Avif,),
+                input: InputFile::Animation(AnimationFormat::Avif),
                 width,
                 height,
                 frames: Some(frames),
             });
         }
         Some(Discovery {
-            input:
-                InputFile::Animation( AnimationFormat::Webp,),
+            input: InputFile::Animation(AnimationFormat::Webp),
             ..
         }) => {
             // continue
@@ -151,6 +150,10 @@ where
         .await
         .map_err(MagickError::RemoveFile)?;
 
+    if output.is_empty() {
+        return Err(MagickError::Empty);
+    }
+
     let lines: u32 = output
         .lines()
         .count()
@@ -158,7 +161,7 @@ where
         .expect("Reasonable frame count");
 
     if lines == 0 {
-        todo!("Error");
+        return Err(MagickError::Empty);
     }
 
     Ok(lines)
@@ -202,17 +205,21 @@ where
         .await
         .map_err(MagickError::RemoveFile)?;
 
+    if output.is_empty() {
+        return Err(MagickError::Empty);
+    }
+
     let output: Vec<MagickDiscovery> =
         serde_json::from_slice(&output).map_err(MagickError::Json)?;
 
-    parse_discovery(output)
+    parse_discovery(output).map_err(MagickError::Discover)
 }
 
-fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickError> {
+fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, DiscoverError> {
     let frames = output.len();
 
     if frames == 0 {
-        todo!("Error")
+        return Err(DiscoverError::NoFrames);
     }
 
     let width = output
@@ -250,7 +257,7 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickErro
              image: Image { format, .. },
          }| format != first_format,
     ) {
-        todo!("Error")
+        return Err(DiscoverError::FormatMismatch);
     }
 
     let frames: u32 = frames.try_into().expect("Reasonable frame count");
@@ -259,7 +266,7 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickErro
         "AVIF" => {
             if frames > 1 {
                 Ok(Discovery {
-                    input: InputFile::Animation( AnimationFormat::Avif,),
+                    input: InputFile::Animation(AnimationFormat::Avif),
                     width,
                     height,
                     frames: Some(frames),
@@ -277,13 +284,13 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickErro
             }
         }
         "APNG" => Ok(Discovery {
-            input: InputFile::Animation( AnimationFormat::Apng,),
+            input: InputFile::Animation(AnimationFormat::Apng),
             width,
             height,
             frames: Some(frames),
         }),
         "GIF" => Ok(Discovery {
-            input: InputFile::Animation( AnimationFormat::Gif,),
+            input: InputFile::Animation(AnimationFormat::Gif),
             width,
             height,
             frames: Some(frames),
@@ -324,7 +331,7 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickErro
         "WEBP" => {
             if frames > 1 {
                 Ok(Discovery {
-                    input: InputFile::Animation( AnimationFormat::Webp,),
+                    input: InputFile::Animation(AnimationFormat::Webp),
                     width,
                     height,
                     frames: Some(frames),
@@ -347,6 +354,6 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, MagickErro
             height,
             frames: Some(frames),
         }),
-        otherwise => todo!("Error {otherwise}"),
+        otherwise => Err(DiscoverError::UnsupportedFileType(String::from(otherwise))),
     }
 }

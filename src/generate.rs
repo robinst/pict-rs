@@ -93,16 +93,23 @@ async fn process<R: FullRepo, S: Store + 'static>(
         details
     };
 
-    let Some(format) = input_details.internal_format().and_then(|format| format.processable_format()) else {
-        todo!("Error")
+    let input_format = input_details
+        .internal_format()
+        .and_then(|format| format.processable_format())
+        .expect("Valid details should always have internal format");
+
+    let Some(format) = input_format.process_to(output_format) else {
+        return Err(UploadError::InvalidProcessExtension.into());
     };
 
-    let Some(format) = format.process_to(output_format) else {
-        todo!("Error")
-    };
-
-    let mut processed_reader =
-        crate::magick::process_image_store_read(store.clone(), identifier, thumbnail_args, format)?;
+    let mut processed_reader = crate::magick::process_image_store_read(
+        store,
+        &identifier,
+        thumbnail_args,
+        input_format,
+        format,
+    )
+    .await?;
 
     let mut vec = Vec::new();
     processed_reader

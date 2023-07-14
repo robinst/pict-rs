@@ -1,4 +1,3 @@
-use crate::store::Store;
 use actix_rt::task::JoinHandle;
 use actix_web::web::Bytes;
 use std::{
@@ -18,6 +17,7 @@ use tracing::{Instrument, Span};
 struct StatusError(ExitStatus);
 
 pub(crate) struct Process {
+    command: String,
     child: Child,
 }
 
@@ -59,8 +59,8 @@ pub(crate) enum ProcessError {
 
 impl Process {
     pub(crate) fn run(command: &str, args: &[&str]) -> Result<Self, ProcessError> {
-        let res = tracing::trace_span!(parent: None, "Create command")
-            .in_scope(|| Self::spawn(Command::new(command).args(args)));
+        let res = tracing::trace_span!(parent: None, "Create command", %command)
+            .in_scope(|| Self::spawn(command, Command::new(command).args(args)));
 
         match res {
             Ok(this) => Ok(this),
@@ -72,14 +72,17 @@ impl Process {
         }
     }
 
-    fn spawn(cmd: &mut Command) -> std::io::Result<Self> {
-        tracing::trace_span!(parent: None, "Spawn command").in_scope(|| {
+    fn spawn(command: &str, cmd: &mut Command) -> std::io::Result<Self> {
+        tracing::trace_span!(parent: None, "Spawn command", %command).in_scope(|| {
             let cmd = cmd
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .kill_on_drop(true);
 
-            cmd.spawn().map(|child| Process { child })
+            cmd.spawn().map(|child| Process {
+                child,
+                command: String::from(command),
+            })
         })
     }
 
@@ -105,30 +108,6 @@ impl Process {
         self.spawn_fn(|_| async { Ok(()) })
     }
 
-    pub(crate) fn pipe_async_read<A: AsyncRead + Unpin + 'static>(
-        self,
-        mut async_read: A,
-    ) -> impl AsyncRead + Unpin {
-        self.spawn_fn(move |mut stdin| async move {
-            tokio::io::copy(&mut async_read, &mut stdin)
-                .await
-                .map(|_| ())
-        })
-    }
-
-    pub(crate) fn store_read<S: Store + 'static>(
-        self,
-        store: S,
-        identifier: S::Identifier,
-    ) -> impl AsyncRead + Unpin {
-        self.spawn_fn(move |mut stdin| {
-            let store = store;
-            let identifier = identifier;
-
-            async move { store.read_into(&identifier, &mut stdin).await }
-        })
-    }
-
     #[allow(unknown_lints)]
     #[allow(clippy::let_with_type_underscore)]
     #[tracing::instrument(level = "trace", skip_all)]
@@ -140,14 +119,15 @@ impl Process {
         let stdin = self.child.stdin.take().expect("stdin exists");
         let stdout = self.child.stdout.take().expect("stdout exists");
 
-        let (tx, rx) = tracing::trace_span!(parent: None, "Create channel")
+        let (tx, rx) = tracing::trace_span!(parent: None, "Create channel", %self.command)
             .in_scope(channel::<std::io::Error>);
 
-        let span = tracing::info_span!(parent: None, "Background process task");
+        let span = tracing::info_span!(parent: None, "Background process task", %self.command);
         span.follows_from(Span::current());
 
         let mut child = self.child;
-        let handle = tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+        let command = self.command;
+        let handle = tracing::trace_span!(parent: None, "Spawn task", %command).in_scope(|| {
             actix_rt::spawn(
                 async move {
                     if let Err(e) = (f)(stdin).await {

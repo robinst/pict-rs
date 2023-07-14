@@ -78,6 +78,9 @@ pub(crate) enum UploadError {
     #[error("Error in exiftool")]
     Exiftool(#[from] crate::exiftool::ExifError),
 
+    #[error("Requested file extension cannot be served by source file")]
+    InvalidProcessExtension,
+
     #[error("Provided process path is invalid")]
     ParsePath,
 
@@ -170,7 +173,8 @@ impl ResponseError for Error {
                 ))
                 | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
                 | UploadError::Validation(_)
-                | UploadError::UnsupportedProcessExtension,
+                | UploadError::UnsupportedProcessExtension
+                | UploadError::InvalidProcessExtension,
             ) => StatusCode::BAD_REQUEST,
             Some(UploadError::Magick(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::Ffmpeg(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,

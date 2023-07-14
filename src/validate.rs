@@ -28,6 +28,9 @@ pub(crate) enum ValidationError {
     #[error("Too many frames")]
     Frames,
 
+    #[error("Uploaded file is empty")]
+    Empty,
+
     #[error("Filesize too large")]
     Filesize,
 
@@ -42,6 +45,10 @@ pub(crate) async fn validate_bytes(
     bytes: Bytes,
     validations: Validations<'_>,
 ) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
+    if bytes.is_empty() {
+        return Err(ValidationError::Empty.into());
+    }
+
     let Discovery {
         input,
         width,
@@ -112,7 +119,7 @@ async fn process_image(
     } = input.build_output(validations.format);
 
     let read = if needs_transcode {
-        Either::left(magick::convert_image(input.format, format, bytes)?)
+        Either::left(magick::convert_image(input.format, format, bytes).await?)
     } else {
         Either::right(exiftool::clear_metadata_bytes_read(bytes)?)
     };
@@ -163,7 +170,7 @@ async fn process_animation(
             } = input.build_output(validations.animation.format);
 
             let read = if needs_transcode {
-                Either::left(magick::convert_animation(input, format, bytes)?)
+                Either::left(magick::convert_animation(input, format, bytes).await?)
             } else {
                 Either::right(Either::left(exiftool::clear_metadata_bytes_read(bytes)?))
             };
@@ -177,7 +184,9 @@ async fn process_animation(
                 validations.video.allow_audio,
             );
 
-            let read = Either::right(Either::right(magick::convert_video(input, output, bytes)?));
+            let read = Either::right(Either::right(
+                magick::convert_video(input, output, bytes).await?,
+            ));
 
             Ok((InternalFormat::Video(output.internal_format()), read))
         }

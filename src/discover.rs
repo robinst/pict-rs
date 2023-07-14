@@ -25,6 +25,18 @@ pub(crate) struct DiscoveryLite {
     pub(crate) frames: Option<u32>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DiscoverError {
+    #[error("No frames in uploaded media")]
+    NoFrames,
+
+    #[error("Not all frames have same image format")]
+    FormatMismatch,
+
+    #[error("Input file type {0} is unsupported")]
+    UnsupportedFileType(String),
+}
+
 pub(crate) async fn discover_bytes_lite(
     bytes: Bytes,
 ) -> Result<DiscoveryLite, crate::error::Error> {

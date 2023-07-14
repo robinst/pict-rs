@@ -40,7 +40,7 @@ where
     Ok(buf.into_bytes())
 }
 
-#[tracing::instrument(skip(repo, store, stream))]
+#[tracing::instrument(skip(repo, store, stream, media))]
 pub(crate) async fn ingest<R, S>(
     repo: &R,
     store: &S,
@@ -56,7 +56,6 @@ where
 
     let bytes = aggregate(stream).await?;
 
-    // TODO: load from config
     let prescribed = Validations {
         image: &media.image,
         animation: &media.animation,
@@ -71,8 +70,13 @@ where
             let (_, magick_args) =
                 crate::processor::build_chain(operations, format.file_extension())?;
 
-            let processed_reader =
-                crate::magick::process_image_async_read(validated_reader, magick_args, format)?;
+            let processed_reader = crate::magick::process_image_async_read(
+                validated_reader,
+                magick_args,
+                format,
+                format,
+            )
+            .await?;
 
             Either::left(processed_reader)
         } else {
