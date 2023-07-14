@@ -34,6 +34,7 @@
             clippy
             exiftool
             ffmpeg_6-full
+            garage
             gcc
             imagemagick
             protobuf

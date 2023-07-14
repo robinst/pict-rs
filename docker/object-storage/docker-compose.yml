@@ -21,13 +21,13 @@ services:
   #      - ./storage/pict-rs:/mnt
   #      - ../../:/opt/app
 
-  pictrs_proxy:
-    image: asonix/pictrs-proxy:0.4.0-rc.2
-    ports:
-      - "8081:8081"
-    environment:
-      - PICTRS_PROXY_UPSTREAM=http://pictrs:8080
-      - PICTRS_PROXY_OPENTELEMETRY_URL=http://otel:4137
+  # pictrs_proxy:
+  #   image: asonix/pictrs-proxy:0.4.0-rc.2
+  #   ports:
+  #     - "8081:8081"
+  #   environment:
+  #     - PICTRS_PROXY_UPSTREAM=http://pictrs:8080
+  #     - PICTRS_PROXY_OPENTELEMETRY_URL=http://otel:4137
 
   minio:
     image: quay.io/minio/minio

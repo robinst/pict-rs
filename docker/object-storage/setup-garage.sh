@@ -19,6 +19,7 @@ key_id=$(garage -c garage-local.toml key info pict-rs-key 2>>"${STDERR}" | grep 
 secret_key=$(garage -c garage-local.toml key info pict-rs-key 2>>"${STDERR}" | grep "Secret key" | awk '{ print $3 }')
 
 garage -c garage-local.toml bucket allow --read --write --owner pict-rs --key pict-rs-key >>"${STDOUT}" 2>>"${STDERR}"
+garage -c garage-local.toml bucket website pict-rs --allow >> "${STDOUT}" 2>>"${STDERR}"
 
 cat > pict-rs-garage.toml <<EOF
 [server]
