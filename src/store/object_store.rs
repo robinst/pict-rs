@@ -98,6 +98,7 @@ pub(crate) struct ObjectStore {
     client: Client,
     signature_expiration: Duration,
     client_timeout: Duration,
+    public_endpoint: Option<Url>,
 }
 
 #[derive(Clone)]
@@ -108,6 +109,7 @@ pub(crate) struct ObjectStoreConfig {
     credentials: Credentials,
     signature_expiration: u64,
     client_timeout: u64,
+    public_endpoint: Option<Url>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -130,6 +132,7 @@ impl ObjectStoreConfig {
             client,
             signature_expiration: Duration::from_secs(self.signature_expiration),
             client_timeout: Duration::from_secs(self.client_timeout),
+            public_endpoint: self.public_endpoint,
         }
     }
 }
@@ -190,15 +193,24 @@ impl Store for ObjectStore {
         Ok(())
     }
 
-    async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, StoreError>
+    async fn save_async_read<Reader>(
+        &self,
+        reader: Reader,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
-        self.save_stream(ReaderStream::new(reader)).await
+        self.save_stream(ReaderStream::new(reader), content_type)
+            .await
     }
 
     #[tracing::instrument(skip_all)]
-    async fn save_stream<S>(&self, mut stream: S) -> Result<Self::Identifier, StoreError>
+    async fn save_stream<S>(
+        &self,
+        mut stream: S,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
@@ -206,7 +218,7 @@ impl Store for ObjectStore {
 
         if first_chunk.len() < CHUNK_SIZE {
             drop(stream);
-            let (req, object_id) = self.put_object_request().await?;
+            let (req, object_id) = self.put_object_request(content_type).await?;
             let response = req
                 .send_body(first_chunk)
                 .await
@@ -221,7 +233,7 @@ impl Store for ObjectStore {
 
         let mut first_chunk = Some(first_chunk);
 
-        let (req, object_id) = self.create_multipart_request().await?;
+        let (req, object_id) = self.create_multipart_request(content_type).await?;
         let mut response = req.send().await.map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
@@ -329,8 +341,12 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, StoreError> {
-        let (req, object_id) = self.put_object_request().await?;
+    async fn save_bytes(
+        &self,
+        bytes: Bytes,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError> {
+        let (req, object_id) = self.put_object_request(content_type).await?;
 
         let response = req.send_body(bytes).await.map_err(ObjectError::from)?;
 
@@ -339,6 +355,13 @@ impl Store for ObjectStore {
         }
 
         Ok(object_id)
+    }
+
+    fn public_url(&self, identifier: &Self::Identifier) -> Option<url::Url> {
+        self.public_endpoint.clone().map(|mut endpoint| {
+            endpoint.set_path(identifier.as_str());
+            endpoint
+        })
     }
 
     #[tracing::instrument(skip(self))]
@@ -445,6 +468,7 @@ impl ObjectStore {
         session_token: Option<String>,
         signature_expiration: u64,
         client_timeout: u64,
+        public_endpoint: Option<Url>,
         repo: Repo,
     ) -> Result<ObjectStoreConfig, StoreError> {
         let path_gen = init_generator(&repo).await?;
@@ -461,6 +485,7 @@ impl ObjectStore {
             },
             signature_expiration,
             client_timeout,
+            public_endpoint,
         })
     }
 
@@ -470,19 +495,25 @@ impl ObjectStore {
         Ok(self.build_request(action))
     }
 
-    async fn put_object_request(&self) -> Result<(ClientRequest, ObjectId), StoreError> {
+    async fn put_object_request(
+        &self,
+        content_type: mime::Mime,
+    ) -> Result<(ClientRequest, ObjectId), StoreError> {
         let path = self.next_file().await?;
 
         let mut action = self.bucket.put_object(Some(&self.credentials), &path);
 
         action
             .headers_mut()
-            .insert("content-type", "application/octet-stream");
+            .insert("content-type", content_type.as_ref());
 
         Ok((self.build_request(action), ObjectId::from_string(path)))
     }
 
-    async fn create_multipart_request(&self) -> Result<(ClientRequest, ObjectId), StoreError> {
+    async fn create_multipart_request(
+        &self,
+        content_type: mime::Mime,
+    ) -> Result<(ClientRequest, ObjectId), StoreError> {
         let path = self.next_file().await?;
 
         let mut action = self
@@ -491,7 +522,7 @@ impl ObjectStore {
 
         action
             .headers_mut()
-            .insert("content-type", "application/octet-stream");
+            .insert("content-type", content_type.as_ref());
 
         Ok((self.build_request(action), ObjectId::from_string(path)))
     }

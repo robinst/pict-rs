@@ -672,6 +672,12 @@ async fn process<R: FullRepo, S: Store + 'static>(
             new_details
         };
 
+        if let Some(public_url) = store.public_url(&identifier) {
+            return Ok(HttpResponse::SeeOther()
+                .insert_header((actix_web::http::header::LOCATION, public_url.as_str()))
+                .finish());
+        }
+
         return ranged_file_resp(&store, identifier, range, details, not_found).await;
     }
 
@@ -721,7 +727,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     Ok(srv_response(
         builder,
         stream,
-        details.content_type(),
+        details.media_type(),
         7 * DAYS,
         details.system_time(),
     ))
@@ -767,6 +773,12 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
             tracing::debug!("stored");
             new_details
         };
+
+        if let Some(public_url) = store.public_url(&identifier) {
+            return Ok(HttpResponse::SeeOther()
+                .insert_header((actix_web::http::header::LOCATION, public_url.as_str()))
+                .finish());
+        }
 
         return ranged_file_head_resp(&store, identifier, range, details).await;
     }
@@ -847,6 +859,12 @@ async fn serve<R: FullRepo, S: Store + 'static>(
 
     let details = ensure_details(&repo, &store, &alias).await?;
 
+    if let Some(public_url) = store.public_url(&identifier) {
+        return Ok(HttpResponse::SeeOther()
+            .insert_header((actix_web::http::header::LOCATION, public_url.as_str()))
+            .finish());
+    }
+
     ranged_file_resp(&store, identifier, range, details, not_found).await
 }
 
@@ -865,6 +883,12 @@ async fn serve_head<R: FullRepo, S: Store + 'static>(
     };
 
     let details = ensure_details(&repo, &store, &alias).await?;
+
+    if let Some(public_url) = store.public_url(&identifier) {
+        return Ok(HttpResponse::SeeOther()
+            .insert_header((actix_web::http::header::LOCATION, public_url.as_str()))
+            .finish());
+    }
 
     ranged_file_head_resp(&store, identifier, range, details).await
 }
@@ -897,7 +921,7 @@ async fn ranged_file_head_resp<S: Store + 'static>(
 
     Ok(srv_head(
         builder,
-        details.content_type(),
+        details.media_type(),
         7 * DAYS,
         details.system_time(),
     )
@@ -953,7 +977,7 @@ async fn ranged_file_resp<S: Store + 'static>(
     Ok(srv_response(
         builder,
         stream,
-        details.content_type(),
+        details.media_type(),
         7 * DAYS,
         details.system_time(),
     ))
@@ -1280,7 +1304,7 @@ async fn migrate_inner<S1>(
     skip_missing_files: bool,
 ) -> color_eyre::Result<()>
 where
-    S1: Store,
+    S1: Store + 'static,
 {
     match to {
         config::primitives::Store::Filesystem(config::Filesystem { path }) => {
@@ -1300,6 +1324,7 @@ where
             session_token,
             signature_duration,
             client_timeout,
+            public_endpoint,
         }) => {
             let to = ObjectStore::build(
                 endpoint.clone(),
@@ -1315,6 +1340,7 @@ where
                 session_token,
                 signature_duration.unwrap_or(15),
                 client_timeout.unwrap_or(30),
+                public_endpoint,
                 repo.clone(),
             )
             .await?
@@ -1427,6 +1453,7 @@ pub async fn run() -> color_eyre::Result<()> {
                     session_token,
                     signature_duration,
                     client_timeout,
+                    public_endpoint,
                 }) => {
                     let from = ObjectStore::build(
                         endpoint,
@@ -1442,6 +1469,7 @@ pub async fn run() -> color_eyre::Result<()> {
                         session_token,
                         signature_duration.unwrap_or(15),
                         client_timeout.unwrap_or(30),
+                        public_endpoint,
                         repo.clone(),
                     )
                     .await?
@@ -1480,6 +1508,7 @@ pub async fn run() -> color_eyre::Result<()> {
             session_token,
             signature_duration,
             client_timeout,
+            public_endpoint,
         }) => {
             let store = ObjectStore::build(
                 endpoint,
@@ -1495,6 +1524,7 @@ pub async fn run() -> color_eyre::Result<()> {
                 session_token,
                 signature_duration,
                 client_timeout,
+                public_endpoint,
                 repo.clone(),
             )
             .await?;
@@ -1527,7 +1557,7 @@ async fn migrate_store<R, S1, S2>(
     skip_missing_files: bool,
 ) -> Result<(), Error>
 where
-    S1: Store + Clone,
+    S1: Store + Clone + 'static,
     S2: Store + Clone,
     R: IdentifierRepo + HashRepo + SettingsRepo + QueueRepo,
 {
@@ -1570,7 +1600,7 @@ async fn do_migrate_store<R, S1, S2>(
     skip_missing_files: bool,
 ) -> Result<(), Error>
 where
-    S1: Store,
+    S1: Store + 'static,
     S2: Store,
     R: IdentifierRepo + HashRepo + SettingsRepo + QueueRepo,
 {
@@ -1639,7 +1669,7 @@ where
             .await?
         {
             if repo.get(STORE_MIGRATION_MOTION).await?.is_none() {
-                match migrate_file(&from, &to, &identifier, skip_missing_files).await {
+                match migrate_file(repo, &from, &to, &identifier, skip_missing_files).await {
                     Ok(new_identifier) => {
                         migrate_details(repo, identifier, &new_identifier).await?;
                         repo.relate_motion_identifier(
@@ -1652,6 +1682,13 @@ where
                     }
                     Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                         tracing::warn!("Skipping motion file for hash {}", hex::encode(&hash));
+                    }
+                    Err(MigrateError::Details(e)) => {
+                        tracing::warn!(
+                            "Error generating details for motion file for hash {}",
+                            hex::encode(&hash)
+                        );
+                        return Err(e.into());
                     }
                     Err(MigrateError::From(e)) => {
                         tracing::warn!("Error migrating motion file from old store");
@@ -1675,7 +1712,7 @@ where
                 continue;
             }
 
-            match migrate_file(&from, &to, &identifier, skip_missing_files).await {
+            match migrate_file(repo, &from, &to, &identifier, skip_missing_files).await {
                 Ok(new_identifier) => {
                     migrate_details(repo, identifier, &new_identifier).await?;
                     repo.remove_variant(hash.as_ref().to_vec().into(), variant.clone())
@@ -1697,6 +1734,13 @@ where
                         hex::encode(&hash)
                     );
                 }
+                Err(MigrateError::Details(e)) => {
+                    tracing::warn!(
+                        "Error generating details for variant file for hash {}",
+                        hex::encode(&hash)
+                    );
+                    return Err(e.into());
+                }
                 Err(MigrateError::From(e)) => {
                     tracing::warn!("Error migrating variant file from old store");
                     return Err(e.into());
@@ -1708,7 +1752,7 @@ where
             }
         }
 
-        match migrate_file(&from, &to, &original_identifier, skip_missing_files).await {
+        match migrate_file(repo, &from, &to, &original_identifier, skip_missing_files).await {
             Ok(new_identifier) => {
                 migrate_details(repo, original_identifier, &new_identifier).await?;
                 repo.relate_identifier(hash.as_ref().to_vec().into(), &new_identifier)
@@ -1716,6 +1760,13 @@ where
             }
             Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                 tracing::warn!("Skipping original file for hash {}", hex::encode(&hash));
+            }
+            Err(MigrateError::Details(e)) => {
+                tracing::warn!(
+                    "Error generating details for original file for hash {}",
+                    hex::encode(&hash)
+                );
+                return Err(e.into());
             }
             Err(MigrateError::From(e)) => {
                 tracing::warn!("Error migrating original file from old store");
@@ -1756,20 +1807,22 @@ where
     Ok(())
 }
 
-async fn migrate_file<S1, S2>(
+async fn migrate_file<R, S1, S2>(
+    repo: &R,
     from: &S1,
     to: &S2,
     identifier: &S1::Identifier,
     skip_missing_files: bool,
 ) -> Result<S2::Identifier, MigrateError>
 where
-    S1: Store,
+    R: IdentifierRepo,
+    S1: Store + 'static,
     S2: Store,
 {
     let mut failure_count = 0;
 
     loop {
-        match do_migrate_file(from, to, identifier).await {
+        match do_migrate_file(repo, from, to, identifier).await {
             Ok(identifier) => return Ok(identifier),
             Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                 return Err(MigrateError::From(e));
@@ -1793,16 +1846,19 @@ where
 #[derive(Debug)]
 enum MigrateError {
     From(crate::store::StoreError),
+    Details(crate::error::Error),
     To(crate::store::StoreError),
 }
 
-async fn do_migrate_file<S1, S2>(
+async fn do_migrate_file<R, S1, S2>(
+    repo: &R,
     from: &S1,
     to: &S2,
     identifier: &S1::Identifier,
 ) -> Result<S2::Identifier, MigrateError>
 where
-    S1: Store,
+    R: IdentifierRepo,
+    S1: Store + 'static,
     S2: Store,
 {
     let stream = from
@@ -1810,7 +1866,36 @@ where
         .await
         .map_err(MigrateError::From)?;
 
-    let new_identifier = to.save_stream(stream).await.map_err(MigrateError::To)?;
+    let details_opt = repo
+        .details(identifier)
+        .await
+        .map_err(Error::from)
+        .map_err(MigrateError::Details)?
+        .and_then(|details| {
+            if details.internal_format().is_some() {
+                Some(details)
+            } else {
+                None
+            }
+        });
+
+    let details = if let Some(details) = details_opt {
+        details
+    } else {
+        let new_details = Details::from_store(from, identifier)
+            .await
+            .map_err(MigrateError::Details)?;
+        repo.relate_details(identifier, &new_details)
+            .await
+            .map_err(Error::from)
+            .map_err(MigrateError::Details)?;
+        new_details
+    };
+
+    let new_identifier = to
+        .save_stream(stream, details.media_type())
+        .await
+        .map_err(MigrateError::To)?;
 
     Ok(new_identifier)
 }

@@ -72,15 +72,31 @@ pub(crate) trait Store: Clone + Debug {
 
     async fn health_check(&self) -> Result<(), StoreError>;
 
-    async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, StoreError>
+    async fn save_async_read<Reader>(
+        &self,
+        reader: Reader,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static;
 
-    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, StoreError>
+    async fn save_stream<S>(
+        &self,
+        stream: S,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static;
 
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, StoreError>;
+    async fn save_bytes(
+        &self,
+        bytes: Bytes,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>;
+
+    fn public_url(&self, _: &Self::Identifier) -> Option<url::Url> {
+        None
+    }
 
     async fn to_stream(
         &self,
@@ -114,22 +130,34 @@ where
         T::health_check(self).await
     }
 
-    async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, StoreError>
+    async fn save_async_read<Reader>(
+        &self,
+        reader: Reader,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
-        T::save_async_read(self, reader).await
+        T::save_async_read(self, reader, content_type).await
     }
 
-    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, StoreError>
+    async fn save_stream<S>(
+        &self,
+        stream: S,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
-        T::save_stream(self, stream).await
+        T::save_stream(self, stream, content_type).await
     }
 
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, StoreError> {
-        T::save_bytes(self, bytes).await
+    async fn save_bytes(
+        &self,
+        bytes: Bytes,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError> {
+        T::save_bytes(self, bytes, content_type).await
     }
 
     async fn to_stream(
@@ -173,22 +201,34 @@ where
         T::health_check(self).await
     }
 
-    async fn save_async_read<Reader>(&self, reader: Reader) -> Result<Self::Identifier, StoreError>
+    async fn save_async_read<Reader>(
+        &self,
+        reader: Reader,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
-        T::save_async_read(self, reader).await
+        T::save_async_read(self, reader, content_type).await
     }
 
-    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, StoreError>
+    async fn save_stream<S>(
+        &self,
+        stream: S,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
-        T::save_stream(self, stream).await
+        T::save_stream(self, stream, content_type).await
     }
 
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, StoreError> {
-        T::save_bytes(self, bytes).await
+    async fn save_bytes(
+        &self,
+        bytes: Bytes,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError> {
+        T::save_bytes(self, bytes, content_type).await
     }
 
     async fn to_stream(

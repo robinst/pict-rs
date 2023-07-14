@@ -64,7 +64,7 @@ impl Details {
         InternalFormat::maybe_from_media_type(&self.content_type, self.frames.is_some())
     }
 
-    pub(crate) fn content_type(&self) -> mime::Mime {
+    pub(crate) fn media_type(&self) -> mime::Mime {
         (*self.content_type).clone()
     }
 

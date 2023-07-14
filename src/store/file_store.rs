@@ -66,6 +66,7 @@ impl Store for FileStore {
     async fn save_async_read<Reader>(
         &self,
         mut reader: Reader,
+        _content_type: mime::Mime,
     ) -> Result<Self::Identifier, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
@@ -80,15 +81,24 @@ impl Store for FileStore {
         Ok(self.file_id_from_path(path)?)
     }
 
-    async fn save_stream<S>(&self, stream: S) -> Result<Self::Identifier, StoreError>
+    async fn save_stream<S>(
+        &self,
+        stream: S,
+        content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
-        self.save_async_read(StreamReader::new(stream)).await
+        self.save_async_read(StreamReader::new(stream), content_type)
+            .await
     }
 
     #[tracing::instrument(skip(bytes))]
-    async fn save_bytes(&self, bytes: Bytes) -> Result<Self::Identifier, StoreError> {
+    async fn save_bytes(
+        &self,
+        bytes: Bytes,
+        _content_type: mime::Mime,
+    ) -> Result<Self::Identifier, StoreError> {
         let path = self.next_file().await?;
 
         if let Err(e) = self.safe_save_bytes(&path, bytes).await {

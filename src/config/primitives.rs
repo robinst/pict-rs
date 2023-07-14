@@ -91,6 +91,11 @@ pub(crate) struct ObjectStorage {
     #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) client_timeout: Option<u64>,
+
+    /// Base endpoint at which object storage images are publicly accessible
+    #[arg(long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) public_endpoint: Option<Url>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

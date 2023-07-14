@@ -68,14 +68,19 @@ async fn process<R: FullRepo, S: Store + 'static>(
             return Err(UploadError::MissingIdentifier.into());
         };
 
+        let thumbnail_format = thumbnail_format.unwrap_or(ThumbnailFormat::Jpeg);
+
         let reader = crate::ffmpeg::thumbnail(
             store.clone(),
             identifier,
             input_format.unwrap_or(InternalVideoFormat::Mp4),
-            thumbnail_format.unwrap_or(ThumbnailFormat::Jpeg),
+            thumbnail_format,
         )
         .await?;
-        let motion_identifier = store.save_async_read(reader).await?;
+
+        let motion_identifier = store
+            .save_async_read(reader, thumbnail_format.media_type())
+            .await?;
 
         repo.relate_motion_identifier(hash.clone(), &motion_identifier)
             .await?;
@@ -122,7 +127,9 @@ async fn process<R: FullRepo, S: Store + 'static>(
 
     let details = Details::from_bytes(bytes.clone()).await?;
 
-    let identifier = store.save_bytes(bytes.clone()).await?;
+    let identifier = store
+        .save_bytes(bytes.clone(), details.media_type())
+        .await?;
     repo.relate_details(&identifier, &details).await?;
     repo.relate_variant_identifier(
         hash,

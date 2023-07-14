@@ -86,6 +86,13 @@ impl ThumbnailFormat {
             // Self::Webp => "webp",
         }
     }
+
+    pub(crate) fn media_type(self) -> mime::Mime {
+        match self {
+            Self::Jpeg => mime::IMAGE_JPEG,
+            // Self::Webp => crate::formats::mimes::image_webp(),
+        }
+    }
 }
 
 #[tracing::instrument(skip(store))]

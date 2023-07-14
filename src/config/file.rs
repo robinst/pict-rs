@@ -74,6 +74,9 @@ pub(crate) struct ObjectStorage {
     ///
     /// This defaults to 30 seconds
     pub(crate) client_timeout: u64,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) public_endpoint: Option<Url>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

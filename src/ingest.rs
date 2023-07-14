@@ -89,7 +89,9 @@ where
     let hasher_reader = Hasher::new(processed_reader, Sha256::new());
     let hasher = hasher_reader.hasher();
 
-    let identifier = store.save_async_read(hasher_reader).await?;
+    let identifier = store
+        .save_async_read(hasher_reader, input_type.media_type())
+        .await?;
 
     drop(permit);
 

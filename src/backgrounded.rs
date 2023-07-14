@@ -5,6 +5,7 @@ use crate::{
 };
 use actix_web::web::Bytes;
 use futures_util::{Stream, TryStreamExt};
+use mime::APPLICATION_OCTET_STREAM;
 use tracing::{Instrument, Span};
 
 pub(crate) struct Backgrounded<R, S>
@@ -58,7 +59,8 @@ where
 
         let stream = stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
 
-        let identifier = store.save_stream(stream).await?;
+        // use octet-stream, we don't know the upload's real type yet
+        let identifier = store.save_stream(stream, APPLICATION_OCTET_STREAM).await?;
 
         self.identifier = Some(identifier);
 
