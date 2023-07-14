@@ -18,14 +18,12 @@ targets = 'info'
 path = 'data/'
 
 [media]
-max_width = 10000
-max_height = 10000
-max_area = 40000000
 max_file_size = 40
-enable_silent_video = true
-enable_full_video = true
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
-skip_validate_imports = false
+
+[media.video]
+enable = true
+allow_audio = true
 
 [repo]
 type = 'sled'
