@@ -15,7 +15,7 @@ use tokio::{
 use tracing::{Instrument, Span};
 
 #[derive(Debug)]
-struct StatusError;
+struct StatusError(ExitStatus);
 
 pub(crate) struct Process {
     child: Child,
@@ -38,6 +38,7 @@ pin_project_lite::pin_project! {
         err_recv: Receiver<std::io::Error>,
         err_closed: bool,
         handle: DropHandle,
+        eof: bool,
     }
 }
 
@@ -159,7 +160,7 @@ impl Process {
                             if !status.success() {
                                 let _ = tx.send(std::io::Error::new(
                                     std::io::ErrorKind::Other,
-                                    &StatusError,
+                                    StatusError(status),
                                 ));
                             }
                         }
@@ -177,6 +178,7 @@ impl Process {
             err_recv: rx,
             err_closed: false,
             handle: DropHandle { inner: handle },
+            eof: false,
         }
     }
 }
@@ -194,18 +196,53 @@ where
 
         let err_recv = this.err_recv;
         let err_closed = this.err_closed;
+        let eof = this.eof;
         let inner = this.inner;
 
         if !*err_closed {
             if let Poll::Ready(res) = Pin::new(err_recv).poll(cx) {
                 *err_closed = true;
+
                 if let Ok(err) = res {
                     return Poll::Ready(Err(err));
+                }
+
+                if *eof {
+                    return Poll::Ready(Ok(()));
                 }
             }
         }
 
-        inner.poll_read(cx, buf)
+        if !*eof {
+            let before_size = buf.filled().len();
+
+            return match inner.poll_read(cx, buf) {
+                Poll::Ready(Ok(())) => {
+                    if buf.filled().len() == before_size {
+                        *eof = true;
+
+                        if !*err_closed {
+                            // reached end of stream & haven't received process signal
+                            return Poll::Pending;
+                        }
+                    }
+
+                    Poll::Ready(Ok(()))
+                }
+                Poll::Ready(Err(e)) => {
+                    *eof = true;
+
+                    Poll::Ready(Err(e))
+                }
+                Poll::Pending => Poll::Pending,
+            };
+        }
+
+        if *err_closed && *eof {
+            return Poll::Ready(Ok(()));
+        }
+
+        Poll::Pending
     }
 }
 
@@ -217,7 +254,7 @@ impl Drop for DropHandle {
 
 impl std::fmt::Display for StatusError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Command failed with bad status")
+        write!(f, "Command failed with bad status: {}", self.0)
     }
 }
 
