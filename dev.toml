@@ -21,6 +21,11 @@ path = 'data/'
 max_file_size = 40
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 
+[media.animation]
+max_width = 2000
+max_height = 2000
+max_area = 2000000
+
 [media.video]
 enable = true
 allow_audio = true

@@ -95,6 +95,8 @@ where
             // TODO: decide if it is okay to skip aliases without tokens
             if let Some(token) = repo.delete_token(&alias).await? {
                 super::cleanup_alias(repo, alias, token).await?;
+            } else {
+                tracing::warn!("Not cleaning alias!");
             }
         }
         // Return after queueing cleanup alias, since we will be requeued when the last alias is cleaned
@@ -130,12 +132,12 @@ where
         return Err(UploadError::InvalidToken.into());
     }
 
-    AliasRepo::cleanup(repo, &alias).await?;
-
     let Some(hash) = repo.hash(&alias).await? else {
         // hash doesn't exist, nothing to do
         return Ok(());
     };
+
+    AliasRepo::cleanup(repo, &alias).await?;
 
     repo.remove_alias(hash.clone(), &alias).await?;
 
