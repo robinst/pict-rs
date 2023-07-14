@@ -132,12 +132,14 @@ where
         return Err(UploadError::InvalidToken.into());
     }
 
-    let Some(hash) = repo.hash(&alias).await? else {
+    let hash = repo.hash(&alias).await?;
+
+    AliasRepo::cleanup(repo, &alias).await?;
+
+    let Some(hash) = hash else {
         // hash doesn't exist, nothing to do
         return Ok(());
     };
-
-    AliasRepo::cleanup(repo, &alias).await?;
 
     repo.remove_alias(hash.clone(), &alias).await?;
 
