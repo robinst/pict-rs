@@ -1688,7 +1688,7 @@ where
                             "Error generating details for motion file for hash {}",
                             hex::encode(&hash)
                         );
-                        return Err(e.into());
+                        return Err(e);
                     }
                     Err(MigrateError::From(e)) => {
                         tracing::warn!("Error migrating motion file from old store");
@@ -1739,7 +1739,7 @@ where
                         "Error generating details for variant file for hash {}",
                         hex::encode(&hash)
                     );
-                    return Err(e.into());
+                    return Err(e);
                 }
                 Err(MigrateError::From(e)) => {
                     tracing::warn!("Error migrating variant file from old store");
@@ -1766,7 +1766,7 @@ where
                     "Error generating details for original file for hash {}",
                     hex::encode(&hash)
                 );
-                return Err(e.into());
+                return Err(e);
             }
             Err(MigrateError::From(e)) => {
                 tracing::warn!("Error migrating original file from old store");
