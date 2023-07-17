@@ -21,14 +21,36 @@ path = 'data/'
 max_file_size = 40
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 
+[media.image.quality]
+avif = 50
+png = 50
+jpeg = 75
+jxl = 50
+webp = 60
+
 [media.animation]
 max_width = 2000
 max_height = 2000
 max_area = 2000000
 
+[media.animation.quality]
+apng = 50
+avif = 50
+webp = 60
+
 [media.video]
 enable = true
 allow_audio = true
+
+[media.video.quality]
+crf_240 = 37
+crf_360 = 36
+crf_480 = 33
+crf_720 = 32
+crf_1080 = 31
+crf_1440 = 24
+crf_2160 = 15
+crf_max = 12
 
 [repo]
 type = 'sled'
