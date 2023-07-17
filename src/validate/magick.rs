@@ -79,56 +79,21 @@ async fn convert(
 
     let input_arg = format!("{input}:{input_file_str}");
     let output_arg = format!("{output}:-");
+    let quality = quality.map(|q| q.to_string());
 
-    let process = if coalesce {
-        if let Some(quality) = quality {
-            Process::run(
-                "magick",
-                &[
-                    "convert",
-                    "-strip",
-                    "-auto-orient",
-                    &input_arg,
-                    "-quality",
-                    &quality.to_string(),
-                    "-coalesce",
-                    &output_arg,
-                ],
-            )?
-        } else {
-            Process::run(
-                "magick",
-                &[
-                    "convert",
-                    "-strip",
-                    "-auto-orient",
-                    &input_arg,
-                    "-coalesce",
-                    &output_arg,
-                ],
-            )?
-        }
-    } else if let Some(quality) = quality {
-        Process::run(
-            "magick",
-            &[
-                "convert",
-                "-strip",
-                "-auto-orient",
-                &input_arg,
-                "-quality",
-                &quality.to_string(),
-                &output_arg,
-            ],
-        )?
-    } else {
-        Process::run(
-            "magick",
-            &["convert", "-strip", "-auto-orient", &input_arg, &output_arg],
-        )?
-    };
+    let mut args = vec!["convert", "-strip", "-auto-orient", &input_arg];
 
-    let reader = process.read();
+    if let Some(quality) = &quality {
+        args.extend(["-quality", quality]);
+    }
+
+    if coalesce {
+        args.push("-coalesce");
+    }
+
+    args.push(&output_arg);
+
+    let reader = Process::run("magick", &args)?.read();
 
     let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, input_file);
 

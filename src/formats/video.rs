@@ -235,6 +235,13 @@ impl VideoFormat {
 }
 
 impl OutputVideoFormat {
+    pub(crate) const fn is_vp9(&self) -> bool {
+        match self {
+            Self::Webm { video_codec, .. } => video_codec.is_vp9(),
+            Self::Mp4 { .. } => false,
+        }
+    }
+
     pub(crate) const fn from_parts(
         video_codec: VideoCodec,
         audio_codec: Option<AudioCodec>,
@@ -374,6 +381,10 @@ impl Mp4Codec {
 }
 
 impl WebmAlphaCodec {
+    const fn is_vp9(&self) -> bool {
+        matches!(self, Self::Vp9)
+    }
+
     const fn ffmpeg_codec(self) -> &'static str {
         match self {
             Self::Vp8 => "vp8",
@@ -383,6 +394,13 @@ impl WebmAlphaCodec {
 }
 
 impl WebmCodec {
+    const fn is_vp9(self) -> bool {
+        match self {
+            Self::Av1 => false,
+            Self::Alpha(AlphaCodec { codec, .. }) => codec.is_vp9(),
+        }
+    }
+
     const fn ffmpeg_codec(self) -> &'static str {
         match self {
             Self::Av1 => "av1",

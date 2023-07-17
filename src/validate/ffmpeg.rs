@@ -60,66 +60,43 @@ async fn transcode_files(
     output_format: OutputVideoFormat,
     crf: u8,
 ) -> Result<(), FfMpegError> {
+    let mut args = vec![
+        "-hide_banner",
+        "-v",
+        "warning",
+        "-f",
+        input_format.ffmpeg_format(),
+        "-i",
+        input_path,
+        "-pix_fmt",
+        output_format.pix_fmt(),
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+    ];
+
     if let Some(audio_codec) = output_format.ffmpeg_audio_codec() {
-        Process::run(
-            "ffmpeg",
-            &[
-                "-hide_banner",
-                "-v",
-                "warning",
-                "-f",
-                input_format.ffmpeg_format(),
-                "-i",
-                input_path,
-                "-pix_fmt",
-                output_format.pix_fmt(),
-                "-vf",
-                "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                "-c:a",
-                audio_codec,
-                "-c:v",
-                output_format.ffmpeg_video_codec(),
-                "-b:v",
-                "0",
-                "-crf",
-                &crf.to_string(),
-                "-f",
-                output_format.ffmpeg_format(),
-                output_path,
-            ],
-        )?
-        .wait()
-        .await?;
+        args.extend(["-c:a", audio_codec]);
     } else {
-        Process::run(
-            "ffmpeg",
-            &[
-                "-hide_banner",
-                "-v",
-                "warning",
-                "-f",
-                input_format.ffmpeg_format(),
-                "-i",
-                input_path,
-                "-pix_fmt",
-                output_format.pix_fmt(),
-                "-vf",
-                "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                "-an",
-                "-c:v",
-                output_format.ffmpeg_video_codec(),
-                "-b:v",
-                "0",
-                "-crf",
-                &crf.to_string(),
-                "-f",
-                output_format.ffmpeg_format(),
-                output_path,
-            ],
-        )?
-        .wait()
-        .await?;
+        args.push("-an")
     }
+
+    args.extend(["-c:v", output_format.ffmpeg_video_codec()]);
+
+    if output_format.is_vp9() {
+        args.extend(["-b:v", "0"]);
+    }
+
+    let crf = crf.to_string();
+
+    args.extend([
+        "-crf",
+        &crf,
+        "-f",
+        output_format.ffmpeg_format(),
+        output_path,
+    ]);
+
+    Process::run("ffmpeg", &args)?.wait().await?;
 
     Ok(())
 }
