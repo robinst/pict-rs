@@ -105,7 +105,7 @@ where
             tracing::warn!("Failed to ingest\n{}\n{}", format!("{e}"), format!("{e:?}"));
 
             UploadResult::Failure {
-                message: e.to_string(),
+                message: e.root_cause().to_string(),
             }
         }
     };

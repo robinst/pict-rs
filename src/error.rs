@@ -9,6 +9,10 @@ impl Error {
     fn kind(&self) -> Option<&UploadError> {
         self.inner.downcast_ref()
     }
+
+    pub(crate) fn root_cause(&self) -> &(dyn std::error::Error + 'static) {
+        self.inner.root_cause()
+    }
 }
 
 impl std::fmt::Debug for Error {
@@ -188,20 +192,11 @@ impl ResponseError for Error {
     }
 
     fn error_response(&self) -> HttpResponse {
-        if let Some(kind) = self.kind() {
-            HttpResponse::build(self.status_code())
-                .content_type("application/json")
-                .body(
-                    serde_json::to_string(&serde_json::json!({ "msg": kind.to_string() }))
-                        .unwrap_or_else(|_| r#"{"msg":"Request failed"}"#.to_string()),
-                )
-        } else {
-            HttpResponse::build(self.status_code())
-                .content_type("application/json")
-                .body(
-                    serde_json::to_string(&serde_json::json!({ "msg": "Unknown error" }))
-                        .unwrap_or_else(|_| r#"{"msg":"Request failed"}"#.to_string()),
-                )
-        }
+        HttpResponse::build(self.status_code())
+            .content_type("application/json")
+            .body(
+                serde_json::to_string(&serde_json::json!({ "msg": self.root_cause().to_string() }))
+                    .unwrap_or_else(|_| r#"{"msg":"Request failed"}"#.to_string()),
+            )
     }
 }

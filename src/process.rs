@@ -44,8 +44,11 @@ pin_project_lite::pin_project! {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ProcessError {
-    #[error("Required command {0} not found")]
+    #[error("Required command {0} not found, make sure it exists in pict-rs' $PATH")]
     NotFound(String),
+
+    #[error("Cannot run command {0} due to invalid permissions on binary, make sure the pict-rs user has permission to run it")]
+    PermissionDenied(String),
 
     #[error("Reached process spawn limit")]
     LimitReached,
@@ -66,6 +69,9 @@ impl Process {
             Ok(this) => Ok(this),
             Err(e) => match e.kind() {
                 std::io::ErrorKind::NotFound => Err(ProcessError::NotFound(command.to_string())),
+                std::io::ErrorKind::PermissionDenied => {
+                    Err(ProcessError::PermissionDenied(command.to_string()))
+                }
                 std::io::ErrorKind::WouldBlock => Err(ProcessError::LimitReached),
                 _ => Err(ProcessError::Other(e)),
             },
