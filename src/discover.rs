@@ -54,7 +54,7 @@ pub(crate) async fn discover_store_lite<S>(
     identifier: &S::Identifier,
 ) -> Result<DiscoveryLite, crate::error::Error>
 where
-    S: Store + 'static,
+    S: Store,
 {
     if let Some(discovery) =
         ffmpeg::discover_stream_lite(store.to_stream(identifier, None, None).await?).await?

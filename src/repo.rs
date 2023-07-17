@@ -72,6 +72,7 @@ pub(crate) trait FullRepo:
     + AliasRepo
     + QueueRepo
     + HashRepo
+    + MigrationRepo
     + Send
     + Sync
     + Clone
@@ -258,6 +259,47 @@ where
 
     async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), StoreError> {
         T::cleanup(self, identifier).await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+pub(crate) trait MigrationRepo: BaseRepo {
+    async fn is_continuing_migration(&self) -> Result<bool, RepoError>;
+
+    async fn mark_migrated<I1: Identifier, I2: Identifier>(
+        &self,
+        old_identifier: &I1,
+        new_identifier: &I2,
+    ) -> Result<(), StoreError>;
+
+    async fn is_migrated<I: Identifier>(&self, identifier: &I) -> Result<bool, StoreError>;
+
+    async fn clear(&self) -> Result<(), RepoError>;
+}
+
+#[async_trait::async_trait(?Send)]
+impl<T> MigrationRepo for actix_web::web::Data<T>
+where
+    T: MigrationRepo,
+{
+    async fn is_continuing_migration(&self) -> Result<bool, RepoError> {
+        T::is_continuing_migration(self).await
+    }
+
+    async fn mark_migrated<I1: Identifier, I2: Identifier>(
+        &self,
+        old_identifier: &I1,
+        new_identifier: &I2,
+    ) -> Result<(), StoreError> {
+        T::mark_migrated(self, old_identifier, new_identifier).await
+    }
+
+    async fn is_migrated<I: Identifier>(&self, identifier: &I) -> Result<bool, StoreError> {
+        T::is_migrated(self, identifier).await
+    }
+
+    async fn clear(&self) -> Result<(), RepoError> {
+        T::clear(self).await
     }
 }
 

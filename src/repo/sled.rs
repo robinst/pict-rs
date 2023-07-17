@@ -2,8 +2,8 @@ use crate::{
     details::MaybeHumanDate,
     repo::{
         Alias, AliasAlreadyExists, AliasRepo, AlreadyExists, BaseRepo, DeleteToken, Details,
-        FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, QueueRepo, SettingsRepo,
-        UploadId, UploadRepo, UploadResult,
+        FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, MigrationRepo,
+        QueueRepo, SettingsRepo, UploadId, UploadRepo, UploadResult,
     },
     serde_str::Serde,
     store::StoreError,
@@ -69,6 +69,7 @@ pub(crate) struct SledRepo {
     in_progress_queue: Tree,
     queue_notifier: Arc<RwLock<HashMap<&'static str, Arc<Notify>>>>,
     uploads: Tree,
+    migration_identifiers: Tree,
     cache_capacity: u64,
     export_path: PathBuf,
     db: Db,
@@ -100,6 +101,7 @@ impl SledRepo {
             in_progress_queue: db.open_tree("pict-rs-in-progress-queue-tree")?,
             queue_notifier: Arc::new(RwLock::new(HashMap::new())),
             uploads: db.open_tree("pict-rs-uploads-tree")?,
+            migration_identifiers: db.open_tree("pict-rs-migration-identifiers-tree")?,
             cache_capacity,
             export_path,
             db,
@@ -456,6 +458,41 @@ impl IdentifierRepo for SledRepo {
         let key = identifier.to_bytes()?;
 
         b!(self.identifier_details, identifier_details.remove(key));
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl MigrationRepo for SledRepo {
+    async fn is_continuing_migration(&self) -> Result<bool, RepoError> {
+        Ok(!self.migration_identifiers.is_empty())
+    }
+
+    async fn mark_migrated<I1: Identifier, I2: Identifier>(
+        &self,
+        old_identifier: &I1,
+        new_identifier: &I2,
+    ) -> Result<(), StoreError> {
+        let key = new_identifier.to_bytes()?;
+        let value = old_identifier.to_bytes()?;
+
+        b!(
+            self.migration_identifiers,
+            migration_identifiers.insert(key, value)
+        );
+
+        Ok(())
+    }
+
+    async fn is_migrated<I: Identifier>(&self, identifier: &I) -> Result<bool, StoreError> {
+        let key = identifier.to_bytes()?;
+
+        Ok(b!(self.migration_identifiers, migration_identifiers.get(key)).is_some())
+    }
+
+    async fn clear(&self) -> Result<(), RepoError> {
+        b!(self.migration_identifiers, migration_identifiers.clear());
 
         Ok(())
     }

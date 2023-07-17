@@ -42,7 +42,7 @@ impl Details {
         Ok(Details::from_parts(format, width, height, frames))
     }
 
-    pub(crate) async fn from_store<S: Store + 'static>(
+    pub(crate) async fn from_store<S: Store>(
         store: &S,
         identifier: &S::Identifier,
     ) -> Result<Self, Error> {
