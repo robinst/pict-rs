@@ -85,7 +85,12 @@ struct ImageDefaults {
     max_height: u16,
     max_area: u32,
     max_file_size: usize,
+    quality: ImageQualityDefaults,
 }
+
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct ImageQualityDefaults {}
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -95,7 +100,12 @@ struct AnimationDefaults {
     max_area: u32,
     max_frame_count: u32,
     max_file_size: usize,
+    quality: AnimationQualityDefaults,
 }
+
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct AnimationQualityDefaults {}
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -108,6 +118,13 @@ struct VideoDefaults {
     max_frame_count: u32,
     max_file_size: usize,
     video_codec: VideoCodec,
+    quality: VideoQualityDefaults,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct VideoQualityDefaults {
+    crf_max: u8,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -232,6 +249,7 @@ impl Default for ImageDefaults {
             max_height: 10_000,
             max_area: 40_000_000,
             max_file_size: 40,
+            quality: ImageQualityDefaults {},
         }
     }
 }
@@ -244,6 +262,7 @@ impl Default for AnimationDefaults {
             max_area: 65_536,
             max_frame_count: 100,
             max_file_size: 40,
+            quality: AnimationQualityDefaults {},
         }
     }
 }
@@ -259,7 +278,14 @@ impl Default for VideoDefaults {
             max_frame_count: 900,
             max_file_size: 40,
             video_codec: VideoCodec::Vp9,
+            quality: VideoQualityDefaults::default(),
         }
+    }
+}
+
+impl Default for VideoQualityDefaults {
+    fn default() -> Self {
+        VideoQualityDefaults { crf_max: 32 }
     }
 }
 

@@ -55,12 +55,20 @@ impl Args {
                 media_image_max_area,
                 media_image_max_file_size,
                 media_image_format,
+                media_image_quality_avif,
+                media_image_quality_jpeg,
+                media_image_quality_jxl,
+                media_image_quality_png,
+                media_image_quality_webp,
                 media_animation_max_width,
                 media_animation_max_height,
                 media_animation_max_area,
                 media_animation_max_file_size,
                 media_animation_max_frame_count,
                 media_animation_format,
+                media_animation_quality_apng,
+                media_animation_quality_avif,
+                media_animation_quality_webp,
                 media_video_enable,
                 media_video_allow_audio,
                 media_video_max_width,
@@ -70,6 +78,14 @@ impl Args {
                 media_video_max_frame_count,
                 media_video_codec,
                 media_video_audio_codec,
+                media_video_quality_max,
+                media_video_quality_240,
+                media_video_quality_360,
+                media_video_quality_480,
+                media_video_quality_720,
+                media_video_quality_1080,
+                media_video_quality_1440,
+                media_video_quality_2160,
                 media_filters,
                 read_only,
                 store,
@@ -86,12 +102,27 @@ impl Args {
                     timeout: client_timeout,
                 };
 
+                let image_quality = ImageQuality {
+                    avif: media_image_quality_avif,
+                    jpeg: media_image_quality_jpeg,
+                    jxl: media_image_quality_jxl,
+                    png: media_image_quality_png,
+                    webp: media_image_quality_webp,
+                };
+
                 let image = Image {
                     max_file_size: media_image_max_file_size,
                     max_width: media_image_max_width,
                     max_height: media_image_max_height,
                     max_area: media_image_max_area,
                     format: media_image_format,
+                    quality: image_quality.set(),
+                };
+
+                let animation_quality = AnimationQuality {
+                    apng: media_animation_quality_apng,
+                    avif: media_animation_quality_avif,
+                    webp: media_animation_quality_webp,
                 };
 
                 let animation = Animation {
@@ -101,6 +132,18 @@ impl Args {
                     max_area: media_animation_max_area,
                     max_frame_count: media_animation_max_frame_count,
                     format: media_animation_format,
+                    quality: animation_quality.set(),
+                };
+
+                let video_quality = VideoQuality {
+                    crf_240: media_video_quality_240,
+                    crf_360: media_video_quality_360,
+                    crf_480: media_video_quality_480,
+                    crf_720: media_video_quality_720,
+                    crf_1080: media_video_quality_1080,
+                    crf_1440: media_video_quality_1440,
+                    crf_2160: media_video_quality_2160,
+                    crf_max: media_video_quality_max,
                 };
 
                 let video = Video {
@@ -113,6 +156,7 @@ impl Args {
                     max_frame_count: media_video_max_frame_count,
                     video_codec: media_video_codec,
                     audio_codec: media_video_audio_codec,
+                    quality: video_quality.set(),
                 };
 
                 let media = Media {
@@ -404,6 +448,8 @@ struct Image {
     max_file_size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<ImageFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quality: Option<ImageQuality>,
 }
 
 impl Image {
@@ -412,7 +458,38 @@ impl Image {
             || self.max_height.is_some()
             || self.max_area.is_some()
             || self.max_file_size.is_some()
-            || self.format.is_some();
+            || self.format.is_some()
+            || self.quality.is_some();
+
+        if any_set {
+            Some(self)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+struct ImageQuality {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avif: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jpeg: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jxl: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    png: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    webp: Option<u8>,
+}
+
+impl ImageQuality {
+    fn set(self) -> Option<Self> {
+        let any_set = self.avif.is_some()
+            || self.jpeg.is_some()
+            || self.jxl.is_some()
+            || self.png.is_some()
+            || self.webp.is_some();
 
         if any_set {
             Some(self)
@@ -437,6 +514,8 @@ struct Animation {
     max_file_size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<AnimationFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quality: Option<AnimationQuality>,
 }
 
 impl Animation {
@@ -446,7 +525,31 @@ impl Animation {
             || self.max_area.is_some()
             || self.max_frame_count.is_some()
             || self.max_file_size.is_some()
-            || self.format.is_some();
+            || self.format.is_some()
+            || self.quality.is_some();
+
+        if any_set {
+            Some(self)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct AnimationQuality {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    apng: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avif: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    webp: Option<u8>,
+}
+
+impl AnimationQuality {
+    fn set(self) -> Option<Self> {
+        let any_set = self.apng.is_some() || self.avif.is_some() || self.webp.is_some();
 
         if any_set {
             Some(self)
@@ -477,6 +580,8 @@ struct Video {
     video_codec: Option<VideoCodec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     audio_codec: Option<AudioCodec>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quality: Option<VideoQuality>,
 }
 
 impl Video {
@@ -489,7 +594,41 @@ impl Video {
             || self.max_frame_count.is_some()
             || self.max_file_size.is_some()
             || self.video_codec.is_some()
-            || self.audio_codec.is_some();
+            || self.audio_codec.is_some()
+            || self.quality.is_some();
+
+        if any_set {
+            Some(self)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct VideoQuality {
+    crf_240: Option<u8>,
+    crf_360: Option<u8>,
+    crf_480: Option<u8>,
+    crf_720: Option<u8>,
+    crf_1080: Option<u8>,
+    crf_1440: Option<u8>,
+    crf_2160: Option<u8>,
+    crf_max: Option<u8>,
+}
+
+impl VideoQuality {
+    fn set(self) -> Option<Self> {
+        let any_set = self.crf_240.is_some()
+            || self.crf_360.is_some()
+            || self.crf_480.is_some()
+            || self.crf_720.is_some()
+            || self.crf_1080.is_some()
+            || self.crf_1440.is_some()
+            || self.crf_1440.is_some()
+            || self.crf_2160.is_some()
+            || self.crf_max.is_some();
 
         if any_set {
             Some(self)
@@ -609,6 +748,31 @@ struct Run {
     /// Enforce a specific format for uploaded images
     #[arg(long)]
     media_image_format: Option<ImageFormat>,
+    /// Enforce a specific quality for AVIF images
+    ///
+    /// A higher number means better quality, with a minimum value of 0 and a maximum value of 100
+    #[arg(long)]
+    media_image_quality_avif: Option<u8>,
+    /// Enforce a specific compression level for PNG images
+    ///
+    /// A higher number means better compression. PNGs will look the same regardless
+    #[arg(long)]
+    media_image_quality_png: Option<u8>,
+    /// Enforce a specific quality for JPEG images
+    ///
+    /// A higher number means better quality, with a minimum value of 0 and a maximum value of 100
+    #[arg(long)]
+    media_image_quality_jpeg: Option<u8>,
+    /// Enforce a specific quality for JXL images
+    ///
+    /// A higher number means better quality, with a minimum value of 0 and a maximum value of 100
+    #[arg(long)]
+    media_image_quality_jxl: Option<u8>,
+    /// Enforce a specific quality for WEBP images
+    ///
+    /// A higher number means better quality, with a minimum value of 0 and a maximum value of 100
+    #[arg(long)]
+    media_image_quality_webp: Option<u8>,
 
     /// The maximum width, in pixels, for uploaded animations
     #[arg(long)]
@@ -628,6 +792,21 @@ struct Run {
     /// Enforce a specific format for uploaded animations
     #[arg(long)]
     media_animation_format: Option<AnimationFormat>,
+    /// Enforce a specific compression level for APNG animations
+    ///
+    /// A higher number means better compression, APNGs will look the same regardless
+    #[arg(long)]
+    media_animation_quality_apng: Option<u8>,
+    /// Enforce a specific quality for AVIF animations
+    ///
+    /// A higher number means better quality, with a minimum value of 0 and a maximum value of 100
+    #[arg(long)]
+    media_animation_quality_avif: Option<u8>,
+    /// Enforce a specific quality for WEBP animations
+    ///
+    /// A higher number means better quality, with a minimum value of 0 and a maximum value of 100
+    #[arg(long)]
+    media_animation_quality_webp: Option<u8>,
 
     /// Whether to enable video uploads
     #[arg(long)]
@@ -656,6 +835,42 @@ struct Run {
     /// Enforce a specific audio codec for uploaded videos
     #[arg(long)]
     media_video_audio_codec: Option<AudioCodec>,
+    /// Enforce a maximum quality level for uploaded videos
+    ///
+    /// This value means different things for different video codecs:
+    /// - it ranges from 0 to 63 for AV1
+    /// - it ranges from 4 to 63 for VP8
+    /// - it ranges from 0 to 63 for VP9
+    /// - it ranges from 0 to 51 for H265
+    /// - it ranges from 0 to 51 for 8bit H264
+    /// - it ranges from 0 to 63 for 10bit H264
+    ///
+    /// A lower value (closer to 0) is higher quality, while a higher value (closer to 63) is lower
+    /// quality. Generally acceptable ranges are 15-38, where lower values are preferred for larger
+    /// videos
+    #[arg(long)]
+    media_video_quality_max: Option<u8>,
+    /// Enforce a video quality for video with a smaller dimension less than 240px
+    #[arg(long)]
+    media_video_quality_240: Option<u8>,
+    /// Enforce a video quality for video with a smaller dimension less than 360px
+    #[arg(long)]
+    media_video_quality_360: Option<u8>,
+    /// Enforce a video quality for video with a smaller dimension less than 480px
+    #[arg(long)]
+    media_video_quality_480: Option<u8>,
+    /// Enforce a video quality for video with a smaller dimension less than 720px
+    #[arg(long)]
+    media_video_quality_720: Option<u8>,
+    /// Enforce a video quality for video with a smaller dimension less than 1080px
+    #[arg(long)]
+    media_video_quality_1080: Option<u8>,
+    /// Enforce a video quality for video with a smaller dimension less than 1440px
+    #[arg(long)]
+    media_video_quality_1440: Option<u8>,
+    /// Enforce a video quality for video with a smaller dimension less than 2160px
+    #[arg(long)]
+    media_video_quality_2160: Option<u8>,
 
     /// Don't permit ingesting media
     #[arg(long)]

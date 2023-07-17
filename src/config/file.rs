@@ -181,6 +181,42 @@ pub(crate) struct Image {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) format: Option<ImageFormat>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) quality: Option<ImageQuality>,
+}
+
+impl Image {
+    pub(crate) fn quality_for(&self, format: ImageFormat) -> Option<u8> {
+        self.quality
+            .as_ref()
+            .and_then(|quality| match format {
+                ImageFormat::Avif => quality.avif,
+                ImageFormat::Jpeg => quality.jpeg,
+                ImageFormat::Jxl => quality.jxl,
+                ImageFormat::Png => quality.png,
+                ImageFormat::Webp => quality.webp,
+            })
+            .map(|quality| quality.min(100))
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct ImageQuality {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) avif: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) png: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) jpeg: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) jxl: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) webp: Option<u8>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -197,6 +233,35 @@ pub(crate) struct Animation {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) format: Option<AnimationFormat>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) quality: Option<AnimationQuality>,
+}
+
+impl Animation {
+    pub(crate) fn quality_for(&self, format: AnimationFormat) -> Option<u8> {
+        self.quality
+            .as_ref()
+            .and_then(|quality| match format {
+                AnimationFormat::Apng => quality.apng,
+                AnimationFormat::Avif => quality.avif,
+                AnimationFormat::Gif => None,
+                AnimationFormat::Webp => quality.webp,
+            })
+            .map(|quality| quality.min(100))
+    }
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+pub(crate) struct AnimationQuality {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    apng: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avif: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    webp: Option<u8>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -217,8 +282,71 @@ pub(crate) struct Video {
 
     pub(crate) video_codec: VideoCodec,
 
+    pub(crate) quality: VideoQuality,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) audio_codec: Option<AudioCodec>,
+}
+
+impl Video {
+    pub(crate) fn crf_for(&self, width: u16, height: u16) -> u8 {
+        let smaller_dimension = width.min(height);
+
+        let dimension_cutoffs = [240, 360, 480, 720, 1080, 1440, 2160];
+        let crfs = [
+            self.quality.crf_240,
+            self.quality.crf_360,
+            self.quality.crf_480,
+            self.quality.crf_720,
+            self.quality.crf_1080,
+            self.quality.crf_1440,
+            self.quality.crf_2160,
+        ];
+
+        let index = dimension_cutoffs
+            .into_iter()
+            .enumerate()
+            .find_map(|(index, dim)| {
+                if smaller_dimension <= dim {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(crfs.len());
+
+        crfs.into_iter()
+            .skip(index)
+            .find_map(|opt| opt)
+            .unwrap_or(self.quality.crf_max)
+            .min(63)
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct VideoQuality {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    crf_240: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    crf_360: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    crf_480: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    crf_720: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    crf_1080: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    crf_1440: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    crf_2160: Option<u8>,
+
+    crf_max: u8,
 }
 
 impl Media {

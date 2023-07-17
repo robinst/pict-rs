@@ -10,6 +10,7 @@ use crate::{
 pub(super) async fn transcode_bytes(
     input_format: VideoFormat,
     output_format: OutputVideoFormat,
+    crf: u8,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, FfMpegError> {
     let input_file = crate::tmp_file::tmp_file(None);
@@ -30,7 +31,14 @@ pub(super) async fn transcode_bytes(
     let output_file = crate::tmp_file::tmp_file(None);
     let output_file_str = output_file.to_str().ok_or(FfMpegError::Path)?;
 
-    transcode_files(input_file_str, input_format, output_file_str, output_format).await?;
+    transcode_files(
+        input_file_str,
+        input_format,
+        output_file_str,
+        output_format,
+        crf,
+    )
+    .await?;
 
     let tmp_two = crate::file::File::open(&output_file)
         .await
@@ -50,6 +58,7 @@ async fn transcode_files(
     input_format: VideoFormat,
     output_path: &str,
     output_format: OutputVideoFormat,
+    crf: u8,
 ) -> Result<(), FfMpegError> {
     if let Some(audio_codec) = output_format.ffmpeg_audio_codec() {
         Process::run(
@@ -70,6 +79,10 @@ async fn transcode_files(
                 audio_codec,
                 "-c:v",
                 output_format.ffmpeg_video_codec(),
+                "-b:v",
+                "0",
+                "-crf",
+                &crf.to_string(),
                 "-f",
                 output_format.ffmpeg_format(),
                 output_path,
@@ -95,6 +108,10 @@ async fn transcode_files(
                 "-an",
                 "-c:v",
                 output_format.ffmpeg_video_codec(),
+                "-b:v",
+                "0",
+                "-crf",
+                &crf.to_string(),
                 "-f",
                 output_format.ffmpeg_format(),
                 output_path,

@@ -119,7 +119,9 @@ async fn process_image(
     } = input.build_output(validations.format);
 
     let read = if needs_transcode {
-        Either::left(magick::convert_image(input.format, format, bytes).await?)
+        let quality = validations.quality_for(format);
+
+        Either::left(magick::convert_image(input.format, format, quality, bytes).await?)
     } else {
         Either::right(exiftool::clear_metadata_bytes_read(bytes)?)
     };
@@ -170,27 +172,31 @@ async fn process_animation(
             } = input.build_output(validations.animation.format);
 
             let read = if needs_transcode {
-                Either::left(magick::convert_animation(input, format, bytes).await?)
+                let quality = validations.animation.quality_for(format);
+
+                Either::left(magick::convert_animation(input, format, quality, bytes).await?)
             } else {
                 Either::right(Either::left(exiftool::clear_metadata_bytes_read(bytes)?))
             };
 
             Ok((InternalFormat::Animation(format), read))
         }
-        Err(_) if validate_video(bytes.len(), width, height, frames, validations.video).is_ok() => {
-            let output = OutputVideoFormat::from_parts(
-                validations.video.video_codec,
-                validations.video.audio_codec,
-                validations.video.allow_audio,
-            );
+        Err(_) => match validate_video(bytes.len(), width, height, frames, validations.video) {
+            Ok(()) => {
+                let output = OutputVideoFormat::from_parts(
+                    validations.video.video_codec,
+                    validations.video.audio_codec,
+                    validations.video.allow_audio,
+                );
 
-            let read = Either::right(Either::right(
-                magick::convert_video(input, output, bytes).await?,
-            ));
+                let read = Either::right(Either::right(
+                    magick::convert_video(input, output, bytes).await?,
+                ));
 
-            Ok((InternalFormat::Video(output.internal_format()), read))
-        }
-        Err(e) => Err(e.into()),
+                Ok((InternalFormat::Video(output.internal_format()), read))
+            }
+            Err(e) => Err(e.into()),
+        },
     }
 }
 
@@ -240,7 +246,9 @@ async fn process_video(
         validations.allow_audio,
     );
 
-    let read = ffmpeg::transcode_bytes(input, output, bytes).await?;
+    let crf = validations.crf_for(width, height);
+
+    let read = ffmpeg::transcode_bytes(input, output, crf, bytes).await?;
 
     Ok((InternalFormat::Video(output.internal_format()), read))
 }

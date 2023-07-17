@@ -111,6 +111,8 @@ pub(crate) fn configure() -> color_eyre::Result<(Configuration, Operation)> {
         .add_source(config::Config::try_from(&config_format)?)
         .build()?;
 
+    println!("{built:?}");
+
     let config: Configuration = built.try_deserialize()?;
 
     if let Some(save_to) = save_to {

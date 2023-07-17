@@ -188,6 +188,53 @@ max_file_size = 40
 format = "webp"
 
 
+[media.image.quality]
+## Optional: set quality for AVIF images
+# environment variable : PICTRS__MEDIA__IMAGE__QUALITY__AVIF
+# default: empty
+#
+# availabe range: 0-100
+# 100 means best quality and 0 means worst quality. Playing with numbers between 40 and 100 makes
+# the most sense.
+avif = 100
+
+## Optional: set compression for PNG images
+# environment variable : PICTRS__MEDIA__IMAGE__QUALITY__PNG
+# default: empty
+#
+# availabe range: 0-100
+# 100 means best compression and 0 means worst compression. Since PNG is a lossless format, changing
+# this value will not change how the images look.
+png = 100
+
+## Optional: set quality for JPEG images
+# environment variable : PICTRS__MEDIA__IMAGE__QUALITY__JPEG
+# default: empty
+#
+# availabe range: 0-100
+# 100 means best quality and 0 means worst quality. Playing with numbers between 60 and 100 makes
+# the most sense.
+jpeg = 100
+
+## Optional: set quality for JXL images
+# environment variable : PICTRS__MEDIA__IMAGE__QUALITY__JXL
+# default: empty
+#
+# availabe range: 0-100
+# 100 means best quality and 0 means worst quality. Playing with numbers between 40 and 100 makes
+# the most sense.
+jxl = 100
+
+## Optional: set quality for WEBP images
+# environment variable : PICTRS__MEDIA__IMAGE__QUALITY__WEBP
+# default: empty
+#
+# availabe range: 0-100
+# 100 means best quality and 0 means worst quality. Playing with numbers between 50 and 100 makes
+# the most sense.
+webp = 100
+
+
 [media.animation]
 ## Optional: max animation width (in pixels)
 # environment variable: PICTRS__MEDIA__ANIMATION__MAX_WIDTH
@@ -233,6 +280,35 @@ max_frame_count = 100
 # file size vs browser support, 'avif', 'jxl', and 'webp' should be considered. By default, images
 # are stored in their original file type.
 format = "webp"
+
+
+[media.animation.quality]
+## Optional: set compression for APNG animations
+# environment variable : PICTRS__MEDIA__ANIMATION__QUALITY__APNG
+# default: empty
+#
+# availabe range: 0-100
+# 100 means best compression and 0 means worst compression. Since APNG is a lossless format,
+# changing this value will not change how the animations look.
+apng = 100
+
+## Optional: set quality for AVIF animations
+# environment variable : PICTRS__MEDIA__ANIMATION__QUALITY__AVIF
+# default: empty
+#
+# availabe range: 0-100
+# 100 means best quality and 0 means worst quality. Playing with numbers between 40 and 100 makes
+# the most sense.
+avif = 100
+
+## Optional: set quality for WEBP animations
+# environment variable : PICTRS__MEDIA__ANIMATION__QUALITY__WEBP
+# default: empty
+#
+# availabe range: 0-100
+# 100 means best quality and 0 means worst quality. Playing with numbers between 50 and 100 makes
+# the most sense.
+webp = 100
 
 
 [media.video]
@@ -306,6 +382,88 @@ video_codec = "vp9"
 # - vorbis is not default for any codec
 # this setting does nothing if full video is not enabled
 audio_codec = "opus"
+
+
+[media.video.quality]
+## Optional: set maximum quality for all videos
+# environment variable: PICTRS__MEDIA__VIDEO__QUALITY__CRF_MAX
+# default: 32
+#
+# This value means different things for different video codecs:
+# - it ranges from 0 to 63 for AV1
+# - it ranges from 4 to 63 for VP8
+# - it ranges from 0 to 63 for VP9
+# - it ranges from 0 to 51 for H265
+# - it ranges from 0 to 51 for 8bit H264
+# - it ranges from 0 to 63 for 10bit H264
+#
+# A lower value (closer to 0) is higher quality, while a higher value (closer to 63) is lower
+# quality. Generally acceptable ranges are 15-38, where lower values are preferred for larger
+# videos
+#
+# This value may be overridden for some videos depending on whether other crf configurations are set
+# For example, if crf_max is set to 32 and crf_720 is set to 34, then all videos smaller than or
+# equal to 720p video will be encoded with a `crf` of 34, while all videos larger than 720p will be
+# encoded with a `crf` of 32
+#
+# The example values here are taken from a google document about reasonable CRF values for VP9
+# video. More information about `crf` can be found on ffmpeg's wiki
+# 
+# - AV1: https://trac.ffmpeg.org/wiki/Encode/AV1#ConstantQuality
+# - H264: https://trac.ffmpeg.org/wiki/Encode/H.264#crf
+# - H265: https://trac.ffmpeg.org/wiki/Encode/H.265#ConstantRateFactorCRF
+# - VP8: https://trac.ffmpeg.org/wiki/Encode/H.265#ConstantRateFactorCRF
+# - VP9: https://trac.ffmpeg.org/wiki/Encode/VP9#constantq
+crf_max = 12
+
+## Optional: set quality for videos up to 240p
+# environment variable: PICTRS__MEDIA__VIDEO__QUALITY__CRF_240
+# default: empty
+#
+# This value overrides `crf_max` for videos with a smaller dimension of at most 240px (240p)
+crf_240 = 37
+
+## Optional: set quality for videos up to 360p
+# environment variable: PICTRS__MEDIA__VIDEO__QUALITY__CRF_360
+# default: empty
+#
+# This value overrides `crf_max` for videos with a smaller dimension of at most 360px (260p)
+crf_360 = 36
+
+## Optional: set quality for videos up to 480p
+# environment variable: PICTRS__MEDIA__VIDEO__QUALITY__CRF_480
+# default: empty
+#
+# This value overrides `crf_max` for videos with a smaller dimension of at most 480px (480p)
+crf_480 = 33
+
+## Optional: set quality for videos up to 720p
+# environment variable: PICTRS__MEDIA__VIDEO__QUALITY__CRF_720
+# default: empty
+#
+# This value overrides `crf_max` for videos with a smaller dimension of at most 720px (720p)
+crf_720 = 32
+
+## Optional: set quality for videos up to 1080p
+# environment variable: PICTRS__MEDIA__VIDEO__QUALITY__CRF_1080
+# default: empty
+#
+# This value overrides `crf_max` for videos with a smaller dimension of at most 1080px (1080p)
+crf_1080 = 31
+
+## Optional: set quality for videos up to 1440p
+# environment variable: PICTRS__MEDIA__VIDEO__QUALITY__CRF_1440
+# default: empty
+#
+# This value overrides `crf_max` for videos with a smaller dimension of at most 1440px (1440p)
+crf_1440 = 24
+
+## Optional: set quality for videos up to 4K
+# environment variable: PICTRS__MEDIA__VIDEO__QUALITY__CRF_2160
+# default: empty
+#
+# This value overrides `crf_max` for videos with a smaller dimension of at most 2160px (4K)
+crf_2160 = 15
 
 
 ## Database configuration

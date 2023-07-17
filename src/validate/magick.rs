@@ -10,17 +10,33 @@ use crate::{
 pub(super) async fn convert_image(
     input: ImageFormat,
     output: ImageFormat,
+    quality: Option<u8>,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
-    convert(input.magick_format(), output.magick_format(), false, bytes).await
+    convert(
+        input.magick_format(),
+        output.magick_format(),
+        false,
+        quality,
+        bytes,
+    )
+    .await
 }
 
 pub(super) async fn convert_animation(
     input: AnimationFormat,
     output: AnimationFormat,
+    quality: Option<u8>,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
-    convert(input.magick_format(), output.magick_format(), true, bytes).await
+    convert(
+        input.magick_format(),
+        output.magick_format(),
+        true,
+        quality,
+        bytes,
+    )
+    .await
 }
 
 pub(super) async fn convert_video(
@@ -28,13 +44,21 @@ pub(super) async fn convert_video(
     output: OutputVideoFormat,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
-    convert(input.magick_format(), output.magick_format(), true, bytes).await
+    convert(
+        input.magick_format(),
+        output.magick_format(),
+        true,
+        None,
+        bytes,
+    )
+    .await
 }
 
 async fn convert(
     input: &'static str,
     output: &'static str,
     coalesce: bool,
+    quality: Option<u8>,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     let input_file = crate::tmp_file::tmp_file(None);
@@ -57,6 +81,34 @@ async fn convert(
     let output_arg = format!("{output}:-");
 
     let process = if coalesce {
+        if let Some(quality) = quality {
+            Process::run(
+                "magick",
+                &[
+                    "convert",
+                    "-strip",
+                    "-auto-orient",
+                    &input_arg,
+                    "-quality",
+                    &quality.to_string(),
+                    "-coalesce",
+                    &output_arg,
+                ],
+            )?
+        } else {
+            Process::run(
+                "magick",
+                &[
+                    "convert",
+                    "-strip",
+                    "-auto-orient",
+                    &input_arg,
+                    "-coalesce",
+                    &output_arg,
+                ],
+            )?
+        }
+    } else if let Some(quality) = quality {
         Process::run(
             "magick",
             &[
@@ -64,7 +116,8 @@ async fn convert(
                 "-strip",
                 "-auto-orient",
                 &input_arg,
-                "-coalesce",
+                "-quality",
+                &quality.to_string(),
                 &output_arg,
             ],
         )?
