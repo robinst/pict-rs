@@ -71,12 +71,14 @@ impl Args {
                 media_video_codec,
                 media_video_audio_codec,
                 media_filters,
+                read_only,
                 store,
             }) => {
                 let server = Server {
                     address,
                     api_key,
                     worker_id,
+                    read_only,
                 };
 
                 let client = Client {
@@ -315,6 +317,8 @@ struct Server {
     worker_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     api_key: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    read_only: bool,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -455,10 +459,10 @@ impl Animation {
 #[derive(Debug, Default, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 struct Video {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    enable: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    allow_audio: Option<bool>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    enable: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    allow_audio: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_width: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -477,8 +481,8 @@ struct Video {
 
 impl Video {
     fn set(self) -> Option<Self> {
-        let any_set = self.enable.is_some()
-            || self.allow_audio.is_some()
+        let any_set = self.enable
+            || self.allow_audio
             || self.max_width.is_some()
             || self.max_height.is_some()
             || self.max_area.is_some()
@@ -627,9 +631,10 @@ struct Run {
 
     /// Whether to enable video uploads
     #[arg(long)]
-    media_video_enable: Option<bool>,
+    media_video_enable: bool,
     /// Whether to enable audio in video uploads
-    media_video_allow_audio: Option<bool>,
+    #[arg(long)]
+    media_video_allow_audio: bool,
     /// The maximum width, in pixels, for uploaded videos
     #[arg(long)]
     media_video_max_width: Option<u16>,
@@ -651,6 +656,10 @@ struct Run {
     /// Enforce a specific audio codec for uploaded videos
     #[arg(long)]
     media_video_audio_codec: Option<AudioCodec>,
+
+    /// Don't permit ingesting media
+    #[arg(long)]
+    read_only: bool,
 
     #[command(subcommand)]
     store: Option<RunStore>,

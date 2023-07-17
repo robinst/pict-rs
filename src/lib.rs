@@ -128,6 +128,10 @@ async fn ensure_details<R: FullRepo, S: Store + 'static>(
         tracing::debug!("details exist");
         Ok(details)
     } else {
+        if CONFIG.server.read_only {
+            return Err(UploadError::ReadOnly.into());
+        }
+
         tracing::debug!("generating new details from {:?}", identifier);
         let new_details = Details::from_store(store, &identifier).await?;
         tracing::debug!("storing details for {:?}", identifier);
@@ -172,6 +176,10 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
 
                     Box::pin(
                         async move {
+                            if CONFIG.server.read_only {
+                                return Err(UploadError::ReadOnly.into());
+                            }
+
                             ingest::ingest(&**repo, &**store, stream, None, &CONFIG.media).await
                         }
                         .instrument(span),
@@ -220,6 +228,10 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
 
                     Box::pin(
                         async move {
+                            if CONFIG.server.read_only {
+                                return Err(UploadError::ReadOnly.into());
+                            }
+
                             ingest::ingest(
                                 &**repo,
                                 &**store,
@@ -341,8 +353,14 @@ impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
                     let stream = stream.map_err(Error::from);
 
                     Box::pin(
-                        async move { Backgrounded::proxy(repo, store, stream).await }
-                            .instrument(span),
+                        async move {
+                            if CONFIG.server.read_only {
+                                return Err(UploadError::ReadOnly.into());
+                            }
+
+                            Backgrounded::proxy(repo, store, stream).await
+                        }
+                        .instrument(span),
                     )
                 })),
             )
@@ -457,6 +475,10 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     store: web::Data<S>,
     query: web::Query<UrlQuery>,
 ) -> Result<HttpResponse, Error> {
+    if CONFIG.server.read_only {
+        return Err(UploadError::ReadOnly.into());
+    }
+
     let res = client.get(&query.url).send().await?;
 
     if !res.status().is_success() {
@@ -531,6 +553,10 @@ async fn delete<R: FullRepo>(
     repo: web::Data<R>,
     path_entries: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
+    if CONFIG.server.read_only {
+        return Err(UploadError::ReadOnly.into());
+    }
+
     let (token, alias) = path_entries.into_inner();
 
     let token = DeleteToken::from_existing(&token);
@@ -666,6 +692,10 @@ async fn process<R: FullRepo, S: Store + 'static>(
             tracing::debug!("details exist");
             details
         } else {
+            if CONFIG.server.read_only {
+                return Err(UploadError::ReadOnly.into());
+            }
+
             tracing::debug!("generating new details from {:?}", identifier);
             let new_details = Details::from_store(&store, &identifier).await?;
             tracing::debug!("storing details for {:?}", identifier);
@@ -681,6 +711,10 @@ async fn process<R: FullRepo, S: Store + 'static>(
         }
 
         return ranged_file_resp(&store, identifier, range, details, not_found).await;
+    }
+
+    if CONFIG.server.read_only {
+        return Err(UploadError::ReadOnly.into());
     }
 
     let original_details = ensure_details(&repo, &store, &alias).await?;
@@ -768,6 +802,10 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
             tracing::debug!("details exist");
             details
         } else {
+            if CONFIG.server.read_only {
+                return Err(UploadError::ReadOnly.into());
+            }
+
             tracing::debug!("generating new details from {:?}", identifier);
             let new_details = Details::from_store(&store, &identifier).await?;
             tracing::debug!("storing details for {:?}", identifier);
@@ -809,6 +847,10 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
 
     if identifier_opt.is_some() {
         return Ok(HttpResponse::Accepted().finish());
+    }
+
+    if CONFIG.server.read_only {
+        return Err(UploadError::ReadOnly.into());
     }
 
     queue_generate(&repo, target_format, source, process_path, process_args).await?;
@@ -1029,6 +1071,10 @@ fn srv_head(
 
 #[tracing::instrument(name = "Spawning variant cleanup", skip(repo))]
 async fn clean_variants<R: FullRepo>(repo: web::Data<R>) -> Result<HttpResponse, Error> {
+    if CONFIG.server.read_only {
+        return Err(UploadError::ReadOnly.into());
+    }
+
     queue::cleanup_all_variants(&repo).await?;
     Ok(HttpResponse::NoContent().finish())
 }
@@ -1043,6 +1089,10 @@ async fn set_not_found<R: FullRepo>(
     json: web::Json<AliasQuery>,
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
+    if CONFIG.server.read_only {
+        return Err(UploadError::ReadOnly.into());
+    }
+
     let alias = json.into_inner().alias;
 
     if repo.hash(&alias).await?.is_none() {
@@ -1063,6 +1113,10 @@ async fn purge<R: FullRepo>(
     query: web::Query<AliasQuery>,
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
+    if CONFIG.server.read_only {
+        return Err(UploadError::ReadOnly.into());
+    }
+
     let alias = query.into_inner().alias;
     let aliases = repo.aliases_from_alias(&alias).await?;
 
@@ -1479,6 +1533,10 @@ pub async fn run() -> color_eyre::Result<()> {
 
             return Ok(());
         }
+    }
+
+    if CONFIG.server.read_only {
+        tracing::warn!("Launching in READ ONLY mode");
     }
 
     match CONFIG.store.clone() {

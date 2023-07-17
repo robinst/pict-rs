@@ -82,6 +82,9 @@ pub(crate) enum UploadError {
     #[error("Error in exiftool")]
     Exiftool(#[from] crate::exiftool::ExifError),
 
+    #[error("pict-rs is in read-only mode")]
+    ReadOnly,
+
     #[error("Requested file extension cannot be served by source file")]
     InvalidProcessExtension,
 
@@ -178,7 +181,8 @@ impl ResponseError for Error {
                 | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
                 | UploadError::Validation(_)
                 | UploadError::UnsupportedProcessExtension
-                | UploadError::InvalidProcessExtension,
+                | UploadError::InvalidProcessExtension
+                | UploadError::ReadOnly,
             ) => StatusCode::BAD_REQUEST,
             Some(UploadError::Magick(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::Ffmpeg(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,

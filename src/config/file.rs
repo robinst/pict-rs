@@ -97,6 +97,8 @@ pub(crate) struct Server {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) api_key: Option<String>,
+
+    pub(crate) read_only: bool,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

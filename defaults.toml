@@ -1,6 +1,7 @@
 [server]
 address = "0.0.0.0:8080"
 worker_id = "pict-rs-1"
+read_only = false
 
 [client]
 pool_size = 100
