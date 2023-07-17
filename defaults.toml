@@ -1,7 +1,10 @@
 [server]
 address = "0.0.0.0:8080"
 worker_id = "pict-rs-1"
-client_pool_size = 100
+
+[client]
+pool_size = 100
+timeout = 30
 
 [tracing.logging]
 format = "normal"

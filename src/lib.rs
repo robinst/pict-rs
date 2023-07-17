@@ -1128,17 +1128,13 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
 }
 
 fn build_client() -> awc::Client {
-    let connector = CONFIG
-        .server
-        .client_pool_size
-        .map(|size| Connector::new().limit(size))
-        .unwrap_or_else(Connector::new);
+    let connector = Connector::new().limit(CONFIG.client.pool_size);
 
     Client::builder()
         .connector(connector)
         .wrap(Tracing)
         .add_default_header(("User-Agent", "pict-rs v0.4.1"))
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(CONFIG.client.timeout))
         .finish()
 }
 

@@ -12,6 +12,8 @@ use url::Url;
 pub(crate) struct ConfigFile {
     pub(crate) server: Server,
 
+    pub(crate) client: Client,
+
     pub(crate) tracing: Tracing,
 
     pub(crate) old_db: OldDb,
@@ -95,9 +97,13 @@ pub(crate) struct Server {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) api_key: Option<String>,
+}
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) client_pool_size: Option<usize>,
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Client {
+    pub(crate) pool_size: usize,
+
+    pub(crate) timeout: u64,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

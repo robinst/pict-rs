@@ -9,6 +9,7 @@ use std::{net::SocketAddr, path::PathBuf};
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Defaults {
     server: ServerDefaults,
+    client: ClientDefaults,
     tracing: TracingDefaults,
     old_db: OldDbDefaults,
     media: MediaDefaults,
@@ -21,7 +22,13 @@ pub(crate) struct Defaults {
 struct ServerDefaults {
     address: SocketAddr,
     worker_id: String,
-    client_pool_size: usize,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct ClientDefaults {
+    pool_size: usize,
+    timeout: u64,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -149,7 +156,15 @@ impl Default for ServerDefaults {
         ServerDefaults {
             address: "0.0.0.0:8080".parse().expect("Valid address string"),
             worker_id: String::from("pict-rs-1"),
-            client_pool_size: 100,
+        }
+    }
+}
+
+impl Default for ClientDefaults {
+    fn default() -> Self {
+        ClientDefaults {
+            pool_size: 100,
+            timeout: 30,
         }
     }
 }

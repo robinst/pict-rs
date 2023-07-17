@@ -47,6 +47,7 @@ impl Args {
                 api_key,
                 worker_id,
                 client_pool_size,
+                client_timeout,
                 media_preprocess_steps,
                 media_max_file_size,
                 media_image_max_width,
@@ -76,7 +77,11 @@ impl Args {
                     address,
                     api_key,
                     worker_id,
-                    client_pool_size,
+                };
+
+                let client = Client {
+                    pool_size: client_pool_size,
+                    timeout: client_timeout,
                 };
 
                 let image = Image {
@@ -124,6 +129,7 @@ impl Args {
                         Output {
                             config_format: ConfigFormat {
                                 server,
+                                client,
                                 old_db,
                                 tracing,
                                 media,
@@ -140,6 +146,7 @@ impl Args {
                         Output {
                             config_format: ConfigFormat {
                                 server,
+                                client,
                                 old_db,
                                 tracing,
                                 media,
@@ -154,6 +161,7 @@ impl Args {
                     None => Output {
                         config_format: ConfigFormat {
                             server,
+                            client,
                             old_db,
                             tracing,
                             media,
@@ -171,6 +179,7 @@ impl Args {
                 store,
             }) => {
                 let server = Server::default();
+                let client = Client::default();
                 let media = Media::default();
 
                 match store {
@@ -178,6 +187,7 @@ impl Args {
                         MigrateStoreTo::Filesystem(MigrateFilesystemInner { to, repo }) => Output {
                             config_format: ConfigFormat {
                                 server,
+                                client,
                                 old_db,
                                 tracing,
                                 media,
@@ -196,6 +206,7 @@ impl Args {
                             Output {
                                 config_format: ConfigFormat {
                                     server,
+                                    client,
                                     old_db,
                                     tracing,
                                     media,
@@ -218,6 +229,7 @@ impl Args {
                                 Output {
                                     config_format: ConfigFormat {
                                         server,
+                                        client,
                                         old_db,
                                         tracing,
                                         media,
@@ -239,6 +251,7 @@ impl Args {
                             }) => Output {
                                 config_format: ConfigFormat {
                                     server,
+                                    client,
                                     old_db,
                                     tracing,
                                     media,
@@ -283,6 +296,7 @@ pub(crate) enum Operation {
 #[serde(rename_all = "snake_case")]
 pub(super) struct ConfigFormat {
     server: Server,
+    client: Client,
     old_db: OldDb,
     tracing: Tracing,
     media: Media,
@@ -301,8 +315,15 @@ struct Server {
     worker_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     api_key: Option<String>,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct Client {
     #[serde(skip_serializing_if = "Option::is_none")]
-    client_pool_size: Option<usize>,
+    pool_size: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timeout: Option<u64>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -548,6 +569,12 @@ struct Run {
     /// pooled connections, and running on a 32 core system will result in 3200 pooled connections.
     #[arg(long)]
     client_pool_size: Option<usize>,
+
+    /// How long (in seconds) the internel HTTP client should wait for responses
+    ///
+    /// This number defaults to 30
+    #[arg(long)]
+    client_timeout: Option<u64>,
 
     /// Optional pre-processing steps for uploaded media.
     ///
