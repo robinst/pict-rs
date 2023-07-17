@@ -67,14 +67,12 @@ async fn convert(
                 "-coalesce",
                 &output_arg,
             ],
-        )
-        .map_err(MagickError::Process)?
+        )?
     } else {
         Process::run(
             "magick",
             &["convert", "-strip", "-auto-orient", &input_arg, &output_arg],
-        )
-        .map_err(MagickError::Process)?
+        )?
     };
 
     let reader = process.read();

@@ -37,6 +37,9 @@ pub(crate) enum MagickError {
     #[error("Error in metadata discovery")]
     Discover(#[source] crate::discover::DiscoverError),
 
+    #[error("Invalid media file provided")]
+    CommandFailed(ProcessError),
+
     #[error("Command output is empty")]
     Empty,
 
@@ -44,10 +47,19 @@ pub(crate) enum MagickError {
     Path,
 }
 
+impl From<ProcessError> for MagickError {
+    fn from(value: ProcessError) -> Self {
+        match value {
+            e @ ProcessError::Status(_, _) => Self::CommandFailed(e),
+            otherwise => Self::Process(otherwise),
+        }
+    }
+}
+
 impl MagickError {
     pub(crate) fn is_client_error(&self) -> bool {
         // Failing validation or imagemagick bailing probably means bad input
-        matches!(self, Self::Process(ProcessError::Status(_)))
+        matches!(self, Self::CommandFailed(_))
     }
 }
 
@@ -91,9 +103,7 @@ where
     }
     args.push(&output_arg);
 
-    let reader = Process::run("magick", &args)
-        .map_err(MagickError::Process)?
-        .read();
+    let reader = Process::run("magick", &args)?.read();
 
     let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, input_file);
 

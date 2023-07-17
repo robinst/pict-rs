@@ -6,8 +6,8 @@ use std::{collections::HashSet, sync::OnceLock};
 use crate::{
     ffmpeg::FfMpegError,
     formats::{
-        AnimationFormat, ImageFormat, ImageInput, InputFile, InternalFormat,
-        InternalVideoFormat, VideoFormat,
+        AnimationFormat, ImageFormat, ImageInput, InputFile, InternalFormat, InternalVideoFormat,
+        VideoFormat,
     },
     process::Process,
 };
@@ -220,8 +220,7 @@ where
             "json",
             input_file_str,
         ],
-    )
-    .map_err(FfMpegError::Process)?;
+    )?;
 
     let mut output = Vec::new();
     process
@@ -268,8 +267,7 @@ where
             "compact=p=0:nk=1",
             input_file_str,
         ],
-    )
-    .map_err(FfMpegError::Process)?;
+    )?;
 
     let mut output = Vec::new();
     process
@@ -298,8 +296,7 @@ async fn alpha_pixel_formats() -> Result<HashSet<String>, FfMpegError> {
             "-print_format",
             "json",
         ],
-    )
-    .map_err(FfMpegError::Process)?;
+    )?;
 
     let mut output = Vec::new();
     process

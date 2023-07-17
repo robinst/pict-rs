@@ -53,8 +53,8 @@ pub(crate) enum ProcessError {
     #[error("Reached process spawn limit")]
     LimitReached,
 
-    #[error("Failed with status {0}")]
-    Status(ExitStatus),
+    #[error("{0} Failed with {1}")]
+    Status(String, ExitStatus),
 
     #[error("Unknown process error")]
     Other(#[source] std::io::Error),
@@ -98,7 +98,7 @@ impl Process {
 
         match res {
             Ok(status) if status.success() => Ok(()),
-            Ok(status) => Err(ProcessError::Status(status)),
+            Ok(status) => Err(ProcessError::Status(self.command, status)),
             Err(e) => Err(ProcessError::Other(e)),
         }
     }

@@ -74,11 +74,9 @@ async fn transcode_files(
                 output_format.ffmpeg_format(),
                 output_path,
             ],
-        )
-        .map_err(FfMpegError::Process)?
+        )?
         .wait()
-        .await
-        .map_err(FfMpegError::Process)?;
+        .await?;
     } else {
         Process::run(
             "ffmpeg",
@@ -101,11 +99,9 @@ async fn transcode_files(
                 output_format.ffmpeg_format(),
                 output_path,
             ],
-        )
-        .map_err(FfMpegError::Process)?
+        )?
         .wait()
-        .await
-        .map_err(FfMpegError::Process)?;
+        .await?;
     }
 
     Ok(())

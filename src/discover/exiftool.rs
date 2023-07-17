@@ -40,8 +40,7 @@ pub(super) async fn check_reorient(
 
 #[tracing::instrument(level = "trace", skip(input))]
 async fn needs_reorienting(input: Bytes) -> Result<bool, ExifError> {
-    let process =
-        Process::run("exiftool", &["-n", "-Orientation", "-"]).map_err(ExifError::Process)?;
+    let process = Process::run("exiftool", &["-n", "-Orientation", "-"])?;
     let mut reader = process.bytes_read(input);
 
     let mut buf = String::new();

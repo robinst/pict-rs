@@ -46,14 +46,26 @@ pub(crate) enum FfMpegError {
     #[error("Error in store")]
     Store(#[source] StoreError),
 
+    #[error("Invalid media file provided")]
+    CommandFailed(ProcessError),
+
     #[error("Invalid file path")]
     Path,
+}
+
+impl From<ProcessError> for FfMpegError {
+    fn from(value: ProcessError) -> Self {
+        match value {
+            e @ ProcessError::Status(_, _) => Self::CommandFailed(e),
+            otherwise => Self::Process(otherwise),
+        }
+    }
 }
 
 impl FfMpegError {
     pub(crate) fn is_client_error(&self) -> bool {
         // Failing validation or ffmpeg bailing probably means bad input
-        matches!(self, Self::Process(ProcessError::Status(_)))
+        matches!(self, Self::CommandFailed(_))
     }
 
     pub(crate) fn is_not_found(&self) -> bool {
@@ -143,10 +155,9 @@ pub(crate) async fn thumbnail<S: Store>(
             format.as_ffmpeg_format(),
             output_file_str,
         ],
-    )
-    .map_err(FfMpegError::Process)?;
+    )?;
 
-    process.wait().await.map_err(FfMpegError::Process)?;
+    process.wait().await?;
     tokio::fs::remove_file(input_file)
         .await
         .map_err(FfMpegError::RemoveFile)?;

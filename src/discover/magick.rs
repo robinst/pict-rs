@@ -137,8 +137,7 @@ where
     let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
-    let process = Process::run("magick", &["convert", "-ping", input_file_str, "INFO:"])
-        .map_err(MagickError::Process)?;
+    let process = Process::run("magick", &["convert", "-ping", input_file_str, "INFO:"])?;
 
     let mut output = String::new();
     process
@@ -192,8 +191,7 @@ where
     let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
-    let process = Process::run("magick", &["convert", "-ping", input_file_str, "JSON:"])
-        .map_err(MagickError::Process)?;
+    let process = Process::run("magick", &["convert", "-ping", input_file_str, "JSON:"])?;
 
     let mut output = Vec::new();
     process

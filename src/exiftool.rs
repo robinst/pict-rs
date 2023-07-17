@@ -9,19 +9,30 @@ pub(crate) enum ExifError {
 
     #[error("Error reading process output")]
     Read(#[source] std::io::Error),
+
+    #[error("Invalid media file provided")]
+    CommandFailed(ProcessError),
+}
+
+impl From<ProcessError> for ExifError {
+    fn from(value: ProcessError) -> Self {
+        match value {
+            e @ ProcessError::Status(_, _) => Self::CommandFailed(e),
+            otherwise => Self::Process(otherwise),
+        }
+    }
 }
 
 impl ExifError {
     pub(crate) fn is_client_error(&self) -> bool {
         // if exiftool bails we probably have bad input
-        matches!(self, Self::Process(ProcessError::Status(_)))
+        matches!(self, Self::CommandFailed(_))
     }
 }
 
 #[tracing::instrument(level = "trace", skip(input))]
 pub(crate) async fn needs_reorienting(input: Bytes) -> Result<bool, ExifError> {
-    let process =
-        Process::run("exiftool", &["-n", "-Orientation", "-"]).map_err(ExifError::Process)?;
+    let process = Process::run("exiftool", &["-n", "-Orientation", "-"])?;
     let mut reader = process.bytes_read(input);
 
     let mut buf = String::new();
@@ -35,8 +46,7 @@ pub(crate) async fn needs_reorienting(input: Bytes) -> Result<bool, ExifError> {
 
 #[tracing::instrument(level = "trace", skip(input))]
 pub(crate) fn clear_metadata_bytes_read(input: Bytes) -> Result<impl AsyncRead + Unpin, ExifError> {
-    let process =
-        Process::run("exiftool", &["-all=", "-", "-out", "-"]).map_err(ExifError::Process)?;
+    let process = Process::run("exiftool", &["-all=", "-", "-out", "-"])?;
 
     Ok(process.bytes_read(input))
 }
