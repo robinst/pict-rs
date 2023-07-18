@@ -81,14 +81,16 @@ async fn convert(
     let output_arg = format!("{output}:-");
     let quality = quality.map(|q| q.to_string());
 
-    let mut args = vec!["convert", "-strip", "-auto-orient", &input_arg];
-
-    if let Some(quality) = &quality {
-        args.extend(["-quality", quality]);
-    }
+    let mut args = vec!["convert"];
 
     if coalesce {
         args.push("-coalesce");
+    }
+
+    args.extend(["-strip", "-auto-orient", &input_arg]);
+
+    if let Some(quality) = &quality {
+        args.extend(["-quality", quality]);
     }
 
     args.push(&output_arg);

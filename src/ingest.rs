@@ -46,7 +46,7 @@ pub(crate) async fn ingest<R, S>(
     store: &S,
     stream: impl Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     declared_alias: Option<Alias>,
-    media: &crate::config::Media,
+    media: &'static crate::config::Media,
 ) -> Result<Session<R, S>, Error>
 where
     R: FullRepo + 'static,
@@ -70,11 +70,19 @@ where
             let (_, magick_args) =
                 crate::processor::build_chain(operations, format.file_extension())?;
 
+            let quality = match format {
+                crate::formats::ProcessableFormat::Image(format) => media.image.quality_for(format),
+                crate::formats::ProcessableFormat::Animation(format) => {
+                    media.animation.quality_for(format)
+                }
+            };
+
             let processed_reader = crate::magick::process_image_async_read(
                 validated_reader,
                 magick_args,
                 format,
                 format,
+                quality,
             )
             .await?;
 

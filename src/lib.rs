@@ -728,6 +728,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
         thumbnail_args,
         original_details.video_format(),
         None,
+        &CONFIG.media,
         hash,
     )
     .await?;

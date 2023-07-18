@@ -67,6 +67,7 @@ async fn process_image<F, Fut>(
     process_args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
+    quality: Option<u8>,
     write_file: F,
 ) -> Result<impl AsyncRead + Unpin, MagickError>
 where
@@ -87,6 +88,7 @@ where
 
     let input_arg = format!("{}:{input_file_str}", input_format.magick_format());
     let output_arg = format!("{}:-", format.magick_format());
+    let quality = quality.map(|q| q.to_string());
 
     let len = if format.coalesce() {
         process_args.len() + 4
@@ -97,9 +99,12 @@ where
     let mut args: Vec<&str> = Vec::with_capacity(len);
     args.push("convert");
     args.push(&input_arg);
-    args.extend(process_args.iter().map(|s| s.as_str()));
     if format.coalesce() {
         args.push("-coalesce");
+    }
+    args.extend(process_args.iter().map(|s| s.as_str()));
+    if let Some(quality) = &quality {
+        args.extend(["-quality", quality]);
     }
     args.push(&output_arg);
 
@@ -116,19 +121,26 @@ pub(crate) async fn process_image_store_read<S: Store + 'static>(
     args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
+    quality: Option<u8>,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     let stream = store
         .to_stream(identifier, None, None)
         .await
         .map_err(MagickError::Store)?;
 
-    process_image(args, input_format, format, |mut tmp_file| async move {
-        tmp_file
-            .write_from_stream(stream)
-            .await
-            .map_err(MagickError::Write)?;
-        Ok(tmp_file)
-    })
+    process_image(
+        args,
+        input_format,
+        format,
+        quality,
+        |mut tmp_file| async move {
+            tmp_file
+                .write_from_stream(stream)
+                .await
+                .map_err(MagickError::Write)?;
+            Ok(tmp_file)
+        },
+    )
     .await
 }
 
@@ -137,13 +149,20 @@ pub(crate) async fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
     args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
+    quality: Option<u8>,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
-    process_image(args, input_format, format, |mut tmp_file| async move {
-        tmp_file
-            .write_from_async_read(async_read)
-            .await
-            .map_err(MagickError::Write)?;
-        Ok(tmp_file)
-    })
+    process_image(
+        args,
+        input_format,
+        format,
+        quality,
+        |mut tmp_file| async move {
+            tmp_file
+                .write_from_async_read(async_read)
+                .await
+                .map_err(MagickError::Write)?;
+            Ok(tmp_file)
+        },
+    )
     .await
 }

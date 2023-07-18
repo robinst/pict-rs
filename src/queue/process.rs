@@ -51,6 +51,7 @@ where
                         Serde::into_inner(source),
                         process_path,
                         process_args,
+                        &CONFIG.media,
                     )
                     .await?
                 }
@@ -133,6 +134,7 @@ async fn generate<R: FullRepo, S: Store + 'static>(
     source: Alias,
     process_path: PathBuf,
     process_args: Vec<String>,
+    meida: &'static crate::config::Media,
 ) -> Result<(), Error> {
     let Some(hash) = repo.hash(&source).await? else {
         // Nothing to do
@@ -159,6 +161,7 @@ async fn generate<R: FullRepo, S: Store + 'static>(
         process_args,
         original_details.video_format(),
         None,
+        meida,
         hash,
     )
     .await?;

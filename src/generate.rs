@@ -23,6 +23,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     thumbnail_args: Vec<String>,
     input_format: Option<InternalVideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
+    media: &'static crate::config::Media,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
     let process_fut = process(
@@ -34,6 +35,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
         thumbnail_args,
         input_format,
         thumbnail_format,
+        media,
         hash.clone(),
     );
 
@@ -54,6 +56,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     thumbnail_args: Vec<String>,
     input_format: Option<InternalVideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
+    media: &'static crate::config::Media,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
     let permit = crate::PROCESS_SEMAPHORE.acquire().await;
@@ -107,12 +110,18 @@ async fn process<R: FullRepo, S: Store + 'static>(
         return Err(UploadError::InvalidProcessExtension.into());
     };
 
+    let quality = match format {
+        crate::formats::ProcessableFormat::Image(format) => media.image.quality_for(format),
+        crate::formats::ProcessableFormat::Animation(format) => media.animation.quality_for(format),
+    };
+
     let mut processed_reader = crate::magick::process_image_store_read(
         store,
         &identifier,
         thumbnail_args,
         input_format,
         format,
+        quality,
     )
     .await?;
 
