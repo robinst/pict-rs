@@ -21,6 +21,9 @@ path = 'data/'
 max_file_size = 40
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 
+[media.image]
+format = "webp"
+
 [media.image.quality]
 avif = 50
 png = 50
@@ -32,6 +35,7 @@ webp = 60
 max_width = 2000
 max_height = 2000
 max_area = 2000000
+format = "webp"
 
 [media.animation.quality]
 apng = 50
@@ -41,6 +45,8 @@ webp = 60
 [media.video]
 enable = true
 allow_audio = true
+video_codec = "vp9"
+max_area = 884000000
 
 [media.video.quality]
 crf_240 = 37
