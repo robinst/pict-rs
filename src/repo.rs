@@ -73,6 +73,8 @@ pub(crate) trait FullRepo:
     + QueueRepo
     + HashRepo
     + MigrationRepo
+    + AliasAccessRepo
+    + IdentifierAccessRepo
     + Send
     + Sync
     + Clone
@@ -141,6 +143,82 @@ where
     T: BaseRepo,
 {
     type Bytes = T::Bytes;
+}
+
+#[async_trait::async_trait(?Send)]
+pub(crate) trait AliasAccessRepo: BaseRepo {
+    type AliasAccessStream: Stream<Item = Result<Alias, RepoError>>;
+
+    async fn accessed(&self, alias: Alias) -> Result<(), RepoError>;
+
+    async fn older_aliases(
+        &self,
+        timestamp: time::OffsetDateTime,
+    ) -> Result<Self::AliasAccessStream, RepoError>;
+
+    async fn remove(&self, alias: Alias) -> Result<(), RepoError>;
+}
+
+#[async_trait::async_trait(?Send)]
+impl<T> AliasAccessRepo for actix_web::web::Data<T>
+where
+    T: AliasAccessRepo,
+{
+    type AliasAccessStream = T::AliasAccessStream;
+
+    async fn accessed(&self, alias: Alias) -> Result<(), RepoError> {
+        T::accessed(self, alias).await
+    }
+
+    async fn older_aliases(
+        &self,
+        timestamp: time::OffsetDateTime,
+    ) -> Result<Self::AliasAccessStream, RepoError> {
+        T::older_aliases(self, timestamp).await
+    }
+
+    async fn remove(&self, alias: Alias) -> Result<(), RepoError> {
+        T::remove(self, alias).await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+pub(crate) trait IdentifierAccessRepo: BaseRepo {
+    type IdentifierAccessStream<I>: Stream<Item = Result<I, StoreError>>
+    where
+        I: Identifier;
+
+    async fn accessed<I: Identifier>(&self, identifier: I) -> Result<(), StoreError>;
+
+    async fn older_identifiers<I: Identifier>(
+        &self,
+        timestamp: time::OffsetDateTime,
+    ) -> Result<Self::IdentifierAccessStream<I>, RepoError>;
+
+    async fn remove<I: Identifier>(&self, identifier: I) -> Result<(), StoreError>;
+}
+
+#[async_trait::async_trait(?Send)]
+impl<T> IdentifierAccessRepo for actix_web::web::Data<T>
+where
+    T: IdentifierAccessRepo,
+{
+    type IdentifierAccessStream<I> = T::IdentifierAccessStream<I> where I: Identifier;
+
+    async fn accessed<I: Identifier>(&self, identifier: I) -> Result<(), StoreError> {
+        T::accessed(self, identifier).await
+    }
+
+    async fn older_identifiers<I: Identifier>(
+        &self,
+        timestamp: time::OffsetDateTime,
+    ) -> Result<Self::IdentifierAccessStream<I>, RepoError> {
+        T::older_identifiers(self, timestamp).await
+    }
+
+    async fn remove<I: Identifier>(&self, identifier: I) -> Result<(), StoreError> {
+        T::remove(self, identifier).await
+    }
 }
 
 #[async_trait::async_trait(?Send)]
