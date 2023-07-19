@@ -169,9 +169,11 @@ impl FullRepo for SledRepo {
     }
 }
 
+type IterValue = Option<(sled::Iter, Result<sled::IVec, RepoError>)>;
+
 pub(crate) struct IterStream {
     iter: Option<sled::Iter>,
-    next: Option<JoinHandle<Option<(sled::Iter, Result<sled::IVec, RepoError>)>>>,
+    next: Option<JoinHandle<IterValue>>,
 }
 
 impl futures_util::Stream for IterStream {
