@@ -88,6 +88,7 @@ impl Args {
                 media_video_quality_2160,
                 media_filters,
                 read_only,
+                max_file_count,
                 store,
             }) => {
                 let server = Server {
@@ -95,6 +96,7 @@ impl Args {
                     api_key,
                     worker_id,
                     read_only,
+                    max_file_count,
                 };
 
                 let client = Client {
@@ -363,6 +365,8 @@ struct Server {
     api_key: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     read_only: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_file_count: Option<u32>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -718,6 +722,12 @@ struct Run {
     /// This number defaults to 30
     #[arg(long)]
     client_timeout: Option<u64>,
+
+    /// How many files are allowed to be uploaded per-request
+    ///
+    /// This number defaults to 1
+    #[arg(long)]
+    max_file_count: Option<u32>,
 
     /// Optional pre-processing steps for uploaded media.
     ///

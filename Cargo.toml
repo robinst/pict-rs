@@ -19,7 +19,7 @@ io-uring = [
 ]
 
 [dependencies]
-actix-form-data = "0.7.0-beta.3"
+actix-form-data = "0.7.0-beta.4"
 actix-rt = { version = "2.7.0", default-features = false }
 actix-server = "2.0.0"
 actix-web = { version = "4.0.0", default-features = false }

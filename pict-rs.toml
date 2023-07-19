@@ -20,6 +20,11 @@ worker_id = 'pict-rs-1'
 # Not specifying api_key disables internal endpoints
 api_key = 'API_KEY'
 
+## Optional: How many files are allowed to be uploaded per request
+# environment variable: PICTRS__SERVER__MAX_FILE_COUNT
+# default: 1
+max_file_count = 1
+
 ## Client configuration
 [client]
 ## Optional: connection pool size for internal http client

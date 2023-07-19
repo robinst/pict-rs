@@ -161,7 +161,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
             .clone();
 
         Form::new()
-            .max_files(10)
+            .max_files(CONFIG.server.max_file_count)
             .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
             .transform_error(transform_error)
             .field(
@@ -213,7 +213,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
         //
         // This form is expecting a single array field, 'images' with at most 10 files in it
         Form::new()
-            .max_files(10)
+            .max_files(CONFIG.server.max_file_count)
             .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
             .transform_error(transform_error)
             .field(
@@ -339,7 +339,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
             .clone();
 
         Form::new()
-            .max_files(10)
+            .max_files(CONFIG.server.max_file_count)
             .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
             .transform_error(transform_error)
             .field(

@@ -99,6 +99,8 @@ pub(crate) struct Server {
     pub(crate) api_key: Option<String>,
 
     pub(crate) read_only: bool,
+
+    pub(crate) max_file_count: u32,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
