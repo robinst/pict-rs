@@ -33,7 +33,6 @@ use actix_web::{
     http::header::{CacheControl, CacheDirective, LastModified, Range, ACCEPT_RANGES},
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
-use awc::{Client, Connector};
 use formats::InputProcessableFormat;
 use futures_util::{
     stream::{empty, once},
@@ -41,6 +40,8 @@ use futures_util::{
 };
 use once_cell::sync::{Lazy, OnceCell};
 use repo::sled::SledRepo;
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_tracing::TracingMiddleware;
 use rusty_s3::UrlStyle;
 use std::{
     future::ready,
@@ -51,7 +52,6 @@ use std::{
 };
 use tokio::sync::Semaphore;
 use tracing_actix_web::TracingLogger;
-use tracing_awc::Tracing;
 use tracing_futures::Instrument;
 
 use self::{
@@ -470,7 +470,7 @@ struct UrlQuery {
 /// download an image from a URL
 #[tracing::instrument(name = "Downloading file", skip(client, repo, store))]
 async fn download<R: FullRepo + 'static, S: Store + 'static>(
-    client: web::Data<Client>,
+    client: web::Data<ClientWithMiddleware>,
     repo: web::Data<R>,
     store: web::Data<S>,
     query: web::Query<UrlQuery>,
@@ -486,6 +486,7 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     }
 
     let stream = res
+        .bytes_stream()
         .map_err(Error::from)
         .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
 
@@ -1182,15 +1183,17 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
     error
 }
 
-fn build_client() -> awc::Client {
-    let connector = Connector::new().limit(CONFIG.client.pool_size);
+fn build_client() -> Result<ClientWithMiddleware, Error> {
+    let client = reqwest::Client::builder()
+        .user_agent("pict-rs v0.5.0-main")
+        .use_rustls_tls()
+        .pool_max_idle_per_host(CONFIG.client.pool_size)
+        .build()
+        .map_err(UploadError::BuildClient)?;
 
-    Client::builder()
-        .connector(connector)
-        .wrap(Tracing)
-        .add_default_header(("User-Agent", "pict-rs v0.4.1"))
-        .timeout(Duration::from_secs(CONFIG.client.timeout))
-        .finish()
+    Ok(ClientBuilder::new(client)
+        .with(TracingMiddleware::default())
+        .build())
 }
 
 fn next_worker_id() -> String {
@@ -1209,7 +1212,7 @@ fn configure_endpoints<
     config: &mut web::ServiceConfig,
     repo: R,
     store: S,
-    client: Client,
+    client: ClientWithMiddleware,
     extra_config: F,
 ) {
     config
@@ -1301,10 +1304,11 @@ where
 async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig) + Send + Clone>(
     repo: R,
     store: FileStore,
+    client: ClientWithMiddleware,
     extra_config: F,
 ) -> std::io::Result<()> {
     HttpServer::new(move || {
-        let client = build_client();
+        let client = client.clone();
 
         let store = store.clone();
         let repo = repo.clone();
@@ -1328,10 +1332,11 @@ async fn launch_object_store<
 >(
     repo: R,
     store_config: ObjectStoreConfig,
+    client: ClientWithMiddleware,
     extra_config: F,
 ) -> std::io::Result<()> {
     HttpServer::new(move || {
-        let client = build_client();
+        let client = client.clone();
 
         let store = store_config.clone().build(client.clone());
         let repo = repo.clone();
@@ -1351,7 +1356,7 @@ async fn launch_object_store<
 
 async fn migrate_inner<S1>(
     repo: Repo,
-    client: Client,
+    client: ClientWithMiddleware,
     from: S1,
     to: config::primitives::Store,
     skip_missing_files: bool,
@@ -1481,6 +1486,7 @@ fn sled_extra_config(sc: &mut web::ServiceConfig) {
 pub async fn run() -> color_eyre::Result<()> {
     let repo = Repo::open(CONFIG.repo.clone())?;
     repo.migrate_from_db(CONFIG.old_db.path.clone()).await?;
+    let client = build_client()?;
 
     match (*OPERATION).clone() {
         Operation::Run => (),
@@ -1489,8 +1495,6 @@ pub async fn run() -> color_eyre::Result<()> {
             from,
             to,
         } => {
-            let client = build_client();
-
             match from {
                 config::primitives::Store::Filesystem(config::Filesystem { path }) => {
                     let from = FileStore::build(path.clone(), repo.clone()).await?;
@@ -1551,7 +1555,7 @@ pub async fn run() -> color_eyre::Result<()> {
                         .requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
                         .await?;
 
-                    launch_file_store(sled_repo, store, sled_extra_config).await?;
+                    launch_file_store(sled_repo, store, client, sled_extra_config).await?;
                 }
             }
         }
@@ -1592,7 +1596,7 @@ pub async fn run() -> color_eyre::Result<()> {
                         .requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
                         .await?;
 
-                    launch_object_store(sled_repo, store, sled_extra_config).await?;
+                    launch_object_store(sled_repo, store, client, sled_extra_config).await?;
                 }
             }
         }

@@ -82,6 +82,15 @@ pub(crate) enum UploadError {
     #[error("Error in exiftool")]
     Exiftool(#[from] crate::exiftool::ExifError),
 
+    #[error("Error building reqwest client")]
+    BuildClient(#[source] reqwest::Error),
+
+    #[error("Error making request")]
+    RequestMiddleware(#[from] reqwest_middleware::Error),
+
+    #[error("Error in request response")]
+    Request(#[from] reqwest::Error),
+
     #[error("pict-rs is in read-only mode")]
     ReadOnly,
 
@@ -115,12 +124,6 @@ pub(crate) enum UploadError {
     #[error("Unable to download image, bad response {0}")]
     Download(actix_web::http::StatusCode),
 
-    #[error("Unable to download image")]
-    Payload(#[from] awc::error::PayloadError),
-
-    #[error("Unable to send request, {0}")]
-    SendRequest(String),
-
     #[error("Tried to save an image with an already-taken name")]
     DuplicateAlias,
 
@@ -138,12 +141,6 @@ pub(crate) enum UploadError {
 
     #[error("Response timeout")]
     Timeout(#[from] crate::stream::TimeoutError),
-}
-
-impl From<awc::error::SendRequestError> for UploadError {
-    fn from(e: awc::error::SendRequestError) -> Self {
-        UploadError::SendRequest(e.to_string())
-    }
 }
 
 impl From<actix_web::error::BlockingError> for UploadError {

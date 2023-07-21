@@ -31,13 +31,7 @@ max_file_count = 1
 # environment variable: PICTRS__CLIENT__POOL_SIZE
 # default: 100
 #
-# This number is multiplied the number of cores available to pict-rs. Running on a 2 core machine
-# with the default value will result in 200 pooled connections. Running on a 32 core machine with
-# the default value will result in 3200 pooled connections.
-#
-# This number can be lowered to keep pict-rs within ulimit bounds if you encounter errors related to
-# "Too many open files". Alternatively, increasing the ulimit of your system can solve this problem
-# as well.
+# Sets the maximum number of allowed idle connections per-host.
 pool_size = 100
 
 ## Optional: time (in seconds) the client will wait for a response before giving up

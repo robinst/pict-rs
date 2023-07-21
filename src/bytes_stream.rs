@@ -2,8 +2,10 @@ use actix_web::{
     body::MessageBody,
     web::{Bytes, BytesMut},
 };
+use futures_util::Stream;
 use std::{
     collections::{vec_deque::IntoIter, VecDeque},
+    convert::Infallible,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -74,5 +76,13 @@ impl MessageBody for BytesStream {
         Self: Sized,
     {
         Ok(self.into_bytes())
+    }
+}
+
+impl Stream for BytesStream {
+    type Item = Result<Bytes, Infallible>;
+
+    fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(self.get_mut().inner.pop_front().map(Ok))
     }
 }

@@ -5,16 +5,17 @@ use crate::{
 };
 use actix_rt::task::JoinError;
 use actix_web::{
-    error::{BlockingError, PayloadError},
+    error::BlockingError,
     http::{
         header::{ByteRangeSpec, Range, CONTENT_LENGTH},
         StatusCode,
     },
     web::Bytes,
 };
-use awc::{error::SendRequestError, Client, ClientRequest, ClientResponse, SendClientRequest};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_util::{Stream, StreamExt, TryStreamExt};
+use reqwest::{header::RANGE, Body, Response};
+use reqwest_middleware::{ClientWithMiddleware, RequestBuilder};
 use rusty_s3::{actions::S3Action, Bucket, BucketError, Credentials, UrlStyle};
 use std::{pin::Pin, string::FromUtf8Error, time::Duration};
 use storage_path_generator::{Generator, Path};
@@ -46,8 +47,11 @@ pub(crate) enum ObjectError {
     #[error("IO Error")]
     IO(#[from] std::io::Error),
 
-    #[error("Error making request: {0}")]
-    SendRequest(String),
+    #[error("Error making request")]
+    RequestMiddleware(#[from] reqwest_middleware::Error),
+
+    #[error("Error in request response")]
+    Request(#[from] reqwest::Error),
 
     #[error("Failed to parse string")]
     Utf8(#[from] FromUtf8Error),
@@ -66,15 +70,6 @@ pub(crate) enum ObjectError {
 
     #[error("Invalid status: {0}\n{1}")]
     Status(StatusCode, String),
-
-    #[error("Unable to upload image")]
-    Upload(awc::error::PayloadError),
-}
-
-impl From<SendRequestError> for ObjectError {
-    fn from(e: SendRequestError) -> Self {
-        Self::SendRequest(e.to_string())
-    }
 }
 
 impl From<JoinError> for ObjectError {
@@ -95,7 +90,7 @@ pub(crate) struct ObjectStore {
     repo: Repo,
     bucket: Bucket,
     credentials: Credentials,
-    client: Client,
+    client: ClientWithMiddleware,
     signature_expiration: Duration,
     client_timeout: Duration,
     public_endpoint: Option<Url>,
@@ -123,7 +118,7 @@ struct InitiateMultipartUploadResponse {
 }
 
 impl ObjectStoreConfig {
-    pub(crate) fn build(self, client: Client) -> ObjectStore {
+    pub(crate) fn build(self, client: ClientWithMiddleware) -> ObjectStore {
         ObjectStore {
             path_gen: self.path_gen,
             repo: self.repo,
@@ -137,11 +132,8 @@ impl ObjectStoreConfig {
     }
 }
 
-fn payload_to_io_error(e: PayloadError) -> std::io::Error {
-    match e {
-        PayloadError::Io(io) => io,
-        otherwise => std::io::Error::new(std::io::ErrorKind::Other, otherwise.to_string()),
-    }
+fn payload_to_io_error(e: reqwest::Error) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
 }
 
 #[tracing::instrument(skip(stream))]
@@ -162,15 +154,15 @@ where
     Ok(buf)
 }
 
-async fn status_error(mut response: ClientResponse) -> StoreError {
-    let body = match response.body().await {
-        Err(e) => return ObjectError::Upload(e).into(),
+async fn status_error(response: Response) -> StoreError {
+    let status = response.status();
+
+    let body = match response.text().await {
+        Err(e) => return ObjectError::Request(e).into(),
         Ok(body) => body,
     };
 
-    let body = String::from_utf8_lossy(&body).to_string();
-
-    ObjectError::Status(response.status(), body).into()
+    ObjectError::Status(status, body).into()
 }
 
 #[async_trait::async_trait(?Send)]
@@ -220,7 +212,8 @@ impl Store for ObjectStore {
             drop(stream);
             let (req, object_id) = self.put_object_request(content_type).await?;
             let response = req
-                .send_body(first_chunk)
+                .body(Body::wrap_stream(first_chunk))
+                .send()
                 .await
                 .map_err(ObjectError::from)?;
 
@@ -234,13 +227,13 @@ impl Store for ObjectStore {
         let mut first_chunk = Some(first_chunk);
 
         let (req, object_id) = self.create_multipart_request(content_type).await?;
-        let mut response = req.send().await.map_err(ObjectError::from)?;
+        let response = req.send().await.map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
             return Err(status_error(response).await);
         }
 
-        let body = response.body().await.map_err(ObjectError::Upload)?;
+        let body = response.bytes().await.map_err(ObjectError::Request)?;
         let body: InitiateMultipartUploadResponse =
             quick_xml::de::from_reader(&*body).map_err(ObjectError::from)?;
         let upload_id = &body.upload_id;
@@ -276,7 +269,8 @@ impl Store for ObjectStore {
                                 &upload_id2,
                             )
                             .await?
-                            .send_body(buf)
+                            .body(Body::wrap_stream(buf))
+                            .send()
                             .await
                             .map_err(ObjectError::from)?;
 
@@ -348,7 +342,7 @@ impl Store for ObjectStore {
     ) -> Result<Self::Identifier, StoreError> {
         let (req, object_id) = self.put_object_request(content_type).await?;
 
-        let response = req.send_body(bytes).await.map_err(ObjectError::from)?;
+        let response = req.body(bytes).send().await.map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
             return Err(status_error(response).await);
@@ -381,7 +375,9 @@ impl Store for ObjectStore {
             return Err(status_error(response).await);
         }
 
-        Ok(Box::pin(response.map_err(payload_to_io_error)))
+        Ok(Box::pin(
+            response.bytes_stream().map_err(payload_to_io_error),
+        ))
     }
 
     #[tracing::instrument(skip(self, writer))]
@@ -393,7 +389,7 @@ impl Store for ObjectStore {
     where
         Writer: AsyncWrite + Unpin,
     {
-        let mut response = self
+        let response = self
             .get_object_request(identifier, None, None)
             .send()
             .await
@@ -406,7 +402,9 @@ impl Store for ObjectStore {
             ));
         }
 
-        while let Some(res) = response.next().await {
+        let mut stream = response.bytes_stream();
+
+        while let Some(res) = stream.next().await {
             let mut bytes = res.map_err(payload_to_io_error)?;
             writer.write_all_buf(&mut bytes).await?;
         }
@@ -489,7 +487,7 @@ impl ObjectStore {
         })
     }
 
-    async fn head_bucket_request(&self) -> Result<ClientRequest, StoreError> {
+    async fn head_bucket_request(&self) -> Result<RequestBuilder, StoreError> {
         let action = self.bucket.head_bucket(Some(&self.credentials));
 
         Ok(self.build_request(action))
@@ -498,7 +496,7 @@ impl ObjectStore {
     async fn put_object_request(
         &self,
         content_type: mime::Mime,
-    ) -> Result<(ClientRequest, ObjectId), StoreError> {
+    ) -> Result<(RequestBuilder, ObjectId), StoreError> {
         let path = self.next_file().await?;
 
         let mut action = self.bucket.put_object(Some(&self.credentials), &path);
@@ -513,7 +511,7 @@ impl ObjectStore {
     async fn create_multipart_request(
         &self,
         content_type: mime::Mime,
-    ) -> Result<(ClientRequest, ObjectId), StoreError> {
+    ) -> Result<(RequestBuilder, ObjectId), StoreError> {
         let path = self.next_file().await?;
 
         let mut action = self
@@ -533,7 +531,7 @@ impl ObjectStore {
         object_id: &ObjectId,
         part_number: u16,
         upload_id: &str,
-    ) -> Result<ClientRequest, ObjectError> {
+    ) -> Result<RequestBuilder, ObjectError> {
         use md5::Digest;
 
         let mut action = self.bucket.upload_part(
@@ -571,12 +569,12 @@ impl ObjectStore {
         Ok(self.build_request(action))
     }
 
-    fn send_complete_multipart_request<'a, I: Iterator<Item = &'a str>>(
+    async fn send_complete_multipart_request<'a, I: Iterator<Item = &'a str>>(
         &'a self,
         object_id: &'a ObjectId,
         upload_id: &'a str,
         etags: I,
-    ) -> SendClientRequest {
+    ) -> Result<Response, reqwest_middleware::Error> {
         let mut action = self.bucket.complete_multipart_upload(
             Some(&self.credentials),
             object_id.as_str(),
@@ -590,14 +588,14 @@ impl ObjectStore {
 
         let (req, action) = self.build_request_inner(action);
 
-        req.send_body(action.body())
+        req.body(action.body()).send().await
     }
 
     fn create_abort_multipart_request(
         &self,
         object_id: &ObjectId,
         upload_id: &str,
-    ) -> ClientRequest {
+    ) -> RequestBuilder {
         let action = self.bucket.abort_multipart_upload(
             Some(&self.credentials),
             object_id.as_str(),
@@ -607,18 +605,18 @@ impl ObjectStore {
         self.build_request(action)
     }
 
-    fn build_request<'a, A: S3Action<'a>>(&'a self, action: A) -> ClientRequest {
+    fn build_request<'a, A: S3Action<'a>>(&'a self, action: A) -> RequestBuilder {
         let (req, _) = self.build_request_inner(action);
         req
     }
 
-    fn build_request_inner<'a, A: S3Action<'a>>(&'a self, mut action: A) -> (ClientRequest, A) {
+    fn build_request_inner<'a, A: S3Action<'a>>(&'a self, mut action: A) -> (RequestBuilder, A) {
         let method = match A::METHOD {
-            rusty_s3::Method::Head => awc::http::Method::HEAD,
-            rusty_s3::Method::Get => awc::http::Method::GET,
-            rusty_s3::Method::Post => awc::http::Method::POST,
-            rusty_s3::Method::Put => awc::http::Method::PUT,
-            rusty_s3::Method::Delete => awc::http::Method::DELETE,
+            rusty_s3::Method::Head => reqwest::Method::HEAD,
+            rusty_s3::Method::Get => reqwest::Method::GET,
+            rusty_s3::Method::Post => reqwest::Method::POST,
+            rusty_s3::Method::Put => reqwest::Method::PUT,
+            rusty_s3::Method::Delete => reqwest::Method::DELETE,
         };
 
         let url = action.sign(self.signature_expiration);
@@ -631,7 +629,7 @@ impl ObjectStore {
         let req = action
             .headers_mut()
             .iter()
-            .fold(req, |req, tup| req.insert_header(tup));
+            .fold(req, |req, (name, value)| req.header(name, value));
 
         (req, action)
     }
@@ -641,7 +639,7 @@ impl ObjectStore {
         identifier: &ObjectId,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> ClientRequest {
+    ) -> RequestBuilder {
         let action = self
             .bucket
             .get_object(Some(&self.credentials), identifier.as_str());
@@ -651,14 +649,18 @@ impl ObjectStore {
         let start = from_start.unwrap_or(0);
         let end = len.map(|len| start + len - 1);
 
-        req.insert_header(Range::Bytes(vec![if let Some(end) = end {
-            ByteRangeSpec::FromTo(start, end)
-        } else {
-            ByteRangeSpec::From(start)
-        }]))
+        req.header(
+            RANGE,
+            Range::Bytes(vec![if let Some(end) = end {
+                ByteRangeSpec::FromTo(start, end)
+            } else {
+                ByteRangeSpec::From(start)
+            }])
+            .to_string(),
+        )
     }
 
-    fn head_object_request(&self, identifier: &ObjectId) -> ClientRequest {
+    fn head_object_request(&self, identifier: &ObjectId) -> RequestBuilder {
         let action = self
             .bucket
             .head_object(Some(&self.credentials), identifier.as_str());
@@ -666,7 +668,7 @@ impl ObjectStore {
         self.build_request(action)
     }
 
-    fn delete_object_request(&self, identifier: &ObjectId) -> ClientRequest {
+    fn delete_object_request(&self, identifier: &ObjectId) -> RequestBuilder {
         let action = self
             .bucket
             .delete_object(Some(&self.credentials), identifier.as_str());
