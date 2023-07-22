@@ -126,6 +126,15 @@ service_name = 'pict-rs'
 # Follows the same format as RUST_LOG
 targets = 'info'
 
+[metrics]
+## Optional: enable a prometheus scrape endpoint for pict-rs
+# environment variable: PICTRS__METRICS__PROMETHEUS_ADDRESS
+# default: empty
+#
+# Setting this value enables pointing prometheus at pict-rs to receive metrics. It can also be
+# queried with curl.
+prometheus_address = "0.0.0.0:9000"
+
 
 ## Configuration for migrating from pict-rs 0.2
 [old_db]
