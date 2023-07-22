@@ -1621,7 +1621,7 @@ dependencies = [
 
 [[package]]
 name = "pict-rs"
-version = "0.5.0-alpha.4"
+version = "0.5.0-alpha.5"
 dependencies = [
  "actix-form-data",
  "actix-rt",
