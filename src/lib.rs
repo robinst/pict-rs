@@ -1531,8 +1531,9 @@ impl PictRsConfiguration {
     ///
     /// This is probably not useful for 3rd party applications that install their own tracing
     /// subscribers.
-    pub fn install_tracing(&self) -> color_eyre::Result<()> {
-        init_tracing(&self.config.tracing)
+    pub fn install_tracing(self) -> color_eyre::Result<Self> {
+        init_tracing(&self.config.tracing)?;
+        Ok(self)
     }
 
     /// Run the pict-rs application
