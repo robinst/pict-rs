@@ -1,4 +1,5 @@
 use crate::{
+    concurrent_processor::ProcessMap,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     ingest::Session,
@@ -14,6 +15,7 @@ use std::path::PathBuf;
 pub(super) fn perform<'a, R, S>(
     repo: &'a R,
     store: &'a S,
+    process_map: &'a ProcessMap,
     job: &'a [u8],
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
@@ -47,6 +49,7 @@ where
                     generate(
                         repo,
                         store,
+                        process_map,
                         target_format,
                         Serde::into_inner(source),
                         process_path,
@@ -126,10 +129,12 @@ where
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all)]
 async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
+    process_map: &ProcessMap,
     target_format: InputProcessableFormat,
     source: Alias,
     process_path: PathBuf,
@@ -155,6 +160,7 @@ async fn generate<R: FullRepo, S: Store + 'static>(
     crate::generate::generate(
         repo,
         store,
+        process_map,
         target_format,
         source,
         process_path,

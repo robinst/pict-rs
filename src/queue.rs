@@ -1,4 +1,5 @@
 use crate::{
+    concurrent_processor::ProcessMap,
     error::Error,
     formats::InputProcessableFormat,
     repo::{
@@ -161,9 +162,18 @@ pub(crate) async fn process_cleanup<R: FullRepo, S: Store>(repo: R, store: S, wo
 pub(crate) async fn process_images<R: FullRepo + 'static, S: Store + 'static>(
     repo: R,
     store: S,
+    process_map: ProcessMap,
     worker_id: String,
 ) {
-    process_jobs(&repo, &store, worker_id, PROCESS_QUEUE, process::perform).await
+    process_image_jobs(
+        &repo,
+        &store,
+        &process_map,
+        worker_id,
+        PROCESS_QUEUE,
+        process::perform,
+    )
+    .await
 }
 
 type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -212,6 +222,60 @@ where
         let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
 
         span.in_scope(|| (callback)(repo, store, bytes.as_ref()))
+            .instrument(span)
+            .await?;
+    }
+}
+
+async fn process_image_jobs<R, S, F>(
+    repo: &R,
+    store: &S,
+    process_map: &ProcessMap,
+    worker_id: String,
+    queue: &'static str,
+    callback: F,
+) where
+    R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
+    R::Bytes: Clone,
+    S: Store,
+    for<'a> F:
+        Fn(&'a R, &'a S, &'a ProcessMap, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
+{
+    loop {
+        let res =
+            image_job_loop(repo, store, process_map, worker_id.clone(), queue, callback).await;
+
+        if let Err(e) = res {
+            tracing::warn!("Error processing jobs: {}", format!("{e}"));
+            tracing::warn!("{}", format!("{e:?}"));
+            continue;
+        }
+
+        break;
+    }
+}
+
+async fn image_job_loop<R, S, F>(
+    repo: &R,
+    store: &S,
+    process_map: &ProcessMap,
+    worker_id: String,
+    queue: &'static str,
+    callback: F,
+) -> Result<(), Error>
+where
+    R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
+    R::Bytes: Clone,
+    S: Store,
+    for<'a> F:
+        Fn(&'a R, &'a S, &'a ProcessMap, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
+{
+    loop {
+        let bytes = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
+
+        let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
+
+        span.in_scope(|| (callback)(repo, store, process_map, bytes.as_ref()))
             .instrument(span)
             .await?;
     }

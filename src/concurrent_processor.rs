@@ -5,11 +5,11 @@ use crate::{
 use actix_web::web;
 use dashmap::{mapref::entry::Entry, DashMap};
 use flume::{r#async::RecvFut, Receiver, Sender};
-use once_cell::sync::Lazy;
 use std::{
     future::Future,
     path::PathBuf,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tracing::Span;
@@ -18,14 +18,81 @@ type OutcomeReceiver = Receiver<(Details, web::Bytes)>;
 
 type ProcessMapKey = (Vec<u8>, PathBuf);
 
-type ProcessMap = DashMap<ProcessMapKey, OutcomeReceiver>;
+type ProcessMapInner = DashMap<ProcessMapKey, OutcomeReceiver>;
 
-static PROCESS_MAP: Lazy<ProcessMap> = Lazy::new(DashMap::new);
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ProcessMap {
+    process_map: Arc<ProcessMapInner>,
+}
+
+impl ProcessMap {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(super) async fn process<Fut>(
+        &self,
+        hash: &[u8],
+        path: PathBuf,
+        fut: Fut,
+    ) -> Result<(Details, web::Bytes), Error>
+    where
+        Fut: Future<Output = Result<(Details, web::Bytes), Error>>,
+    {
+        let key = (hash.to_vec(), path.clone());
+
+        let (sender, receiver) = flume::bounded(1);
+
+        let entry = self.process_map.entry(key.clone());
+
+        let (state, span) = match entry {
+            Entry::Vacant(vacant) => {
+                vacant.insert(receiver);
+
+                let span = tracing::info_span!(
+                    "Processing image",
+                    hash = &tracing::field::debug(&hex::encode(hash)),
+                    path = &tracing::field::debug(&path),
+                    completed = &tracing::field::Empty,
+                );
+
+                (CancelState::Sender { sender }, span)
+            }
+            Entry::Occupied(receiver) => {
+                let span = tracing::info_span!(
+                    "Waiting for processed image",
+                    hash = &tracing::field::debug(&hex::encode(hash)),
+                    path = &tracing::field::debug(&path),
+                );
+
+                let receiver = receiver.get().clone().into_recv_async();
+
+                (CancelState::Receiver { receiver }, span)
+            }
+        };
+
+        CancelSafeProcessor {
+            cancel_token: CancelToken {
+                span,
+                key,
+                state,
+                process_map: self.clone(),
+            },
+            fut,
+        }
+        .await
+    }
+
+    fn remove(&self, key: &ProcessMapKey) -> Option<OutcomeReceiver> {
+        self.process_map.remove(key).map(|(_, v)| v)
+    }
+}
 
 struct CancelToken {
     span: Span,
     key: ProcessMapKey,
     state: CancelState,
+    process_map: ProcessMap,
 }
 
 enum CancelState {
@@ -44,55 +111,11 @@ impl CancelState {
 }
 
 pin_project_lite::pin_project! {
-    pub(super) struct CancelSafeProcessor<F> {
+    struct CancelSafeProcessor<F> {
         cancel_token: CancelToken,
 
         #[pin]
         fut: F,
-    }
-}
-
-impl<F> CancelSafeProcessor<F>
-where
-    F: Future<Output = Result<(Details, web::Bytes), Error>>,
-{
-    pub(super) fn new(hash: &[u8], path: PathBuf, fut: F) -> Self {
-        let key = (hash.to_vec(), path.clone());
-
-        let (sender, receiver) = flume::bounded(1);
-
-        let entry = PROCESS_MAP.entry(key.clone());
-
-        let (state, span) = match entry {
-            Entry::Vacant(vacant) => {
-                vacant.insert(receiver);
-                let span = tracing::info_span!(
-                    "Processing image",
-                    hash = &tracing::field::debug(&hex::encode(hash)),
-                    path = &tracing::field::debug(&path),
-                    completed = &tracing::field::Empty,
-                );
-                (CancelState::Sender { sender }, span)
-            }
-            Entry::Occupied(receiver) => {
-                let span = tracing::info_span!(
-                    "Waiting for processed image",
-                    hash = &tracing::field::debug(&hex::encode(hash)),
-                    path = &tracing::field::debug(&path),
-                );
-                (
-                    CancelState::Receiver {
-                        receiver: receiver.get().clone().into_recv_async(),
-                    },
-                    span,
-                )
-            }
-        };
-
-        CancelSafeProcessor {
-            cancel_token: CancelToken { span, key, state },
-            fut,
-        }
     }
 }
 
@@ -106,20 +129,23 @@ where
         let this = self.as_mut().project();
 
         let span = &this.cancel_token.span;
+        let process_map = &this.cancel_token.process_map;
         let state = &mut this.cancel_token.state;
         let key = &this.cancel_token.key;
         let fut = this.fut;
 
         span.in_scope(|| match state {
-            CancelState::Sender { sender } => fut.poll(cx).map(|res| {
-                PROCESS_MAP.remove(key);
+            CancelState::Sender { sender } => {
+                let res = std::task::ready!(fut.poll(cx));
+
+                process_map.remove(key);
 
                 if let Ok(tup) = &res {
                     let _ = sender.try_send(tup.clone());
                 }
 
-                res
-            }),
+                Poll::Ready(res)
+            }
             CancelState::Receiver { ref mut receiver } => Pin::new(receiver)
                 .poll(cx)
                 .map(|res| res.map_err(|_| UploadError::Canceled.into())),
@@ -130,7 +156,7 @@ where
 impl Drop for CancelToken {
     fn drop(&mut self) {
         if self.state.is_sender() {
-            let completed = PROCESS_MAP.remove(&self.key).is_none();
+            let completed = self.process_map.remove(&self.key).is_none();
             self.span.record("completed", completed);
         }
     }

@@ -33,6 +33,7 @@ use actix_web::{
     http::header::{CacheControl, CacheDirective, LastModified, Range, ACCEPT_RANGES},
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
+use concurrent_processor::ProcessMap;
 use formats::InputProcessableFormat;
 use futures_util::{
     stream::{empty, once},
@@ -661,6 +662,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     ext: web::Path<String>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    process_map: web::Data<ProcessMap>,
 ) -> Result<HttpResponse, Error> {
     let (format, alias, thumbnail_path, thumbnail_args) = prepare_process(query, ext.as_str())?;
 
@@ -723,6 +725,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     let (details, bytes) = generate::generate(
         &repo,
         &store,
+        &process_map,
         format,
         alias,
         thumbnail_path,
@@ -1285,7 +1288,7 @@ fn configure_endpoints<
         );
 }
 
-fn spawn_workers<R, S>(repo: R, store: S)
+fn spawn_workers<R, S>(repo: R, store: S, process_map: ProcessMap)
 where
     R: FullRepo + 'static,
     S: Store + 'static,
@@ -1297,8 +1300,14 @@ where
             next_worker_id(),
         ))
     });
-    tracing::trace_span!(parent: None, "Spawn task")
-        .in_scope(|| actix_rt::spawn(queue::process_images(repo, store, next_worker_id())));
+    tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+        actix_rt::spawn(queue::process_images(
+            repo,
+            store,
+            process_map,
+            next_worker_id(),
+        ))
+    });
 }
 
 async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig) + Send + Clone>(
@@ -1307,6 +1316,8 @@ async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig)
     client: ClientWithMiddleware,
     extra_config: F,
 ) -> std::io::Result<()> {
+    let process_map = ProcessMap::new();
+
     HttpServer::new(move || {
         let client = client.clone();
 
@@ -1314,11 +1325,12 @@ async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig)
         let repo = repo.clone();
         let extra_config = extra_config.clone();
 
-        spawn_workers(repo.clone(), store.clone());
+        spawn_workers(repo.clone(), store.clone(), process_map.clone());
 
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
+            .app_data(web::Data::new(process_map.clone()))
             .configure(move |sc| configure_endpoints(sc, repo, store, client, extra_config))
     })
     .bind(CONFIG.server.address)?
@@ -1335,6 +1347,8 @@ async fn launch_object_store<
     client: ClientWithMiddleware,
     extra_config: F,
 ) -> std::io::Result<()> {
+    let process_map = ProcessMap::new();
+
     HttpServer::new(move || {
         let client = client.clone();
 
@@ -1342,11 +1356,12 @@ async fn launch_object_store<
         let repo = repo.clone();
         let extra_config = extra_config.clone();
 
-        spawn_workers(repo.clone(), store.clone());
+        spawn_workers(repo.clone(), store.clone(), process_map.clone());
 
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
+            .app_data(web::Data::new(process_map.clone()))
             .configure(move |sc| configure_endpoints(sc, repo, store, client, extra_config))
     })
     .bind(CONFIG.server.address)?

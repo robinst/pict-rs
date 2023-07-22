@@ -1,5 +1,5 @@
 use crate::{
-    concurrent_processor::CancelSafeProcessor,
+    concurrent_processor::ProcessMap,
     details::Details,
     error::{Error, UploadError},
     ffmpeg::ThumbnailFormat,
@@ -17,6 +17,7 @@ use tracing::Instrument;
 pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
+    process_map: &ProcessMap,
     format: InputProcessableFormat,
     alias: Alias,
     thumbnail_path: PathBuf,
@@ -39,8 +40,9 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
         hash.clone(),
     );
 
-    let (details, bytes) =
-        CancelSafeProcessor::new(hash.as_ref(), thumbnail_path, process_fut).await?;
+    let (details, bytes) = process_map
+        .process(hash.as_ref(), thumbnail_path, process_fut)
+        .await?;
 
     Ok((details, bytes))
 }
