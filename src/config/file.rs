@@ -3,7 +3,6 @@ use crate::{
     formats::{AnimationFormat, AudioCodec, ImageFormat, VideoCodec},
     serde_str::Serde,
 };
-use once_cell::sync::OnceCell;
 use std::{collections::BTreeSet, net::SocketAddr, path::PathBuf};
 use url::Url;
 
@@ -160,7 +159,7 @@ pub(crate) struct Media {
     pub(crate) max_file_size: usize,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) preprocess_steps: Option<String>,
+    preprocess_steps: Option<PreprocessSteps>,
 
     pub(crate) filters: BTreeSet<String>,
 
@@ -351,22 +350,45 @@ pub(crate) struct VideoQuality {
     crf_max: u8,
 }
 
+#[derive(Clone, Debug)]
+struct PreprocessSteps {
+    inner: Vec<(String, String)>,
+}
+
+impl<'de> serde::Deserialize<'de> for PreprocessSteps {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let s = String::deserialize(deserializer)?;
+
+        let inner: Vec<(String, String)> =
+            serde_urlencoded::from_str(&s).map_err(D::Error::custom)?;
+
+        Ok(PreprocessSteps { inner })
+    }
+}
+
+impl serde::Serialize for PreprocessSteps {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::Error;
+
+        let s = serde_urlencoded::to_string(&self.inner).map_err(S::Error::custom)?;
+
+        s.serialize(serializer)
+    }
+}
+
 impl Media {
     pub(crate) fn preprocess_steps(&self) -> Option<&[(String, String)]> {
-        static PREPROCESS_STEPS: OnceCell<Vec<(String, String)>> = OnceCell::new();
-
-        if let Some(steps) = &self.preprocess_steps {
-            let steps = PREPROCESS_STEPS
-                .get_or_try_init(|| {
-                    serde_urlencoded::from_str(steps) as Result<Vec<(String, String)>, _>
-                })
-                .expect("Invalid preprocess_steps configuration")
-                .as_slice();
-
-            Some(steps)
-        } else {
-            None
-        }
+        self.preprocess_steps
+            .as_ref()
+            .map(|steps| steps.inner.as_slice())
     }
 }
 
