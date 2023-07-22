@@ -74,7 +74,7 @@ pub(crate) trait FullRepo:
     + HashRepo
     + MigrationRepo
     + AliasAccessRepo
-    + IdentifierAccessRepo
+    + VariantAccessRepo
     + Send
     + Sync
     + Clone
@@ -183,41 +183,39 @@ where
 }
 
 #[async_trait::async_trait(?Send)]
-pub(crate) trait IdentifierAccessRepo: BaseRepo {
-    type IdentifierAccessStream<I>: Stream<Item = Result<I, StoreError>>
-    where
-        I: Identifier;
+pub(crate) trait VariantAccessRepo: BaseRepo {
+    type VariantAccessStream: Stream<Item = Result<(Self::Bytes, String), RepoError>>;
 
-    async fn accessed<I: Identifier>(&self, identifier: I) -> Result<(), StoreError>;
+    async fn accessed(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError>;
 
-    async fn older_identifiers<I: Identifier>(
+    async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Self::IdentifierAccessStream<I>, RepoError>;
+    ) -> Result<Self::VariantAccessStream, RepoError>;
 
-    async fn remove<I: Identifier>(&self, identifier: I) -> Result<(), StoreError>;
+    async fn remove(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> IdentifierAccessRepo for actix_web::web::Data<T>
+impl<T> VariantAccessRepo for actix_web::web::Data<T>
 where
-    T: IdentifierAccessRepo,
+    T: VariantAccessRepo,
 {
-    type IdentifierAccessStream<I> = T::IdentifierAccessStream<I> where I: Identifier;
+    type VariantAccessStream = T::VariantAccessStream;
 
-    async fn accessed<I: Identifier>(&self, identifier: I) -> Result<(), StoreError> {
-        T::accessed(self, identifier).await
+    async fn accessed(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+        T::accessed(self, hash, variant).await
     }
 
-    async fn older_identifiers<I: Identifier>(
+    async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Self::IdentifierAccessStream<I>, RepoError> {
-        T::older_identifiers(self, timestamp).await
+    ) -> Result<Self::VariantAccessStream, RepoError> {
+        T::older_variants(self, timestamp).await
     }
 
-    async fn remove<I: Identifier>(&self, identifier: I) -> Result<(), StoreError> {
-        T::remove(self, identifier).await
+    async fn remove(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+        T::remove(self, hash, variant).await
     }
 }
 
