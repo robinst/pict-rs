@@ -354,6 +354,18 @@ impl VariantAccessRepo for SledRepo {
         .map_err(RepoError::from)
     }
 
+    async fn contains_variant(
+        &self,
+        hash: Self::Bytes,
+        variant: String,
+    ) -> Result<bool, RepoError> {
+        let key = variant_access_key(&hash, &variant);
+
+        let timestamp = b!(self.variant_access, variant_access.get(key));
+
+        Ok(timestamp.is_some())
+    }
+
     async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,

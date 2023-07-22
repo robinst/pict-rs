@@ -188,6 +188,9 @@ pub(crate) trait VariantAccessRepo: BaseRepo {
 
     async fn accessed(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError>;
 
+    async fn contains_variant(&self, hash: Self::Bytes, variant: String)
+        -> Result<bool, RepoError>;
+
     async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,
@@ -205,6 +208,14 @@ where
 
     async fn accessed(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
         T::accessed(self, hash, variant).await
+    }
+
+    async fn contains_variant(
+        &self,
+        hash: Self::Bytes,
+        variant: String,
+    ) -> Result<bool, RepoError> {
+        T::contains_variant(self, hash, variant).await
     }
 
     async fn older_variants(

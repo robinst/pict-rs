@@ -69,7 +69,7 @@ use self::{
     queue::queue_generate,
     repo::{
         sled::SledRepo, Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, QueueRepo, Repo,
-        SettingsRepo, UploadId, UploadResult,
+        SettingsRepo, UploadId, UploadResult, VariantAccessRepo,
     },
     serde_str::Serde,
     store::{
@@ -647,8 +647,15 @@ async fn process_details<R: FullRepo, S: Store>(
         })));
     };
 
+    let thumbnail_string = thumbnail_path.to_string_lossy().to_string();
+
+    if !config.server.read_only {
+        repo.accessed(hash.clone(), thumbnail_string.clone())
+            .await?;
+    }
+
     let identifier = repo
-        .variant_identifier::<S::Identifier>(hash, thumbnail_path.to_string_lossy().to_string())
+        .variant_identifier::<S::Identifier>(hash, thumbnail_string)
         .await?
         .ok_or(UploadError::MissingAlias)?;
 
@@ -705,6 +712,10 @@ async fn process<R: FullRepo, S: Store + 'static>(
 
         (hash, alias, true)
     };
+
+    if !config.server.read_only {
+        repo.accessed(hash.clone(), path_string.clone()).await?;
+    }
 
     let identifier_opt = repo
         .variant_identifier::<S::Identifier>(hash.clone(), path_string)
@@ -818,6 +829,10 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
         // Invalid alias
         return Ok(HttpResponse::NotFound().finish());
     };
+
+    if !config.server.read_only {
+        repo.accessed(hash.clone(), path_string.clone()).await?;
+    }
 
     let identifier_opt = repo
         .variant_identifier::<S::Identifier>(hash.clone(), path_string)
