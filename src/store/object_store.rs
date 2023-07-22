@@ -210,7 +210,9 @@ impl Store for ObjectStore {
 
         if first_chunk.len() < CHUNK_SIZE {
             drop(stream);
-            let (req, object_id) = self.put_object_request(content_type).await?;
+            let (req, object_id) = self
+                .put_object_request(first_chunk.len(), content_type)
+                .await?;
             let response = req
                 .body(Body::wrap_stream(first_chunk))
                 .send()
@@ -340,7 +342,7 @@ impl Store for ObjectStore {
         bytes: Bytes,
         content_type: mime::Mime,
     ) -> Result<Self::Identifier, StoreError> {
-        let (req, object_id) = self.put_object_request(content_type).await?;
+        let (req, object_id) = self.put_object_request(bytes.len(), content_type).await?;
 
         let response = req.body(bytes).send().await.map_err(ObjectError::from)?;
 
@@ -495,6 +497,7 @@ impl ObjectStore {
 
     async fn put_object_request(
         &self,
+        length: usize,
         content_type: mime::Mime,
     ) -> Result<(RequestBuilder, ObjectId), StoreError> {
         let path = self.next_file().await?;
@@ -504,6 +507,9 @@ impl ObjectStore {
         action
             .headers_mut()
             .insert("content-type", content_type.as_ref());
+        action
+            .headers_mut()
+            .insert("content-length", length.to_string());
 
         Ok((self.build_request(action), ObjectId::from_string(path)))
     }
@@ -588,7 +594,12 @@ impl ObjectStore {
 
         let (req, action) = self.build_request_inner(action);
 
-        req.body(action.body()).send().await
+        let body: Vec<u8> = action.body().into();
+
+        req.header(CONTENT_LENGTH, body.len())
+            .body(body)
+            .send()
+            .await
     }
 
     fn create_abort_multipart_request(
