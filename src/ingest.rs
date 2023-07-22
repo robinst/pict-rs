@@ -46,7 +46,7 @@ pub(crate) async fn ingest<R, S>(
     store: &S,
     stream: impl Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     declared_alias: Option<Alias>,
-    media: &'static crate::config::Media,
+    media: &crate::config::Media,
 ) -> Result<Session<R, S>, Error>
 where
     R: FullRepo + 'static,

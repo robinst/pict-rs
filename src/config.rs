@@ -54,10 +54,15 @@ impl ConfigSource<PathBuf, ()> {
     }
 }
 
+pub struct PictRsConfiguration {
+    pub(crate) config: Configuration,
+    pub(crate) operation: Operation,
+}
+
 pub(crate) fn configure_without_clap<P: AsRef<Path>, T: serde::Serialize, Q: AsRef<Path>>(
     source: ConfigSource<P, T>,
     save_to: Option<Q>,
-) -> color_eyre::Result<(Configuration, Operation)> {
+) -> color_eyre::Result<PictRsConfiguration> {
     let config = Config::builder().add_source(config::Config::try_from(&Defaults::default())?);
 
     let config = match source {
@@ -83,10 +88,10 @@ pub(crate) fn configure_without_clap<P: AsRef<Path>, T: serde::Serialize, Q: AsR
         std::fs::write(save_to, output)?;
     }
 
-    Ok((config, operation))
+    Ok(PictRsConfiguration { config, operation })
 }
 
-pub(crate) fn configure() -> color_eyre::Result<(Configuration, Operation)> {
+pub(crate) fn configure() -> color_eyre::Result<PictRsConfiguration> {
     let Output {
         config_format,
         operation,
@@ -118,5 +123,5 @@ pub(crate) fn configure() -> color_eyre::Result<(Configuration, Operation)> {
         std::fs::write(save_to, output)?;
     }
 
-    Ok((config, operation))
+    Ok(PictRsConfiguration { config, operation })
 }

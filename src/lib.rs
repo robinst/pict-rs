@@ -39,7 +39,7 @@ use futures_util::{
     stream::{empty, once},
     Stream, StreamExt, TryStreamExt,
 };
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::Lazy;
 use repo::sled::SledRepo;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
@@ -79,7 +79,7 @@ use self::{
     stream::{StreamLimit, StreamTimeout},
 };
 
-pub use self::config::ConfigSource;
+pub use self::config::{ConfigSource, PictRsConfiguration};
 
 const MEGABYTES: usize = 1024 * 1024;
 const MINUTES: u32 = 60;
@@ -88,21 +88,6 @@ const DAYS: u32 = 24 * HOURS;
 
 const NOT_FOUND_KEY: &str = "404-alias";
 
-static DO_CONFIG: OnceCell<(Configuration, Operation)> = OnceCell::new();
-static CONFIG: Lazy<Configuration> = Lazy::new(|| {
-    DO_CONFIG
-        .get_or_try_init(config::configure)
-        .expect("Failed to configure")
-        .0
-        .clone()
-});
-static OPERATION: Lazy<Operation> = Lazy::new(|| {
-    DO_CONFIG
-        .get_or_try_init(config::configure)
-        .expect("Failed to configure")
-        .1
-        .clone()
-});
 static PROCESS_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
     tracing::trace_span!(parent: None, "Initialize semaphore")
         .in_scope(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
@@ -111,6 +96,7 @@ static PROCESS_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
 async fn ensure_details<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
+    config: &Configuration,
     alias: &Alias,
 ) -> Result<Details, Error> {
     let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(alias).await? else {
@@ -129,7 +115,7 @@ async fn ensure_details<R: FullRepo, S: Store + 'static>(
         tracing::debug!("details exist");
         Ok(details)
     } else {
-        if CONFIG.server.read_only {
+        if config.server.read_only {
             return Err(UploadError::ReadOnly.into());
         }
 
@@ -160,16 +146,21 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
             .app_data::<web::Data<S>>()
             .expect("No store in request")
             .clone();
+        let config = req
+            .app_data::<web::Data<Configuration>>()
+            .expect("No configuration in request")
+            .clone();
 
         Form::new()
-            .max_files(CONFIG.server.max_file_count)
-            .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
+            .max_files(config.server.max_file_count)
+            .max_file_size(config.media.max_file_size * MEGABYTES)
             .transform_error(transform_error)
             .field(
                 "images",
                 Field::array(Field::file(move |filename, _, stream| {
                     let repo = repo.clone();
                     let store = store.clone();
+                    let config = config.clone();
 
                     let span = tracing::info_span!("file-upload", ?filename);
 
@@ -177,11 +168,11 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
 
                     Box::pin(
                         async move {
-                            if CONFIG.server.read_only {
+                            if config.server.read_only {
                                 return Err(UploadError::ReadOnly.into());
                             }
 
-                            ingest::ingest(&**repo, &**store, stream, None, &CONFIG.media).await
+                            ingest::ingest(&**repo, &**store, stream, None, &config.media).await
                         }
                         .instrument(span),
                     )
@@ -209,19 +200,24 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
             .app_data::<web::Data<S>>()
             .expect("No store in request")
             .clone();
+        let config = req
+            .app_data::<web::Data<Configuration>>()
+            .expect("No configuration in request")
+            .clone();
 
         // Create a new Multipart Form validator for internal imports
         //
         // This form is expecting a single array field, 'images' with at most 10 files in it
         Form::new()
-            .max_files(CONFIG.server.max_file_count)
-            .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
+            .max_files(config.server.max_file_count)
+            .max_file_size(config.media.max_file_size * MEGABYTES)
             .transform_error(transform_error)
             .field(
                 "images",
                 Field::array(Field::file(move |filename, _, stream| {
                     let repo = repo.clone();
                     let store = store.clone();
+                    let config = config.clone();
 
                     let span = tracing::info_span!("file-import", ?filename);
 
@@ -229,7 +225,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
 
                     Box::pin(
                         async move {
-                            if CONFIG.server.read_only {
+                            if config.server.read_only {
                                 return Err(UploadError::ReadOnly.into());
                             }
 
@@ -238,7 +234,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
                                 &**store,
                                 stream,
                                 Some(Alias::from_existing(&filename)),
-                                &CONFIG.media,
+                                &config.media,
                             )
                             .await
                         }
@@ -257,31 +253,34 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
 }
 
 /// Handle responding to successful uploads
-#[tracing::instrument(name = "Uploaded files", skip(value, repo, store))]
+#[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
 async fn upload<R: FullRepo, S: Store + 'static>(
     Multipart(Upload(value)): Multipart<Upload<R, S>>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    handle_upload(value, repo, store).await
+    handle_upload(value, repo, store, config).await
 }
 
 /// Handle responding to successful uploads
-#[tracing::instrument(name = "Imported files", skip(value, repo, store))]
+#[tracing::instrument(name = "Imported files", skip(value, repo, store, config))]
 async fn import<R: FullRepo, S: Store + 'static>(
     Multipart(Import(value)): Multipart<Import<R, S>>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    handle_upload(value, repo, store).await
+    handle_upload(value, repo, store, config).await
 }
 
 /// Handle responding to successful uploads
-#[tracing::instrument(name = "Uploaded files", skip(value, repo, store))]
+#[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
 async fn handle_upload<R: FullRepo, S: Store + 'static>(
     value: Value<Session<R, S>>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let images = value
         .map()
@@ -300,7 +299,7 @@ async fn handle_upload<R: FullRepo, S: Store + 'static>(
             tracing::debug!("Uploaded {} as {:?}", image.filename, alias);
             let delete_token = image.result.delete_token().await?;
 
-            let details = ensure_details(&repo, &store, alias).await?;
+            let details = ensure_details(&repo, &store, &config, alias).await?;
 
             files.push(serde_json::json!({
                 "file": alias.to_string(),
@@ -338,10 +337,16 @@ impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
             .app_data::<web::Data<S>>()
             .expect("No store in request")
             .clone();
+        let config = req
+            .app_data::<web::Data<Configuration>>()
+            .expect("No configuration in request")
+            .clone();
+
+        let read_only = config.server.read_only;
 
         Form::new()
-            .max_files(CONFIG.server.max_file_count)
-            .max_file_size(CONFIG.media.max_file_size * MEGABYTES)
+            .max_files(config.server.max_file_count)
+            .max_file_size(config.media.max_file_size * MEGABYTES)
             .transform_error(transform_error)
             .field(
                 "images",
@@ -355,7 +360,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
 
                     Box::pin(
                         async move {
-                            if CONFIG.server.read_only {
+                            if read_only {
                                 return Err(UploadError::ReadOnly.into());
                             }
 
@@ -427,6 +432,7 @@ struct ClaimQuery {
 async fn claim_upload<R: FullRepo, S: Store + 'static>(
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
     query: web::Query<ClaimQuery>,
 ) -> Result<HttpResponse, Error> {
     let upload_id = Serde::into_inner(query.into_inner().upload_id);
@@ -438,7 +444,7 @@ async fn claim_upload<R: FullRepo, S: Store + 'static>(
 
             match upload_result {
                 UploadResult::Success { alias, token } => {
-                    let details = ensure_details(&repo, &store, &alias).await?;
+                    let details = ensure_details(&repo, &store, &config, &alias).await?;
 
                     Ok(HttpResponse::Ok().json(&serde_json::json!({
                         "msg": "ok",
@@ -469,14 +475,15 @@ struct UrlQuery {
 }
 
 /// download an image from a URL
-#[tracing::instrument(name = "Downloading file", skip(client, repo, store))]
+#[tracing::instrument(name = "Downloading file", skip(client, repo, store, config))]
 async fn download<R: FullRepo + 'static, S: Store + 'static>(
     client: web::Data<ClientWithMiddleware>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
     query: web::Query<UrlQuery>,
 ) -> Result<HttpResponse, Error> {
-    if CONFIG.server.read_only {
+    if config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
@@ -489,27 +496,28 @@ async fn download<R: FullRepo + 'static, S: Store + 'static>(
     let stream = res
         .bytes_stream()
         .map_err(Error::from)
-        .limit((CONFIG.media.max_file_size * MEGABYTES) as u64);
+        .limit((config.media.max_file_size * MEGABYTES) as u64);
 
     if query.backgrounded {
         do_download_backgrounded(stream, repo, store).await
     } else {
-        do_download_inline(stream, repo, store).await
+        do_download_inline(stream, repo, store, config).await
     }
 }
 
-#[tracing::instrument(name = "Downloading file inline", skip(stream, repo, store))]
+#[tracing::instrument(name = "Downloading file inline", skip(stream, repo, store, config))]
 async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let mut session = ingest::ingest(&repo, &store, stream, None, &CONFIG.media).await?;
+    let mut session = ingest::ingest(&repo, &store, stream, None, &config.media).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
     let delete_token = session.delete_token().await?;
 
-    let details = ensure_details(&repo, &store, &alias).await?;
+    let details = ensure_details(&repo, &store, &config, &alias).await?;
 
     session.disarm();
 
@@ -553,9 +561,10 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
 #[tracing::instrument(name = "Deleting file", skip(repo))]
 async fn delete<R: FullRepo>(
     repo: web::Data<R>,
+    config: web::Data<Configuration>,
     path_entries: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
-    if CONFIG.server.read_only {
+    if config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
@@ -572,6 +581,7 @@ async fn delete<R: FullRepo>(
 type ProcessQuery = Vec<(String, String)>;
 
 fn prepare_process(
+    config: &Configuration,
     query: web::Query<ProcessQuery>,
     ext: &str,
 ) -> Result<(InputProcessableFormat, Alias, PathBuf, Vec<String>), Error> {
@@ -596,7 +606,7 @@ fn prepare_process(
 
     let operations = operations
         .into_iter()
-        .filter(|(k, _)| CONFIG.media.filters.contains(&k.to_lowercase()))
+        .filter(|(k, _)| config.media.filters.contains(&k.to_lowercase()))
         .collect::<Vec<_>>();
 
     let format = ext
@@ -609,13 +619,14 @@ fn prepare_process(
     Ok((format, alias, thumbnail_path, thumbnail_args))
 }
 
-#[tracing::instrument(name = "Fetching derived details", skip(repo))]
+#[tracing::instrument(name = "Fetching derived details", skip(repo, config))]
 async fn process_details<R: FullRepo, S: Store>(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     repo: web::Data<R>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
+    let (_, alias, thumbnail_path, _) = prepare_process(&config, query, ext.as_str())?;
 
     let Some(hash) = repo.hash(&alias).await? else {
         // Invalid alias
@@ -655,16 +666,21 @@ async fn not_found_hash<R: FullRepo>(repo: &R) -> Result<Option<(Alias, R::Bytes
 }
 
 /// Process files
-#[tracing::instrument(name = "Serving processed image", skip(repo, store))]
+#[tracing::instrument(
+    name = "Serving processed image",
+    skip(repo, store, config, process_map)
+)]
 async fn process<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
     process_map: web::Data<ProcessMap>,
 ) -> Result<HttpResponse, Error> {
-    let (format, alias, thumbnail_path, thumbnail_args) = prepare_process(query, ext.as_str())?;
+    let (format, alias, thumbnail_path, thumbnail_args) =
+        prepare_process(&config, query, ext.as_str())?;
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
 
@@ -695,7 +711,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
             tracing::debug!("details exist");
             details
         } else {
-            if CONFIG.server.read_only {
+            if config.server.read_only {
                 return Err(UploadError::ReadOnly.into());
             }
 
@@ -716,11 +732,11 @@ async fn process<R: FullRepo, S: Store + 'static>(
         return ranged_file_resp(&store, identifier, range, details, not_found).await;
     }
 
-    if CONFIG.server.read_only {
+    if config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
-    let original_details = ensure_details(&repo, &store, &alias).await?;
+    let original_details = ensure_details(&repo, &store, &config, &alias).await?;
 
     let (details, bytes) = generate::generate(
         &repo,
@@ -732,7 +748,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
         thumbnail_args,
         original_details.video_format(),
         None,
-        &CONFIG.media,
+        &config.media,
         hash,
     )
     .await?;
@@ -774,15 +790,16 @@ async fn process<R: FullRepo, S: Store + 'static>(
     ))
 }
 
-#[tracing::instrument(name = "Serving processed image headers", skip(repo, store))]
+#[tracing::instrument(name = "Serving processed image headers", skip(repo, store, config))]
 async fn process_head<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let (_, alias, thumbnail_path, _) = prepare_process(query, ext.as_str())?;
+    let (_, alias, thumbnail_path, _) = prepare_process(&config, query, ext.as_str())?;
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
     let Some(hash) = repo.hash(&alias).await? else {
@@ -807,7 +824,7 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
             tracing::debug!("details exist");
             details
         } else {
-            if CONFIG.server.read_only {
+            if config.server.read_only {
                 return Err(UploadError::ReadOnly.into());
             }
 
@@ -837,8 +854,10 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
     query: web::Query<ProcessQuery>,
     ext: web::Path<String>,
     repo: web::Data<R>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let (target_format, source, process_path, process_args) = prepare_process(query, ext.as_str())?;
+    let (target_format, source, process_path, process_args) =
+        prepare_process(&config, query, ext.as_str())?;
 
     let path_string = process_path.to_string_lossy().to_string();
     let Some(hash) = repo.hash(&source).await? else {
@@ -854,7 +873,7 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
         return Ok(HttpResponse::Accepted().finish());
     }
 
-    if CONFIG.server.read_only {
+    if config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
@@ -864,26 +883,28 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
 }
 
 /// Fetch file details
-#[tracing::instrument(name = "Fetching details", skip(repo, store))]
+#[tracing::instrument(name = "Fetching details", skip(repo, store, config))]
 async fn details<R: FullRepo, S: Store + 'static>(
     alias: web::Path<Serde<Alias>>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
 
-    let details = ensure_details(&repo, &store, &alias).await?;
+    let details = ensure_details(&repo, &store, &config, &alias).await?;
 
     Ok(HttpResponse::Ok().json(&details))
 }
 
 /// Serve files
-#[tracing::instrument(name = "Serving file", skip(repo, store))]
+#[tracing::instrument(name = "Serving file", skip(repo, store, config))]
 async fn serve<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
 
@@ -906,7 +927,7 @@ async fn serve<R: FullRepo, S: Store + 'static>(
         return Ok(HttpResponse::NotFound().finish());
     };
 
-    let details = ensure_details(&repo, &store, &alias).await?;
+    let details = ensure_details(&repo, &store, &config, &alias).await?;
 
     if let Some(public_url) = store.public_url(&identifier) {
         return Ok(HttpResponse::SeeOther()
@@ -917,12 +938,13 @@ async fn serve<R: FullRepo, S: Store + 'static>(
     ranged_file_resp(&store, identifier, range, details, not_found).await
 }
 
-#[tracing::instrument(name = "Serving file headers", skip(repo, store))]
+#[tracing::instrument(name = "Serving file headers", skip(repo, store, config))]
 async fn serve_head<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
     repo: web::Data<R>,
     store: web::Data<S>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let alias = alias.into_inner();
 
@@ -931,7 +953,7 @@ async fn serve_head<R: FullRepo, S: Store + 'static>(
         return Ok(HttpResponse::NotFound().finish());
     };
 
-    let details = ensure_details(&repo, &store, &alias).await?;
+    let details = ensure_details(&repo, &store, &config, &alias).await?;
 
     if let Some(public_url) = store.public_url(&identifier) {
         return Ok(HttpResponse::SeeOther()
@@ -1074,9 +1096,12 @@ fn srv_head(
     builder
 }
 
-#[tracing::instrument(name = "Spawning variant cleanup", skip(repo))]
-async fn clean_variants<R: FullRepo>(repo: web::Data<R>) -> Result<HttpResponse, Error> {
-    if CONFIG.server.read_only {
+#[tracing::instrument(name = "Spawning variant cleanup", skip(repo, config))]
+async fn clean_variants<R: FullRepo>(
+    repo: web::Data<R>,
+    config: web::Data<Configuration>,
+) -> Result<HttpResponse, Error> {
+    if config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
@@ -1089,12 +1114,13 @@ struct AliasQuery {
     alias: Serde<Alias>,
 }
 
-#[tracing::instrument(name = "Setting 404 Image", skip(repo))]
+#[tracing::instrument(name = "Setting 404 Image", skip(repo, config))]
 async fn set_not_found<R: FullRepo>(
     json: web::Json<AliasQuery>,
     repo: web::Data<R>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    if CONFIG.server.read_only {
+    if config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
@@ -1113,12 +1139,13 @@ async fn set_not_found<R: FullRepo>(
     })))
 }
 
-#[tracing::instrument(name = "Purging file", skip(repo))]
+#[tracing::instrument(name = "Purging file", skip(repo, config))]
 async fn purge<R: FullRepo>(
     query: web::Query<AliasQuery>,
     repo: web::Data<R>,
+    config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    if CONFIG.server.read_only {
+    if config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
@@ -1186,11 +1213,11 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
     error
 }
 
-fn build_client() -> Result<ClientWithMiddleware, Error> {
+fn build_client(config: &Configuration) -> Result<ClientWithMiddleware, Error> {
     let client = reqwest::Client::builder()
         .user_agent("pict-rs v0.5.0-main")
         .use_rustls_tls()
-        .pool_max_idle_per_host(CONFIG.client.pool_size)
+        .pool_max_idle_per_host(config.client.pool_size)
         .build()
         .map_err(UploadError::BuildClient)?;
 
@@ -1199,12 +1226,12 @@ fn build_client() -> Result<ClientWithMiddleware, Error> {
         .build())
 }
 
-fn next_worker_id() -> String {
+fn next_worker_id(config: &Configuration) -> String {
     static WORKER_ID: AtomicU64 = AtomicU64::new(0);
 
     let next_id = WORKER_ID.fetch_add(1, Ordering::Relaxed);
 
-    format!("{}-{}", CONFIG.server.worker_id, next_id)
+    format!("{}-{}", config.server.worker_id, next_id)
 }
 
 fn configure_endpoints<
@@ -1215,6 +1242,7 @@ fn configure_endpoints<
     config: &mut web::ServiceConfig,
     repo: R,
     store: S,
+    configuration: Configuration,
     client: ClientWithMiddleware,
     extra_config: F,
 ) {
@@ -1222,6 +1250,7 @@ fn configure_endpoints<
         .app_data(web::Data::new(repo))
         .app_data(web::Data::new(store))
         .app_data(web::Data::new(client))
+        .app_data(web::Data::new(configuration.clone()))
         .route("/healthz", web::get().to(healthz::<R, S>))
         .service(
             web::scope("/image")
@@ -1276,7 +1305,7 @@ fn configure_endpoints<
         .service(
             web::scope("/internal")
                 .wrap(Internal(
-                    CONFIG.server.api_key.as_ref().map(|s| s.to_owned()),
+                    configuration.server.api_key.as_ref().map(|s| s.to_owned()),
                 ))
                 .service(web::resource("/import").route(web::post().to(import::<R, S>)))
                 .service(web::resource("/variants").route(web::delete().to(clean_variants::<R>)))
@@ -1288,7 +1317,7 @@ fn configure_endpoints<
         );
 }
 
-fn spawn_workers<R, S>(repo: R, store: S, process_map: ProcessMap)
+fn spawn_workers<R, S>(repo: R, store: S, config: &Configuration, process_map: ProcessMap)
 where
     R: FullRepo + 'static,
     S: Store + 'static,
@@ -1297,7 +1326,7 @@ where
         actix_rt::spawn(queue::process_cleanup(
             repo.clone(),
             store.clone(),
-            next_worker_id(),
+            next_worker_id(config),
         ))
     });
     tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
@@ -1305,7 +1334,8 @@ where
             repo,
             store,
             process_map,
-            next_worker_id(),
+            config.clone(),
+            next_worker_id(config),
         ))
     });
 }
@@ -1314,26 +1344,29 @@ async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig)
     repo: R,
     store: FileStore,
     client: ClientWithMiddleware,
+    config: Configuration,
     extra_config: F,
 ) -> std::io::Result<()> {
     let process_map = ProcessMap::new();
 
+    let address = config.server.address;
+
     HttpServer::new(move || {
         let client = client.clone();
-
         let store = store.clone();
         let repo = repo.clone();
+        let config = config.clone();
         let extra_config = extra_config.clone();
 
-        spawn_workers(repo.clone(), store.clone(), process_map.clone());
+        spawn_workers(repo.clone(), store.clone(), &config, process_map.clone());
 
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
             .app_data(web::Data::new(process_map.clone()))
-            .configure(move |sc| configure_endpoints(sc, repo, store, client, extra_config))
+            .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     })
-    .bind(CONFIG.server.address)?
+    .bind(address)?
     .run()
     .await
 }
@@ -1345,26 +1378,29 @@ async fn launch_object_store<
     repo: R,
     store_config: ObjectStoreConfig,
     client: ClientWithMiddleware,
+    config: Configuration,
     extra_config: F,
 ) -> std::io::Result<()> {
     let process_map = ProcessMap::new();
 
+    let address = config.server.address;
+
     HttpServer::new(move || {
         let client = client.clone();
-
         let store = store_config.clone().build(client.clone());
         let repo = repo.clone();
+        let config = config.clone();
         let extra_config = extra_config.clone();
 
-        spawn_workers(repo.clone(), store.clone(), process_map.clone());
+        spawn_workers(repo.clone(), store.clone(), &config, process_map.clone());
 
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
             .app_data(web::Data::new(process_map.clone()))
-            .configure(move |sc| configure_endpoints(sc, repo, store, client, extra_config))
+            .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     })
-    .bind(CONFIG.server.address)?
+    .bind(address)?
     .run()
     .await
 }
@@ -1463,23 +1499,12 @@ impl<P: AsRef<Path>, T: serde::Serialize> ConfigSource<P, T> {
     ///     Ok(())
     /// }
     /// ```
-    pub fn init<Q: AsRef<Path>>(self, save_to: Option<Q>) -> color_eyre::Result<()> {
-        let (config, operation) = config::configure_without_clap(self, save_to)?;
-
-        DO_CONFIG
-            .set((config, operation))
-            .unwrap_or_else(|_| panic!("CONFIG cannot be initialized more than once"));
-
-        Ok(())
+    pub fn init<Q: AsRef<Path>>(
+        self,
+        save_to: Option<Q>,
+    ) -> color_eyre::Result<PictRsConfiguration> {
+        config::configure_without_clap(self, save_to)
     }
-}
-
-/// Install the default pict-rs tracer
-///
-/// This is probably not useful for 3rd party applications that install their own tracing
-/// subscribers.
-pub fn install_tracing() -> color_eyre::Result<()> {
-    init_tracing(&CONFIG.tracing)
 }
 
 async fn export_handler(repo: web::Data<SledRepo>) -> Result<HttpResponse, Error> {
@@ -1494,106 +1519,111 @@ fn sled_extra_config(sc: &mut web::ServiceConfig) {
     sc.service(web::resource("/export").route(web::post().to(export_handler)));
 }
 
-/// Run the pict-rs application
-///
-/// This must be called after `init_config`, or else the default configuration builder will run and
-/// fail.
-pub async fn run() -> color_eyre::Result<()> {
-    let repo = Repo::open(CONFIG.repo.clone())?;
-    repo.migrate_from_db(CONFIG.old_db.path.clone()).await?;
-    let client = build_client()?;
+impl PictRsConfiguration {
+    /// Build the pict-rs configuration from commandline arguments
+    ///
+    /// This is probably not useful for 3rd party applications that handle their own commandline
+    pub fn build_default() -> color_eyre::Result<Self> {
+        config::configure()
+    }
 
-    match (*OPERATION).clone() {
-        Operation::Run => (),
-        Operation::MigrateStore {
-            skip_missing_files,
-            from,
-            to,
-        } => {
-            match from {
-                config::primitives::Store::Filesystem(config::Filesystem { path }) => {
-                    let from = FileStore::build(path.clone(), repo.clone()).await?;
-                    migrate_inner(repo, client, from, to, skip_missing_files).await?;
-                }
-                config::primitives::Store::ObjectStorage(config::primitives::ObjectStorage {
-                    endpoint,
-                    bucket_name,
-                    use_path_style,
-                    region,
-                    access_key,
-                    secret_key,
-                    session_token,
-                    signature_duration,
-                    client_timeout,
-                    public_endpoint,
-                }) => {
-                    let from = ObjectStore::build(
-                        endpoint,
-                        bucket_name,
-                        if use_path_style {
-                            UrlStyle::Path
-                        } else {
-                            UrlStyle::VirtualHost
+    /// Install the default pict-rs tracer
+    ///
+    /// This is probably not useful for 3rd party applications that install their own tracing
+    /// subscribers.
+    pub fn install_tracing(&self) -> color_eyre::Result<()> {
+        init_tracing(&self.config.tracing)
+    }
+
+    /// Run the pict-rs application
+    ///
+    /// This must be called after `init_config`, or else the default configuration builder will run and
+    /// fail.
+    pub async fn run(self) -> color_eyre::Result<()> {
+        let PictRsConfiguration { config, operation } = self;
+
+        let repo = Repo::open(config.repo.clone())?;
+        repo.migrate_from_db(config.old_db.path.clone()).await?;
+        let client = build_client(&config)?;
+
+        match operation {
+            Operation::Run => (),
+            Operation::MigrateStore {
+                skip_missing_files,
+                from,
+                to,
+            } => {
+                match from {
+                    config::primitives::Store::Filesystem(config::Filesystem { path }) => {
+                        let from = FileStore::build(path.clone(), repo.clone()).await?;
+                        migrate_inner(repo, client, from, to, skip_missing_files).await?;
+                    }
+                    config::primitives::Store::ObjectStorage(
+                        config::primitives::ObjectStorage {
+                            endpoint,
+                            bucket_name,
+                            use_path_style,
+                            region,
+                            access_key,
+                            secret_key,
+                            session_token,
+                            signature_duration,
+                            client_timeout,
+                            public_endpoint,
                         },
-                        region,
-                        access_key,
-                        secret_key,
-                        session_token,
-                        signature_duration.unwrap_or(15),
-                        client_timeout.unwrap_or(30),
-                        public_endpoint,
-                        repo.clone(),
-                    )
-                    .await?
-                    .build(client.clone());
+                    ) => {
+                        let from = ObjectStore::build(
+                            endpoint,
+                            bucket_name,
+                            if use_path_style {
+                                UrlStyle::Path
+                            } else {
+                                UrlStyle::VirtualHost
+                            },
+                            region,
+                            access_key,
+                            secret_key,
+                            session_token,
+                            signature_duration.unwrap_or(15),
+                            client_timeout.unwrap_or(30),
+                            public_endpoint,
+                            repo.clone(),
+                        )
+                        .await?
+                        .build(client.clone());
 
-                    migrate_inner(repo, client, from, to, skip_missing_files).await?;
+                        migrate_inner(repo, client, from, to, skip_missing_files).await?;
+                    }
                 }
-            }
 
-            return Ok(());
-        }
-    }
-
-    if CONFIG.server.read_only {
-        tracing::warn!("Launching in READ ONLY mode");
-    }
-
-    match CONFIG.store.clone() {
-        config::Store::Filesystem(config::Filesystem { path }) => {
-            repo.migrate_identifiers().await?;
-
-            let store = FileStore::build(path, repo.clone()).await?;
-            match repo {
-                Repo::Sled(sled_repo) => {
-                    sled_repo
-                        .requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
-                        .await?;
-
-                    launch_file_store(sled_repo, store, client, sled_extra_config).await?;
-                }
+                return Ok(());
             }
         }
-        config::Store::ObjectStorage(config::ObjectStorage {
-            endpoint,
-            bucket_name,
-            use_path_style,
-            region,
-            access_key,
-            secret_key,
-            session_token,
-            signature_duration,
-            client_timeout,
-            public_endpoint,
-        }) => {
-            let store = ObjectStore::build(
+
+        if config.server.read_only {
+            tracing::warn!("Launching in READ ONLY mode");
+        }
+
+        match config.store.clone() {
+            config::Store::Filesystem(config::Filesystem { path }) => {
+                repo.migrate_identifiers().await?;
+
+                let store = FileStore::build(path, repo.clone()).await?;
+                match repo {
+                    Repo::Sled(sled_repo) => {
+                        sled_repo
+                            .requeue_in_progress(config.server.worker_id.as_bytes().to_vec())
+                            .await?;
+
+                        launch_file_store(sled_repo, store, client, config, sled_extra_config)
+                            .await?;
+                    }
+                }
+            }
+            config::Store::ObjectStorage(config::ObjectStorage {
                 endpoint,
                 bucket_name,
-                if use_path_style {
-                    UrlStyle::Path
-                } else {
-                    UrlStyle::VirtualHost
-                },
+                use_path_style,
                 region,
                 access_key,
                 secret_key,
@@ -1601,23 +1631,41 @@ pub async fn run() -> color_eyre::Result<()> {
                 signature_duration,
                 client_timeout,
                 public_endpoint,
-                repo.clone(),
-            )
-            .await?;
+            }) => {
+                let store = ObjectStore::build(
+                    endpoint,
+                    bucket_name,
+                    if use_path_style {
+                        UrlStyle::Path
+                    } else {
+                        UrlStyle::VirtualHost
+                    },
+                    region,
+                    access_key,
+                    secret_key,
+                    session_token,
+                    signature_duration,
+                    client_timeout,
+                    public_endpoint,
+                    repo.clone(),
+                )
+                .await?;
 
-            match repo {
-                Repo::Sled(sled_repo) => {
-                    sled_repo
-                        .requeue_in_progress(CONFIG.server.worker_id.as_bytes().to_vec())
-                        .await?;
+                match repo {
+                    Repo::Sled(sled_repo) => {
+                        sled_repo
+                            .requeue_in_progress(config.server.worker_id.as_bytes().to_vec())
+                            .await?;
 
-                    launch_object_store(sled_repo, store, client, sled_extra_config).await?;
+                        launch_object_store(sled_repo, store, client, config, sled_extra_config)
+                            .await?;
+                    }
                 }
             }
         }
+
+        self::tmp_file::remove_tmp_dir().await?;
+
+        Ok(())
     }
-
-    self::tmp_file::remove_tmp_dir().await?;
-
-    Ok(())
 }

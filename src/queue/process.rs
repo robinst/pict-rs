@@ -1,5 +1,6 @@
 use crate::{
     concurrent_processor::ProcessMap,
+    config::Configuration,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     ingest::Session,
@@ -7,7 +8,6 @@ use crate::{
     repo::{Alias, DeleteToken, FullRepo, UploadId, UploadResult},
     serde_str::Serde,
     store::{Identifier, Store},
-    CONFIG,
 };
 use futures_util::TryStreamExt;
 use std::path::PathBuf;
@@ -16,6 +16,7 @@ pub(super) fn perform<'a, R, S>(
     repo: &'a R,
     store: &'a S,
     process_map: &'a ProcessMap,
+    config: &'a Configuration,
     job: &'a [u8],
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
@@ -36,7 +37,7 @@ where
                         identifier,
                         Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
-                        &CONFIG.media,
+                        &config.media,
                     )
                     .await?
                 }
@@ -54,7 +55,7 @@ where
                         Serde::into_inner(source),
                         process_path,
                         process_args,
-                        &CONFIG.media,
+                        config,
                     )
                     .await?
                 }
@@ -75,7 +76,7 @@ async fn process_ingest<R, S>(
     unprocessed_identifier: Vec<u8>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
-    media: &'static crate::config::Media,
+    media: &crate::config::Media,
 ) -> Result<(), Error>
 where
     R: FullRepo + 'static,
@@ -88,6 +89,7 @@ where
         let store2 = store.clone();
         let repo = repo.clone();
 
+        let media = media.clone();
         let error_boundary = actix_rt::spawn(async move {
             let stream = store2
                 .to_stream(&ident, None, None)
@@ -95,7 +97,7 @@ where
                 .map_err(Error::from);
 
             let session =
-                crate::ingest::ingest(&repo, &store2, stream, declared_alias, media).await?;
+                crate::ingest::ingest(&repo, &store2, stream, declared_alias, &media).await?;
 
             let token = session.delete_token().await?;
 
@@ -139,7 +141,7 @@ async fn generate<R: FullRepo, S: Store + 'static>(
     source: Alias,
     process_path: PathBuf,
     process_args: Vec<String>,
-    meida: &'static crate::config::Media,
+    config: &Configuration,
 ) -> Result<(), Error> {
     let Some(hash) = repo.hash(&source).await? else {
         // Nothing to do
@@ -155,7 +157,7 @@ async fn generate<R: FullRepo, S: Store + 'static>(
         return Ok(());
     }
 
-    let original_details = crate::ensure_details(repo, store, &source).await?;
+    let original_details = crate::ensure_details(repo, store, config, &source).await?;
 
     crate::generate::generate(
         repo,
@@ -167,7 +169,7 @@ async fn generate<R: FullRepo, S: Store + 'static>(
         process_args,
         original_details.video_format(),
         None,
-        meida,
+        &config.media,
         hash,
     )
     .await?;

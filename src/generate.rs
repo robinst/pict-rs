@@ -24,7 +24,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     thumbnail_args: Vec<String>,
     input_format: Option<InternalVideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
-    media: &'static crate::config::Media,
+    media: &crate::config::Media,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
     let process_fut = process(
@@ -58,7 +58,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     thumbnail_args: Vec<String>,
     input_format: Option<InternalVideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
-    media: &'static crate::config::Media,
+    media: &crate::config::Media,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
     let permit = crate::PROCESS_SEMAPHORE.acquire().await;
