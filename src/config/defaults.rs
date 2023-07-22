@@ -74,9 +74,17 @@ struct OldDbDefaults {
 struct MediaDefaults {
     max_file_size: usize,
     filters: Vec<String>,
+    retention: RetentionDefaults,
     image: ImageDefaults,
     animation: AnimationDefaults,
     video: VideoDefaults,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct RetentionDefaults {
+    variants: &'static str,
+    proxy: &'static str,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -237,9 +245,19 @@ impl Default for MediaDefaults {
                 "resize".into(),
                 "thumbnail".into(),
             ],
+            retention: Default::default(),
             image: Default::default(),
             animation: Default::default(),
             video: Default::default(),
+        }
+    }
+}
+
+impl Default for RetentionDefaults {
+    fn default() -> Self {
+        RetentionDefaults {
+            variants: "7d",
+            proxy: "7d",
         }
     }
 }

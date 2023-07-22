@@ -19,6 +19,8 @@ buffer_capacity = 102400
 service_name = "pict-rs"
 targets = "info"
 
+[metrics]
+
 [old_db]
 path = "/mnt"
 
@@ -31,6 +33,10 @@ filters = [
     "resize",
     "thumbnail",
 ]
+
+[media.retention]
+variants = "7d"
+proxy = "7d"
 
 [media.image]
 max_width = 10000

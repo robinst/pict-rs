@@ -7,6 +7,8 @@ use clap::{Parser, Subcommand};
 use std::{net::SocketAddr, path::PathBuf};
 use url::Url;
 
+use super::primitives::RetentionValue;
+
 impl Args {
     pub(super) fn into_output(self) -> Output {
         let Args {
@@ -51,6 +53,8 @@ impl Args {
                 metrics_prometheus_address,
                 media_preprocess_steps,
                 media_max_file_size,
+                media_retention_variants,
+                media_retention_proxy,
                 media_image_max_width,
                 media_image_max_height,
                 media_image_max_area,
@@ -107,6 +111,11 @@ impl Args {
 
                 let metrics = Metrics {
                     prometheus_address: metrics_prometheus_address,
+                };
+
+                let retention = Retention {
+                    variants: media_retention_variants,
+                    proxy: media_retention_proxy,
                 };
 
                 let image_quality = ImageQuality {
@@ -170,6 +179,7 @@ impl Args {
                     max_file_size: media_max_file_size,
                     preprocess_steps: media_preprocess_steps,
                     filters: media_filters,
+                    retention: retention.set(),
                     image: image.set(),
                     animation: animation.set(),
                     video: video.set(),
@@ -453,11 +463,34 @@ struct Media {
     #[serde(skip_serializing_if = "Option::is_none")]
     filters: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    retention: Option<Retention>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     image: Option<Image>,
     #[serde(skip_serializing_if = "Option::is_none")]
     animation: Option<Animation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     video: Option<Video>,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct Retention {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    variants: Option<RetentionValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxy: Option<RetentionValue>,
+}
+
+impl Retention {
+    fn set(self) -> Option<Self> {
+        let any_set = self.variants.is_some() || self.proxy.is_some();
+
+        if any_set {
+            Some(self)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -767,6 +800,18 @@ struct Run {
     /// The maximum size, in megabytes, for all uploaded media
     #[arg(long)]
     media_max_file_size: Option<usize>,
+
+    /// How long to keep image "variants" around
+    ///
+    /// A variant is any processed version of an original image
+    #[arg(long)]
+    media_retention_variants: Option<RetentionValue>,
+
+    /// How long to keep "proxied" images around
+    ///
+    /// Proxied images are any images ingested using the media proxy functionality
+    #[arg(long)]
+    media_retention_proxy: Option<RetentionValue>,
 
     /// The maximum width, in pixels, for uploaded images
     #[arg(long)]

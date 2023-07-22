@@ -1,5 +1,5 @@
 use crate::{
-    config::primitives::{Filesystem, LogFormat, Targets},
+    config::primitives::{Filesystem, LogFormat, RetentionValue, Targets},
     formats::{AnimationFormat, AudioCodec, ImageFormat, VideoCodec},
     serde_str::Serde,
 };
@@ -173,11 +173,20 @@ pub(crate) struct Media {
 
     pub(crate) filters: BTreeSet<String>,
 
+    pub(crate) retention: Retention,
+
     pub(crate) image: Image,
 
     pub(crate) animation: Animation,
 
     pub(crate) video: Video,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Retention {
+    pub(crate) variants: RetentionValue,
+
+    pub(crate) proxy: RetentionValue,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

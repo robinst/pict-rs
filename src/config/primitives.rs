@@ -3,6 +3,116 @@ use std::{fmt::Display, path::PathBuf, str::FromStr};
 use tracing::Level;
 use url::Url;
 
+#[derive(Clone, Debug)]
+pub(crate) struct RetentionValue {
+    value: u32,
+    units: TimeUnit,
+}
+
+#[derive(Clone, Debug)]
+enum TimeUnit {
+    Minute,
+    Hour,
+    Day,
+    Year,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RetentionValueError {
+    #[error("No number in retention value")]
+    NoValue,
+    #[error("Provided value is invalid")]
+    InvalidValue,
+    #[error("No units in retention value")]
+    NoUnits,
+    #[error("Provided units are invalid")]
+    InvalidUnits,
+}
+
+impl RetentionValue {
+    pub(crate) fn to_duration(&self) -> time::Duration {
+        match self.units {
+            TimeUnit::Minute => time::Duration::minutes(i64::from(self.value)),
+            TimeUnit::Hour => time::Duration::hours(i64::from(self.value)),
+            TimeUnit::Day => time::Duration::days(i64::from(self.value)),
+            TimeUnit::Year => time::Duration::days(i64::from(self.value) * 365),
+        }
+    }
+}
+
+impl std::str::FromStr for RetentionValue {
+    type Err = RetentionValueError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let num_str = s.chars().take_while(|c| c.is_digit(10)).collect::<String>();
+
+        if num_str.is_empty() {
+            return Err(RetentionValueError::NoValue);
+        }
+
+        let value: u32 = num_str
+            .parse()
+            .map_err(|_| RetentionValueError::InvalidValue)?;
+
+        let units = s.trim_start_matches(&num_str).to_lowercase();
+
+        if units.is_empty() {
+            return Err(RetentionValueError::NoUnits);
+        }
+
+        let units = match units.as_str() {
+            "m" | "minute" => TimeUnit::Minute,
+            "h" | "hour" => TimeUnit::Hour,
+            "d" | "day" => TimeUnit::Day,
+            "y" | "year" => TimeUnit::Year,
+            _ => return Err(RetentionValueError::InvalidUnits),
+        };
+
+        Ok(RetentionValue { value, units })
+    }
+}
+
+impl std::fmt::Display for TimeUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Minute => write!(f, "m"),
+            Self::Hour => write!(f, "h"),
+            Self::Day => write!(f, "d"),
+            Self::Year => write!(f, "y"),
+        }
+    }
+}
+
+impl std::fmt::Display for RetentionValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.value, self.units)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RetentionValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let s = String::deserialize(deserializer)?;
+
+        s.parse().map_err(D::Error::custom)
+    }
+}
+
+impl serde::Serialize for RetentionValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = self.to_string();
+
+        s.serialize(serializer)
+    }
+}
+
 #[derive(
     Clone,
     Copy,
