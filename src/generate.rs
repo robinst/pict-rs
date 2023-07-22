@@ -8,9 +8,39 @@ use crate::{
     store::Store,
 };
 use actix_web::web::Bytes;
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Instant};
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
+
+struct MetricsGuard {
+    start: Instant,
+    armed: bool,
+}
+
+impl MetricsGuard {
+    fn guard() -> Self {
+        metrics::increment_counter!("pict-rs.generate.start");
+        Self {
+            start: Instant::now(),
+            armed: true,
+        }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for MetricsGuard {
+    fn drop(&mut self) {
+        metrics::histogram!("pict-rs.generate.duration", self.start.elapsed().as_secs_f64(), "completed" => (!self.armed).to_string());
+        if self.armed {
+            metrics::increment_counter!("pict-rs.generate.failure");
+        } else {
+            metrics::increment_counter!("pict-rs.generate.success");
+        }
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(repo, store, hash))]
@@ -61,6 +91,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     media: &crate::config::Media,
     hash: R::Bytes,
 ) -> Result<(Details, Bytes), Error> {
+    let guard = MetricsGuard::guard();
     let permit = crate::PROCESS_SEMAPHORE.acquire().await;
 
     let identifier = if let Some(identifier) = repo
@@ -148,6 +179,8 @@ async fn process<R: FullRepo, S: Store + 'static>(
         &identifier,
     )
     .await?;
+
+    guard.disarm();
 
     Ok((details, bytes)) as Result<(Details, Bytes), Error>
 }

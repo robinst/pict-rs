@@ -1,3 +1,5 @@
+mod metrics;
+
 use actix_rt::time::Timeout;
 use actix_web::{
     dev::{Service, ServiceRequest, Transform},
@@ -9,6 +11,8 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+
+pub(crate) use self::metrics::Metrics;
 
 pub(crate) struct Deadline;
 pub(crate) struct DeadlineMiddleware<S> {

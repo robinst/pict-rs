@@ -5,6 +5,7 @@ use std::{
     pin::Pin,
     process::{ExitStatus, Stdio},
     task::{Context, Poll},
+    time::Instant,
 };
 use tokio::{
     io::{AsyncRead, AsyncWriteExt, ReadBuf},
@@ -13,12 +14,52 @@ use tokio::{
 };
 use tracing::{Instrument, Span};
 
+struct MetricsGuard {
+    start: Instant,
+    armed: bool,
+    command: String,
+}
+
+impl MetricsGuard {
+    fn guard(command: String) -> Self {
+        metrics::increment_counter!("pict-rs.process.spawn", "command" => command.clone());
+
+        Self {
+            start: Instant::now(),
+            armed: true,
+            command,
+        }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for MetricsGuard {
+    fn drop(&mut self) {
+        metrics::histogram!(
+            "pict-rs.process.duration",
+            self.start.elapsed().as_secs_f64(),
+            "command" => self.command.clone(),
+            "completed" => (!self.armed).to_string(),
+        );
+
+        if self.armed {
+            metrics::increment_counter!("pict-rs.process.failure", "command" => self.command.clone());
+        } else {
+            metrics::increment_counter!("pict-rs.process.success", "command" => self.command.clone());
+        }
+    }
+}
+
 #[derive(Debug)]
 struct StatusError(ExitStatus);
 
 pub(crate) struct Process {
     command: String,
     child: Child,
+    guard: MetricsGuard,
 }
 
 impl std::fmt::Debug for Process {
@@ -80,6 +121,8 @@ impl Process {
 
     fn spawn(command: &str, cmd: &mut Command) -> std::io::Result<Self> {
         tracing::trace_span!(parent: None, "Spawn command", %command).in_scope(|| {
+            let guard = MetricsGuard::guard(command.into());
+
             let cmd = cmd
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -88,6 +131,7 @@ impl Process {
             cmd.spawn().map(|child| Process {
                 child,
                 command: String::from(command),
+                guard,
             })
         })
     }
@@ -97,7 +141,11 @@ impl Process {
         let res = self.child.wait().await;
 
         match res {
-            Ok(status) if status.success() => Ok(()),
+            Ok(status) if status.success() => {
+                self.guard.disarm();
+
+                Ok(())
+            }
             Ok(status) => Err(ProcessError::Status(self.command, status)),
             Err(e) => Err(ProcessError::Other(e)),
         }
@@ -133,6 +181,7 @@ impl Process {
 
         let mut child = self.child;
         let command = self.command;
+        let guard = self.guard;
         let handle = tracing::trace_span!(parent: None, "Spawn task", %command).in_scope(|| {
             actix_rt::spawn(
                 async move {
@@ -143,7 +192,9 @@ impl Process {
 
                     match child.wait().await {
                         Ok(status) => {
-                            if !status.success() {
+                            if status.success() {
+                                guard.disarm();
+                            } else {
                                 let _ = tx.send(std::io::Error::new(
                                     std::io::ErrorKind::Other,
                                     StatusError(status),

@@ -48,6 +48,7 @@ impl Args {
                 worker_id,
                 client_pool_size,
                 client_timeout,
+                metrics_prometheus_address,
                 media_preprocess_steps,
                 media_max_file_size,
                 media_image_max_width,
@@ -102,6 +103,10 @@ impl Args {
                 let client = Client {
                     pool_size: client_pool_size,
                     timeout: client_timeout,
+                };
+
+                let metrics = Metrics {
+                    prometheus_address: metrics_prometheus_address,
                 };
 
                 let image_quality = ImageQuality {
@@ -180,6 +185,7 @@ impl Args {
                                 client,
                                 old_db,
                                 tracing,
+                                metrics,
                                 media,
                                 store,
                                 repo,
@@ -197,6 +203,7 @@ impl Args {
                                 client,
                                 old_db,
                                 tracing,
+                                metrics,
                                 media,
                                 store,
                                 repo,
@@ -212,6 +219,7 @@ impl Args {
                             client,
                             old_db,
                             tracing,
+                            metrics,
                             media,
                             store: None,
                             repo: None,
@@ -229,6 +237,7 @@ impl Args {
                 let server = Server::default();
                 let client = Client::default();
                 let media = Media::default();
+                let metrics = Metrics::default();
 
                 match store {
                     MigrateStoreFrom::Filesystem(MigrateFilesystem { from, to }) => match to {
@@ -238,6 +247,7 @@ impl Args {
                                 client,
                                 old_db,
                                 tracing,
+                                metrics,
                                 media,
                                 store: None,
                                 repo,
@@ -257,6 +267,7 @@ impl Args {
                                     client,
                                     old_db,
                                     tracing,
+                                    metrics,
                                     media,
                                     store: None,
                                     repo,
@@ -280,6 +291,7 @@ impl Args {
                                         client,
                                         old_db,
                                         tracing,
+                                        metrics,
                                         media,
                                         store: None,
                                         repo,
@@ -302,6 +314,7 @@ impl Args {
                                     client,
                                     old_db,
                                     tracing,
+                                    metrics,
                                     media,
                                     store: None,
                                     repo,
@@ -347,6 +360,7 @@ pub(super) struct ConfigFormat {
     client: Client,
     old_db: OldDb,
     tracing: Tracing,
+    metrics: Metrics,
     media: Media,
     #[serde(skip_serializing_if = "Option::is_none")]
     repo: Option<Repo>,
@@ -413,6 +427,13 @@ struct OpenTelemetry {
     service_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     targets: Option<Serde<Targets>>,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct Metrics {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prometheus_address: Option<SocketAddr>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -722,6 +743,10 @@ struct Run {
     /// This number defaults to 30
     #[arg(long)]
     client_timeout: Option<u64>,
+
+    /// Whether to enable the prometheus scrape endpoint
+    #[arg(long)]
+    metrics_prometheus_address: Option<SocketAddr>,
 
     /// How many files are allowed to be uploaded per-request
     ///

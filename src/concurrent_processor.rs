@@ -56,6 +56,8 @@ impl ProcessMap {
                     completed = &tracing::field::Empty,
                 );
 
+                metrics::increment_counter!("pict-rs.process-map.inserted");
+
                 (CancelState::Sender { sender }, span)
             }
             Entry::Occupied(receiver) => {
@@ -138,7 +140,9 @@ where
             CancelState::Sender { sender } => {
                 let res = std::task::ready!(fut.poll(cx));
 
-                process_map.remove(key);
+                if process_map.remove(key).is_some() {
+                    metrics::increment_counter!("pict-rs.process-map.removed");
+                }
 
                 if let Ok(tup) = &res {
                     let _ = sender.try_send(tup.clone());
@@ -158,6 +162,10 @@ impl Drop for CancelToken {
         if self.state.is_sender() {
             let completed = self.process_map.remove(&self.key).is_none();
             self.span.record("completed", completed);
+
+            if !completed {
+                metrics::increment_counter!("pict-rs.process-map.removed");
+            }
         }
     }
 }

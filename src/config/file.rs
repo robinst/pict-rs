@@ -15,6 +15,8 @@ pub(crate) struct ConfigFile {
 
     pub(crate) tracing: Tracing,
 
+    pub(crate) metrics: Metrics,
+
     pub(crate) old_db: OldDb,
 
     pub(crate) media: Media,
@@ -117,6 +119,13 @@ pub(crate) struct Tracing {
     pub(crate) console: Console,
 
     pub(crate) opentelemetry: OpenTelemetry,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct Metrics {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) prometheus_address: Option<SocketAddr>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

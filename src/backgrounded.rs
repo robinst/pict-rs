@@ -75,6 +75,8 @@ where
 {
     fn drop(&mut self) {
         if self.identifier.is_some() || self.upload_id.is_some() {
+            metrics::increment_counter!("pict-rs.background.upload.failure");
+
             let cleanup_parent_span =
                 tracing::info_span!(parent: None, "Dropped backgrounded cleanup");
             cleanup_parent_span.follows_from(Span::current());
@@ -108,6 +110,8 @@ where
                     )
                 });
             }
+        } else {
+            metrics::increment_counter!("pict-rs.background.upload.success");
         }
     }
 }

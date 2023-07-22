@@ -225,6 +225,8 @@ where
 {
     fn drop(&mut self) {
         if self.hash.is_some() || self.alias.is_some() | self.identifier.is_some() {
+            metrics::increment_counter!("pict-rs.ingest.failure");
+
             let cleanup_parent_span = tracing::info_span!(parent: None, "Dropped session cleanup");
             cleanup_parent_span.follows_from(Span::current());
 
@@ -279,6 +281,8 @@ where
                     )
                 });
             }
+        } else {
+            metrics::increment_counter!("pict-rs.ingest.success");
         }
     }
 }

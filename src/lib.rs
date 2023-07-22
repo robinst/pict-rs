@@ -37,6 +37,8 @@ use futures_util::{
     stream::{empty, once},
     Stream, StreamExt, TryStreamExt,
 };
+use metrics_exporter_prometheus::PrometheusBuilder;
+use middleware::Metrics;
 use once_cell::sync::Lazy;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
@@ -161,6 +163,8 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
                     let store = store.clone();
                     let config = config.clone();
 
+                    metrics::increment_counter!("pict-rs.files", "upload" => "inline");
+
                     let span = tracing::info_span!("file-upload", ?filename);
 
                     let stream = stream.map_err(Error::from);
@@ -217,6 +221,8 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
                     let repo = repo.clone();
                     let store = store.clone();
                     let config = config.clone();
+
+                    metrics::increment_counter!("pict-rs.files", "import" => "inline");
 
                     let span = tracing::info_span!("file-import", ?filename);
 
@@ -353,6 +359,8 @@ impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
                     let repo = (**repo).clone();
                     let store = (**store).clone();
 
+                    metrics::increment_counter!("pict-rs.files", "upload" => "background");
+
                     let span = tracing::info_span!("file-proxy", ?filename);
 
                     let stream = stream.map_err(Error::from);
@@ -440,6 +448,7 @@ async fn claim_upload<R: FullRepo, S: Store + 'static>(
         Ok(wait_res) => {
             let upload_result = wait_res?;
             repo.claim(upload_id).await?;
+            metrics::increment_counter!("pict-rs.background.upload.claim");
 
             match upload_result {
                 UploadResult::Success { alias, token } => {
@@ -511,6 +520,8 @@ async fn do_download_inline<R: FullRepo + 'static, S: Store + 'static>(
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
+    metrics::increment_counter!("pict-rs.files", "download" => "inline");
+
     let mut session = ingest::ingest(&repo, &store, stream, None, &config.media).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
@@ -536,6 +547,8 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
     repo: web::Data<R>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
+    metrics::increment_counter!("pict-rs.files", "download" => "background");
+
     let backgrounded = Backgrounded::proxy((**repo).clone(), (**store).clone(), stream).await?;
 
     let upload_id = backgrounded.upload_id().expect("Upload ID exists");
@@ -1362,6 +1375,7 @@ async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig)
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
+            .wrap(Metrics)
             .app_data(web::Data::new(process_map.clone()))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     })
@@ -1396,6 +1410,7 @@ async fn launch_object_store<
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
+            .wrap(Metrics)
             .app_data(web::Data::new(process_map.clone()))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     })
@@ -1471,8 +1486,6 @@ impl<P: AsRef<Path>, T: serde::Serialize> ConfigSource<P, T> {
     /// parameters have defaults, it can be useful to dump a valid configuration with default values to
     /// see what is available for tweaking.
     ///
-    /// This function must be called before `run` or `install_tracing`
-    ///
     /// When running pict-rs as a library, configuration is limited to environment variables and
     /// configuration files. Commandline options are not available.
     ///
@@ -1532,6 +1545,16 @@ impl PictRsConfiguration {
     /// subscribers.
     pub fn install_tracing(self) -> color_eyre::Result<Self> {
         init_tracing(&self.config.tracing)?;
+        Ok(self)
+    }
+
+    pub fn install_metrics(self) -> color_eyre::Result<Self> {
+        if let Some(addr) = self.config.metrics.prometheus_address {
+            PrometheusBuilder::new()
+                .with_http_listener(addr)
+                .install()?;
+        }
+
         Ok(self)
     }
 
