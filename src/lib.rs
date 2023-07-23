@@ -1692,6 +1692,9 @@ impl PictRsConfiguration {
                         sled_repo
                             .requeue_in_progress(config.server.worker_id.as_bytes().to_vec())
                             .await?;
+                        sled_repo
+                            .mark_accessed::<<FileStore as Store>::Identifier>()
+                            .await?;
 
                         launch_file_store(sled_repo, store, client, config, sled_extra_config)
                             .await?;
@@ -1733,6 +1736,9 @@ impl PictRsConfiguration {
                     Repo::Sled(sled_repo) => {
                         sled_repo
                             .requeue_in_progress(config.server.worker_id.as_bytes().to_vec())
+                            .await?;
+                        sled_repo
+                            .mark_accessed::<<ObjectStore as Store>::Identifier>()
                             .await?;
 
                         launch_object_store(sled_repo, store, client, config, sled_extra_config)

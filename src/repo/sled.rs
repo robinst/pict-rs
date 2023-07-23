@@ -133,7 +133,26 @@ impl SledRepo {
         Ok(db)
     }
 
-    #[tracing::instrument(level = "warn")]
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub(crate) async fn mark_accessed<I: Identifier + 'static>(&self) -> Result<(), StoreError> {
+        use futures_util::StreamExt;
+
+        let mut stream = self.hashes().await;
+
+        while let Some(res) = stream.next().await {
+            let hash = res?;
+
+            for (variant, _) in self.variants::<I>(hash.clone()).await? {
+                if !self.contains_variant(hash.clone(), variant.clone()).await? {
+                    VariantAccessRepo::accessed(self, hash.clone(), variant).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "warn", skip_all)]
     pub(crate) async fn export(&self) -> Result<(), RepoError> {
         let path = self
             .export_path
