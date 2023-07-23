@@ -164,6 +164,39 @@ preprocess_steps = 'crop=16x9&resize=1200&blur=0.2'
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 
 
+[media.retention]
+## Optional: retention period for image variants
+# environment variable: PICTRS__MEDIA__RETENTION__VARIANTS
+# default: 7d
+#
+# Variants are any image served from the process.{ext} endpoint. These images are generated based on
+# an original upload, and can be regenerated when needed. The retention period is after last access
+# rather than after generation, so a value of "7d" means "7 days after the last access of this
+# variant"
+#
+# Available units are
+# - m (minutes)
+# - h (hours)
+# - d (days)
+# - y (years)
+variants = "7d"
+
+## Optional: retention period for proxied images
+# environment variable: PICTRS__MEDIA__RETENTION__PROXY
+# default: 7d
+#
+# Proxied images reside originally on other servers, and can be re-fetched if needed. The retention
+# period is after last access rather than after fetch, so a value of "7d" means "7 days after the
+# last access of this image"
+#
+# Available units are
+# - m (minutes)
+# - h (hours)
+# - d (days)
+# - y (years)
+proxy = "7d"
+
+
 [media.image]
 ## Optional: max media width (in pixels)
 # environment variable: PICTRS__MEDIA__IMAGE__MAX_WIDTH
