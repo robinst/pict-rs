@@ -590,32 +590,28 @@ async fn delete<R: FullRepo>(
     Ok(HttpResponse::NoContent().finish())
 }
 
-type ProcessQuery = Vec<(String, String)>;
+#[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(untagged)]
+enum ProcessSource {
+    Source { src: Serde<Alias> },
+    Alias { alias: Serde<Alias> },
+    Proxy { proxy: url::Url },
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq, PartialOrd, Ord)]
+struct ProcessQuery {
+    #[serde(flatten)]
+    source: ProcessSource,
+
+    #[serde(with = "tuple_vec_map", flatten)]
+    operations: Vec<(String, String)>,
+}
 
 fn prepare_process(
     config: &Configuration,
-    query: web::Query<ProcessQuery>,
+    operations: Vec<(String, String)>,
     ext: &str,
-) -> Result<(InputProcessableFormat, Alias, PathBuf, Vec<String>), Error> {
-    let (alias, operations) =
-        query
-            .into_inner()
-            .into_iter()
-            .fold((String::new(), Vec::new()), |(s, mut acc), (k, v)| {
-                if k == "src" {
-                    (v, acc)
-                } else {
-                    acc.push((k, v));
-                    (s, acc)
-                }
-            });
-
-    if alias.is_empty() {
-        return Err(UploadError::MissingAlias.into());
-    }
-
-    let alias = Alias::from_existing(&alias);
-
+) -> Result<(InputProcessableFormat, PathBuf, Vec<String>), Error> {
     let operations = operations
         .into_iter()
         .filter(|(k, _)| config.media.filters.contains(&k.to_lowercase()))
@@ -628,17 +624,24 @@ fn prepare_process(
     let (thumbnail_path, thumbnail_args) =
         self::processor::build_chain(&operations, &format.to_string())?;
 
-    Ok((format, alias, thumbnail_path, thumbnail_args))
+    Ok((format, thumbnail_path, thumbnail_args))
 }
 
 #[tracing::instrument(name = "Fetching derived details", skip(repo, config))]
 async fn process_details<R: FullRepo, S: Store>(
-    query: web::Query<ProcessQuery>,
+    web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     repo: web::Data<R>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let (_, alias, thumbnail_path, _) = prepare_process(&config, query, ext.as_str())?;
+    let alias = match source {
+        ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
+            Serde::into_inner(alias)
+        }
+        ProcessSource::Proxy { proxy } => todo!("proxy URL"),
+    };
+
+    let (_, thumbnail_path, _) = prepare_process(&config, operations, ext.as_str())?;
 
     let Some(hash) = repo.hash(&alias).await? else {
         // Invalid alias
@@ -691,15 +694,22 @@ async fn not_found_hash<R: FullRepo>(repo: &R) -> Result<Option<(Alias, R::Bytes
 )]
 async fn process<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
-    query: web::Query<ProcessQuery>,
+    web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     repo: web::Data<R>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
     process_map: web::Data<ProcessMap>,
 ) -> Result<HttpResponse, Error> {
-    let (format, alias, thumbnail_path, thumbnail_args) =
-        prepare_process(&config, query, ext.as_str())?;
+    let alias = match source {
+        ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
+            Serde::into_inner(alias)
+        }
+        ProcessSource::Proxy { proxy } => todo!("proxy URL"),
+    };
+
+    let (format, thumbnail_path, thumbnail_args) =
+        prepare_process(&config, operations, ext.as_str())?;
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
 
@@ -816,13 +826,20 @@ async fn process<R: FullRepo, S: Store + 'static>(
 #[tracing::instrument(name = "Serving processed image headers", skip(repo, store, config))]
 async fn process_head<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
-    query: web::Query<ProcessQuery>,
+    web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     repo: web::Data<R>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let (_, alias, thumbnail_path, _) = prepare_process(&config, query, ext.as_str())?;
+    let alias = match source {
+        ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
+            Serde::into_inner(alias)
+        }
+        ProcessSource::Proxy { proxy } => todo!("proxy URL"),
+    };
+
+    let (_, thumbnail_path, _) = prepare_process(&config, operations, ext.as_str())?;
 
     let path_string = thumbnail_path.to_string_lossy().to_string();
     let Some(hash) = repo.hash(&alias).await? else {
@@ -878,13 +895,20 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
 /// Process files
 #[tracing::instrument(name = "Spawning image process", skip(repo))]
 async fn process_backgrounded<R: FullRepo, S: Store>(
-    query: web::Query<ProcessQuery>,
+    web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     repo: web::Data<R>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let (target_format, source, process_path, process_args) =
-        prepare_process(&config, query, ext.as_str())?;
+    let source = match source {
+        ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
+            Serde::into_inner(alias)
+        }
+        ProcessSource::Proxy { proxy } => todo!("proxy URL"),
+    };
+
+    let (target_format, process_path, process_args) =
+        prepare_process(&config, operations, ext.as_str())?;
 
     let path_string = process_path.to_string_lossy().to_string();
     let Some(hash) = repo.hash(&source).await? else {
@@ -910,6 +934,24 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
 }
 
 /// Fetch file details
+#[tracing::instrument(name = "Fetching query details", skip(repo, store, config))]
+async fn details_query<R: FullRepo, S: Store + 'static>(
+    web::Query(alias_query): web::Query<AliasQuery>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    config: web::Data<Configuration>,
+) -> Result<HttpResponse, Error> {
+    let alias = match alias_query {
+        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Proxy { proxy } => {
+            todo!("Proxy URL")
+        }
+    };
+
+    do_details(alias, repo, store, config).await
+}
+
+/// Fetch file details
 #[tracing::instrument(name = "Fetching details", skip(repo, store, config))]
 async fn details<R: FullRepo, S: Store + 'static>(
     alias: web::Path<Serde<Alias>>,
@@ -917,11 +959,37 @@ async fn details<R: FullRepo, S: Store + 'static>(
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let alias = alias.into_inner();
+    do_details(alias.into_inner(), repo, store, config).await
+}
 
+async fn do_details<R: FullRepo, S: Store + 'static>(
+    alias: Serde<Alias>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    config: web::Data<Configuration>,
+) -> Result<HttpResponse, Error> {
     let details = ensure_details(&repo, &store, &config, &alias).await?;
 
     Ok(HttpResponse::Ok().json(&details))
+}
+
+/// Serve files based on alias query
+#[tracing::instrument(name = "Serving file query", skip(repo, store, config))]
+async fn serve_query<R: FullRepo, S: Store + 'static>(
+    range: Option<web::Header<Range>>,
+    web::Query(alias_query): web::Query<AliasQuery>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    config: web::Data<Configuration>,
+) -> Result<HttpResponse, Error> {
+    let alias = match alias_query {
+        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Proxy { proxy } => {
+            todo!("Proxy URL")
+        }
+    };
+
+    do_serve(range, alias, repo, store, config).await
 }
 
 /// Serve files
@@ -933,8 +1001,16 @@ async fn serve<R: FullRepo, S: Store + 'static>(
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let alias = alias.into_inner();
+    do_serve(range, alias.into_inner(), repo, store, config).await
+}
 
+async fn do_serve<R: FullRepo, S: Store + 'static>(
+    range: Option<web::Header<Range>>,
+    alias: Serde<Alias>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    config: web::Data<Configuration>,
+) -> Result<HttpResponse, Error> {
     let (hash, alias, not_found) = if let Some(hash) = repo.hash(&alias).await? {
         (hash, Serde::into_inner(alias), false)
     } else {
@@ -965,6 +1041,24 @@ async fn serve<R: FullRepo, S: Store + 'static>(
     ranged_file_resp(&store, identifier, range, details, not_found).await
 }
 
+#[tracing::instrument(name = "Serving query file headers", skip(repo, store, config))]
+async fn serve_query_head<R: FullRepo, S: Store + 'static>(
+    range: Option<web::Header<Range>>,
+    web::Query(alias_query): web::Query<AliasQuery>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    config: web::Data<Configuration>,
+) -> Result<HttpResponse, Error> {
+    let alias = match alias_query {
+        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Proxy { proxy } => {
+            todo!("Proxy URL")
+        }
+    };
+
+    do_serve_head(range, alias, repo, store, config).await
+}
+
 #[tracing::instrument(name = "Serving file headers", skip(repo, store, config))]
 async fn serve_head<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
@@ -973,8 +1067,16 @@ async fn serve_head<R: FullRepo, S: Store + 'static>(
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let alias = alias.into_inner();
+    do_serve_head(range, alias.into_inner(), repo, store, config).await
+}
 
+async fn do_serve_head<R: FullRepo, S: Store + 'static>(
+    range: Option<web::Header<Range>>,
+    alias: Serde<Alias>,
+    repo: web::Data<R>,
+    store: web::Data<S>,
+    config: web::Data<Configuration>,
+) -> Result<HttpResponse, Error> {
     let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(&alias).await? else {
         // Invalid alias
         return Ok(HttpResponse::NotFound().finish());
@@ -1137,8 +1239,9 @@ async fn clean_variants<R: FullRepo>(
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct AliasQuery {
-    alias: Serde<Alias>,
+enum AliasQuery {
+    Proxy { proxy: url::Url },
+    Alias { alias: Serde<Alias> },
 }
 
 #[tracing::instrument(name = "Setting 404 Image", skip(repo, config))]
@@ -1151,7 +1254,12 @@ async fn set_not_found<R: FullRepo>(
         return Err(UploadError::ReadOnly.into());
     }
 
-    let alias = json.into_inner().alias;
+    let alias = match json.into_inner() {
+        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Proxy { proxy } => {
+            todo!("Proxy URL")
+        }
+    };
 
     if repo.hash(&alias).await?.is_none() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
@@ -1168,7 +1276,7 @@ async fn set_not_found<R: FullRepo>(
 
 #[tracing::instrument(name = "Purging file", skip(repo, config))]
 async fn purge<R: FullRepo>(
-    query: web::Query<AliasQuery>,
+    web::Query(alias_query): web::Query<AliasQuery>,
     repo: web::Data<R>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -1176,7 +1284,13 @@ async fn purge<R: FullRepo>(
         return Err(UploadError::ReadOnly.into());
     }
 
-    let alias = query.into_inner().alias;
+    let alias = match alias_query {
+        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Proxy { proxy } => {
+            todo!("Proxy URL")
+        }
+    };
+
     let aliases = repo.aliases_from_alias(&alias).await?;
 
     let Some(hash) = repo.hash(&alias).await? else {
@@ -1194,10 +1308,16 @@ async fn purge<R: FullRepo>(
 
 #[tracing::instrument(name = "Fetching aliases", skip(repo))]
 async fn aliases<R: FullRepo>(
-    query: web::Query<AliasQuery>,
+    web::Query(alias_query): web::Query<AliasQuery>,
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
-    let alias = query.into_inner().alias;
+    let alias = match alias_query {
+        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Proxy { proxy } => {
+            todo!("Proxy URL")
+        }
+    };
+
     let aliases = repo.aliases_from_alias(&alias).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
@@ -1208,10 +1328,16 @@ async fn aliases<R: FullRepo>(
 
 #[tracing::instrument(name = "Fetching identifier", skip(repo))]
 async fn identifier<R: FullRepo, S: Store>(
-    query: web::Query<AliasQuery>,
+    web::Query(alias_query): web::Query<AliasQuery>,
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
-    let alias = query.into_inner().alias;
+    let alias = match alias_query {
+        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Proxy { proxy } => {
+            todo!("Proxy URL")
+        }
+    };
+
     let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(&alias).await? else {
         // Invalid alias
         return Ok(HttpResponse::NotFound().json(serde_json::json!({
@@ -1304,9 +1430,17 @@ fn configure_endpoints<
                         .route(web::get().to(delete::<R>)),
                 )
                 .service(
-                    web::resource("/original/{filename}")
-                        .route(web::get().to(serve::<R, S>))
-                        .route(web::head().to(serve_head::<R, S>)),
+                    web::scope("/original")
+                        .service(
+                            web::resource("")
+                                .route(web::get().to(serve_query::<R, S>))
+                                .route(web::head().to(serve_query_head::<R, S>)),
+                        )
+                        .service(
+                            web::resource("/{filename}")
+                                .route(web::get().to(serve::<R, S>))
+                                .route(web::head().to(serve_head::<R, S>)),
+                        ),
                 )
                 .service(
                     web::resource("/process.{ext}")
@@ -1320,8 +1454,14 @@ fn configure_endpoints<
                 .service(
                     web::scope("/details")
                         .service(
-                            web::resource("/original/{filename}")
-                                .route(web::get().to(details::<R, S>)),
+                            web::scope("/original")
+                                .service(
+                                    web::resource("").route(web::get().to(details_query::<R, S>)),
+                                )
+                                .service(
+                                    web::resource("/{filename}")
+                                        .route(web::get().to(details::<R, S>)),
+                                ),
                         )
                         .service(
                             web::resource("/process.{ext}")
@@ -1755,5 +1895,62 @@ impl PictRsConfiguration {
         self::tmp_file::remove_tmp_dir().await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn source() {
+        let query = super::ProcessQuery {
+            source: super::ProcessSource::Source {
+                src: super::Serde::new(super::Alias::from_existing("example.png")),
+            },
+            operations: vec![("resize".into(), "200".into())],
+        };
+        let encoded = serde_urlencoded::to_string(&query).expect("Encoded");
+        let new_query: super::ProcessQuery = serde_urlencoded::from_str(&encoded).expect("Decoded");
+        // Don't compare entire query - "src" gets deserialized twice
+        assert_eq!(new_query.source, query.source);
+
+        assert!(new_query
+            .operations
+            .contains(&("resize".into(), "200".into())));
+    }
+
+    #[test]
+    fn alias() {
+        let query = super::ProcessQuery {
+            source: super::ProcessSource::Alias {
+                alias: super::Serde::new(super::Alias::from_existing("example.png")),
+            },
+            operations: vec![("resize".into(), "200".into())],
+        };
+        let encoded = serde_urlencoded::to_string(&query).expect("Encoded");
+        let new_query: super::ProcessQuery = serde_urlencoded::from_str(&encoded).expect("Decoded");
+        // Don't compare entire query - "alias" gets deserialized twice
+        assert_eq!(new_query.source, query.source);
+
+        assert!(new_query
+            .operations
+            .contains(&("resize".into(), "200".into())));
+    }
+
+    #[test]
+    fn url() {
+        let query = super::ProcessQuery {
+            source: super::ProcessSource::Proxy {
+                proxy: "http://example.com/image.png".parse().expect("valid url"),
+            },
+            operations: vec![("resize".into(), "200".into())],
+        };
+        let encoded = serde_urlencoded::to_string(&query).expect("Encoded");
+        let new_query: super::ProcessQuery = serde_urlencoded::from_str(&encoded).expect("Decoded");
+        // Don't compare entire query - "proxy" gets deserialized twice
+        assert_eq!(new_query.source, query.source);
+
+        assert!(new_query
+            .operations
+            .contains(&("resize".into(), "200".into())));
     }
 }

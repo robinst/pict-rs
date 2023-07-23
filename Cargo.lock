@@ -1747,6 +1747,7 @@ dependencies = [
  "reqwest-tracing",
  "rusty-s3",
  "serde",
+ "serde-tuple-vec-map",
  "serde_cbor",
  "serde_json",
  "serde_urlencoded",
@@ -2246,6 +2247,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b88756493a5bd5e5395d53baa70b194b05764ab85b59e43e4b8f4e1192fa9b1"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde-tuple-vec-map"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a04d0ebe0de77d7d445bb729a895dcb0a288854b267ca85f030ce51cdc578c82"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

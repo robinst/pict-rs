@@ -44,6 +44,7 @@ reqwest-middleware = "0.2.2"
 reqwest-tracing = { version = "0.4.5", features = ["opentelemetry_0_19"] }
 rusty-s3 = "0.4.1"
 serde = { version = "1.0", features = ["derive"] }
+serde-tuple-vec-map = "1.0.1"
 serde_cbor = "0.11.2"
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
