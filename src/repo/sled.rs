@@ -962,7 +962,7 @@ impl HashRepo for SledRepo {
         opt.map(|ivec| I::from_bytes(ivec.to_vec())).transpose()
     }
 
-    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
+    #[tracing::instrument(level = "debug", skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn variants<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
