@@ -377,10 +377,25 @@ pict-rs offers the following endpoints:
         ```
     - 204 No Content (Upload validation and ingest is not complete, and waiting timed out)
         In this case, trying again is fine
-- `GET /image/original/{file}` get a full-resolution image. `file` here is the `file` key from the
+- `GET /image/original/{alias}` Get a full-resolution image. `alias` here is the `file` key from the
     `/image` endpoint's JSON
-- `HEAD /image/original/{file}` Returns just the headers from the analogous `GET` request.
-- `GET /image/details/original/{file}` for getting the details of a full-resolution image.
+- `GET /image/original?alias={alias}` Get a full-resolution image. `alias` here is the `file` key from
+    the `/image` endpoint's JSON
+    Available source arguments are
+    - `?alias={alias}` Serve an original file by its alias
+    - `?proxy={url}` This `proxy` field can be used to proxy external URLs through the original
+        endpoint. These proxied images are removed from pict-rs some time after their last access.
+        This time is configurable with `PICTRS__MEDIA__RETENTION__PROXY`. See
+        (./pict-rs.toml)[./pict-rs.toml] for more information.
+- `HEAD /image/original/{alias}` Returns just the headers from the analogous `GET` request.
+- `HEAD /image/original?alias={alias}` Returns just the headers from the analogous `GET` request.
+    Available source arguments are
+    - `?alias={alias}` Serve an original file by its alias
+    - `?proxy={url}` This `proxy` field can be used to proxy external URLs through the original
+        endpoint. These proxied images are removed from pict-rs some time after their last access.
+        This time is configurable with `PICTRS__MEDIA__RETENTION__PROXY`. See
+        (./pict-rs.toml)[./pict-rs.toml] for more information.
+- `GET /image/details/original/{alias}` for getting the details of a full-resolution image.
     The returned JSON is structured like so:
     ```json
     {
@@ -390,8 +405,26 @@ pict-rs offers the following endpoints:
         "created_at": "2022-04-08T18:33:42.957791698Z"
     }
     ```
-- `GET /image/process.{ext}?src={file}&...` get a file with transformations applied.
-    existing transformations include
+- `GET /image/details/original?alias={alias}` Same as the above endpoint but with a query instead of
+    a path
+
+    Available source arguments are
+    - `?alias={alias}` Serve an original file by its alias
+    - `?proxy={url}` This `proxy` field can be used to get details about proxied images in pict-rs.
+        These proxied images are removed from pict-rs some time after their last access. This time
+        is configurable with `PICTRS__MEDIA__RETENTION__PROXY`. See (./pict-rs.toml)[./pict-rs.toml]
+        for more information.
+- `GET /image/process.{ext}?src={file}&...` Get a file with transformations applied.
+    Available source arguments are
+    - `?src={alias}` This behavior is the same as in previous releases
+    - `?alias={alias}` This `alias` field is the same as the `src` field. Renamed for better
+        consistency
+    - `?proxy={url}` This `proxy` field can be used to proxy external URLs through the process
+        endpoint. These proxied images are removed from pict-rs some time after their last access.
+        This time is configurable with `PICTRS__MEDIA__RETENTION__PROXY`. See
+        (./pict-rs.toml)[./pict-rs.toml] for more information.
+    
+    Existing transformations include
     - `identity=true`: apply no changes
     - `blur={float}`: apply a gaussian blur to the file
     - `thumbnail={int}`: produce a thumbnail of the image fitting inside an `{int}` by `{int}`
@@ -417,7 +450,10 @@ pict-rs offers the following endpoints:
         aspect ratio. For example, a 1600x900 image cropped with a 1x1 aspect ratio will become 900x900. A
         1600x1100 image cropped with a 16x9 aspect ratio will become 1600x900.
 
-    Supported `ext` file extensions include `avif`, `jpg`, `jxl`, `png`, and `webp`
+    Supported `ext` file extensions include `apng`, `avif`, `gif`, `jpg`, `jxl`, `png`, and `webp`.
+    Note that while `avif` and `webp` will work for both animated & non-animated images, some
+    formats like `apng` and `gif` are only used to serve animations while others like `jpg`, `jxl`
+    and `png` are only used to serve sill images.
 
     An example of usage could be
     ```
@@ -431,6 +467,15 @@ pict-rs offers the following endpoints:
     for the processing to complete.
 - `GET /image/details/process.{ext}?src={file}&...` for getting the details of a processed image.
     The returned JSON is the same format as listed for the full-resolution details endpoint.
+- `GET /image/details/process.{ext}?alias={alias}` Same as the above endpoint but with a query
+    instead of a path
+
+    Available source arguments are
+    - `?alias={alias}` Serve a processed file by its alias
+    - `?proxy={url}` This `proxy` field can be used to get details about proxied images in pict-rs.
+        These proxied images are removed from pict-rs some time after their last access. This time
+        is configurable with `PICTRS__MEDIA__RETENTION__PROXY`. See [./pict-rs.toml](./pict-rs.toml)
+        for more information.
 - `DELETE /image/delete/{delete_token}/{file}` or `GET /image/delete/{delete_token}/{file}` to
     delete a file, where `delete_token` and `file` are from the `/image` endpoint's JSON
 - `GET /healthz` Check the health of the pict-rs server. This will check that the `sled` embedded
@@ -447,6 +492,10 @@ A secure API key can be generated by any password generator.
 - `POST /internal/purge?alias={alias}` Purge a file by it's alias. This removes all aliases and
     files associated with the query.
 
+    Available source arguments are
+    - `?alias={alias}` Purge a file by it's alias
+    - `?proxy={url}` Purge a proxied file by its URL
+
     This endpoint returns the following JSON
     ```json
     {
@@ -454,13 +503,22 @@ A secure API key can be generated by any password generator.
         "aliases": ["asdf.png"]
     }
     ```
-- `GET /internal/aliases?alias={alias}` Get the aliases for a file by it's alias
+- `GET /internal/aliases?alias={alias}` Get the aliases for a file by its alias
+
+    Available source arguments are
+    - `?alias={alias}` Get all aliases for a file by the provided alias
+    - `?proxy={url}` Get all aliases for a proxied file by its url
 
     This endpiont returns the same JSON as the purge endpoint
 - `DELETE /internal/variants` Queue a cleanup for generated variants of uploaded images.
 
     If any of the cleaned variants are fetched again, they will be re-generated.
-- `GET /internal/identifier` Get the image identifier (file path or object path) for a given alias
+- `GET /internal/identifier?alias={alias}` Get the image identifier (file path or object path) for a
+    given alias.
+
+    Available source arguments are
+    - `?alias={alias}` Get the identifier for a file by the provided alias
+    - `?proxy={url}` Get the identifier for a proxied file by its url
 
     On success, the returned json should look like this:
     ```json
@@ -469,9 +527,9 @@ A secure API key can be generated by any password generator.
         "identifier": "/path/to/object"
     }
     ```
-- `POST /internal/set_not_found` Set the 404 image that is served from the original and process
-    endpoints. The image used must already be uploaded and have an alias. The request should look
-    like this:
+- `POST /internal/set_not_found?alias={alias}` Set the 404 image that is served from the original
+    and process endpoints. The image used must already be uploaded and have an alias. The request
+    should look like this:
     ```json
     {
         "alias": "asdf.png"
@@ -526,6 +584,10 @@ let request = client
     .send()
     .await;
 ```
+
+Finally, there's an optional prometheus scrape endpoint that can be enabled with the
+`PICTRS__METRICS__PROMETHEUS_ADDRESS` configuration. This binds to a separate port from the main
+pict-rs application. See [pict-rs.toml](./pict-rs.toml) for more details.
 
 
 ## Administration
