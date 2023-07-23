@@ -34,11 +34,7 @@ impl MetricsGuard {
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
         metrics::histogram!("pict-rs.generate.duration", self.start.elapsed().as_secs_f64(), "completed" => (!self.armed).to_string());
-        if self.armed {
-            metrics::increment_counter!("pict-rs.generate.failure");
-        } else {
-            metrics::increment_counter!("pict-rs.generate.success");
-        }
+        metrics::increment_counter!("pict-rs.generate.end", "completed" => (!self.armed).to_string());
     }
 }
 

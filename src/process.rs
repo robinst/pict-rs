@@ -22,7 +22,7 @@ struct MetricsGuard {
 
 impl MetricsGuard {
     fn guard(command: String) -> Self {
-        metrics::increment_counter!("pict-rs.process.spawn", "command" => command.clone());
+        metrics::increment_counter!("pict-rs.process.start", "command" => command.clone());
 
         Self {
             start: Instant::now(),
@@ -45,11 +45,7 @@ impl Drop for MetricsGuard {
             "completed" => (!self.armed).to_string(),
         );
 
-        if self.armed {
-            metrics::increment_counter!("pict-rs.process.failure", "command" => self.command.clone());
-        } else {
-            metrics::increment_counter!("pict-rs.process.success", "command" => self.command.clone());
-        }
+        metrics::increment_counter!("pict-rs.process.end", "completed" => (!self.armed).to_string() , "command" => self.command.clone());
     }
 }
 

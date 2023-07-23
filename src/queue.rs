@@ -10,7 +10,7 @@ use crate::{
     store::{Identifier, Store},
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
-use std::{future::Future, path::PathBuf, pin::Pin};
+use std::{future::Future, path::PathBuf, pin::Pin, time::Instant};
 use tracing::Instrument;
 
 mod cleanup;
@@ -235,6 +235,37 @@ async fn process_jobs<R, S, F>(
     }
 }
 
+struct MetricsGuard {
+    worker_id: String,
+    queue: &'static str,
+    start: Instant,
+    armed: bool,
+}
+
+impl MetricsGuard {
+    fn guard(worker_id: String, queue: &'static str) -> Self {
+        metrics::increment_counter!("pict-rs.job.start", "queue" => queue, "worker-id" => worker_id.clone());
+
+        Self {
+            worker_id,
+            queue,
+            start: Instant::now(),
+            armed: true,
+        }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for MetricsGuard {
+    fn drop(&mut self) {
+        metrics::histogram!("pict-rs.job.duration", self.start.elapsed().as_secs_f64(), "queue" => self.queue, "worker-id" => self.worker_id.clone(), "completed" => (!self.armed).to_string());
+        metrics::increment_counter!("pict-rs.job.end", "queue" => self.queue, "worker-id" => self.worker_id.clone(), "completed" => (!self.armed).to_string());
+    }
+}
+
 async fn job_loop<R, S, F>(
     repo: &R,
     store: &S,
@@ -255,9 +286,13 @@ where
 
         let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
 
+        let guard = MetricsGuard::guard(worker_id.clone(), queue);
+
         span.in_scope(|| (callback)(repo, store, config, bytes.as_ref()))
             .instrument(span)
             .await?;
+
+        guard.disarm();
     }
 }
 
@@ -331,8 +366,12 @@ where
 
         let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
 
+        let guard = MetricsGuard::guard(worker_id.clone(), queue);
+
         span.in_scope(|| (callback)(repo, store, process_map, config, bytes.as_ref()))
             .instrument(span)
             .await?;
+
+        guard.disarm();
     }
 }

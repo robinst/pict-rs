@@ -19,6 +19,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, RwLock,
     },
+    time::Instant,
 };
 use tokio::{sync::Notify, task::JoinHandle};
 
@@ -468,6 +469,54 @@ impl From<InnerUploadResult> for UploadResult {
     }
 }
 
+struct PushMetricsGuard {
+    queue: &'static str,
+    armed: bool,
+}
+
+struct PopMetricsGuard {
+    queue: &'static str,
+    start: Instant,
+    armed: bool,
+}
+
+impl PushMetricsGuard {
+    fn guard(queue: &'static str) -> Self {
+        Self { queue, armed: true }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl PopMetricsGuard {
+    fn guard(queue: &'static str) -> Self {
+        Self {
+            queue,
+            start: Instant::now(),
+            armed: true,
+        }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PushMetricsGuard {
+    fn drop(&mut self) {
+        metrics::increment_counter!("pict-rs.queue.push", "completed" => (!self.armed).to_string(), "queue" => self.queue);
+    }
+}
+
+impl Drop for PopMetricsGuard {
+    fn drop(&mut self) {
+        metrics::histogram!("pict-rs.queue.pop.duration", self.start.elapsed().as_secs_f64(), "completed" => (!self.armed).to_string(), "queue" => self.queue);
+        metrics::increment_counter!("pict-rs.queue.pop", "completed" => (!self.armed).to_string(), "queue" => self.queue);
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 impl UploadRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self))]
@@ -577,6 +626,8 @@ impl QueueRepo for SledRepo {
 
     #[tracing::instrument(skip(self, job), fields(job = %String::from_utf8_lossy(&job)))]
     async fn push(&self, queue_name: &'static str, job: Self::Bytes) -> Result<(), RepoError> {
+        let metrics_guard = PushMetricsGuard::guard(queue_name);
+
         let id = self.db.generate_id().map_err(SledError::from)?;
         let mut key = queue_name.as_bytes().to_vec();
         key.extend(id.to_be_bytes());
@@ -585,6 +636,7 @@ impl QueueRepo for SledRepo {
 
         if let Some(notifier) = self.queue_notifier.read().unwrap().get(&queue_name) {
             notifier.notify_one();
+            metrics_guard.disarm();
             return Ok(());
         }
 
@@ -595,6 +647,8 @@ impl QueueRepo for SledRepo {
             .or_insert_with(|| Arc::new(Notify::new()))
             .notify_one();
 
+        metrics_guard.disarm();
+
         Ok(())
     }
 
@@ -604,6 +658,8 @@ impl QueueRepo for SledRepo {
         queue_name: &'static str,
         worker_id: Vec<u8>,
     ) -> Result<Self::Bytes, RepoError> {
+        let metrics_guard = PopMetricsGuard::guard(queue_name);
+
         loop {
             let in_progress_queue = self.in_progress_queue.clone();
 
@@ -633,6 +689,7 @@ impl QueueRepo for SledRepo {
             });
 
             if let Some(job) = job {
+                metrics_guard.disarm();
                 return Ok(job);
             }
 
