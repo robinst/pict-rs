@@ -638,7 +638,14 @@ async fn process_details<R: FullRepo, S: Store>(
         ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
             Serde::into_inner(alias)
         }
-        ProcessSource::Proxy { proxy } => todo!("proxy URL"),
+        ProcessSource::Proxy { proxy } => {
+            let Some(alias) = repo.related(proxy).await? else {
+                return Ok(HttpResponse::NotFound().json(&serde_json::json!({
+                    "msg": "No images associated with provided proxy url"
+                })));
+            };
+            alias
+        }
     };
 
     let (_, thumbnail_path, _) = prepare_process(&config, operations, ext.as_str())?;
@@ -705,7 +712,13 @@ async fn process<R: FullRepo, S: Store + 'static>(
         ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
             Serde::into_inner(alias)
         }
-        ProcessSource::Proxy { proxy } => todo!("proxy URL"),
+        ProcessSource::Proxy { proxy } => {
+            if let Some(alias) = repo.related(proxy).await? {
+                alias
+            } else {
+                todo!("proxy URL")
+            }
+        }
     };
 
     let (format, thumbnail_path, thumbnail_args) =
@@ -836,7 +849,12 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
         ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
             Serde::into_inner(alias)
         }
-        ProcessSource::Proxy { proxy } => todo!("proxy URL"),
+        ProcessSource::Proxy { proxy } => {
+            let Some(alias) = repo.related(proxy).await? else {
+                return Ok(HttpResponse::NotFound().finish());
+            };
+            alias
+        }
     };
 
     let (_, thumbnail_path, _) = prepare_process(&config, operations, ext.as_str())?;
@@ -904,7 +922,12 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
         ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
             Serde::into_inner(alias)
         }
-        ProcessSource::Proxy { proxy } => todo!("proxy URL"),
+        ProcessSource::Proxy { proxy } => {
+            let Some(alias) = repo.related(proxy).await? else {
+                return Ok(HttpResponse::NotFound().finish());
+            };
+            alias
+        }
     };
 
     let (target_format, process_path, process_args) =
@@ -942,9 +965,14 @@ async fn details_query<R: FullRepo, S: Store + 'static>(
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let alias = match alias_query {
-        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Alias { alias } => Serde::into_inner(alias),
         AliasQuery::Proxy { proxy } => {
-            todo!("Proxy URL")
+            let Some(alias) = repo.related(proxy).await? else {
+                return Ok(HttpResponse::NotFound().json(&serde_json::json!({
+                    "msg": "Provided proxy URL has not been cached",
+                })))
+            };
+            alias
         }
     };
 
@@ -959,11 +987,11 @@ async fn details<R: FullRepo, S: Store + 'static>(
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    do_details(alias.into_inner(), repo, store, config).await
+    do_details(Serde::into_inner(alias.into_inner()), repo, store, config).await
 }
 
 async fn do_details<R: FullRepo, S: Store + 'static>(
-    alias: Serde<Alias>,
+    alias: Alias,
     repo: web::Data<R>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -983,9 +1011,13 @@ async fn serve_query<R: FullRepo, S: Store + 'static>(
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let alias = match alias_query {
-        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Alias { alias } => Serde::into_inner(alias),
         AliasQuery::Proxy { proxy } => {
-            todo!("Proxy URL")
+            if let Some(alias) = repo.related(proxy).await? {
+                alias
+            } else {
+                todo!("proxy URL")
+            }
         }
     };
 
@@ -1001,18 +1033,25 @@ async fn serve<R: FullRepo, S: Store + 'static>(
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    do_serve(range, alias.into_inner(), repo, store, config).await
+    do_serve(
+        range,
+        Serde::into_inner(alias.into_inner()),
+        repo,
+        store,
+        config,
+    )
+    .await
 }
 
 async fn do_serve<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
-    alias: Serde<Alias>,
+    alias: Alias,
     repo: web::Data<R>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let (hash, alias, not_found) = if let Some(hash) = repo.hash(&alias).await? {
-        (hash, Serde::into_inner(alias), false)
+        (hash, alias, false)
     } else {
         let Some((alias, hash)) = not_found_hash(&repo).await? else {
             return Ok(HttpResponse::NotFound().finish());
@@ -1050,9 +1089,12 @@ async fn serve_query_head<R: FullRepo, S: Store + 'static>(
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let alias = match alias_query {
-        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Alias { alias } => Serde::into_inner(alias),
         AliasQuery::Proxy { proxy } => {
-            todo!("Proxy URL")
+            let Some(alias) = repo.related(proxy).await? else {
+                return Ok(HttpResponse::NotFound().finish());
+            };
+            alias
         }
     };
 
@@ -1067,12 +1109,19 @@ async fn serve_head<R: FullRepo, S: Store + 'static>(
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    do_serve_head(range, alias.into_inner(), repo, store, config).await
+    do_serve_head(
+        range,
+        Serde::into_inner(alias.into_inner()),
+        repo,
+        store,
+        config,
+    )
+    .await
 }
 
 async fn do_serve_head<R: FullRepo, S: Store + 'static>(
     range: Option<web::Header<Range>>,
-    alias: Serde<Alias>,
+    alias: Alias,
     repo: web::Data<R>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1255,9 +1304,13 @@ async fn set_not_found<R: FullRepo>(
     }
 
     let alias = match json.into_inner() {
-        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Alias { alias } => Serde::into_inner(alias),
         AliasQuery::Proxy { proxy } => {
-            todo!("Proxy URL")
+            if let Some(alias) = repo.related(proxy).await? {
+                alias
+            } else {
+                todo!("proxy URL")
+            }
         }
     };
 
@@ -1285,9 +1338,12 @@ async fn purge<R: FullRepo>(
     }
 
     let alias = match alias_query {
-        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Alias { alias } => Serde::into_inner(alias),
         AliasQuery::Proxy { proxy } => {
-            todo!("Proxy URL")
+            let Some(alias) = repo.related(proxy).await? else {
+                return Ok(HttpResponse::NotFound().finish());
+            };
+            alias
         }
     };
 
@@ -1312,9 +1368,12 @@ async fn aliases<R: FullRepo>(
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
     let alias = match alias_query {
-        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Alias { alias } => Serde::into_inner(alias),
         AliasQuery::Proxy { proxy } => {
-            todo!("Proxy URL")
+            let Some(alias) = repo.related(proxy).await? else {
+                return Ok(HttpResponse::NotFound().finish());
+            };
+            alias
         }
     };
 
@@ -1332,9 +1391,12 @@ async fn identifier<R: FullRepo, S: Store>(
     repo: web::Data<R>,
 ) -> Result<HttpResponse, Error> {
     let alias = match alias_query {
-        AliasQuery::Alias { alias } => alias,
+        AliasQuery::Alias { alias } => Serde::into_inner(alias),
         AliasQuery::Proxy { proxy } => {
-            todo!("Proxy URL")
+            let Some(alias) = repo.related(proxy).await? else {
+                return Ok(HttpResponse::NotFound().finish());
+            };
+            alias
         }
     };
 
