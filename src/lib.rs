@@ -1344,10 +1344,14 @@ fn configure_endpoints<
         );
 }
 
-fn spawn_cleanup<R>(repo: R)
+fn spawn_cleanup<R>(repo: R, config: &Configuration)
 where
     R: FullRepo + 'static,
 {
+    if config.server.read_only {
+        return;
+    }
+
     tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
         actix_rt::spawn(async move {
             let mut interval = actix_rt::time::interval(Duration::from_secs(30));
@@ -1404,7 +1408,7 @@ async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig)
 
     let address = config.server.address;
 
-    spawn_cleanup(repo.clone());
+    spawn_cleanup(repo.clone(), &config);
 
     HttpServer::new(move || {
         let client = client.clone();
@@ -1446,7 +1450,7 @@ async fn launch_object_store<
 
     let address = config.server.address;
 
-    spawn_cleanup(repo.clone());
+    spawn_cleanup(repo.clone(), &config);
 
     HttpServer::new(move || {
         let client = client.clone();
