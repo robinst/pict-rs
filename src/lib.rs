@@ -716,6 +716,7 @@ async fn not_found_hash<R: FullRepo>(repo: &R) -> Result<Option<(Alias, R::Bytes
 }
 
 /// Process files
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(
     name = "Serving processed image",
     skip(repo, store, client, config, process_map)
