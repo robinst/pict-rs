@@ -64,6 +64,7 @@ enum Cleanup {
     },
     AllVariants,
     OutdatedVariants,
+    OutdatedProxies,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -122,6 +123,12 @@ async fn cleanup_variants<R: QueueRepo>(
         hash: Base64Bytes(hash.as_ref().to_vec()),
         variant,
     })?;
+    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    Ok(())
+}
+
+pub(crate) async fn cleanup_outdated_proxies<R: QueueRepo>(repo: &R) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Cleanup::OutdatedProxies)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }

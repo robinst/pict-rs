@@ -2,7 +2,10 @@ use crate::{
     config::Configuration,
     error::{Error, UploadError},
     queue::{Base64Bytes, Cleanup, LocalBoxFuture},
-    repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, VariantAccessRepo},
+    repo::{
+        Alias, AliasAccessRepo, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo,
+        VariantAccessRepo,
+    },
     serde_str::Serde,
     store::{Identifier, Store},
 };
@@ -44,6 +47,7 @@ where
                 } => hash_variant::<R, S>(repo, hash, variant).await?,
                 Cleanup::AllVariants => all_variants::<R, S>(repo).await?,
                 Cleanup::OutdatedVariants => outdated_variants::<R, S>(repo, configuration).await?,
+                Cleanup::OutdatedProxies => outdated_proxies::<R, S>(repo, configuration).await?,
             },
             Err(e) => {
                 tracing::warn!("Invalid job: {}", format!("{e}"));
@@ -139,6 +143,8 @@ where
     let hash = repo.hash(&alias).await?;
 
     AliasRepo::cleanup(repo, &alias).await?;
+    repo.remove_relation(alias.clone()).await?;
+    AliasAccessRepo::remove_access(repo, alias.clone()).await?;
 
     let Some(hash) = hash else {
         // hash doesn't exist, nothing to do
@@ -184,6 +190,31 @@ where
     while let Some(res) = variant_stream.next().await {
         let (hash, variant) = res?;
         super::cleanup_variants(repo, hash, Some(variant)).await?;
+    }
+
+    Ok(())
+}
+
+#[tracing::instrument(skip_all)]
+async fn outdated_proxies<R, S>(repo: &R, config: &Configuration) -> Result<(), Error>
+where
+    R: FullRepo,
+    S: Store,
+{
+    let now = time::OffsetDateTime::now_utc();
+    let since = now.saturating_sub(config.media.retention.proxy.to_duration());
+
+    let mut alias_stream = Box::pin(repo.older_aliases(since).await?);
+
+    while let Some(res) = alias_stream.next().await {
+        let alias = res?;
+        if let Some(token) = repo.delete_token(&alias).await? {
+            super::cleanup_alias(repo, alias, token).await?;
+        } else {
+            tracing::warn!("Skipping alias cleanup - no delete token");
+            repo.remove_relation(alias.clone()).await?;
+            AliasAccessRepo::remove_access(repo, alias).await?;
+        }
     }
 
     Ok(())
