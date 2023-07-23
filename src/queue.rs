@@ -59,8 +59,11 @@ enum Cleanup {
     },
     Variant {
         hash: Base64Bytes,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        variant: Option<String>,
     },
     AllVariants,
+    OutdatedVariants,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -110,10 +113,21 @@ pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
     Ok(())
 }
 
-async fn cleanup_variants<R: QueueRepo>(repo: &R, hash: R::Bytes) -> Result<(), Error> {
+async fn cleanup_variants<R: QueueRepo>(
+    repo: &R,
+    hash: R::Bytes,
+    variant: Option<String>,
+) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::Variant {
         hash: Base64Bytes(hash.as_ref().to_vec()),
+        variant,
     })?;
+    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    Ok(())
+}
+
+pub(crate) async fn cleanup_outdated_variants<R: QueueRepo>(repo: &R) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Cleanup::OutdatedVariants)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
@@ -156,8 +170,21 @@ pub(crate) async fn queue_generate<R: QueueRepo>(
     Ok(())
 }
 
-pub(crate) async fn process_cleanup<R: FullRepo, S: Store>(repo: R, store: S, worker_id: String) {
-    process_jobs(&repo, &store, worker_id, CLEANUP_QUEUE, cleanup::perform).await
+pub(crate) async fn process_cleanup<R: FullRepo, S: Store>(
+    repo: R,
+    store: S,
+    config: Configuration,
+    worker_id: String,
+) {
+    process_jobs(
+        &repo,
+        &store,
+        &config,
+        worker_id,
+        CLEANUP_QUEUE,
+        cleanup::perform,
+    )
+    .await
 }
 
 pub(crate) async fn process_images<R: FullRepo + 'static, S: Store + 'static>(
@@ -184,6 +211,7 @@ type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 async fn process_jobs<R, S, F>(
     repo: &R,
     store: &S,
+    config: &Configuration,
     worker_id: String,
     queue: &'static str,
     callback: F,
@@ -191,10 +219,11 @@ async fn process_jobs<R, S, F>(
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
     R::Bytes: Clone,
     S: Store,
-    for<'a> F: Fn(&'a R, &'a S, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
+    for<'a> F: Fn(&'a R, &'a S, &'a Configuration, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>>
+        + Copy,
 {
     loop {
-        let res = job_loop(repo, store, worker_id.clone(), queue, callback).await;
+        let res = job_loop(repo, store, config, worker_id.clone(), queue, callback).await;
 
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
@@ -209,6 +238,7 @@ async fn process_jobs<R, S, F>(
 async fn job_loop<R, S, F>(
     repo: &R,
     store: &S,
+    config: &Configuration,
     worker_id: String,
     queue: &'static str,
     callback: F,
@@ -217,14 +247,15 @@ where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
     R::Bytes: Clone,
     S: Store,
-    for<'a> F: Fn(&'a R, &'a S, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
+    for<'a> F: Fn(&'a R, &'a S, &'a Configuration, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>>
+        + Copy,
 {
     loop {
         let bytes = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
 
         let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
 
-        span.in_scope(|| (callback)(repo, store, bytes.as_ref()))
+        span.in_scope(|| (callback)(repo, store, config, bytes.as_ref()))
             .instrument(span)
             .await?;
     }

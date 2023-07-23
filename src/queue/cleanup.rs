@@ -1,7 +1,8 @@
 use crate::{
+    config::Configuration,
     error::{Error, UploadError},
     queue::{Base64Bytes, Cleanup, LocalBoxFuture},
-    repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo},
+    repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, VariantAccessRepo},
     serde_str::Serde,
     store::{Identifier, Store},
 };
@@ -10,6 +11,7 @@ use futures_util::StreamExt;
 pub(super) fn perform<'a, R, S>(
     repo: &'a R,
     store: &'a S,
+    configuration: &'a Configuration,
     job: &'a [u8],
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
@@ -38,8 +40,10 @@ where
                 }
                 Cleanup::Variant {
                     hash: Base64Bytes(hash),
-                } => variant::<R, S>(repo, hash).await?,
+                    variant,
+                } => hash_variant::<R, S>(repo, hash, variant).await?,
                 Cleanup::AllVariants => all_variants::<R, S>(repo).await?,
+                Cleanup::OutdatedVariants => outdated_variants::<R, S>(repo, configuration).await?,
             },
             Err(e) => {
                 tracing::warn!("Invalid job: {}", format!("{e}"));
@@ -150,6 +154,7 @@ where
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 async fn all_variants<R, S>(repo: &R) -> Result<(), Error>
 where
     R: FullRepo,
@@ -159,22 +164,60 @@ where
 
     while let Some(res) = hash_stream.next().await {
         let hash = res?;
-        super::cleanup_variants(repo, hash).await?;
+        super::cleanup_variants(repo, hash, None).await?;
     }
 
     Ok(())
 }
 
-async fn variant<R, S>(repo: &R, hash: Vec<u8>) -> Result<(), Error>
+#[tracing::instrument(skip_all)]
+async fn outdated_variants<R, S>(repo: &R, config: &Configuration) -> Result<(), Error>
+where
+    R: FullRepo,
+    S: Store,
+{
+    let now = time::OffsetDateTime::now_utc();
+    let since = now.saturating_sub(config.media.retention.variants.to_duration());
+
+    let mut variant_stream = Box::pin(repo.older_variants(since).await?);
+
+    while let Some(res) = variant_stream.next().await {
+        let (hash, variant) = res?;
+        super::cleanup_variants(repo, hash, Some(variant)).await?;
+    }
+
+    Ok(())
+}
+
+#[tracing::instrument(skip_all)]
+async fn hash_variant<R, S>(
+    repo: &R,
+    hash: Vec<u8>,
+    target_variant: Option<String>,
+) -> Result<(), Error>
 where
     R: FullRepo,
     S: Store,
 {
     let hash: R::Bytes = hash.into();
 
-    for (variant, identifier) in repo.variants::<S::Identifier>(hash.clone()).await? {
-        repo.remove_variant(hash.clone(), variant).await?;
-        super::cleanup_identifier(repo, identifier).await?;
+    if let Some(target_variant) = target_variant {
+        if let Some(identifier) = repo
+            .variant_identifier::<S::Identifier>(hash.clone(), target_variant.clone())
+            .await?
+        {
+            super::cleanup_identifier(repo, identifier).await?;
+        }
+
+        repo.remove_variant(hash.clone(), target_variant.clone())
+            .await?;
+        VariantAccessRepo::remove_access(repo, hash, target_variant).await?;
+    } else {
+        for (variant, identifier) in repo.variants::<S::Identifier>(hash.clone()).await? {
+            repo.remove_variant(hash.clone(), variant.clone()).await?;
+            VariantAccessRepo::remove_access(repo, hash.clone(), variant).await?;
+            super::cleanup_identifier(repo, identifier).await?;
+        }
     }
 
     Ok(())

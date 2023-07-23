@@ -156,7 +156,7 @@ pub(crate) trait AliasAccessRepo: BaseRepo {
         timestamp: time::OffsetDateTime,
     ) -> Result<Self::AliasAccessStream, RepoError>;
 
-    async fn remove(&self, alias: Alias) -> Result<(), RepoError>;
+    async fn remove_access(&self, alias: Alias) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -177,8 +177,8 @@ where
         T::older_aliases(self, timestamp).await
     }
 
-    async fn remove(&self, alias: Alias) -> Result<(), RepoError> {
-        T::remove(self, alias).await
+    async fn remove_access(&self, alias: Alias) -> Result<(), RepoError> {
+        T::remove_access(self, alias).await
     }
 }
 
@@ -196,7 +196,7 @@ pub(crate) trait VariantAccessRepo: BaseRepo {
         timestamp: time::OffsetDateTime,
     ) -> Result<Self::VariantAccessStream, RepoError>;
 
-    async fn remove(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError>;
+    async fn remove_access(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -225,8 +225,8 @@ where
         T::older_variants(self, timestamp).await
     }
 
-    async fn remove(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
-        T::remove(self, hash, variant).await
+    async fn remove_access(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+        T::remove_access(self, hash, variant).await
     }
 }
 

@@ -269,6 +269,7 @@ impl futures_util::Stream for VariantAccessStream {
 impl AliasAccessRepo for SledRepo {
     type AliasAccessStream = AliasAccessStream;
 
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn accessed(&self, alias: Alias) -> Result<(), RepoError> {
         let now_string = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
@@ -289,6 +290,7 @@ impl AliasAccessRepo for SledRepo {
         .map_err(RepoError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn older_aliases(
         &self,
         timestamp: time::OffsetDateTime,
@@ -312,7 +314,8 @@ impl AliasAccessRepo for SledRepo {
         })
     }
 
-    async fn remove(&self, alias: Alias) -> Result<(), RepoError> {
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn remove_access(&self, alias: Alias) -> Result<(), RepoError> {
         let alias_access = self.alias_access.clone();
         let inverse_alias_access = self.inverse_alias_access.clone();
 
@@ -332,6 +335,7 @@ impl AliasAccessRepo for SledRepo {
 impl VariantAccessRepo for SledRepo {
     type VariantAccessStream = VariantAccessStream;
 
+    #[tracing::instrument(level = "debug", skip_all, fields(hash = %hex::encode(&hash), variant = %variant))]
     async fn accessed(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
         let key = variant_access_key(&hash, &variant);
 
@@ -354,6 +358,7 @@ impl VariantAccessRepo for SledRepo {
         .map_err(RepoError::from)
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(hash = %hex::encode(&hash), variant = %variant))]
     async fn contains_variant(
         &self,
         hash: Self::Bytes,
@@ -366,6 +371,7 @@ impl VariantAccessRepo for SledRepo {
         Ok(timestamp.is_some())
     }
 
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,
@@ -389,7 +395,8 @@ impl VariantAccessRepo for SledRepo {
         })
     }
 
-    async fn remove(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+    #[tracing::instrument(level = "debug", skip_all, fields(hash = %hex::encode(&hash), variant = %variant))]
+    async fn remove_access(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
         let key = variant_access_key(&hash, &variant);
 
         let variant_access = self.variant_access.clone();

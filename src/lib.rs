@@ -1344,16 +1344,42 @@ fn configure_endpoints<
         );
 }
 
-fn spawn_workers<R, S>(repo: R, store: S, config: &Configuration, process_map: ProcessMap)
+fn spawn_cleanup<R>(repo: R)
+where
+    R: FullRepo + 'static,
+{
+    tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
+        actix_rt::spawn(async move {
+            let mut interval = actix_rt::time::interval(Duration::from_secs(30));
+
+            loop {
+                interval.tick().await;
+
+                if let Err(e) = queue::cleanup_outdated_variants(&repo).await {
+                    tracing::warn!(
+                        "Failed to spawn cleanup for outdated variants:{}",
+                        format!("\n{e}\n{e:?}")
+                    );
+                }
+            }
+        });
+    })
+}
+
+fn spawn_workers<R, S>(repo: R, store: S, config: Configuration, process_map: ProcessMap)
 where
     R: FullRepo + 'static,
     S: Store + 'static,
 {
+    let worker_id_1 = next_worker_id(&config);
+    let worker_id_2 = next_worker_id(&config);
+
     tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
         actix_rt::spawn(queue::process_cleanup(
             repo.clone(),
             store.clone(),
-            next_worker_id(config),
+            config.clone(),
+            worker_id_1,
         ))
     });
     tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
@@ -1361,8 +1387,8 @@ where
             repo,
             store,
             process_map,
-            config.clone(),
-            next_worker_id(config),
+            config,
+            worker_id_2,
         ))
     });
 }
@@ -1378,6 +1404,8 @@ async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig)
 
     let address = config.server.address;
 
+    spawn_cleanup(repo.clone());
+
     HttpServer::new(move || {
         let client = client.clone();
         let store = store.clone();
@@ -1385,7 +1413,12 @@ async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig)
         let config = config.clone();
         let extra_config = extra_config.clone();
 
-        spawn_workers(repo.clone(), store.clone(), &config, process_map.clone());
+        spawn_workers(
+            repo.clone(),
+            store.clone(),
+            config.clone(),
+            process_map.clone(),
+        );
 
         App::new()
             .wrap(TracingLogger::default())
@@ -1413,6 +1446,8 @@ async fn launch_object_store<
 
     let address = config.server.address;
 
+    spawn_cleanup(repo.clone());
+
     HttpServer::new(move || {
         let client = client.clone();
         let store = store_config.clone().build(client.clone());
@@ -1420,7 +1455,12 @@ async fn launch_object_store<
         let config = config.clone();
         let extra_config = extra_config.clone();
 
-        spawn_workers(repo.clone(), store.clone(), &config, process_map.clone());
+        spawn_workers(
+            repo.clone(),
+            store.clone(),
+            config.clone(),
+            process_map.clone(),
+        );
 
         App::new()
             .wrap(TracingLogger::default())

@@ -43,7 +43,7 @@ impl Drop for MetricsGuard {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(repo, store, hash))]
+#[tracing::instrument(skip(repo, store, hash, process_map, media))]
 pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
@@ -78,7 +78,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(repo, store, hash))]
+#[tracing::instrument(skip(repo, store, hash, media))]
 async fn process<R: FullRepo, S: Store + 'static>(
     repo: &R,
     store: &S,
