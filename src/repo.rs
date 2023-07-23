@@ -7,6 +7,7 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_util::Stream;
 use std::{fmt::Debug, path::PathBuf};
 use tracing::Instrument;
+use url::Url;
 use uuid::Uuid;
 
 mod old;
@@ -75,6 +76,7 @@ pub(crate) trait FullRepo:
     + MigrationRepo
     + AliasAccessRepo
     + VariantAccessRepo
+    + ProxyRepo
     + Send
     + Sync
     + Clone
@@ -143,6 +145,33 @@ where
     T: BaseRepo,
 {
     type Bytes = T::Bytes;
+}
+
+#[async_trait::async_trait(?Send)]
+pub(crate) trait ProxyRepo: BaseRepo {
+    async fn relate_url(&self, url: Url, alias: Alias) -> Result<(), RepoError>;
+
+    async fn related(&self, url: Url) -> Result<Option<Alias>, RepoError>;
+
+    async fn remove_relation(&self, alias: Alias) -> Result<(), RepoError>;
+}
+
+#[async_trait::async_trait(?Send)]
+impl<T> ProxyRepo for actix_web::web::Data<T>
+where
+    T: ProxyRepo,
+{
+    async fn relate_url(&self, url: Url, alias: Alias) -> Result<(), RepoError> {
+        T::relate_url(self, url, alias).await
+    }
+
+    async fn related(&self, url: Url) -> Result<Option<Alias>, RepoError> {
+        T::related(self, url).await
+    }
+
+    async fn remove_relation(&self, alias: Alias) -> Result<(), RepoError> {
+        T::remove_relation(self, alias).await
+    }
 }
 
 #[async_trait::async_trait(?Send)]

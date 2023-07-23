@@ -22,8 +22,9 @@ use std::{
     time::Instant,
 };
 use tokio::{sync::Notify, task::JoinHandle};
+use url::Url;
 
-use super::{AliasAccessRepo, RepoError, VariantAccessRepo};
+use super::{AliasAccessRepo, ProxyRepo, RepoError, VariantAccessRepo};
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -77,6 +78,8 @@ pub(crate) struct SledRepo {
     inverse_alias_access: Tree,
     variant_access: Tree,
     inverse_variant_access: Tree,
+    proxy: Tree,
+    inverse_proxy: Tree,
     in_progress_queue: Tree,
     queue_notifier: Arc<RwLock<HashMap<&'static str, Arc<Notify>>>>,
     uploads: Tree,
@@ -113,6 +116,8 @@ impl SledRepo {
             inverse_alias_access: db.open_tree("pict-rs-inverse-alias-access-tree")?,
             variant_access: db.open_tree("pict-rs-variant-access-tree")?,
             inverse_variant_access: db.open_tree("pict-rs-inverse-variant-access-tree")?,
+            proxy: db.open_tree("pict-rs-proxy-tree")?,
+            inverse_proxy: db.open_tree("pict-rs-inverse-proxy-tree")?,
             in_progress_queue: db.open_tree("pict-rs-in-progress-queue-tree")?,
             queue_notifier: Arc::new(RwLock::new(HashMap::new())),
             uploads: db.open_tree("pict-rs-uploads-tree")?,
@@ -187,6 +192,48 @@ impl FullRepo for SledRepo {
         });
         self.healthz.flush_async().await.map_err(SledError::from)?;
         b!(self.healthz, healthz.get("healthz"));
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl ProxyRepo for SledRepo {
+    async fn relate_url(&self, url: Url, alias: Alias) -> Result<(), RepoError> {
+        let proxy = self.proxy.clone();
+        let inverse_proxy = self.inverse_proxy.clone();
+
+        actix_web::web::block(move || {
+            proxy.insert(url.as_str().as_bytes(), alias.to_bytes())?;
+            inverse_proxy.insert(alias.to_bytes(), url.as_str().as_bytes())?;
+
+            Ok(()) as Result<(), SledError>
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)??;
+
+        Ok(())
+    }
+
+    async fn related(&self, url: Url) -> Result<Option<Alias>, RepoError> {
+        let opt = b!(self.proxy, proxy.get(url.as_str().as_bytes()));
+
+        Ok(opt.and_then(|ivec| Alias::from_slice(&ivec)))
+    }
+
+    async fn remove_relation(&self, alias: Alias) -> Result<(), RepoError> {
+        let proxy = self.proxy.clone();
+        let inverse_proxy = self.inverse_proxy.clone();
+
+        actix_web::web::block(move || {
+            if let Some(url) = inverse_proxy.remove(alias.to_bytes())? {
+                proxy.remove(url)?;
+            }
+
+            Ok(()) as Result<(), SledError>
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)??;
+
         Ok(())
     }
 }
