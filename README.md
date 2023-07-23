@@ -414,7 +414,7 @@ pict-rs offers the following endpoints:
         These proxied images are removed from pict-rs some time after their last access. This time
         is configurable with `PICTRS__MEDIA__RETENTION__PROXY`. See (./pict-rs.toml)[./pict-rs.toml]
         for more information.
-- `GET /image/process.{ext}?src={file}&...` Get a file with transformations applied.
+- `GET /image/process.{ext}?src={alias}&...` Get a file with transformations applied.
     Available source arguments are
     - `?src={alias}` This behavior is the same as in previous releases
     - `?alias={alias}` This `alias` field is the same as the `src` field. Renamed for better
@@ -460,13 +460,30 @@ pict-rs offers the following endpoints:
     GET /image/process.jpg?src=asdf.png&thumbnail=256&blur=3.0
     ```
     which would create a 256x256px JPEG thumbnail and blur it
-- `HEAD /image/process.{ext}?src={file}` Returns just the headers from the analogous `GET` request.
+- `HEAD /image/process.{ext}?src={alias}` Returns just the headers from the analogous `GET` request.
     Returns 404 if the processed image has not been generated yet.
-- `GET /image/process_backgrounded.{ext}?src={file}&...` queue transformations to be applied to a
+
+    Available source arguments are
+    - `?src={alias}` This behavior is the same as in previous releases
+    - `?alias={alias}` This `alias` field is the same as the `src` field. Renamed for better
+        consistency
+    - `?proxy={url}` This `proxy` field can be used to get headers for proxied images.
+- `GET /image/process_backgrounded.{ext}?src={alias}&...` queue transformations to be applied to a
     given file. This accepts the same arguments as the `process.{ext}` endpoint, but does not wait
     for the processing to complete.
-- `GET /image/details/process.{ext}?src={file}&...` for getting the details of a processed image.
+
+    Available source arguments are
+    - `?src={alias}` This behavior is the same as in previous releases
+    - `?alias={alias}` This `alias` field is the same as the `src` field. Renamed for better
+        consistency
+- `GET /image/details/process.{ext}?src={alias}&...` for getting the details of a processed image.
     The returned JSON is the same format as listed for the full-resolution details endpoint.
+
+    Available source arguments are
+    - `?src={alias}` This behavior is the same as in previous releases
+    - `?alias={alias}` This `alias` field is the same as the `src` field. Renamed for better
+        consistency
+    - `?proxy={url}` This `proxy` field can be used to get details about proxied images.
 - `GET /image/details/process.{ext}?alias={alias}` Same as the above endpoint but with a query
     instead of a path
 
@@ -476,8 +493,8 @@ pict-rs offers the following endpoints:
         These proxied images are removed from pict-rs some time after their last access. This time
         is configurable with `PICTRS__MEDIA__RETENTION__PROXY`. See [./pict-rs.toml](./pict-rs.toml)
         for more information.
-- `DELETE /image/delete/{delete_token}/{file}` or `GET /image/delete/{delete_token}/{file}` to
-    delete a file, where `delete_token` and `file` are from the `/image` endpoint's JSON
+- `DELETE /image/delete/{delete_token}/{alias}` or `GET /image/delete/{delete_token}/{alias}` to
+    delete a file, where `delete_token` and `alias` are from the `/image` endpoint's JSON
 - `GET /healthz` Check the health of the pict-rs server. This will check that the `sled` embedded
     database is functional and that the configured store is accessible
 
