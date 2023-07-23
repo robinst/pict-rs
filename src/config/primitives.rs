@@ -44,7 +44,10 @@ impl std::str::FromStr for RetentionValue {
     type Err = RetentionValueError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let num_str = s.chars().take_while(|c| c.is_digit(10)).collect::<String>();
+        let num_str = s
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>();
 
         if num_str.is_empty() {
             return Err(RetentionValueError::NoValue);
