@@ -41,12 +41,14 @@ CREATE TABLE hashes (
     motion_identifier TEXT,
 );
 
+
 CREATE TABLE variants (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     hash BYTEA REFERENCES hashes(hash) ON DELETE CASCADE,
     variant TEXT NOT NULL,
     identifier TEXT NOT NULL
 );
+
 
 CREATE UNIQUE INDEX hash_variant_index ON variants (hash, variant);
 ```
@@ -133,6 +135,7 @@ methods:
 ```sql
 CREATE TYPE job_status AS ENUM ('new', 'running');
 
+
 CREATE TABLE queue (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     queue VARCHAR(30) NOT NULL,
@@ -142,6 +145,7 @@ CREATE TABLE queue (
     queue_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+
 CREATE INDEX queue_worker_id_index ON queue INCLUDE worker_id;
 CREATE INDEX queue_status_index ON queue INCLUDE status;
 ```
@@ -149,6 +153,7 @@ CREATE INDEX queue_status_index ON queue INCLUDE status;
 claiming a job can be
 ```sql
 DELETE FROM queue WHERE worker_id = '$WORKER_ID';
+
 
 UPDATE queue SET status = 'running', worker_id = '$WORKER_ID'
 WHERE id = (
@@ -160,6 +165,25 @@ WHERE id = (
     LIMIT 1
 )
 returning *;
+```
+
+notifying pict-rs of a ready job could be
+```sql
+CREATE OR REPLACE FUNCTION queue_status_notify()
+	RETURNS trigger AS
+$$
+BEGIN
+	PERFORM pg_notify('queue_status_channel', NEW.id::text);
+	RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER queue_status
+	AFTER INSERT OR UPDATE OF status
+	ON queue
+	FOR EACH ROW
+EXECUTE PROCEDURE queue_status_notify();
 ```
 
 
