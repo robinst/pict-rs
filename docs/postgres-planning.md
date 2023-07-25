@@ -207,6 +207,8 @@ CREATE TRIGGER queue_status
 EXECUTE PROCEDURE queue_status_notify();
 ```
 
+Postgres queue implementation from this blog post: https://webapp.io/blog/postgres-is-the-answer/
+
 
 ### MigrationRepo
 This is used for migrating from local storage to object storage. It keeps track of which identifiers
