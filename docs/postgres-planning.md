@@ -1,11 +1,32 @@
 # Planning for implementing a postgres repo for pict-rs
 
-FullRepo currently depends on a number of specific repo traits Many of these are simple key -> value
-mappings that can be done with columns or tables, but some are more complicated (like background job
-processing).
+## Technology
+
+I've identified these crates as useful for achieving a reasonable postgres experience
+- [diesel-async](https://docs.rs/diesel-async/latest/diesel_async/)
+- [refinery](https://docs.rs/refinery/latest/refinery/)
+- [deadpool](https://docs.rs/deadpool/latest/deadpool/)
+- [tokio-postgres](https://docs.rs/tokio-postgres/latest/tokio_postgres/)
+
+tokio-postgres will actually do the work of talking to postgres in all cases. diesel-async can use
+tokio-postgres to execute queries. refinery can use tokio-postgres to run migrations. deadpool can
+pool tokio-postgres connections.
+
+I've chosen this stack specifically to avoid depending on `libpq`, the c implementation of a
+postgres client. This is not because it's written in C. 99.9% of postgres client libraries use libpq
+to great success. It is to keep the build process for pict-rs simple. Sticking with a full stack of
+rust means that only a rust compiler is required to build pict-rs.
+
+
+## Plan
+
+pict-rs isolates different concepts between different "Repo" traits. There's a single top-level
+FullRepo that depends on the others to ensure everything gets implemented properly. Since there's
+only been one repo implementation so far, it's not optimized for network databases and some things
+are less efficient than they could be.
 
 Some of the existing repo methods could be consolidated to better represent the data and operations
-that need to be performed. This should happen _before_ impelementing the postgres repo.
+that need to be performed. This should happen _before_ implementing the postgres repo.
 
 
 ### HashRepo
