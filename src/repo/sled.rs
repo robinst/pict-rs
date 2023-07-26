@@ -1,16 +1,16 @@
 use crate::{
     details::MaybeHumanDate,
     repo::{
-        Alias, AliasAlreadyExists, AliasRepo, AlreadyExists, BaseRepo, DeleteToken, Details,
-        FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, MigrationRepo,
-        QueueRepo, SettingsRepo, UploadId, UploadRepo, UploadResult,
+        Alias, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, Details, FullRepo,
+        HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, MigrationRepo, QueueRepo,
+        SettingsRepo, UploadId, UploadRepo, UploadResult,
     },
     serde_str::Serde,
     store::StoreError,
     stream::from_iterator,
 };
 use futures_util::{Future, Stream};
-use sled::{CompareAndSwapError, Db, IVec, Tree};
+use sled::{transaction::TransactionError, Db, IVec, Transactional, Tree};
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -936,12 +936,6 @@ impl MigrationRepo for SledRepo {
 type StreamItem = Result<IVec, RepoError>;
 type LocalBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + 'a>>;
 
-fn hash_alias_key(hash: &IVec, alias: &Alias) -> Vec<u8> {
-    let mut v = hash.to_vec();
-    v.append(&mut alias.to_bytes());
-    v
-}
-
 #[async_trait::async_trait(?Send)]
 impl HashRepo for SledRepo {
     type Stream = LocalBoxStream<'static, StreamItem>;
@@ -965,57 +959,50 @@ impl HashRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), HashAlreadyExists>, RepoError> {
-        let res = b!(self.hashes, {
-            let hash2 = hash.clone();
-            hashes.compare_and_swap(hash, None as Option<Self::Bytes>, Some(hash2))
-        });
+    async fn create<I: Identifier>(
+        &self,
+        hash: Self::Bytes,
+        identifier: &I,
+    ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
+        let identifier: sled::IVec = identifier.to_bytes()?.into();
 
-        Ok(res.map_err(|_| HashAlreadyExists))
+        let hashes = self.hashes.clone();
+        let hash_identifiers = self.hash_identifiers.clone();
+
+        let res = actix_web::web::block(move || {
+            (&hashes, &hash_identifiers).transaction(|(hashes, hash_identifiers)| {
+                if hashes.get(&hash)?.is_some() {
+                    return Ok(Err(HashAlreadyExists));
+                }
+
+                hashes.insert(&hash, &hash)?;
+                hash_identifiers.insert(&hash, &identifier)?;
+
+                Ok(Ok(()))
+            })
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)?;
+
+        match res {
+            Ok(res) => Ok(res),
+            Err(TransactionError::Abort(e) | TransactionError::Storage(e)) => {
+                Err(StoreError::from(RepoError::from(SledError::from(e))))
+            }
+        }
     }
 
-    #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError> {
-        let key = hash_alias_key(&hash, alias);
-        let value = alias.to_bytes();
-
-        b!(self.hash_aliases, hash_aliases.insert(key, value));
-
-        Ok(())
-    }
-
-    #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError> {
-        let key = hash_alias_key(&hash, alias);
-
-        b!(self.hash_aliases, hash_aliases.remove(key));
-
-        Ok(())
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError> {
-        let v = b!(self.hash_aliases, {
-            Ok(hash_aliases
-                .scan_prefix(hash)
-                .values()
-                .filter_map(Result::ok)
-                .filter_map(|ivec| Alias::from_slice(&ivec))
-                .collect::<Vec<_>>()) as Result<_, sled::Error>
-        });
-
-        Ok(v)
-    }
-
-    #[tracing::instrument(level = "trace", skip(self, hash, identifier), fields(hash = hex::encode(&hash), identifier = identifier.string_repr()))]
-    async fn relate_identifier<I: Identifier>(
+    async fn update_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         identifier: &I,
     ) -> Result<(), StoreError> {
-        let bytes = identifier.to_bytes()?;
+        let identifier = identifier.to_bytes()?;
 
-        b!(self.hash_identifiers, hash_identifiers.insert(hash, bytes));
+        b!(
+            self.hash_identifiers,
+            hash_identifiers.insert(hash, identifier)
+        );
 
         Ok(())
     }
@@ -1141,102 +1128,102 @@ impl HashRepo for SledRepo {
 
     #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
     async fn cleanup(&self, hash: Self::Bytes) -> Result<(), RepoError> {
-        let hash2 = hash.clone();
-        b!(self.hashes, hashes.remove(hash2));
+        let hashes = self.hashes.clone();
+        let hash_identifiers = self.hash_identifiers.clone();
+        let hash_motion_identifiers = self.hash_motion_identifiers.clone();
+        let hash_variant_identifiers = self.hash_variant_identifiers.clone();
 
         let hash2 = hash.clone();
-        b!(self.hash_identifiers, hash_identifiers.remove(hash2));
-
-        let hash2 = hash.clone();
-        b!(
-            self.hash_motion_identifiers,
-            hash_motion_identifiers.remove(hash2)
-        );
-
-        let aliases = self.aliases(hash.clone()).await?;
-        let hash2 = hash.clone();
-        b!(self.hash_aliases, {
-            for alias in aliases {
-                let key = hash_alias_key(&hash2, &alias);
-
-                let _ = hash_aliases.remove(key);
-            }
-            Ok(()) as Result<(), SledError>
-        });
-
         let variant_keys = b!(self.hash_variant_identifiers, {
             let v = hash_variant_identifiers
-                .scan_prefix(hash)
+                .scan_prefix(hash2)
                 .keys()
                 .filter_map(Result::ok)
                 .collect::<Vec<_>>();
 
             Ok(v) as Result<Vec<_>, SledError>
         });
-        b!(self.hash_variant_identifiers, {
-            for key in variant_keys {
-                let _ = hash_variant_identifiers.remove(key);
-            }
-            Ok(()) as Result<(), SledError>
-        });
 
-        Ok(())
+        let res = actix_web::web::block(move || {
+            (
+                &hashes,
+                &hash_identifiers,
+                &hash_motion_identifiers,
+                &hash_variant_identifiers,
+            )
+                .transaction(
+                    |(
+                        hashes,
+                        hash_identifiers,
+                        hash_motion_identifiers,
+                        hash_variant_identifiers,
+                    )| {
+                        hashes.remove(&hash)?;
+                        hash_identifiers.remove(&hash)?;
+                        hash_motion_identifiers.remove(&hash)?;
+
+                        for key in &variant_keys {
+                            hash_variant_identifiers.remove(key)?;
+                        }
+
+                        Ok(())
+                    },
+                )
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)?;
+
+        match res {
+            Ok(()) => Ok(()),
+            Err(TransactionError::Abort(e) | TransactionError::Storage(e)) => {
+                Err(SledError::from(e).into())
+            }
+        }
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl AliasRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
-        let bytes = alias.to_bytes();
-        let bytes2 = bytes.clone();
-
-        let res = b!(
-            self.aliases,
-            aliases.compare_and_swap(bytes, None as Option<Self::Bytes>, Some(bytes2))
-        );
-
-        Ok(res.map_err(|_| AliasAlreadyExists))
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn relate_delete_token(
+    async fn create(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-    ) -> Result<Result<(), AlreadyExists>, RepoError> {
-        let key = alias.to_bytes();
-        let token = delete_token.to_bytes();
+        hash: Self::Bytes,
+    ) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
+        let alias: sled::IVec = alias.to_bytes().into();
+        let delete_token: sled::IVec = delete_token.to_bytes().into();
 
-        let res = b!(self.alias_delete_tokens, {
-            let mut prev: Option<Self::Bytes> = None;
+        let aliases = self.aliases.clone();
+        let alias_hashes = self.alias_hashes.clone();
+        let hash_aliases = self.hash_aliases.clone();
+        let alias_delete_tokens = self.alias_delete_tokens.clone();
 
-            loop {
-                let key = key.clone();
-                let token = token.clone();
-
-                let res = alias_delete_tokens.compare_and_swap(key, prev, Some(token))?;
-
-                match res {
-                    Ok(()) => return Ok(Ok(())) as Result<_, SledError>,
-                    Err(CompareAndSwapError {
-                        current: Some(token),
-                        ..
-                    }) => {
-                        if let Some(token) = DeleteToken::from_slice(&token) {
-                            return Ok(Err(AlreadyExists(token)));
-                        } else {
-                            prev = Some(token);
-                        };
+        let res = actix_web::web::block(move || {
+            (&aliases, &alias_hashes, &hash_aliases, &alias_delete_tokens).transaction(
+                |(aliases, alias_hashes, hash_aliases, alias_delete_tokens)| {
+                    if aliases.get(&alias)?.is_some() {
+                        return Ok(Err(AliasAlreadyExists));
                     }
-                    Err(CompareAndSwapError { current: None, .. }) => {
-                        prev = None;
-                    }
-                }
+
+                    aliases.insert(&alias, &alias)?;
+                    alias_hashes.insert(&alias, &hash)?;
+                    hash_aliases.insert(&hash, &alias)?;
+                    alias_delete_tokens.insert(&alias, &delete_token)?;
+
+                    Ok(Ok(()))
+                },
+            )
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)?;
+
+        match res {
+            Ok(res) => Ok(res),
+            Err(TransactionError::Abort(e) | TransactionError::Storage(e)) => {
+                Err(SledError::from(e).into())
             }
-        });
-
-        Ok(res)
+        }
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -1254,15 +1241,6 @@ impl AliasRepo for SledRepo {
         Ok(Some(token))
     }
 
-    #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), RepoError> {
-        let key = alias.to_bytes();
-
-        b!(self.alias_hashes, alias_hashes.insert(key, hash));
-
-        Ok(())
-    }
-
     #[tracing::instrument(level = "trace", skip(self))]
     async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError> {
         let key = alias.to_bytes();
@@ -1272,19 +1250,50 @@ impl AliasRepo for SledRepo {
         Ok(opt)
     }
 
+    #[tracing::instrument(skip_all)]
+    async fn for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError> {
+        let v = b!(self.hash_aliases, {
+            Ok(hash_aliases
+                .scan_prefix(hash)
+                .values()
+                .filter_map(Result::ok)
+                .filter_map(|ivec| Alias::from_slice(&ivec))
+                .collect::<Vec<_>>()) as Result<_, sled::Error>
+        });
+
+        Ok(v)
+    }
+
     #[tracing::instrument(skip(self))]
     async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError> {
-        let key = alias.to_bytes();
+        let alias: sled::IVec = alias.to_bytes().into();
 
-        let key2 = key.clone();
-        b!(self.aliases, aliases.remove(key2));
+        let aliases = self.aliases.clone();
+        let alias_hashes = self.alias_hashes.clone();
+        let hash_aliases = self.hash_aliases.clone();
+        let alias_delete_tokens = self.alias_delete_tokens.clone();
 
-        let key2 = key.clone();
-        b!(self.alias_delete_tokens, alias_delete_tokens.remove(key2));
+        let res = actix_web::web::block(move || {
+            (&aliases, &alias_hashes, &hash_aliases, &alias_delete_tokens).transaction(
+                |(aliases, alias_hashes, hash_aliases, alias_delete_tokens)| {
+                    aliases.remove(&alias)?;
+                    if let Some(hash) = alias_hashes.remove(&alias)? {
+                        hash_aliases.remove(hash)?;
+                    }
+                    alias_delete_tokens.remove(&alias)?;
+                    Ok(())
+                },
+            )
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)?;
 
-        b!(self.alias_hashes, alias_hashes.remove(key));
-
-        Ok(())
+        match res {
+            Ok(()) => Ok(()),
+            Err(TransactionError::Abort(e)) | Err(TransactionError::Storage(e)) => {
+                Err(SledError::from(e).into())
+            }
+        }
     }
 }
 

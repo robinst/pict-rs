@@ -303,7 +303,7 @@ async fn handle_upload<R: FullRepo, S: Store + 'static>(
     for image in &images {
         if let Some(alias) = image.result.alias() {
             tracing::debug!("Uploaded {} as {:?}", image.filename, alias);
-            let delete_token = image.result.delete_token().await?;
+            let delete_token = image.result.delete_token();
 
             let details = ensure_details(&repo, &store, &config, alias).await?;
 
@@ -315,7 +315,7 @@ async fn handle_upload<R: FullRepo, S: Store + 'static>(
         }
     }
 
-    for mut image in images {
+    for image in images {
         image.result.disarm();
     }
 
@@ -489,14 +489,13 @@ async fn ingest_inline<R: FullRepo, S: Store + 'static>(
     store: &S,
     config: &Configuration,
 ) -> Result<(Alias, DeleteToken, Details), Error> {
-    let mut session = ingest::ingest(repo, store, stream, None, &config.media).await?;
+    let session = ingest::ingest(repo, store, stream, None, &config.media).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
-    let delete_token = session.delete_token().await?;
 
     let details = ensure_details(repo, store, config, &alias).await?;
 
-    session.disarm();
+    let delete_token = session.disarm();
 
     Ok((alias, delete_token, details))
 }
@@ -1886,7 +1885,6 @@ impl PictRsConfiguration {
         let PictRsConfiguration { config, operation } = self;
 
         let repo = Repo::open(config.repo.clone())?;
-        repo.migrate_from_db(config.old_db.path.clone()).await?;
         let client = build_client(&config)?;
 
         match operation {
@@ -1949,8 +1947,6 @@ impl PictRsConfiguration {
 
         match config.store.clone() {
             config::Store::Filesystem(config::Filesystem { path }) => {
-                repo.migrate_identifiers().await?;
-
                 let store = FileStore::build(path, repo.clone()).await?;
                 match repo {
                     Repo::Sled(sled_repo) => {

@@ -3,7 +3,7 @@ use crate::{
     either::Either,
     error::{Error, UploadError},
     formats::{InternalFormat, Validations},
-    repo::{Alias, AliasRepo, AlreadyExists, DeleteToken, FullRepo, HashRepo},
+    repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo},
     store::Store,
 };
 use actix_web::web::Bytes;
@@ -21,6 +21,7 @@ where
     S: Store,
 {
     repo: R,
+    delete_token: DeleteToken,
     hash: Option<Vec<u8>>,
     alias: Option<Alias>,
     identifier: Option<S::Identifier>,
@@ -105,6 +106,7 @@ where
 
     let mut session = Session {
         repo: repo.clone(),
+        delete_token: DeleteToken::generate(),
         hash: None,
         alias: None,
         identifier: Some(identifier.clone()),
@@ -117,8 +119,8 @@ where
     if let Some(alias) = declared_alias {
         session.add_existing_alias(&hash, alias).await?
     } else {
-        session.create_alias(&hash, input_type).await?;
-    }
+        session.create_alias(&hash, input_type).await?
+    };
 
     Ok(session)
 }
@@ -135,7 +137,10 @@ where
     S: Store,
     R: FullRepo,
 {
-    if HashRepo::create(repo, hash.to_vec().into()).await?.is_err() {
+    if HashRepo::create(repo, hash.to_vec().into(), identifier)
+        .await?
+        .is_err()
+    {
         // duplicate upload
         store.remove(identifier).await?;
         session.identifier.take();
@@ -145,9 +150,6 @@ where
     // Set hash after upload uniquness check so we don't clean existing files on failure
     session.hash = Some(Vec::from(hash));
 
-    repo.relate_identifier(hash.to_vec().into(), identifier)
-        .await?;
-
     Ok(())
 }
 
@@ -156,59 +158,47 @@ where
     R: FullRepo + 'static,
     S: Store,
 {
-    pub(crate) fn disarm(&mut self) {
+    pub(crate) fn disarm(mut self) -> DeleteToken {
         let _ = self.hash.take();
         let _ = self.alias.take();
         let _ = self.identifier.take();
+
+        self.delete_token.clone()
     }
 
     pub(crate) fn alias(&self) -> Option<&Alias> {
         self.alias.as_ref()
     }
 
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub(crate) async fn delete_token(&self) -> Result<DeleteToken, Error> {
-        let alias = self.alias.clone().ok_or(UploadError::MissingAlias)?;
-
-        tracing::trace!("Generating delete token");
-        let delete_token = DeleteToken::generate();
-
-        tracing::trace!("Saving delete token");
-        let res = self.repo.relate_delete_token(&alias, &delete_token).await?;
-
-        if let Err(AlreadyExists(delete_token)) = res {
-            tracing::trace!("Returning existing delete token, {:?}", delete_token);
-            return Ok(delete_token);
-        }
-
-        tracing::trace!("Returning new delete token, {:?}", delete_token);
-        Ok(delete_token)
+    pub(crate) fn delete_token(&self) -> &DeleteToken {
+        &self.delete_token
     }
 
     #[tracing::instrument(skip(self, hash))]
     async fn add_existing_alias(&mut self, hash: &[u8], alias: Alias) -> Result<(), Error> {
-        AliasRepo::create(&self.repo, &alias)
+        let hash: R::Bytes = hash.to_vec().into();
+
+        AliasRepo::create(&self.repo, &alias, &self.delete_token, hash.clone())
             .await?
             .map_err(|_| UploadError::DuplicateAlias)?;
 
         self.alias = Some(alias.clone());
-
-        self.repo.relate_hash(&alias, hash.to_vec().into()).await?;
-        self.repo.relate_alias(hash.to_vec().into(), &alias).await?;
 
         Ok(())
     }
 
     #[tracing::instrument(level = "debug", skip(self, hash))]
     async fn create_alias(&mut self, hash: &[u8], input_type: InternalFormat) -> Result<(), Error> {
+        let hash: R::Bytes = hash.to_vec().into();
+
         loop {
             let alias = Alias::generate(input_type.file_extension().to_string());
 
-            if AliasRepo::create(&self.repo, &alias).await?.is_ok() {
+            if AliasRepo::create(&self.repo, &alias, &self.delete_token, hash.clone())
+                .await?
+                .is_ok()
+            {
                 self.alias = Some(alias.clone());
-
-                self.repo.relate_hash(&alias, hash.to_vec().into()).await?;
-                self.repo.relate_alias(hash.to_vec().into(), &alias).await?;
 
                 return Ok(());
             }
@@ -249,20 +239,14 @@ where
 
             if let Some(alias) = self.alias.take() {
                 let repo = self.repo.clone();
+                let token = self.delete_token.clone();
 
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup alias", alias = ?alias);
 
                 tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                     actix_rt::spawn(
                         async move {
-                            if let Ok(Some(token)) = repo.delete_token(&alias).await {
-                                let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
-                            } else {
-                                let token = DeleteToken::generate();
-                                if let Ok(Ok(())) = repo.relate_delete_token(&alias, &token).await {
-                                    let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
-                                }
-                            }
+                            let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
                         }
                         .instrument(cleanup_span),
                     )

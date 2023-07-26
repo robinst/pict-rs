@@ -5,7 +5,7 @@ use crate::{
     formats::InputProcessableFormat,
     ingest::Session,
     queue::{Base64Bytes, LocalBoxFuture, Process},
-    repo::{Alias, DeleteToken, FullRepo, UploadId, UploadResult},
+    repo::{Alias, FullRepo, UploadId, UploadResult},
     serde_str::Serde,
     store::{Identifier, Store},
 };
@@ -99,9 +99,7 @@ where
             let session =
                 crate::ingest::ingest(&repo, &store2, stream, declared_alias, &media).await?;
 
-            let token = session.delete_token().await?;
-
-            Ok((session, token)) as Result<(Session<R, S>, DeleteToken), Error>
+            Ok(session) as Result<Session<R, S>, Error>
         })
         .await;
 
@@ -111,10 +109,10 @@ where
     };
 
     let result = match fut.await {
-        Ok((mut session, token)) => {
+        Ok(session) => {
             let alias = session.alias().take().expect("Alias should exist").clone();
+            let token = session.disarm();
             let result = UploadResult::Success { alias, token };
-            session.disarm();
             result
         }
         Err(e) => {

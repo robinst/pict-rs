@@ -283,7 +283,7 @@ where
     match migrate_file(repo, from, to, &original_identifier, *skip_missing_files).await {
         Ok(new_identifier) => {
             migrate_details(repo, &original_identifier, &new_identifier).await?;
-            repo.relate_identifier(hash.clone().into(), &new_identifier)
+            repo.update_identifier(hash.clone().into(), &new_identifier)
                 .await?;
             repo.mark_migrated(&original_identifier, &new_identifier)
                 .await?;

@@ -1,16 +1,14 @@
 use crate::{
     config,
     details::Details,
-    store::{file_store::FileId, Identifier, StoreError},
+    store::{Identifier, StoreError},
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_util::Stream;
-use std::{fmt::Debug, path::PathBuf};
-use tracing::Instrument;
+use std::fmt::Debug;
 use url::Url;
 use uuid::Uuid;
 
-mod old;
 pub(crate) mod sled;
 
 #[derive(Clone, Debug)]
@@ -30,15 +28,13 @@ pub(crate) struct Alias {
     extension: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct DeleteToken {
     id: MaybeUuid,
 }
 
 pub(crate) struct HashAlreadyExists;
 pub(crate) struct AliasAlreadyExists;
-
-pub(crate) struct AlreadyExists(pub(super) DeleteToken);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct UploadId {
@@ -60,9 +56,6 @@ pub(crate) enum RepoError {
 
     #[error("Panic in blocking operation")]
     Canceled,
-
-    #[error("Required field is missing {0}")]
-    Missing(&'static str),
 }
 
 #[async_trait::async_trait(?Send)]
@@ -102,7 +95,7 @@ pub(crate) trait FullRepo:
             return Ok(vec![]);
         };
 
-        self.aliases(hash).await
+        self.for_hash(hash).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -427,17 +420,18 @@ pub(crate) trait HashRepo: BaseRepo {
 
     async fn hashes(&self) -> Self::Stream;
 
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), HashAlreadyExists>, RepoError>;
+    async fn create<I: Identifier>(
+        &self,
+        hash: Self::Bytes,
+        identifier: &I,
+    ) -> Result<Result<(), HashAlreadyExists>, StoreError>;
 
-    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError>;
-    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError>;
-    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError>;
-
-    async fn relate_identifier<I: Identifier>(
+    async fn update_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         identifier: &I,
     ) -> Result<(), StoreError>;
+
     async fn identifier<I: Identifier + 'static>(
         &self,
         hash: Self::Bytes,
@@ -488,28 +482,20 @@ where
         T::hashes(self).await
     }
 
-    async fn create(&self, hash: Self::Bytes) -> Result<Result<(), HashAlreadyExists>, RepoError> {
-        T::create(self, hash).await
+    async fn create<I: Identifier>(
+        &self,
+        hash: Self::Bytes,
+        identifier: &I,
+    ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
+        T::create(self, hash, identifier).await
     }
 
-    async fn relate_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError> {
-        T::relate_alias(self, hash, alias).await
-    }
-
-    async fn remove_alias(&self, hash: Self::Bytes, alias: &Alias) -> Result<(), RepoError> {
-        T::remove_alias(self, hash, alias).await
-    }
-
-    async fn aliases(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError> {
-        T::aliases(self, hash).await
-    }
-
-    async fn relate_identifier<I: Identifier>(
+    async fn update_identifier<I: Identifier>(
         &self,
         hash: Self::Bytes,
         identifier: &I,
     ) -> Result<(), StoreError> {
-        T::relate_identifier(self, hash, identifier).await
+        T::update_identifier(self, hash, identifier).await
     }
 
     async fn identifier<I: Identifier + 'static>(
@@ -569,17 +555,18 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait AliasRepo: BaseRepo {
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AliasAlreadyExists>, RepoError>;
-
-    async fn relate_delete_token(
+    async fn create(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-    ) -> Result<Result<(), AlreadyExists>, RepoError>;
+        hash: Self::Bytes,
+    ) -> Result<Result<(), AliasAlreadyExists>, RepoError>;
+
     async fn delete_token(&self, alias: &Alias) -> Result<Option<DeleteToken>, RepoError>;
 
-    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), RepoError>;
     async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError>;
+
+    async fn for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError>;
 
     async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError>;
 }
@@ -589,28 +576,25 @@ impl<T> AliasRepo for actix_web::web::Data<T>
 where
     T: AliasRepo,
 {
-    async fn create(&self, alias: &Alias) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
-        T::create(self, alias).await
-    }
-
-    async fn relate_delete_token(
+    async fn create(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-    ) -> Result<Result<(), AlreadyExists>, RepoError> {
-        T::relate_delete_token(self, alias, delete_token).await
+        hash: Self::Bytes,
+    ) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
+        T::create(self, alias, delete_token, hash).await
     }
 
     async fn delete_token(&self, alias: &Alias) -> Result<Option<DeleteToken>, RepoError> {
         T::delete_token(self, alias).await
     }
 
-    async fn relate_hash(&self, alias: &Alias, hash: Self::Bytes) -> Result<(), RepoError> {
-        T::relate_hash(self, alias, hash).await
-    }
-
     async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError> {
         T::hash(self, alias).await
+    }
+
+    async fn for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError> {
+        T::for_hash(self, hash).await
     }
 
     async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError> {
@@ -633,223 +617,6 @@ impl Repo {
             }
         }
     }
-
-    pub(crate) async fn migrate_from_db(&self, path: PathBuf) -> color_eyre::Result<()> {
-        if self.has_migrated().await? {
-            return Ok(());
-        }
-
-        if let Some(old) = self::old::Old::open(path)? {
-            let span = tracing::warn_span!("Migrating Database from 0.3 layout to 0.4 layout");
-
-            match self {
-                Self::Sled(repo) => {
-                    async {
-                        for hash in old.hashes() {
-                            if let Err(e) = migrate_hash(repo, &old, hash).await {
-                                tracing::error!("Failed to migrate hash: {}", format!("{e:?}"));
-                            }
-                        }
-
-                        if let Ok(Some(value)) = old.setting(STORE_MIGRATION_PROGRESS.as_bytes()) {
-                            tracing::warn!("Setting STORE_MIGRATION_PROGRESS");
-                            let _ = repo.set(STORE_MIGRATION_PROGRESS, value).await;
-                        }
-
-                        if let Ok(Some(value)) = old.setting(GENERATOR_KEY.as_bytes()) {
-                            tracing::warn!("Setting GENERATOR_KEY");
-                            let _ = repo.set(GENERATOR_KEY, value).await;
-                        }
-                    }
-                    .instrument(span)
-                    .await;
-                }
-            }
-        }
-
-        self.mark_migrated().await?;
-
-        Ok(())
-    }
-
-    pub(crate) async fn migrate_identifiers(&self) -> color_eyre::Result<()> {
-        if self.has_migrated_identifiers().await? {
-            return Ok(());
-        }
-
-        let span = tracing::warn_span!("Migrating File Identifiers from 0.3 format to 0.4 format");
-
-        match self {
-            Self::Sled(repo) => {
-                async {
-                    use futures_util::StreamExt;
-                    let mut hashes = repo.hashes().await;
-
-                    while let Some(res) = hashes.next().await {
-                        let hash = res?;
-                        if let Err(e) = migrate_identifiers_for_hash(repo, hash).await {
-                            tracing::error!(
-                                "Failed to migrate identifiers for hash: {}",
-                                format!("{e:?}")
-                            );
-                        }
-                    }
-
-                    Ok(()) as color_eyre::Result<()>
-                }
-                .instrument(span)
-                .await?;
-            }
-        }
-
-        self.mark_migrated_identifiers().await?;
-
-        Ok(())
-    }
-
-    async fn has_migrated(&self) -> color_eyre::Result<bool> {
-        match self {
-            Self::Sled(repo) => Ok(repo.get(REPO_MIGRATION_O1).await?.is_some()),
-        }
-    }
-
-    async fn has_migrated_identifiers(&self) -> color_eyre::Result<bool> {
-        match self {
-            Self::Sled(repo) => Ok(repo.get(REPO_MIGRATION_02).await?.is_some()),
-        }
-    }
-
-    async fn mark_migrated(&self) -> color_eyre::Result<()> {
-        match self {
-            Self::Sled(repo) => {
-                repo.set(REPO_MIGRATION_O1, b"1".to_vec().into()).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn mark_migrated_identifiers(&self) -> color_eyre::Result<()> {
-        match self {
-            Self::Sled(repo) => {
-                repo.set(REPO_MIGRATION_02, b"1".to_vec().into()).await?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-const REPO_MIGRATION_O1: &str = "repo-migration-01";
-const REPO_MIGRATION_02: &str = "repo-migration-02";
-const STORE_MIGRATION_PROGRESS: &str = "store-migration-progress";
-const GENERATOR_KEY: &str = "last-path";
-
-#[tracing::instrument(skip(repo, hash), fields(hash = hex::encode(&hash)))]
-async fn migrate_identifiers_for_hash<T>(repo: &T, hash: ::sled::IVec) -> color_eyre::Result<()>
-where
-    T: FullRepo,
-{
-    let hash: T::Bytes = hash.to_vec().into();
-
-    if let Some(motion_identifier) = repo.motion_identifier::<FileId>(hash.clone()).await? {
-        if let Some(new_motion_identifier) = motion_identifier.normalize_for_migration() {
-            migrate_identifier_details(repo, &motion_identifier, &new_motion_identifier).await?;
-            repo.relate_motion_identifier(hash.clone(), &new_motion_identifier)
-                .await?;
-        }
-    }
-
-    for (variant_path, variant_identifier) in repo.variants::<FileId>(hash.clone()).await? {
-        if let Some(new_variant_identifier) = variant_identifier.normalize_for_migration() {
-            migrate_identifier_details(repo, &variant_identifier, &new_variant_identifier).await?;
-            repo.relate_variant_identifier(hash.clone(), variant_path, &new_variant_identifier)
-                .await?;
-        }
-    }
-
-    let Some(main_identifier) = repo.identifier::<FileId>(hash.clone()).await? else {
-        tracing::warn!("Missing identifier for hash {}, queueing cleanup", hex::encode(&hash));
-        crate::queue::cleanup_hash(repo, hash.clone()).await?;
-        return Err(RepoError::Missing("hash -> identifier").into());
-    };
-
-    if let Some(new_main_identifier) = main_identifier.normalize_for_migration() {
-        migrate_identifier_details(repo, &main_identifier, &new_main_identifier).await?;
-        repo.relate_identifier(hash, &new_main_identifier).await?;
-    }
-
-    Ok(())
-}
-
-#[tracing::instrument(level = "debug", skip(repo))]
-async fn migrate_identifier_details<T>(
-    repo: &T,
-    old: &FileId,
-    new: &FileId,
-) -> color_eyre::Result<()>
-where
-    T: FullRepo,
-{
-    if old == new {
-        tracing::warn!("Old FileId and new FileId are identical");
-        return Ok(());
-    }
-
-    if let Some(details) = repo.details(old).await? {
-        repo.relate_details(new, &details).await?;
-        IdentifierRepo::cleanup(repo, old).await?;
-    }
-
-    Ok(())
-}
-
-#[tracing::instrument(skip(repo, old, hash), fields(hash = hex::encode(&hash)))]
-async fn migrate_hash<T>(repo: &T, old: &old::Old, hash: ::sled::IVec) -> color_eyre::Result<()>
-where
-    T: IdentifierRepo + HashRepo + AliasRepo + SettingsRepo + Debug,
-{
-    let new_hash: T::Bytes = hash.to_vec().into();
-    let main_ident = old.main_identifier(&hash)?.to_vec();
-
-    if HashRepo::create(repo, new_hash.clone()).await?.is_err() {
-        tracing::warn!("Duplicate hash detected");
-        return Ok(());
-    }
-
-    repo.relate_identifier(new_hash.clone(), &main_ident)
-        .await?;
-
-    for alias in old.aliases(&hash) {
-        if let Ok(Ok(())) = AliasRepo::create(repo, &alias).await {
-            let _ = repo.relate_alias(new_hash.clone(), &alias).await;
-            let _ = repo.relate_hash(&alias, new_hash.clone()).await;
-
-            if let Ok(Some(delete_token)) = old.delete_token(&alias) {
-                let _ = repo.relate_delete_token(&alias, &delete_token).await;
-            }
-        }
-    }
-
-    if let Ok(Some(identifier)) = old.motion_identifier(&hash) {
-        let _ = repo
-            .relate_motion_identifier(new_hash.clone(), &identifier.to_vec())
-            .await;
-    }
-
-    for (variant_path, identifier) in old.variants(&hash)? {
-        let variant = variant_path.to_string_lossy().to_string();
-
-        let _ = repo
-            .relate_variant_identifier(new_hash.clone(), variant, &identifier.to_vec())
-            .await;
-    }
-
-    for (identifier, details) in old.details(&hash)? {
-        let _ = repo.relate_details(&identifier.to_vec(), &details).await;
-    }
-
-    Ok(())
 }
 
 impl MaybeUuid {

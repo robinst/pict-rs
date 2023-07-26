@@ -96,7 +96,7 @@ where
 {
     let hash: R::Bytes = hash.into();
 
-    let aliases = repo.aliases(hash.clone()).await?;
+    let aliases = repo.for_hash(hash.clone()).await?;
 
     if !aliases.is_empty() {
         for alias in aliases {
@@ -151,9 +151,7 @@ where
         return Ok(());
     };
 
-    repo.remove_alias(hash.clone(), &alias).await?;
-
-    if repo.aliases(hash.clone()).await?.is_empty() {
+    if repo.for_hash(hash.clone()).await?.is_empty() {
         super::cleanup_hash(repo, hash).await?;
     }
 
