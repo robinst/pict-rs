@@ -25,34 +25,24 @@ FullRepo that depends on the others to ensure everything gets implemented proper
 only been one repo implementation so far, it's not optimized for network databases and some things
 are less efficient than they could be.
 
-Some of the existing repo methods could be consolidated to better represent the data and operations
-that need to be performed. This should happen _before_ implementing the postgres repo.
-
 
 ### HashRepo
 This is a little complicated because one of the things a HashRepo can do is return a stream of
 hashes from the repo. This can likely be implemented as a batch-retrieval operation that fetches
 1000 hashes at once and then drains them on each call to `poll_next`
 
-This is also probably made up of multiple tables, and can reuse some other tables. It's likely that
-some of this functionality can be consolidated with AliasRepo. In both usages, relate_hash and
-relate_alias are called together.
-
-Create could also maybe be updated to take the identifier as an argument, since it doesn't make
-sense to have a hash without an identifier. This might affect the ingest process' ordering
-
 methods:
 - size
 - hashes
 - create
-- relate_alias
-- remove_alias
-- aliases
-- relate_identifier
+- update_identifier
+- identifier
 - relate_variant_identifier
 - variant_identifier
+- variants
 - remove_variant
 - relate_motion_identifier
+- motion_identifier
 - cleanup
 
 ```sql
@@ -83,14 +73,10 @@ UUIDs in all recent versions of pict-rs.
 
 methods:
 - create
-- relate_delete_token
-- relate_hash
+- delete_token
 - hash
+- for_hash
 - cleanup
-
-This can probably be simplified. If `create` took a `hash` as an argument and returned a
-`delete_token` we could have all of our required information up-front and avoid the hassle of
-generating each part of this separately
 
 ```sql
 CREATE TABLE aliases (
