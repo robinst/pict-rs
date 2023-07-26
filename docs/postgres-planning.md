@@ -130,7 +130,7 @@ CREATE TABLE details (
 ### QueueRepo
 This is going to be the troublesome table. It represents jobs that will be processed. Jobs are
 pushed as Bytes, but at a higher level are actually JSON strings. The QueueRepo API could be updated
-to take `T: Serizlie` as input rather than bytes, and then we can store it as JSONB. With the
+to take `T: Serialize` as input rather than bytes, and then we can store it as JSONB. With the
 current API, the repo doesn't need to know the shape of a job, and maybe that is a benefit. We
 should take care in the future not to query on the contents of the job.
 
