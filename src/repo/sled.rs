@@ -1182,6 +1182,12 @@ impl HashRepo for SledRepo {
     }
 }
 
+fn hash_alias_key(hash: &IVec, alias: &IVec) -> Vec<u8> {
+    let mut v = hash.to_vec();
+    v.extend_from_slice(&alias);
+    v
+}
+
 #[async_trait::async_trait(?Send)]
 impl AliasRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self))]
@@ -1208,7 +1214,8 @@ impl AliasRepo for SledRepo {
 
                     aliases.insert(&alias, &alias)?;
                     alias_hashes.insert(&alias, &hash)?;
-                    hash_aliases.insert(&hash, &alias)?;
+
+                    hash_aliases.insert(hash_alias_key(&hash, &alias), &alias)?;
                     alias_delete_tokens.insert(&alias, &delete_token)?;
 
                     Ok(Ok(()))
@@ -1266,7 +1273,7 @@ impl AliasRepo for SledRepo {
 
     #[tracing::instrument(skip(self))]
     async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError> {
-        let alias: sled::IVec = alias.to_bytes().into();
+        let alias: IVec = alias.to_bytes().into();
 
         let aliases = self.aliases.clone();
         let alias_hashes = self.alias_hashes.clone();
@@ -1278,7 +1285,7 @@ impl AliasRepo for SledRepo {
                 |(aliases, alias_hashes, hash_aliases, alias_delete_tokens)| {
                     aliases.remove(&alias)?;
                     if let Some(hash) = alias_hashes.remove(&alias)? {
-                        hash_aliases.remove(hash)?;
+                        hash_aliases.remove(hash_alias_key(&hash, &alias))?;
                     }
                     alias_delete_tokens.remove(&alias)?;
                     Ok(())

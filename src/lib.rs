@@ -591,7 +591,7 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
 }
 
 /// Delete aliases and files
-#[tracing::instrument(name = "Deleting file", skip(repo))]
+#[tracing::instrument(name = "Deleting file", skip(repo, config))]
 async fn delete<R: FullRepo>(
     repo: web::Data<R>,
     config: web::Data<Configuration>,
