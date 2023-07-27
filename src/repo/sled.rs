@@ -1184,7 +1184,7 @@ impl HashRepo for SledRepo {
 
 fn hash_alias_key(hash: &IVec, alias: &IVec) -> Vec<u8> {
     let mut v = hash.to_vec();
-    v.extend_from_slice(&alias);
+    v.extend_from_slice(alias);
     v
 }
 

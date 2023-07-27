@@ -112,8 +112,7 @@ where
         Ok(session) => {
             let alias = session.alias().take().expect("Alias should exist").clone();
             let token = session.disarm();
-            let result = UploadResult::Success { alias, token };
-            result
+            UploadResult::Success { alias, token }
         }
         Err(e) => {
             tracing::warn!("Failed to ingest\n{}\n{}", format!("{e}"), format!("{e:?}"));
