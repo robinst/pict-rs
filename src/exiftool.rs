@@ -26,7 +26,10 @@ impl From<ProcessError> for ExifError {
 impl ExifError {
     pub(crate) fn is_client_error(&self) -> bool {
         // if exiftool bails we probably have bad input
-        matches!(self, Self::CommandFailed(_))
+        matches!(
+            self,
+            Self::CommandFailed(_) | Self::Process(ProcessError::Timeout(_))
+        )
     }
 }
 

@@ -65,7 +65,10 @@ impl From<ProcessError> for FfMpegError {
 impl FfMpegError {
     pub(crate) fn is_client_error(&self) -> bool {
         // Failing validation or ffmpeg bailing probably means bad input
-        matches!(self, Self::CommandFailed(_))
+        matches!(
+            self,
+            Self::CommandFailed(_) | Self::Process(ProcessError::Timeout(_))
+        )
     }
 
     pub(crate) fn is_not_found(&self) -> bool {

@@ -59,7 +59,10 @@ impl From<ProcessError> for MagickError {
 impl MagickError {
     pub(crate) fn is_client_error(&self) -> bool {
         // Failing validation or imagemagick bailing probably means bad input
-        matches!(self, Self::CommandFailed(_))
+        matches!(
+            self,
+            Self::CommandFailed(_) | Self::Process(ProcessError::Timeout(_))
+        )
     }
 }
 
