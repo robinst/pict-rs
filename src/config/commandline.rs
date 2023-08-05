@@ -53,6 +53,7 @@ impl Args {
                 metrics_prometheus_address,
                 media_preprocess_steps,
                 media_max_file_size,
+                media_process_timeout,
                 media_retention_variants,
                 media_retention_proxy,
                 media_image_max_width,
@@ -177,6 +178,7 @@ impl Args {
 
                 let media = Media {
                     max_file_size: media_max_file_size,
+                    process_timeout: media_process_timeout,
                     preprocess_steps: media_preprocess_steps,
                     filters: media_filters,
                     retention: retention.set(),
@@ -458,6 +460,8 @@ struct OldDb {
 struct Media {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_file_size: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    process_timeout: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     preprocess_steps: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -800,6 +804,10 @@ struct Run {
     /// The maximum size, in megabytes, for all uploaded media
     #[arg(long)]
     media_max_file_size: Option<usize>,
+
+    /// Timeout for any media processing operation
+    #[arg(long)]
+    media_process_timeout: Option<u64>,
 
     /// How long to keep image "variants" around
     ///

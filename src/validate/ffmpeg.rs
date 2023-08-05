@@ -11,6 +11,7 @@ pub(super) async fn transcode_bytes(
     input_format: VideoFormat,
     output_format: OutputVideoFormat,
     crf: u8,
+    timeout: u64,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, FfMpegError> {
     let input_file = crate::tmp_file::tmp_file(None);
@@ -37,6 +38,7 @@ pub(super) async fn transcode_bytes(
         output_file_str,
         output_format,
         crf,
+        timeout,
     )
     .await?;
 
@@ -59,6 +61,7 @@ async fn transcode_files(
     output_path: &str,
     output_format: OutputVideoFormat,
     crf: u8,
+    timeout: u64,
 ) -> Result<(), FfMpegError> {
     let mut args = vec![
         "-hide_banner",
@@ -96,7 +99,7 @@ async fn transcode_files(
         output_path,
     ]);
 
-    Process::run("ffmpeg", &args)?.wait().await?;
+    Process::run("ffmpeg", &args, timeout)?.wait().await?;
 
     Ok(())
 }

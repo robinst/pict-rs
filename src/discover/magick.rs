@@ -49,31 +49,44 @@ impl Discovery {
     }
 }
 
-pub(super) async fn discover_bytes_lite(bytes: Bytes) -> Result<DiscoveryLite, MagickError> {
-    discover_file_lite(move |mut file| async move {
-        file.write_from_bytes(bytes)
-            .await
-            .map_err(MagickError::Write)?;
-        Ok(file)
-    })
+pub(super) async fn discover_bytes_lite(
+    timeout: u64,
+    bytes: Bytes,
+) -> Result<DiscoveryLite, MagickError> {
+    discover_file_lite(
+        move |mut file| async move {
+            file.write_from_bytes(bytes)
+                .await
+                .map_err(MagickError::Write)?;
+            Ok(file)
+        },
+        timeout,
+    )
     .await
 }
 
-pub(super) async fn discover_stream_lite<S>(stream: S) -> Result<DiscoveryLite, MagickError>
+pub(super) async fn discover_stream_lite<S>(
+    timeout: u64,
+    stream: S,
+) -> Result<DiscoveryLite, MagickError>
 where
     S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
 {
-    discover_file_lite(move |mut file| async move {
-        file.write_from_stream(stream)
-            .await
-            .map_err(MagickError::Write)?;
-        Ok(file)
-    })
+    discover_file_lite(
+        move |mut file| async move {
+            file.write_from_stream(stream)
+                .await
+                .map_err(MagickError::Write)?;
+            Ok(file)
+        },
+        timeout,
+    )
     .await
 }
 
 pub(super) async fn confirm_bytes(
     discovery: Option<Discovery>,
+    timeout: u64,
     bytes: Bytes,
 ) -> Result<Discovery, MagickError> {
     match discovery {
@@ -83,12 +96,15 @@ pub(super) async fn confirm_bytes(
             height,
             ..
         }) => {
-            let frames = count_avif_frames(move |mut file| async move {
-                file.write_from_bytes(bytes)
-                    .await
-                    .map_err(MagickError::Write)?;
-                Ok(file)
-            })
+            let frames = count_avif_frames(
+                move |mut file| async move {
+                    file.write_from_bytes(bytes)
+                        .await
+                        .map_err(MagickError::Write)?;
+                    Ok(file)
+                },
+                timeout,
+            )
             .await?;
 
             return Ok(Discovery {
@@ -110,17 +126,20 @@ pub(super) async fn confirm_bytes(
         }
     }
 
-    discover_file(move |mut file| async move {
-        file.write_from_bytes(bytes)
-            .await
-            .map_err(MagickError::Write)?;
+    discover_file(
+        move |mut file| async move {
+            file.write_from_bytes(bytes)
+                .await
+                .map_err(MagickError::Write)?;
 
-        Ok(file)
-    })
+            Ok(file)
+        },
+        timeout,
+    )
     .await
 }
 
-async fn count_avif_frames<F, Fut>(f: F) -> Result<u32, MagickError>
+async fn count_avif_frames<F, Fut>(f: F, timeout: u64) -> Result<u32, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
@@ -137,7 +156,11 @@ where
     let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
-    let process = Process::run("magick", &["convert", "-ping", input_file_str, "INFO:"])?;
+    let process = Process::run(
+        "magick",
+        &["convert", "-ping", input_file_str, "INFO:"],
+        timeout,
+    )?;
 
     let mut output = String::new();
     process
@@ -166,15 +189,15 @@ where
     Ok(lines)
 }
 
-async fn discover_file_lite<F, Fut>(f: F) -> Result<DiscoveryLite, MagickError>
+async fn discover_file_lite<F, Fut>(f: F, timeout: u64) -> Result<DiscoveryLite, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
-    discover_file(f).await.map(Discovery::lite)
+    discover_file(f, timeout).await.map(Discovery::lite)
 }
 
-async fn discover_file<F, Fut>(f: F) -> Result<Discovery, MagickError>
+async fn discover_file<F, Fut>(f: F, timeout: u64) -> Result<Discovery, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
@@ -191,7 +214,11 @@ where
     let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
-    let process = Process::run("magick", &["convert", "-ping", input_file_str, "JSON:"])?;
+    let process = Process::run(
+        "magick",
+        &["convert", "-ping", input_file_str, "JSON:"],
+        timeout,
+    )?;
 
     let mut output = Vec::new();
     process

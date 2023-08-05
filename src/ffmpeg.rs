@@ -113,6 +113,7 @@ pub(crate) async fn thumbnail<S: Store>(
     from: S::Identifier,
     input_format: InternalVideoFormat,
     format: ThumbnailFormat,
+    timeout: u64,
 ) -> Result<impl AsyncRead + Unpin, FfMpegError> {
     let input_file = crate::tmp_file::tmp_file(Some(input_format.file_extension()));
     let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
@@ -155,6 +156,7 @@ pub(crate) async fn thumbnail<S: Store>(
             format.as_ffmpeg_format(),
             output_file_str,
         ],
+        timeout,
     )?;
 
     process.wait().await?;

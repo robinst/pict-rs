@@ -31,13 +31,13 @@ impl Details {
         self.content_type.type_() == "video"
     }
 
-    pub(crate) async fn from_bytes(input: web::Bytes) -> Result<Self, Error> {
+    pub(crate) async fn from_bytes(timeout: u64, input: web::Bytes) -> Result<Self, Error> {
         let DiscoveryLite {
             format,
             width,
             height,
             frames,
-        } = crate::discover::discover_bytes_lite(input).await?;
+        } = crate::discover::discover_bytes_lite(timeout, input).await?;
 
         Ok(Details::from_parts(format, width, height, frames))
     }
@@ -45,13 +45,14 @@ impl Details {
     pub(crate) async fn from_store<S: Store>(
         store: &S,
         identifier: &S::Identifier,
+        timeout: u64,
     ) -> Result<Self, Error> {
         let DiscoveryLite {
             format,
             width,
             height,
             frames,
-        } = crate::discover::discover_store_lite(store, identifier).await?;
+        } = crate::discover::discover_store_lite(store, identifier, timeout).await?;
 
         Ok(Details::from_parts(format, width, height, frames))
     }

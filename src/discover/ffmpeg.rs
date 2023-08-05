@@ -63,46 +63,65 @@ struct Flags {
     alpha: usize,
 }
 
-pub(super) async fn discover_bytes(bytes: Bytes) -> Result<Option<Discovery>, FfMpegError> {
-    discover_file_full(move |mut file| {
-        let bytes = bytes.clone();
+pub(super) async fn discover_bytes(
+    timeout: u64,
+    bytes: Bytes,
+) -> Result<Option<Discovery>, FfMpegError> {
+    discover_file_full(
+        move |mut file| {
+            let bytes = bytes.clone();
 
-        async move {
-            file.write_from_bytes(bytes)
-                .await
-                .map_err(FfMpegError::Write)?;
-            Ok(file)
-        }
-    })
+            async move {
+                file.write_from_bytes(bytes)
+                    .await
+                    .map_err(FfMpegError::Write)?;
+                Ok(file)
+            }
+        },
+        timeout,
+    )
     .await
 }
 
 pub(super) async fn discover_bytes_lite(
+    timeout: u64,
     bytes: Bytes,
 ) -> Result<Option<DiscoveryLite>, FfMpegError> {
-    discover_file_lite(move |mut file| async move {
-        file.write_from_bytes(bytes)
-            .await
-            .map_err(FfMpegError::Write)?;
-        Ok(file)
-    })
+    discover_file_lite(
+        move |mut file| async move {
+            file.write_from_bytes(bytes)
+                .await
+                .map_err(FfMpegError::Write)?;
+            Ok(file)
+        },
+        timeout,
+    )
     .await
 }
 
-pub(super) async fn discover_stream_lite<S>(stream: S) -> Result<Option<DiscoveryLite>, FfMpegError>
+pub(super) async fn discover_stream_lite<S>(
+    timeout: u64,
+    stream: S,
+) -> Result<Option<DiscoveryLite>, FfMpegError>
 where
     S: Stream<Item = std::io::Result<Bytes>> + Unpin,
 {
-    discover_file_lite(move |mut file| async move {
-        file.write_from_stream(stream)
-            .await
-            .map_err(FfMpegError::Write)?;
-        Ok(file)
-    })
+    discover_file_lite(
+        move |mut file| async move {
+            file.write_from_stream(stream)
+                .await
+                .map_err(FfMpegError::Write)?;
+            Ok(file)
+        },
+        timeout,
+    )
     .await
 }
 
-async fn discover_file_lite<F, Fut>(f: F) -> Result<Option<DiscoveryLite>, FfMpegError>
+async fn discover_file_lite<F, Fut>(
+    f: F,
+    timeout: u64,
+) -> Result<Option<DiscoveryLite>, FfMpegError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, FfMpegError>>,
@@ -112,7 +131,7 @@ where
         width,
         height,
         frames,
-    }) = discover_file(f)
+    }) = discover_file(f, timeout)
     .await? else {
         return Ok(None);
     };
@@ -130,12 +149,12 @@ where
     }))
 }
 
-async fn discover_file_full<F, Fut>(f: F) -> Result<Option<Discovery>, FfMpegError>
+async fn discover_file_full<F, Fut>(f: F, timeout: u64) -> Result<Option<Discovery>, FfMpegError>
 where
     F: Fn(crate::file::File) -> Fut + Clone,
     Fut: std::future::Future<Output = Result<crate::file::File, FfMpegError>>,
 {
-    let Some(DiscoveryLite { format, width, height, frames }) = discover_file(f.clone()).await? else {
+    let Some(DiscoveryLite { format, width, height, frames }) = discover_file(f.clone(), timeout).await? else {
         return Ok(None);
     };
 
@@ -143,12 +162,12 @@ where
         InternalFormat::Video(InternalVideoFormat::Webm) => {
             static ALPHA_PIXEL_FORMATS: OnceLock<HashSet<String>> = OnceLock::new();
 
-            let format = pixel_format(f).await?;
+            let format = pixel_format(f, timeout).await?;
 
             let alpha = match ALPHA_PIXEL_FORMATS.get() {
                 Some(alpha_pixel_formats) => alpha_pixel_formats.contains(&format),
                 None => {
-                    let pixel_formats = alpha_pixel_formats().await?;
+                    let pixel_formats = alpha_pixel_formats(timeout).await?;
                     let alpha = pixel_formats.contains(&format);
                     let _ = ALPHA_PIXEL_FORMATS.set(pixel_formats);
                     alpha
@@ -187,7 +206,7 @@ where
 }
 
 #[tracing::instrument(skip(f))]
-async fn discover_file<F, Fut>(f: F) -> Result<Option<DiscoveryLite>, FfMpegError>
+async fn discover_file<F, Fut>(f: F, timeout: u64) -> Result<Option<DiscoveryLite>, FfMpegError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, FfMpegError>>,
@@ -220,6 +239,7 @@ where
             "json",
             input_file_str,
         ],
+        timeout,
     )?;
 
     let mut output = Vec::new();
@@ -237,7 +257,7 @@ where
     parse_discovery(output)
 }
 
-async fn pixel_format<F, Fut>(f: F) -> Result<String, FfMpegError>
+async fn pixel_format<F, Fut>(f: F, timeout: u64) -> Result<String, FfMpegError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, FfMpegError>>,
@@ -267,6 +287,7 @@ where
             "compact=p=0:nk=1",
             input_file_str,
         ],
+        timeout,
     )?;
 
     let mut output = Vec::new();
@@ -283,7 +304,7 @@ where
     Ok(String::from_utf8_lossy(&output).trim().to_string())
 }
 
-async fn alpha_pixel_formats() -> Result<HashSet<String>, FfMpegError> {
+async fn alpha_pixel_formats(timeout: u64) -> Result<HashSet<String>, FfMpegError> {
     let process = Process::run(
         "ffprobe",
         &[
@@ -296,6 +317,7 @@ async fn alpha_pixel_formats() -> Result<HashSet<String>, FfMpegError> {
             "-print_format",
             "json",
         ],
+        timeout,
     )?;
 
     let mut output = Vec::new();

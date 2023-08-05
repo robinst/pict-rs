@@ -73,6 +73,7 @@ struct OldDbDefaults {
 #[serde(rename_all = "snake_case")]
 struct MediaDefaults {
     max_file_size: usize,
+    process_timeout: u64,
     filters: Vec<String>,
     retention: RetentionDefaults,
     image: ImageDefaults,
@@ -238,6 +239,7 @@ impl Default for MediaDefaults {
     fn default() -> Self {
         MediaDefaults {
             max_file_size: 40,
+            process_timeout: 30,
             filters: vec![
                 "blur".into(),
                 "crop".into(),

@@ -64,7 +64,8 @@ where
     };
 
     tracing::trace!("Validating bytes");
-    let (input_type, validated_reader) = crate::validate::validate_bytes(bytes, prescribed).await?;
+    let (input_type, validated_reader) =
+        crate::validate::validate_bytes(bytes, prescribed, media.process_timeout).await?;
 
     let processed_reader = if let Some(operations) = media.preprocess_steps() {
         if let Some(format) = input_type.processable_format() {
@@ -84,6 +85,7 @@ where
                 format,
                 format,
                 quality,
+                media.process_timeout,
             )
             .await?;
 

@@ -44,6 +44,7 @@ const MEGABYTES: usize = 1024 * 1024;
 pub(crate) async fn validate_bytes(
     bytes: Bytes,
     validations: Validations<'_>,
+    timeout: u64,
 ) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
     if bytes.is_empty() {
         return Err(ValidationError::Empty.into());
@@ -54,12 +55,12 @@ pub(crate) async fn validate_bytes(
         width,
         height,
         frames,
-    } = crate::discover::discover_bytes(bytes.clone()).await?;
+    } = crate::discover::discover_bytes(timeout, bytes.clone()).await?;
 
     match &input {
         InputFile::Image(input) => {
             let (format, read) =
-                process_image(bytes, *input, width, height, validations.image).await?;
+                process_image(bytes, *input, width, height, validations.image, timeout).await?;
 
             Ok((format, Either::left(read)))
         }
@@ -71,6 +72,7 @@ pub(crate) async fn validate_bytes(
                 height,
                 frames.unwrap_or(1),
                 &validations,
+                timeout,
             )
             .await?;
 
@@ -84,6 +86,7 @@ pub(crate) async fn validate_bytes(
                 height,
                 frames.unwrap_or(1),
                 validations.video,
+                timeout,
             )
             .await?;
 
@@ -99,6 +102,7 @@ async fn process_image(
     width: u16,
     height: u16,
     validations: &crate::config::Image,
+    timeout: u64,
 ) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
     if width > validations.max_width {
         return Err(ValidationError::Width.into());
@@ -121,9 +125,9 @@ async fn process_image(
     let read = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        Either::left(magick::convert_image(input.format, format, quality, bytes).await?)
+        Either::left(magick::convert_image(input.format, format, quality, timeout, bytes).await?)
     } else {
-        Either::right(exiftool::clear_metadata_bytes_read(bytes)?)
+        Either::right(exiftool::clear_metadata_bytes_read(bytes, timeout)?)
     };
 
     Ok((InternalFormat::Image(format), read))
@@ -163,6 +167,7 @@ async fn process_animation(
     height: u16,
     frames: u32,
     validations: &Validations<'_>,
+    timeout: u64,
 ) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
     match validate_animation(bytes.len(), width, height, frames, validations.animation) {
         Ok(()) => {
@@ -174,9 +179,13 @@ async fn process_animation(
             let read = if needs_transcode {
                 let quality = validations.animation.quality_for(format);
 
-                Either::left(magick::convert_animation(input, format, quality, bytes).await?)
+                Either::left(
+                    magick::convert_animation(input, format, quality, timeout, bytes).await?,
+                )
             } else {
-                Either::right(Either::left(exiftool::clear_metadata_bytes_read(bytes)?))
+                Either::right(Either::left(exiftool::clear_metadata_bytes_read(
+                    bytes, timeout,
+                )?))
             };
 
             Ok((InternalFormat::Animation(format), read))
@@ -190,7 +199,7 @@ async fn process_animation(
                 );
 
                 let read = Either::right(Either::right(
-                    magick::convert_video(input, output, bytes).await?,
+                    magick::convert_video(input, output, timeout, bytes).await?,
                 ));
 
                 Ok((InternalFormat::Video(output.internal_format()), read))
@@ -237,6 +246,7 @@ async fn process_video(
     height: u16,
     frames: u32,
     validations: &crate::config::Video,
+    timeout: u64,
 ) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
     validate_video(bytes.len(), width, height, frames, validations)?;
 
@@ -248,7 +258,7 @@ async fn process_video(
 
     let crf = validations.crf_for(width, height);
 
-    let read = ffmpeg::transcode_bytes(input, output, crf, bytes).await?;
+    let read = ffmpeg::transcode_bytes(input, output, crf, timeout, bytes).await?;
 
     Ok((InternalFormat::Video(output.internal_format()), read))
 }

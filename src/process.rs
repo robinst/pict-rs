@@ -5,11 +5,11 @@ use std::{
     pin::Pin,
     process::{ExitStatus, Stdio},
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncRead, AsyncWriteExt, ReadBuf},
-    process::{Child, ChildStdin, Command},
+    process::{Child, ChildStdin, ChildStdout, Command},
     sync::oneshot::{channel, Receiver},
 };
 use tracing::{Instrument, Span};
@@ -56,6 +56,7 @@ pub(crate) struct Process {
     command: String,
     child: Child,
     guard: MetricsGuard,
+    timeout: Duration,
 }
 
 impl std::fmt::Debug for Process {
@@ -68,15 +69,14 @@ struct DropHandle {
     inner: JoinHandle<()>,
 }
 
-pin_project_lite::pin_project! {
-    struct ProcessRead<I> {
-        #[pin]
-        inner: I,
-        err_recv: Receiver<std::io::Error>,
-        err_closed: bool,
-        handle: DropHandle,
-        eof: bool,
-    }
+pub(crate) struct ProcessRead<I> {
+    inner: I,
+    err_recv: Receiver<std::io::Error>,
+    err_closed: bool,
+    #[allow(dead_code)]
+    handle: DropHandle,
+    eof: bool,
+    sleep: Pin<Box<actix_rt::time::Sleep>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -90,6 +90,9 @@ pub(crate) enum ProcessError {
     #[error("Reached process spawn limit")]
     LimitReached,
 
+    #[error("{0} timed out")]
+    Timeout(String),
+
     #[error("{0} Failed with {1}")]
     Status(String, ExitStatus),
 
@@ -98,9 +101,9 @@ pub(crate) enum ProcessError {
 }
 
 impl Process {
-    pub(crate) fn run(command: &str, args: &[&str]) -> Result<Self, ProcessError> {
+    pub(crate) fn run(command: &str, args: &[&str], timeout: u64) -> Result<Self, ProcessError> {
         let res = tracing::trace_span!(parent: None, "Create command", %command)
-            .in_scope(|| Self::spawn(command, Command::new(command).args(args)));
+            .in_scope(|| Self::spawn(command, Command::new(command).args(args), timeout));
 
         match res {
             Ok(this) => Ok(this),
@@ -115,7 +118,7 @@ impl Process {
         }
     }
 
-    fn spawn(command: &str, cmd: &mut Command) -> std::io::Result<Self> {
+    fn spawn(command: &str, cmd: &mut Command, timeout: u64) -> std::io::Result<Self> {
         tracing::trace_span!(parent: None, "Spawn command", %command).in_scope(|| {
             let guard = MetricsGuard::guard(command.into());
 
@@ -128,83 +131,102 @@ impl Process {
                 child,
                 command: String::from(command),
                 guard,
+                timeout: Duration::from_secs(timeout),
             })
         })
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) async fn wait(mut self) -> Result<(), ProcessError> {
-        let res = self.child.wait().await;
+    pub(crate) async fn wait(self) -> Result<(), ProcessError> {
+        let Process {
+            command,
+            mut child,
+            guard,
+            timeout,
+        } = self;
+
+        let res = actix_rt::time::timeout(timeout, child.wait()).await;
 
         match res {
-            Ok(status) if status.success() => {
-                self.guard.disarm();
+            Ok(Ok(status)) if status.success() => {
+                guard.disarm();
 
                 Ok(())
             }
-            Ok(status) => Err(ProcessError::Status(self.command, status)),
-            Err(e) => Err(ProcessError::Other(e)),
+            Ok(Ok(status)) => Err(ProcessError::Status(command, status)),
+            Ok(Err(e)) => Err(ProcessError::Other(e)),
+            Err(_) => {
+                child.kill().await.map_err(ProcessError::Other)?;
+
+                Err(ProcessError::Timeout(command))
+            }
         }
     }
 
-    pub(crate) fn bytes_read(self, input: Bytes) -> impl AsyncRead + Unpin {
+    pub(crate) fn bytes_read(self, input: Bytes) -> ProcessRead<ChildStdout> {
         self.spawn_fn(move |mut stdin| {
             let mut input = input;
             async move { stdin.write_all_buf(&mut input).await }
         })
     }
 
-    pub(crate) fn read(self) -> impl AsyncRead + Unpin {
+    pub(crate) fn read(self) -> ProcessRead<ChildStdout> {
         self.spawn_fn(|_| async { Ok(()) })
     }
 
     #[allow(unknown_lints)]
     #[allow(clippy::let_with_type_underscore)]
     #[tracing::instrument(level = "trace", skip_all)]
-    fn spawn_fn<F, Fut>(mut self, f: F) -> impl AsyncRead + Unpin
+    fn spawn_fn<F, Fut>(self, f: F) -> ProcessRead<ChildStdout>
     where
         F: FnOnce(ChildStdin) -> Fut + 'static,
         Fut: Future<Output = std::io::Result<()>>,
     {
-        let stdin = self.child.stdin.take().expect("stdin exists");
-        let stdout = self.child.stdout.take().expect("stdout exists");
+        let Process {
+            command,
+            mut child,
+            guard,
+            timeout,
+        } = self;
 
-        let (tx, rx) = tracing::trace_span!(parent: None, "Create channel", %self.command)
+        let stdin = child.stdin.take().expect("stdin exists");
+        let stdout = child.stdout.take().expect("stdout exists");
+
+        let (tx, rx) = tracing::trace_span!(parent: None, "Create channel", %command)
             .in_scope(channel::<std::io::Error>);
 
-        let span = tracing::info_span!(parent: None, "Background process task", %self.command);
+        let span = tracing::info_span!(parent: None, "Background process task", %command);
         span.follows_from(Span::current());
 
-        let mut child = self.child;
-        let command = self.command;
-        let guard = self.guard;
         let handle = tracing::trace_span!(parent: None, "Spawn task", %command).in_scope(|| {
             actix_rt::spawn(
                 async move {
-                    if let Err(e) = (f)(stdin).await {
-                        let _ = tx.send(e);
-                        return;
-                    }
+                    let child_fut = async {
+                        (f)(stdin).await?;
 
-                    match child.wait().await {
-                        Ok(status) => {
-                            if status.success() {
-                                guard.disarm();
-                            } else {
-                                let _ = tx.send(std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    StatusError(status),
-                                ));
-                            }
+                        child.wait().await
+                    };
+
+                    let error = match actix_rt::time::timeout(timeout, child_fut).await {
+                        Ok(Ok(status)) if status.success() => {
+                            guard.disarm();
+                            return;
                         }
-                        Err(e) => {
-                            let _ = tx.send(e);
+                        Ok(Ok(status)) => {
+                            std::io::Error::new(std::io::ErrorKind::Other, StatusError(status))
                         }
-                    }
+                        Ok(Err(e)) => e,
+                        Err(_) => std::io::ErrorKind::TimedOut.into(),
+                    };
+
+                    let _ = tx.send(error);
+                    let _ = child.kill().await;
                 }
                 .instrument(span),
             )
         });
+
+        let sleep = actix_rt::time::sleep(timeout);
 
         ProcessRead {
             inner: stdout,
@@ -212,49 +234,49 @@ impl Process {
             err_closed: false,
             handle: DropHandle { inner: handle },
             eof: false,
+            sleep: Box::pin(sleep),
         }
     }
 }
 
 impl<I> AsyncRead for ProcessRead<I>
 where
-    I: AsyncRead,
+    I: AsyncRead + Unpin,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        let this = self.as_mut().project();
-
-        let err_recv = this.err_recv;
-        let err_closed = this.err_closed;
-        let eof = this.eof;
-        let inner = this.inner;
-
-        if !*err_closed {
-            if let Poll::Ready(res) = Pin::new(err_recv).poll(cx) {
-                *err_closed = true;
+        if !self.err_closed {
+            if let Poll::Ready(res) = Pin::new(&mut self.err_recv).poll(cx) {
+                self.err_closed = true;
 
                 if let Ok(err) = res {
                     return Poll::Ready(Err(err));
                 }
 
-                if *eof {
+                if self.eof {
                     return Poll::Ready(Ok(()));
                 }
             }
+
+            if let Poll::Ready(()) = self.sleep.as_mut().poll(cx) {
+                self.err_closed = true;
+
+                return Poll::Ready(Err(std::io::ErrorKind::TimedOut.into()));
+            }
         }
 
-        if !*eof {
+        if !self.eof {
             let before_size = buf.filled().len();
 
-            return match inner.poll_read(cx, buf) {
+            return match Pin::new(&mut self.inner).poll_read(cx, buf) {
                 Poll::Ready(Ok(())) => {
                     if buf.filled().len() == before_size {
-                        *eof = true;
+                        self.eof = true;
 
-                        if !*err_closed {
+                        if !self.err_closed {
                             // reached end of stream & haven't received process signal
                             return Poll::Pending;
                         }
@@ -263,7 +285,7 @@ where
                     Poll::Ready(Ok(()))
                 }
                 Poll::Ready(Err(e)) => {
-                    *eof = true;
+                    self.eof = true;
 
                     Poll::Ready(Err(e))
                 }
@@ -271,7 +293,7 @@ where
             };
         }
 
-        if *err_closed && *eof {
+        if self.err_closed && self.eof {
             return Poll::Ready(Ok(()));
         }
 

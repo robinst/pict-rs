@@ -107,6 +107,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
             identifier,
             input_format.unwrap_or(InternalVideoFormat::Mp4),
             thumbnail_format,
+            media.process_timeout,
         )
         .await?;
 
@@ -123,7 +124,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     let input_details = if let Some(details) = repo.details(&identifier).await? {
         details
     } else {
-        let details = Details::from_store(store, &identifier).await?;
+        let details = Details::from_store(store, &identifier, media.process_timeout).await?;
 
         repo.relate_details(&identifier, &details).await?;
 
@@ -151,6 +152,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
         input_format,
         format,
         quality,
+        media.process_timeout,
     )
     .await?;
 
@@ -163,7 +165,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
 
     drop(permit);
 
-    let details = Details::from_bytes(bytes.clone()).await?;
+    let details = Details::from_bytes(media.process_timeout, bytes.clone()).await?;
 
     let identifier = store
         .save_bytes(bytes.clone(), details.media_type())

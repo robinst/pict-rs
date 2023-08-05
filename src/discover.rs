@@ -38,13 +38,14 @@ pub(crate) enum DiscoverError {
 }
 
 pub(crate) async fn discover_bytes_lite(
+    timeout: u64,
     bytes: Bytes,
 ) -> Result<DiscoveryLite, crate::error::Error> {
-    if let Some(discovery) = ffmpeg::discover_bytes_lite(bytes.clone()).await? {
+    if let Some(discovery) = ffmpeg::discover_bytes_lite(timeout, bytes.clone()).await? {
         return Ok(discovery);
     }
 
-    let discovery = magick::discover_bytes_lite(bytes).await?;
+    let discovery = magick::discover_bytes_lite(timeout, bytes).await?;
 
     Ok(discovery)
 }
@@ -52,28 +53,34 @@ pub(crate) async fn discover_bytes_lite(
 pub(crate) async fn discover_store_lite<S>(
     store: &S,
     identifier: &S::Identifier,
+    timeout: u64,
 ) -> Result<DiscoveryLite, crate::error::Error>
 where
     S: Store,
 {
     if let Some(discovery) =
-        ffmpeg::discover_stream_lite(store.to_stream(identifier, None, None).await?).await?
+        ffmpeg::discover_stream_lite(timeout, store.to_stream(identifier, None, None).await?)
+            .await?
     {
         return Ok(discovery);
     }
 
     let discovery =
-        magick::discover_stream_lite(store.to_stream(identifier, None, None).await?).await?;
+        magick::discover_stream_lite(timeout, store.to_stream(identifier, None, None).await?)
+            .await?;
 
     Ok(discovery)
 }
 
-pub(crate) async fn discover_bytes(bytes: Bytes) -> Result<Discovery, crate::error::Error> {
-    let discovery = ffmpeg::discover_bytes(bytes.clone()).await?;
+pub(crate) async fn discover_bytes(
+    timeout: u64,
+    bytes: Bytes,
+) -> Result<Discovery, crate::error::Error> {
+    let discovery = ffmpeg::discover_bytes(timeout, bytes.clone()).await?;
 
-    let discovery = magick::confirm_bytes(discovery, bytes.clone()).await?;
+    let discovery = magick::confirm_bytes(discovery, timeout, bytes.clone()).await?;
 
-    let discovery = exiftool::check_reorient(discovery, bytes).await?;
+    let discovery = exiftool::check_reorient(discovery, timeout, bytes).await?;
 
     Ok(discovery)
 }

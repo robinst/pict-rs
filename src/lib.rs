@@ -122,7 +122,8 @@ async fn ensure_details<R: FullRepo, S: Store + 'static>(
         }
 
         tracing::debug!("generating new details from {:?}", identifier);
-        let new_details = Details::from_store(store, &identifier).await?;
+        let new_details =
+            Details::from_store(store, &identifier, config.media.process_timeout).await?;
         tracing::debug!("storing details for {:?}", identifier);
         repo.relate_details(&identifier, &new_details).await?;
         tracing::debug!("stored");
@@ -798,7 +799,8 @@ async fn process<R: FullRepo, S: Store + 'static>(
             }
 
             tracing::debug!("generating new details from {:?}", identifier);
-            let new_details = Details::from_store(&store, &identifier).await?;
+            let new_details =
+                Details::from_store(&store, &identifier, config.media.process_timeout).await?;
             tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
             tracing::debug!("stored");
@@ -927,7 +929,8 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
             }
 
             tracing::debug!("generating new details from {:?}", identifier);
-            let new_details = Details::from_store(&store, &identifier).await?;
+            let new_details =
+                Details::from_store(&store, &identifier, config.media.process_timeout).await?;
             tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
             tracing::debug!("stored");
@@ -1744,6 +1747,7 @@ async fn migrate_inner<S1>(
     from: S1,
     to: config::primitives::Store,
     skip_missing_files: bool,
+    timeout: u64,
 ) -> color_eyre::Result<()>
 where
     S1: Store + 'static,
@@ -1753,7 +1757,9 @@ where
             let to = FileStore::build(path.clone(), repo.clone()).await?;
 
             match repo {
-                Repo::Sled(repo) => migrate_store(repo, from, to, skip_missing_files).await?,
+                Repo::Sled(repo) => {
+                    migrate_store(repo, from, to, skip_missing_files, timeout).await?
+                }
             }
         }
         config::primitives::Store::ObjectStorage(config::primitives::ObjectStorage {
@@ -1789,7 +1795,9 @@ where
             .build(client);
 
             match repo {
-                Repo::Sled(repo) => migrate_store(repo, from, to, skip_missing_files).await?,
+                Repo::Sled(repo) => {
+                    migrate_store(repo, from, to, skip_missing_files, timeout).await?
+                }
             }
         }
     }
@@ -1897,7 +1905,15 @@ impl PictRsConfiguration {
                 match from {
                     config::primitives::Store::Filesystem(config::Filesystem { path }) => {
                         let from = FileStore::build(path.clone(), repo.clone()).await?;
-                        migrate_inner(repo, client, from, to, skip_missing_files).await?;
+                        migrate_inner(
+                            repo,
+                            client,
+                            from,
+                            to,
+                            skip_missing_files,
+                            config.media.process_timeout,
+                        )
+                        .await?;
                     }
                     config::primitives::Store::ObjectStorage(
                         config::primitives::ObjectStorage {
@@ -1933,7 +1949,15 @@ impl PictRsConfiguration {
                         .await?
                         .build(client.clone());
 
-                        migrate_inner(repo, client, from, to, skip_missing_files).await?;
+                        migrate_inner(
+                            repo,
+                            client,
+                            from,
+                            to,
+                            skip_missing_files,
+                            config.media.process_timeout,
+                        )
+                        .await?;
                     }
                 }
 

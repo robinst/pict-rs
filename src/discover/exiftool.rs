@@ -16,11 +16,12 @@ pub(super) async fn check_reorient(
         height,
         frames,
     }: Discovery,
+    timeout: u64,
     bytes: Bytes,
 ) -> Result<Discovery, ExifError> {
     let input = match input {
         InputFile::Image(ImageInput { format, .. }) => {
-            let needs_reorient = needs_reorienting(bytes).await?;
+            let needs_reorient = needs_reorienting(bytes, timeout).await?;
 
             InputFile::Image(ImageInput {
                 format,
@@ -39,8 +40,8 @@ pub(super) async fn check_reorient(
 }
 
 #[tracing::instrument(level = "trace", skip(input))]
-async fn needs_reorienting(input: Bytes) -> Result<bool, ExifError> {
-    let process = Process::run("exiftool", &["-n", "-Orientation", "-"])?;
+async fn needs_reorienting(input: Bytes, timeout: u64) -> Result<bool, ExifError> {
+    let process = Process::run("exiftool", &["-n", "-Orientation", "-"], timeout)?;
     let mut reader = process.bytes_read(input);
 
     let mut buf = String::new();

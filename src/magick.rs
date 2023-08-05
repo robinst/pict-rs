@@ -68,6 +68,7 @@ async fn process_image<F, Fut>(
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
+    timeout: u64,
     write_file: F,
 ) -> Result<impl AsyncRead + Unpin, MagickError>
 where
@@ -108,7 +109,7 @@ where
     }
     args.push(&output_arg);
 
-    let reader = Process::run("magick", &args)?.read();
+    let reader = Process::run("magick", &args, timeout)?.read();
 
     let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, input_file);
 
@@ -122,6 +123,7 @@ pub(crate) async fn process_image_store_read<S: Store + 'static>(
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
+    timeout: u64,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     let stream = store
         .to_stream(identifier, None, None)
@@ -133,6 +135,7 @@ pub(crate) async fn process_image_store_read<S: Store + 'static>(
         input_format,
         format,
         quality,
+        timeout,
         |mut tmp_file| async move {
             tmp_file
                 .write_from_stream(stream)
@@ -150,12 +153,14 @@ pub(crate) async fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
+    timeout: u64,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     process_image(
         args,
         input_format,
         format,
         quality,
+        timeout,
         |mut tmp_file| async move {
             tmp_file
                 .write_from_async_read(async_read)

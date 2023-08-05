@@ -17,6 +17,7 @@ pub(super) async fn migrate_store<R, S1, S2>(
     from: S1,
     to: S2,
     skip_missing_files: bool,
+    timeout: u64,
 ) -> Result<(), Error>
 where
     S1: Store + Clone + 'static,
@@ -38,8 +39,14 @@ where
 
     let mut failure_count = 0;
 
-    while let Err(e) =
-        do_migrate_store(repo.clone(), from.clone(), to.clone(), skip_missing_files).await
+    while let Err(e) = do_migrate_store(
+        repo.clone(),
+        from.clone(),
+        to.clone(),
+        skip_missing_files,
+        timeout,
+    )
+    .await
     {
         tracing::error!("Migration failed with {}", format!("{e:?}"));
 
@@ -69,6 +76,7 @@ struct MigrateState<R, S1, S2> {
     pct: AtomicU64,
     index: AtomicU64,
     started_at: Instant,
+    timeout: u64,
 }
 
 async fn do_migrate_store<R, S1, S2>(
@@ -76,6 +84,7 @@ async fn do_migrate_store<R, S1, S2>(
     from: S1,
     to: S2,
     skip_missing_files: bool,
+    timeout: u64,
 ) -> Result<(), Error>
 where
     S1: Store + 'static,
@@ -110,6 +119,7 @@ where
         pct: AtomicU64::new(initial_repo_size / 100),
         index: AtomicU64::new(0),
         started_at: Instant::now(),
+        timeout,
     });
 
     let mut joinset = tokio::task::JoinSet::new();
@@ -160,6 +170,7 @@ where
         pct,
         index,
         started_at,
+        timeout,
     } = state;
 
     let current_index = index.fetch_add(1, Ordering::Relaxed);
@@ -212,7 +223,7 @@ where
 
     if let Some(identifier) = repo.motion_identifier(hash.clone().into()).await? {
         if !repo.is_migrated(&identifier).await? {
-            match migrate_file(repo, from, to, &identifier, *skip_missing_files).await {
+            match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
                 Ok(new_identifier) => {
                     migrate_details(repo, &identifier, &new_identifier).await?;
                     repo.relate_motion_identifier(hash.clone().into(), &new_identifier)
@@ -244,7 +255,7 @@ where
 
     for (variant, identifier) in repo.variants(hash.clone().into()).await? {
         if !repo.is_migrated(&identifier).await? {
-            match migrate_file(repo, from, to, &identifier, *skip_missing_files).await {
+            match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
                 Ok(new_identifier) => {
                     migrate_details(repo, &identifier, &new_identifier).await?;
                     repo.remove_variant(hash.clone().into(), variant.clone())
@@ -280,7 +291,16 @@ where
         }
     }
 
-    match migrate_file(repo, from, to, &original_identifier, *skip_missing_files).await {
+    match migrate_file(
+        repo,
+        from,
+        to,
+        &original_identifier,
+        *skip_missing_files,
+        *timeout,
+    )
+    .await
+    {
         Ok(new_identifier) => {
             migrate_details(repo, &original_identifier, &new_identifier).await?;
             repo.update_identifier(hash.clone().into(), &new_identifier)
@@ -338,6 +358,7 @@ async fn migrate_file<R, S1, S2>(
     to: &S2,
     identifier: &S1::Identifier,
     skip_missing_files: bool,
+    timeout: u64,
 ) -> Result<S2::Identifier, MigrateError>
 where
     R: IdentifierRepo,
@@ -347,7 +368,7 @@ where
     let mut failure_count = 0;
 
     loop {
-        match do_migrate_file(repo, from, to, identifier).await {
+        match do_migrate_file(repo, from, to, identifier, timeout).await {
             Ok(identifier) => return Ok(identifier),
             Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                 return Err(MigrateError::From(e));
@@ -380,6 +401,7 @@ async fn do_migrate_file<R, S1, S2>(
     from: &S1,
     to: &S2,
     identifier: &S1::Identifier,
+    timeout: u64,
 ) -> Result<S2::Identifier, MigrateError>
 where
     R: IdentifierRepo,
@@ -407,7 +429,7 @@ where
     let details = if let Some(details) = details_opt {
         details
     } else {
-        let new_details = Details::from_store(from, identifier)
+        let new_details = Details::from_store(from, identifier, timeout)
             .await
             .map_err(MigrateError::Details)?;
         repo.relate_details(identifier, &new_details)

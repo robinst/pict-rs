@@ -11,6 +11,7 @@ pub(super) async fn convert_image(
     input: ImageFormat,
     output: ImageFormat,
     quality: Option<u8>,
+    timeout: u64,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     convert(
@@ -18,6 +19,7 @@ pub(super) async fn convert_image(
         output.magick_format(),
         false,
         quality,
+        timeout,
         bytes,
     )
     .await
@@ -27,6 +29,7 @@ pub(super) async fn convert_animation(
     input: AnimationFormat,
     output: AnimationFormat,
     quality: Option<u8>,
+    timeout: u64,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     convert(
@@ -34,6 +37,7 @@ pub(super) async fn convert_animation(
         output.magick_format(),
         true,
         quality,
+        timeout,
         bytes,
     )
     .await
@@ -42,6 +46,7 @@ pub(super) async fn convert_animation(
 pub(super) async fn convert_video(
     input: AnimationFormat,
     output: OutputVideoFormat,
+    timeout: u64,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     convert(
@@ -49,6 +54,7 @@ pub(super) async fn convert_video(
         output.magick_format(),
         true,
         None,
+        timeout,
         bytes,
     )
     .await
@@ -59,6 +65,7 @@ async fn convert(
     output: &'static str,
     coalesce: bool,
     quality: Option<u8>,
+    timeout: u64,
     bytes: Bytes,
 ) -> Result<impl AsyncRead + Unpin, MagickError> {
     let input_file = crate::tmp_file::tmp_file(None);
@@ -95,7 +102,7 @@ async fn convert(
 
     args.push(&output_arg);
 
-    let reader = Process::run("magick", &args)?.read();
+    let reader = Process::run("magick", &args, timeout)?.read();
 
     let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, input_file);
 

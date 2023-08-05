@@ -168,6 +168,8 @@ pub(crate) struct OldDb {
 pub(crate) struct Media {
     pub(crate) max_file_size: usize,
 
+    pub(crate) process_timeout: u64,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     preprocess_steps: Option<PreprocessSteps>,
 

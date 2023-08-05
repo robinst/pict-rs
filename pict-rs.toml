@@ -151,6 +151,11 @@ path = '/mnt'
 # default: 40
 max_file_size = 40
 
+## Optional: Timeout (in seconds) for all spawned media processing operations
+# environment variable: PICTRS__MEDIA__PROCESS_TIMEOUT
+# default: 30
+process_timeout = 30
+
 ## Optional: preprocessing steps for uploaded images
 # environment variable: PICTRS__MEDIA__PREPROCESS_STEPS
 # default: empty
