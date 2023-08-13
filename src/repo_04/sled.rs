@@ -1,8 +1,8 @@
 use crate::{
     details::MaybeHumanDate,
-    repo::{
+    repo_04::{
         Alias, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, Details, FullRepo,
-        HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, JobId, MigrationRepo, QueueRepo,
+        HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, MigrationRepo, QueueRepo,
         SettingsRepo, UploadId, UploadRepo, UploadResult,
     },
     serde_str::Serde,
@@ -74,13 +74,13 @@ pub(crate) struct SledRepo {
     alias_hashes: Tree,
     alias_delete_tokens: Tree,
     queue: Tree,
-    job_state: Tree,
     alias_access: Tree,
     inverse_alias_access: Tree,
     variant_access: Tree,
     inverse_variant_access: Tree,
     proxy: Tree,
     inverse_proxy: Tree,
+    in_progress_queue: Tree,
     queue_notifier: Arc<RwLock<HashMap<&'static str, Arc<Notify>>>>,
     uploads: Tree,
     migration_identifiers: Tree,
@@ -112,13 +112,13 @@ impl SledRepo {
             alias_hashes: db.open_tree("pict-rs-alias-hashes-tree")?,
             alias_delete_tokens: db.open_tree("pict-rs-alias-delete-tokens-tree")?,
             queue: db.open_tree("pict-rs-queue-tree")?,
-            job_state: db.open_tree("pict-rs-job-state-tree")?,
             alias_access: db.open_tree("pict-rs-alias-access-tree")?,
             inverse_alias_access: db.open_tree("pict-rs-inverse-alias-access-tree")?,
             variant_access: db.open_tree("pict-rs-variant-access-tree")?,
             inverse_variant_access: db.open_tree("pict-rs-inverse-variant-access-tree")?,
             proxy: db.open_tree("pict-rs-proxy-tree")?,
             inverse_proxy: db.open_tree("pict-rs-inverse-proxy-tree")?,
+            in_progress_queue: db.open_tree("pict-rs-in-progress-queue-tree")?,
             queue_notifier: Arc::new(RwLock::new(HashMap::new())),
             uploads: db.open_tree("pict-rs-uploads-tree")?,
             migration_identifiers: db.open_tree("pict-rs-migration-identifiers-tree")?,
@@ -270,7 +270,7 @@ impl futures_util::Stream for IterStream {
                 std::task::Poll::Ready(None)
             }
         } else if let Some(mut iter) = self.iter.take() {
-            self.next = Some(actix_rt::task::spawn_blocking(move || {
+            self.next = Some(tokio::task::spawn_blocking(move || {
                 let opt = iter
                     .next()
                     .map(|res| res.map_err(SledError::from).map_err(RepoError::from));
@@ -624,68 +624,62 @@ impl UploadRepo for SledRepo {
     }
 }
 
-enum JobState {
-    Pending,
-    Running(Vec<u8>),
-}
-
-impl JobState {
-    const fn pending() -> Self {
-        Self::Pending
-    }
-
-    fn running() -> Self {
-        Self::Running(
-            time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .expect("Can format")
-                .into_bytes(),
-        )
-    }
-
-    fn as_bytes(&self) -> &[u8] {
-        match self {
-            Self::Pending => b"pending",
-            Self::Running(ref bytes) => bytes,
-        }
-    }
-}
-
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for SledRepo {
     #[tracing::instrument(skip_all, fields(worker_id = %String::from_utf8_lossy(&worker_prefix)))]
-    async fn requeue_timed_out(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError> {
-        todo!()
+    async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError> {
+        let vec: Vec<(String, IVec)> = b!(self.in_progress_queue, {
+            let vec = in_progress_queue
+                .scan_prefix(worker_prefix)
+                .values()
+                .filter_map(Result::ok)
+                .filter_map(|ivec| {
+                    let index = ivec.as_ref().iter().enumerate().find_map(|(index, byte)| {
+                        if *byte == 0 {
+                            Some(index)
+                        } else {
+                            None
+                        }
+                    })?;
+
+                    let (queue, job) = ivec.split_at(index);
+                    if queue.is_empty() || job.len() <= 1 {
+                        return None;
+                    }
+                    let job = &job[1..];
+
+                    Some((String::from_utf8_lossy(queue).to_string(), IVec::from(job)))
+                })
+                .collect::<Vec<(String, IVec)>>();
+
+            Ok(vec) as Result<_, SledError>
+        });
+
+        let db = self.db.clone();
+        b!(self.queue, {
+            for (queue_name, job) in vec {
+                let id = db.generate_id()?;
+                let mut key = queue_name.as_bytes().to_vec();
+                key.extend(id.to_be_bytes());
+
+                queue.insert(key, job)?;
+            }
+
+            Ok(()) as Result<(), SledError>
+        });
+
+        Ok(())
     }
 
     #[tracing::instrument(skip(self, job), fields(job = %String::from_utf8_lossy(&job)))]
     async fn push(&self, queue_name: &'static str, job: Self::Bytes) -> Result<(), RepoError> {
         let metrics_guard = PushMetricsGuard::guard(queue_name);
 
-        let id = JobId::gen();
+        let id = self.db.generate_id().map_err(SledError::from)?;
         let mut key = queue_name.as_bytes().to_vec();
-        key.push(0);
-        key.extend(id.as_bytes());
+        key.extend(id.to_be_bytes());
 
-        let queue = self.queue.clone();
-        let job_state = self.job_state.clone();
-
-        let res = actix_rt::task::spawn_blocking(move || {
-            (&queue, &job_state).transaction(|(queue, job_state)| {
-                let state = JobState::pending();
-
-                queue.insert(key.as_slice(), &job)?;
-                job_state.insert(key.as_slice(), state.as_bytes())?;
-
-                Ok(())
-            })
-        })
-        .await
-        .map_err(|_| RepoError::Canceled)?;
-
-        if let Err(TransactionError::Abort(e) | TransactionError::Storage(e)) = res {
-            return Err(RepoError::from(SledError::from(e)));
-        }
+        b!(self.queue, queue.insert(key, job));
 
         if let Some(notifier) = self.queue_notifier.read().unwrap().get(&queue_name) {
             notifier.notify_one();
@@ -710,53 +704,40 @@ impl QueueRepo for SledRepo {
         &self,
         queue_name: &'static str,
         worker_id: Vec<u8>,
-    ) -> Result<(JobId, Self::Bytes), RepoError> {
+    ) -> Result<Self::Bytes, RepoError> {
         let metrics_guard = PopMetricsGuard::guard(queue_name);
 
         loop {
-            let queue = self.queue.clone();
-            let job_state = self.job_state.clone();
+            let in_progress_queue = self.in_progress_queue.clone();
 
-            let opt = actix_rt::task::spawn_blocking(move || {
-                for res in job_state.scan_prefix(queue_name) {
-                    let (key, value) = res?;
+            let worker_id = worker_id.clone();
+            let job = b!(self.queue, {
+                in_progress_queue.remove(&worker_id)?;
+                in_progress_queue.flush()?;
 
-                    if value != "pending" {
-                        // TODO: requeue dead jobs
-                        continue;
+                while let Some((key, job)) = queue
+                    .scan_prefix(queue_name.as_bytes())
+                    .find_map(Result::ok)
+                {
+                    let mut in_progress_value = queue_name.as_bytes().to_vec();
+                    in_progress_value.push(0);
+                    in_progress_value.extend_from_slice(&job);
+
+                    in_progress_queue.insert(&worker_id, in_progress_value)?;
+
+                    if queue.remove(key)?.is_some() {
+                        return Ok(Some(job));
                     }
 
-                    let state = JobState::running();
-
-                    match job_state.compare_and_swap(&key, Some(value), Some(state.as_bytes())) {
-                        Ok(_) => {
-                            // acquired job
-                        }
-                        Err(_) => {
-                            // someone else acquired job
-                            continue;
-                        }
-                    }
-
-                    let id_bytes = &key[queue_name.len() + 1..];
-
-                    let id_bytes: [u8; 16] = id_bytes.try_into().expect("Key length");
-
-                    let job_id = JobId::from_bytes(id_bytes);
-
-                    let opt = queue.get(&key)?.map(|job_bytes| (job_id, job_bytes));
-
-                    return Ok(opt) as Result<Option<(JobId, Self::Bytes)>, SledError>;
+                    in_progress_queue.remove(&worker_id)?;
                 }
 
-                Ok(None)
-            })
-            .await
-            .map_err(|_| RepoError::Canceled)??;
+                Ok(None) as Result<_, SledError>
+            });
 
-            if let Some(tup) = opt {
+            if let Some(job) = job {
                 metrics_guard.disarm();
-                return Ok(tup);
+                return Ok(job);
             }
 
             let opt = self
@@ -778,14 +759,6 @@ impl QueueRepo for SledRepo {
 
             notify.notified().await
         }
-    }
-
-    async fn heartbeat(&self, job_id: JobId) -> Result<(), RepoError> {
-        todo!()
-    }
-
-    async fn complete_job(&self, job_id: JobId) -> Result<(), RepoError> {
-        todo!()
     }
 }
 

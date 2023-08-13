@@ -21,6 +21,7 @@ mod processor;
 mod queue;
 mod range;
 mod repo;
+mod repo_04;
 mod serde_str;
 mod store;
 mod stream;
@@ -40,7 +41,6 @@ use futures_util::{
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::Metrics;
 use once_cell::sync::Lazy;
-use repo::AliasAccessRepo;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
 use rusty_s3::UrlStyle;
@@ -69,8 +69,8 @@ use self::{
     migrate_store::migrate_store,
     queue::queue_generate,
     repo::{
-        sled::SledRepo, Alias, DeleteToken, FullRepo, HashRepo, IdentifierRepo, QueueRepo, Repo,
-        SettingsRepo, UploadId, UploadResult, VariantAccessRepo,
+        sled::SledRepo, Alias, AliasAccessRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo,
+        Repo, SettingsRepo, UploadId, UploadResult, VariantAccessRepo,
     },
     serde_str::Serde,
     store::{
@@ -1975,9 +1975,6 @@ impl PictRsConfiguration {
                 match repo {
                     Repo::Sled(sled_repo) => {
                         sled_repo
-                            .requeue_in_progress(config.server.worker_id.as_bytes().to_vec())
-                            .await?;
-                        sled_repo
                             .mark_accessed::<<FileStore as Store>::Identifier>()
                             .await?;
 
@@ -2019,9 +2016,6 @@ impl PictRsConfiguration {
 
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        sled_repo
-                            .requeue_in_progress(config.server.worker_id.as_bytes().to_vec())
-                            .await?;
                         sled_repo
                             .mark_accessed::<<ObjectStore as Store>::Identifier>()
                             .await?;

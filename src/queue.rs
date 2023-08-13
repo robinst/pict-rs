@@ -4,13 +4,19 @@ use crate::{
     error::Error,
     formats::InputProcessableFormat,
     repo::{
-        Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, QueueRepo, UploadId,
+        Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, JobId, QueueRepo,
+        UploadId,
     },
     serde_str::Serde,
     store::{Identifier, Store},
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
-use std::{future::Future, path::PathBuf, pin::Pin, time::Instant};
+use std::{
+    future::Future,
+    path::PathBuf,
+    pin::Pin,
+    time::{Duration, Instant},
+};
 use tracing::Instrument;
 
 mod cleanup;
@@ -289,15 +295,21 @@ where
         + Copy,
 {
     loop {
-        let bytes = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
+        let (job_id, bytes) = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
 
         let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
 
         let guard = MetricsGuard::guard(worker_id.clone(), queue);
 
-        span.in_scope(|| (callback)(repo, store, config, bytes.as_ref()))
-            .instrument(span)
-            .await?;
+        span.in_scope(|| {
+            heartbeat(
+                repo,
+                job_id,
+                (callback)(repo, store, config, bytes.as_ref()),
+            )
+        })
+        .instrument(span)
+        .await?;
 
         guard.disarm();
     }
@@ -369,16 +381,62 @@ where
         + Copy,
 {
     loop {
-        let bytes = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
+        let (job_id, bytes) = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
 
         let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
 
         let guard = MetricsGuard::guard(worker_id.clone(), queue);
 
-        span.in_scope(|| (callback)(repo, store, process_map, config, bytes.as_ref()))
-            .instrument(span)
-            .await?;
+        span.in_scope(|| {
+            heartbeat(
+                repo,
+                job_id,
+                (callback)(repo, store, process_map, config, bytes.as_ref()),
+            )
+        })
+        .instrument(span)
+        .await?;
 
         guard.disarm();
+    }
+}
+
+async fn heartbeat<R, Fut>(repo: &R, job_id: JobId, fut: Fut) -> Fut::Output
+where
+    R: QueueRepo,
+    Fut: std::future::Future,
+{
+    let mut fut = std::pin::pin!(fut);
+
+    let mut interval = actix_rt::time::interval(Duration::from_secs(5));
+
+    let mut hb = None;
+
+    loop {
+        tokio::select! {
+            output = &mut fut => {
+                return output;
+            }
+            _ = interval.tick() => {
+                if hb.is_none() {
+                    hb = Some(repo.heartbeat(job_id));
+                }
+            }
+            opt = poll_opt(hb.as_mut()), if hb.is_some() => {
+                if let Some(Err(e)) = opt {
+                    tracing::warn!("Failed heartbeat\n{}", format!("{e:?}"));
+                }
+            }
+        }
+    }
+}
+
+async fn poll_opt<Fut>(opt: Option<&mut Fut>) -> Option<Fut::Output>
+where
+    Fut: std::future::Future + Unpin,
+{
+    match opt {
+        None => None,
+        Some(fut) => std::future::poll_fn(|cx| Pin::new(&mut *fut).poll(cx).map(Some)).await,
     }
 }

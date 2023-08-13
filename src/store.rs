@@ -1,4 +1,5 @@
 use actix_web::web::Bytes;
+use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_util::stream::Stream;
 use std::fmt::Debug;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -16,6 +17,9 @@ pub(crate) enum StoreError {
 
     #[error("Error in DB")]
     Repo(#[from] crate::repo::RepoError),
+
+    #[error("Error in 0.4 DB")]
+    Repo04(#[from] crate::repo_04::RepoError),
 
     #[error("Requested file is not found")]
     FileNotFound(#[source] std::io::Error),
@@ -263,5 +267,22 @@ where
 
     async fn remove(&self, identifier: &Self::Identifier) -> Result<(), StoreError> {
         T::remove(self, identifier).await
+    }
+}
+
+impl Identifier for Vec<u8> {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, StoreError>
+    where
+        Self: Sized,
+    {
+        Ok(bytes)
+    }
+
+    fn to_bytes(&self) -> Result<Vec<u8>, StoreError> {
+        Ok(self.clone())
+    }
+
+    fn string_repr(&self) -> String {
+        BASE64_STANDARD.encode(self.as_slice())
     }
 }

@@ -48,7 +48,7 @@ pub(crate) enum UploadResult {
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RepoError {
     #[error("Error in sled")]
-    SledError(#[from] crate::repo::sled::SledError),
+    SledError(#[from] self::sled::SledError),
 
     #[error("Upload was already claimed")]
     AlreadyClaimed,
@@ -284,38 +284,13 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct JobId(Uuid);
-
-impl JobId {
-    pub(crate) fn gen() -> Self {
-        Self(Uuid::new_v4())
-    }
-
-    pub(crate) const fn as_bytes(&self) -> &[u8; 16] {
-        self.0.as_bytes()
-    }
-
-    pub(crate) const fn from_bytes(bytes: [u8; 16]) -> Self {
-        Self(Uuid::from_bytes(bytes))
-    }
-}
-
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn requeue_timed_out(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError>;
+    async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError>;
 
     async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), RepoError>;
 
-    async fn pop(
-        &self,
-        queue: &'static str,
-        worker_id: Vec<u8>,
-    ) -> Result<(JobId, Self::Bytes), RepoError>;
-
-    async fn heartbeat(&self, job_id: JobId) -> Result<(), RepoError>;
-
-    async fn complete_job(&self, job_id: JobId) -> Result<(), RepoError>;
+    async fn pop(&self, queue: &'static str, worker_id: Vec<u8>) -> Result<Self::Bytes, RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -323,28 +298,16 @@ impl<T> QueueRepo for actix_web::web::Data<T>
 where
     T: QueueRepo,
 {
-    async fn requeue_timed_out(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError> {
-        T::requeue_timed_out(self, worker_prefix).await
+    async fn requeue_in_progress(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError> {
+        T::requeue_in_progress(self, worker_prefix).await
     }
 
     async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), RepoError> {
         T::push(self, queue, job).await
     }
 
-    async fn pop(
-        &self,
-        queue: &'static str,
-        worker_id: Vec<u8>,
-    ) -> Result<(JobId, Self::Bytes), RepoError> {
+    async fn pop(&self, queue: &'static str, worker_id: Vec<u8>) -> Result<Self::Bytes, RepoError> {
         T::pop(self, queue, worker_id).await
-    }
-
-    async fn heartbeat(&self, job_id: JobId) -> Result<(), RepoError> {
-        T::heartbeat(self, job_id).await
-    }
-
-    async fn complete_job(&self, job_id: JobId) -> Result<(), RepoError> {
-        T::complete_job(self, job_id).await
     }
 }
 
