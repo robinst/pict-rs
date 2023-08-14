@@ -21,7 +21,6 @@ pub(crate) struct Defaults {
 #[serde(rename_all = "snake_case")]
 struct ServerDefaults {
     address: SocketAddr,
-    worker_id: String,
     read_only: bool,
     max_file_count: u32,
 }
@@ -183,7 +182,6 @@ impl Default for ServerDefaults {
     fn default() -> Self {
         ServerDefaults {
             address: "0.0.0.0:8080".parse().expect("Valid address string"),
-            worker_id: String::from("pict-rs-1"),
             read_only: false,
             max_file_count: 1,
         }

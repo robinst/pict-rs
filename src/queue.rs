@@ -187,17 +187,8 @@ pub(crate) async fn process_cleanup<R: FullRepo, S: Store>(
     repo: R,
     store: S,
     config: Configuration,
-    worker_id: String,
 ) {
-    process_jobs(
-        &repo,
-        &store,
-        &config,
-        worker_id,
-        CLEANUP_QUEUE,
-        cleanup::perform,
-    )
-    .await
+    process_jobs(&repo, &store, &config, CLEANUP_QUEUE, cleanup::perform).await
 }
 
 pub(crate) async fn process_images<R: FullRepo + 'static, S: Store + 'static>(
@@ -205,14 +196,12 @@ pub(crate) async fn process_images<R: FullRepo + 'static, S: Store + 'static>(
     store: S,
     process_map: ProcessMap,
     config: Configuration,
-    worker_id: String,
 ) {
     process_image_jobs(
         &repo,
         &store,
         &process_map,
         &config,
-        worker_id,
         PROCESS_QUEUE,
         process::perform,
     )
@@ -225,7 +214,6 @@ async fn process_jobs<R, S, F>(
     repo: &R,
     store: &S,
     config: &Configuration,
-    worker_id: String,
     queue: &'static str,
     callback: F,
 ) where
@@ -235,8 +223,10 @@ async fn process_jobs<R, S, F>(
     for<'a> F: Fn(&'a R, &'a S, &'a Configuration, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
+    let worker_id = uuid::Uuid::new_v4();
+
     loop {
-        let res = job_loop(repo, store, config, worker_id.clone(), queue, callback).await;
+        let res = job_loop(repo, store, config, worker_id, queue, callback).await;
 
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
@@ -249,15 +239,15 @@ async fn process_jobs<R, S, F>(
 }
 
 struct MetricsGuard {
-    worker_id: String,
+    worker_id: uuid::Uuid,
     queue: &'static str,
     start: Instant,
     armed: bool,
 }
 
 impl MetricsGuard {
-    fn guard(worker_id: String, queue: &'static str) -> Self {
-        metrics::increment_counter!("pict-rs.job.start", "queue" => queue, "worker-id" => worker_id.clone());
+    fn guard(worker_id: uuid::Uuid, queue: &'static str) -> Self {
+        metrics::increment_counter!("pict-rs.job.start", "queue" => queue, "worker-id" => worker_id.to_string());
 
         Self {
             worker_id,
@@ -274,8 +264,8 @@ impl MetricsGuard {
 
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
-        metrics::histogram!("pict-rs.job.duration", self.start.elapsed().as_secs_f64(), "queue" => self.queue, "worker-id" => self.worker_id.clone(), "completed" => (!self.armed).to_string());
-        metrics::increment_counter!("pict-rs.job.end", "queue" => self.queue, "worker-id" => self.worker_id.clone(), "completed" => (!self.armed).to_string());
+        metrics::histogram!("pict-rs.job.duration", self.start.elapsed().as_secs_f64(), "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string());
+        metrics::increment_counter!("pict-rs.job.end", "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string());
     }
 }
 
@@ -283,7 +273,7 @@ async fn job_loop<R, S, F>(
     repo: &R,
     store: &S,
     config: &Configuration,
-    worker_id: String,
+    worker_id: uuid::Uuid,
     queue: &'static str,
     callback: F,
 ) -> Result<(), Error>
@@ -295,21 +285,27 @@ where
         + Copy,
 {
     loop {
-        let (job_id, bytes) = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
+        let (job_id, bytes) = repo.pop(queue).await?;
 
         let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
 
-        let guard = MetricsGuard::guard(worker_id.clone(), queue);
+        let guard = MetricsGuard::guard(worker_id, queue);
 
-        span.in_scope(|| {
-            heartbeat(
-                repo,
-                job_id,
-                (callback)(repo, store, config, bytes.as_ref()),
-            )
-        })
-        .instrument(span)
-        .await?;
+        let res = span
+            .in_scope(|| {
+                heartbeat(
+                    repo,
+                    queue,
+                    job_id,
+                    (callback)(repo, store, config, bytes.as_ref()),
+                )
+            })
+            .instrument(span)
+            .await;
+
+        repo.complete_job(queue, job_id).await?;
+
+        res?;
 
         guard.disarm();
     }
@@ -320,7 +316,6 @@ async fn process_image_jobs<R, S, F>(
     store: &S,
     process_map: &ProcessMap,
     config: &Configuration,
-    worker_id: String,
     queue: &'static str,
     callback: F,
 ) where
@@ -336,17 +331,11 @@ async fn process_image_jobs<R, S, F>(
         ) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
+    let worker_id = uuid::Uuid::new_v4();
+
     loop {
-        let res = image_job_loop(
-            repo,
-            store,
-            process_map,
-            config,
-            worker_id.clone(),
-            queue,
-            callback,
-        )
-        .await;
+        let res =
+            image_job_loop(repo, store, process_map, config, worker_id, queue, callback).await;
 
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
@@ -363,7 +352,7 @@ async fn image_job_loop<R, S, F>(
     store: &S,
     process_map: &ProcessMap,
     config: &Configuration,
-    worker_id: String,
+    worker_id: uuid::Uuid,
     queue: &'static str,
     callback: F,
 ) -> Result<(), Error>
@@ -381,27 +370,33 @@ where
         + Copy,
 {
     loop {
-        let (job_id, bytes) = repo.pop(queue, worker_id.as_bytes().to_vec()).await?;
+        let (job_id, bytes) = repo.pop(queue).await?;
 
         let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
 
-        let guard = MetricsGuard::guard(worker_id.clone(), queue);
+        let guard = MetricsGuard::guard(worker_id, queue);
 
-        span.in_scope(|| {
-            heartbeat(
-                repo,
-                job_id,
-                (callback)(repo, store, process_map, config, bytes.as_ref()),
-            )
-        })
-        .instrument(span)
-        .await?;
+        let res = span
+            .in_scope(|| {
+                heartbeat(
+                    repo,
+                    queue,
+                    job_id,
+                    (callback)(repo, store, process_map, config, bytes.as_ref()),
+                )
+            })
+            .instrument(span)
+            .await;
+
+        repo.complete_job(queue, job_id).await?;
+
+        res?;
 
         guard.disarm();
     }
 }
 
-async fn heartbeat<R, Fut>(repo: &R, job_id: JobId, fut: Fut) -> Fut::Output
+async fn heartbeat<R, Fut>(repo: &R, queue: &'static str, job_id: JobId, fut: Fut) -> Fut::Output
 where
     R: QueueRepo,
     Fut: std::future::Future,
@@ -419,7 +414,7 @@ where
             }
             _ = interval.tick() => {
                 if hb.is_none() {
-                    hb = Some(repo.heartbeat(job_id));
+                    hb = Some(repo.heartbeat(queue, job_id));
                 }
             }
             opt = poll_opt(hb.as_mut()), if hb.is_some() => {

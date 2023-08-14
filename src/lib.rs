@@ -48,7 +48,6 @@ use std::{
     future::ready,
     path::Path,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime},
 };
 use tokio::sync::Semaphore;
@@ -1495,14 +1494,6 @@ fn build_client(config: &Configuration) -> Result<ClientWithMiddleware, Error> {
         .build())
 }
 
-fn next_worker_id(config: &Configuration) -> String {
-    static WORKER_ID: AtomicU64 = AtomicU64::new(0);
-
-    let next_id = WORKER_ID.fetch_add(1, Ordering::Relaxed);
-
-    format!("{}-{}", config.server.worker_id, next_id)
-}
-
 fn configure_endpoints<
     R: FullRepo + 'static,
     S: Store + 'static,
@@ -1638,26 +1629,15 @@ where
     R: FullRepo + 'static,
     S: Store + 'static,
 {
-    let worker_id_1 = next_worker_id(&config);
-    let worker_id_2 = next_worker_id(&config);
-
     tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
         actix_rt::spawn(queue::process_cleanup(
             repo.clone(),
             store.clone(),
             config.clone(),
-            worker_id_1,
         ))
     });
-    tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-        actix_rt::spawn(queue::process_images(
-            repo,
-            store,
-            process_map,
-            config,
-            worker_id_2,
-        ))
-    });
+    tracing::trace_span!(parent: None, "Spawn task")
+        .in_scope(|| actix_rt::spawn(queue::process_images(repo, store, process_map, config)));
 }
 
 async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig) + Send + Clone>(

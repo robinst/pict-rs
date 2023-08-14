@@ -5,14 +5,6 @@
 # default: 0.0.0.0:8080
 address = '0.0.0.0:8080'
 
-## Optional: pict-rs worker id
-# environment variable PICTRS__SERVER__WORKER_ID
-# default: pict-rs-1
-#
-# This is used for the internal job queue. It will have more meaning once a shared metadata
-# repository (like postgres) can be defined.
-worker_id = 'pict-rs-1'
-
 ## Optional: shared secret for internal endpoints
 # environment variable: PICTRS__SERVER__API_KEY
 # default: empty

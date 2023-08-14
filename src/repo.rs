@@ -289,7 +289,7 @@ pub(crate) struct JobId(Uuid);
 
 impl JobId {
     pub(crate) fn gen() -> Self {
-        Self(Uuid::new_v4())
+        Self(Uuid::now_v7())
     }
 
     pub(crate) const fn as_bytes(&self) -> &[u8; 16] {
@@ -303,19 +303,13 @@ impl JobId {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn requeue_timed_out(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError>;
-
     async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), RepoError>;
 
-    async fn pop(
-        &self,
-        queue: &'static str,
-        worker_id: Vec<u8>,
-    ) -> Result<(JobId, Self::Bytes), RepoError>;
+    async fn pop(&self, queue: &'static str) -> Result<(JobId, Self::Bytes), RepoError>;
 
-    async fn heartbeat(&self, job_id: JobId) -> Result<(), RepoError>;
+    async fn heartbeat(&self, queue: &'static str, job_id: JobId) -> Result<(), RepoError>;
 
-    async fn complete_job(&self, job_id: JobId) -> Result<(), RepoError>;
+    async fn complete_job(&self, queue: &'static str, job_id: JobId) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -323,28 +317,20 @@ impl<T> QueueRepo for actix_web::web::Data<T>
 where
     T: QueueRepo,
 {
-    async fn requeue_timed_out(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError> {
-        T::requeue_timed_out(self, worker_prefix).await
-    }
-
     async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), RepoError> {
         T::push(self, queue, job).await
     }
 
-    async fn pop(
-        &self,
-        queue: &'static str,
-        worker_id: Vec<u8>,
-    ) -> Result<(JobId, Self::Bytes), RepoError> {
-        T::pop(self, queue, worker_id).await
+    async fn pop(&self, queue: &'static str) -> Result<(JobId, Self::Bytes), RepoError> {
+        T::pop(self, queue).await
     }
 
-    async fn heartbeat(&self, job_id: JobId) -> Result<(), RepoError> {
-        T::heartbeat(self, job_id).await
+    async fn heartbeat(&self, queue: &'static str, job_id: JobId) -> Result<(), RepoError> {
+        T::heartbeat(self, queue, job_id).await
     }
 
-    async fn complete_job(&self, job_id: JobId) -> Result<(), RepoError> {
-        T::complete_job(self, job_id).await
+    async fn complete_job(&self, queue: &'static str, job_id: JobId) -> Result<(), RepoError> {
+        T::complete_job(self, queue, job_id).await
     }
 }
 

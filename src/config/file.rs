@@ -95,8 +95,6 @@ pub(crate) enum Repo {
 pub(crate) struct Server {
     pub(crate) address: SocketAddr,
 
-    pub(crate) worker_id: String,
-
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) api_key: Option<String>,
 

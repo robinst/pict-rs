@@ -74,7 +74,7 @@ tracing-subscriber = { version = "0.3.0", features = [
   "tracing-log",
 ] }
 url = { version = "2.2", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["serde", "std", "v4", "v7"] }
 
 [dependencies.tracing-actix-web]
 version = "0.7.5"

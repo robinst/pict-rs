@@ -57,6 +57,9 @@ pub(crate) enum SledError {
 
     #[error("Operation panicked")]
     Panic,
+
+    #[error("Another process updated this value before us")]
+    Conflict,
 }
 
 #[derive(Clone)]
@@ -129,7 +132,7 @@ impl SledRepo {
     }
 
     fn open(mut path: PathBuf, cache_capacity: u64) -> Result<Db, SledError> {
-        path.push("v0.4.0-alpha.1");
+        path.push("v0.5.0");
 
         let db = ::sled::Config::new()
             .cache_capacity(cache_capacity)
@@ -626,7 +629,7 @@ impl UploadRepo for SledRepo {
 
 enum JobState {
     Pending,
-    Running(Vec<u8>),
+    Running([u8; 8]),
 }
 
 impl JobState {
@@ -637,35 +640,34 @@ impl JobState {
     fn running() -> Self {
         Self::Running(
             time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .expect("Can format")
-                .into_bytes(),
+                .unix_timestamp()
+                .to_be_bytes(),
         )
     }
 
     fn as_bytes(&self) -> &[u8] {
         match self {
-            Self::Pending => b"pending",
+            Self::Pending => b"pend",
             Self::Running(ref bytes) => bytes,
         }
     }
 }
 
+fn job_key(queue: &'static str, job_id: JobId) -> Arc<[u8]> {
+    let mut key = queue.as_bytes().to_vec();
+    key.extend(job_id.as_bytes());
+
+    Arc::from(key)
+}
+
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for SledRepo {
-    #[tracing::instrument(skip_all, fields(worker_id = %String::from_utf8_lossy(&worker_prefix)))]
-    async fn requeue_timed_out(&self, worker_prefix: Vec<u8>) -> Result<(), RepoError> {
-        todo!()
-    }
-
     #[tracing::instrument(skip(self, job), fields(job = %String::from_utf8_lossy(&job)))]
     async fn push(&self, queue_name: &'static str, job: Self::Bytes) -> Result<(), RepoError> {
         let metrics_guard = PushMetricsGuard::guard(queue_name);
 
         let id = JobId::gen();
-        let mut key = queue_name.as_bytes().to_vec();
-        key.push(0);
-        key.extend(id.as_bytes());
+        let key = job_key(queue_name, id);
 
         let queue = self.queue.clone();
         let job_state = self.job_state.clone();
@@ -674,8 +676,8 @@ impl QueueRepo for SledRepo {
             (&queue, &job_state).transaction(|(queue, job_state)| {
                 let state = JobState::pending();
 
-                queue.insert(key.as_slice(), &job)?;
-                job_state.insert(key.as_slice(), state.as_bytes())?;
+                queue.insert(&key[..], &job)?;
+                job_state.insert(&key[..], state.as_bytes())?;
 
                 Ok(())
             })
@@ -705,25 +707,35 @@ impl QueueRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, worker_id), fields(worker_id = %String::from_utf8_lossy(&worker_id)))]
-    async fn pop(
-        &self,
-        queue_name: &'static str,
-        worker_id: Vec<u8>,
-    ) -> Result<(JobId, Self::Bytes), RepoError> {
+    #[tracing::instrument(skip(self))]
+    async fn pop(&self, queue_name: &'static str) -> Result<(JobId, Self::Bytes), RepoError> {
         let metrics_guard = PopMetricsGuard::guard(queue_name);
+
+        let now = time::OffsetDateTime::now_utc();
 
         loop {
             let queue = self.queue.clone();
             let job_state = self.job_state.clone();
 
             let opt = actix_rt::task::spawn_blocking(move || {
+                // Job IDs are generated with Uuid version 7 - defining their first bits as a
+                // timestamp. Scanning a prefix should give us jobs in the order they were queued.
                 for res in job_state.scan_prefix(queue_name) {
                     let (key, value) = res?;
 
-                    if value != "pending" {
-                        // TODO: requeue dead jobs
-                        continue;
+                    if value.len() == 8 {
+                        let unix_timestamp =
+                            i64::from_be_bytes(value[0..8].try_into().expect("Verified length"));
+
+                        let timestamp = time::OffsetDateTime::from_unix_timestamp(unix_timestamp)
+                            .expect("Valid timestamp");
+
+                        // heartbeats should update every 5 seconds, so 30 seconds without an
+                        // update is 6 missed beats
+                        if timestamp.saturating_add(time::Duration::seconds(30)) > now {
+                            // job hasn't expired
+                            continue;
+                        }
                     }
 
                     let state = JobState::running();
@@ -738,7 +750,7 @@ impl QueueRepo for SledRepo {
                         }
                     }
 
-                    let id_bytes = &key[queue_name.len() + 1..];
+                    let id_bytes = &key[queue_name.len()..];
 
                     let id_bytes: [u8; 16] = id_bytes.try_into().expect("Key length");
 
@@ -780,12 +792,52 @@ impl QueueRepo for SledRepo {
         }
     }
 
-    async fn heartbeat(&self, job_id: JobId) -> Result<(), RepoError> {
-        todo!()
+    #[tracing::instrument(skip(self))]
+    async fn heartbeat(&self, queue_name: &'static str, job_id: JobId) -> Result<(), RepoError> {
+        let key = job_key(queue_name, job_id);
+
+        let job_state = self.job_state.clone();
+
+        actix_rt::task::spawn_blocking(move || {
+            if let Some(state) = job_state.get(&key)? {
+                let new_state = JobState::running();
+
+                match job_state.compare_and_swap(&key, Some(state), Some(new_state.as_bytes()))? {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(SledError::Conflict),
+                }
+            } else {
+                Ok(())
+            }
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)??;
+
+        Ok(())
     }
 
-    async fn complete_job(&self, job_id: JobId) -> Result<(), RepoError> {
-        todo!()
+    #[tracing::instrument(skip(self))]
+    async fn complete_job(&self, queue_name: &'static str, job_id: JobId) -> Result<(), RepoError> {
+        let key = job_key(queue_name, job_id);
+
+        let queue = self.queue.clone();
+        let job_state = self.job_state.clone();
+
+        let res = actix_rt::task::spawn_blocking(move || {
+            (&queue, &job_state).transaction(|(queue, job_state)| {
+                queue.remove(&key[..])?;
+                job_state.remove(&key[..])?;
+                Ok(())
+            })
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)?;
+
+        if let Err(TransactionError::Abort(e) | TransactionError::Storage(e)) = res {
+            return Err(RepoError::from(SledError::from(e)));
+        }
+
+        Ok(())
     }
 }
 

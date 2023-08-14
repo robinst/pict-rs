@@ -47,7 +47,6 @@ impl Args {
             Command::Run(Run {
                 address,
                 api_key,
-                worker_id,
                 client_pool_size,
                 client_timeout,
                 metrics_prometheus_address,
@@ -100,7 +99,6 @@ impl Args {
                 let server = Server {
                     address,
                     api_key,
-                    worker_id,
                     read_only,
                     max_file_count,
                 };
@@ -385,8 +383,6 @@ pub(super) struct ConfigFormat {
 struct Server {
     #[serde(skip_serializing_if = "Option::is_none")]
     address: Option<SocketAddr>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    worker_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     api_key: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -762,10 +758,6 @@ struct Run {
     /// The API KEY required to access restricted routes
     #[arg(long)]
     api_key: Option<String>,
-
-    /// ID of this pict-rs node. Doesn't do much yet
-    #[arg(long)]
-    worker_id: Option<String>,
 
     /// Number of connections the internel HTTP client should maintain in its pool
     ///
