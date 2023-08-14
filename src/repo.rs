@@ -303,7 +303,7 @@ impl JobId {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), RepoError>;
+    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<JobId, RepoError>;
 
     async fn pop(&self, queue: &'static str) -> Result<(JobId, Self::Bytes), RepoError>;
 
@@ -317,7 +317,7 @@ impl<T> QueueRepo for actix_web::web::Data<T>
 where
     T: QueueRepo,
 {
-    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<(), RepoError> {
+    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<JobId, RepoError> {
         T::push(self, queue, job).await
     }
 

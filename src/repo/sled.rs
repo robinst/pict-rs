@@ -663,7 +663,7 @@ fn job_key(queue: &'static str, job_id: JobId) -> Arc<[u8]> {
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for SledRepo {
     #[tracing::instrument(skip(self, job), fields(job = %String::from_utf8_lossy(&job)))]
-    async fn push(&self, queue_name: &'static str, job: Self::Bytes) -> Result<(), RepoError> {
+    async fn push(&self, queue_name: &'static str, job: Self::Bytes) -> Result<JobId, RepoError> {
         let metrics_guard = PushMetricsGuard::guard(queue_name);
 
         let id = JobId::gen();
@@ -692,7 +692,7 @@ impl QueueRepo for SledRepo {
         if let Some(notifier) = self.queue_notifier.read().unwrap().get(&queue_name) {
             notifier.notify_one();
             metrics_guard.disarm();
-            return Ok(());
+            return Ok(id);
         }
 
         self.queue_notifier
@@ -704,7 +704,7 @@ impl QueueRepo for SledRepo {
 
         metrics_guard.disarm();
 
-        Ok(())
+        Ok(id)
     }
 
     #[tracing::instrument(skip(self))]
