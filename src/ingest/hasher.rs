@@ -7,12 +7,17 @@ use std::{
 };
 use tokio::io::{AsyncRead, ReadBuf};
 
+struct State<D> {
+    hasher: D,
+    size: u64,
+}
+
 pin_project_lite::pin_project! {
     pub(crate) struct Hasher<I, D> {
         #[pin]
         inner: I,
 
-        hasher: Rc<RefCell<D>>,
+        state: Rc<RefCell<State<D>>>,
     }
 }
 
@@ -23,12 +28,15 @@ where
     pub(super) fn new(reader: I, digest: D) -> Self {
         Hasher {
             inner: reader,
-            hasher: Rc::new(RefCell::new(digest)),
+            state: Rc::new(RefCell::new(State {
+                hasher: digest,
+                size: 0,
+            })),
         }
     }
 
-    pub(super) fn hasher(&self) -> Rc<RefCell<D>> {
-        Rc::clone(&self.hasher)
+    pub(super) fn state(&self) -> Rc<RefCell<State<D>>> {
+        Rc::clone(&self.state)
     }
 }
 
@@ -45,15 +53,15 @@ where
         let this = self.as_mut().project();
 
         let reader = this.inner;
-        let hasher = this.hasher;
+        let state = this.state;
 
         let before_len = buf.filled().len();
         let poll_res = reader.poll_read(cx, buf);
         let after_len = buf.filled().len();
         if after_len > before_len {
-            hasher
-                .borrow_mut()
-                .update(&buf.filled()[before_len..after_len]);
+            let mut guard = state.borrow_mut();
+            guard.hasher.update(&buf.filled()[before_len..after_len]);
+            guard.size += u64::try_from(after_len - before_len).expect("Size is reasonable");
         }
         poll_res
     }
@@ -93,7 +101,7 @@ mod test {
 
             tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
 
-            Ok(reader.hasher().borrow_mut().finalize_reset().to_vec()) as std::io::Result<_>
+            Ok(reader.state().borrow_mut().hasher.finalize_reset().to_vec()) as std::io::Result<_>
         })
         .unwrap();
 

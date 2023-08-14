@@ -8,7 +8,10 @@ use std::fmt::Debug;
 use url::Url;
 use uuid::Uuid;
 
+mod hash;
 pub(crate) mod sled;
+
+pub(crate) use hash::Hash;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Repo {
@@ -207,17 +210,16 @@ where
 pub(crate) trait VariantAccessRepo: BaseRepo {
     type VariantAccessStream: Stream<Item = Result<(Self::Bytes, String), RepoError>>;
 
-    async fn accessed(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError>;
+    async fn accessed(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
-    async fn contains_variant(&self, hash: Self::Bytes, variant: String)
-        -> Result<bool, RepoError>;
+    async fn contains_variant(&self, hash: Hash, variant: String) -> Result<bool, RepoError>;
 
     async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,
     ) -> Result<Self::VariantAccessStream, RepoError>;
 
-    async fn remove_access(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError>;
+    async fn remove_access(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -227,15 +229,11 @@ where
 {
     type VariantAccessStream = T::VariantAccessStream;
 
-    async fn accessed(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+    async fn accessed(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         T::accessed(self, hash, variant).await
     }
 
-    async fn contains_variant(
-        &self,
-        hash: Self::Bytes,
-        variant: String,
-    ) -> Result<bool, RepoError> {
+    async fn contains_variant(&self, hash: Hash, variant: String) -> Result<bool, RepoError> {
         T::contains_variant(self, hash, variant).await
     }
 
@@ -246,7 +244,7 @@ where
         T::older_variants(self, timestamp).await
     }
 
-    async fn remove_access(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+    async fn remove_access(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         T::remove_access(self, hash, variant).await
     }
 }
@@ -436,7 +434,7 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait HashRepo: BaseRepo {
-    type Stream: Stream<Item = Result<Self::Bytes, RepoError>>;
+    type Stream: Stream<Item = Result<Hash, RepoError>>;
 
     async fn size(&self) -> Result<u64, RepoError>;
 
@@ -444,49 +442,49 @@ pub(crate) trait HashRepo: BaseRepo {
 
     async fn create<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         identifier: &I,
     ) -> Result<Result<(), HashAlreadyExists>, StoreError>;
 
     async fn update_identifier<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         identifier: &I,
     ) -> Result<(), StoreError>;
 
     async fn identifier<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Option<I>, StoreError>;
 
     async fn relate_variant_identifier<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         variant: String,
         identifier: &I,
     ) -> Result<(), StoreError>;
     async fn variant_identifier<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         variant: String,
     ) -> Result<Option<I>, StoreError>;
     async fn variants<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Vec<(String, I)>, StoreError>;
-    async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError>;
+    async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
     async fn relate_motion_identifier<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         identifier: &I,
     ) -> Result<(), StoreError>;
     async fn motion_identifier<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Option<I>, StoreError>;
 
-    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), RepoError>;
+    async fn cleanup(&self, hash: Hash) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -506,7 +504,7 @@ where
 
     async fn create<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         identifier: &I,
     ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
         T::create(self, hash, identifier).await
@@ -514,7 +512,7 @@ where
 
     async fn update_identifier<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         identifier: &I,
     ) -> Result<(), StoreError> {
         T::update_identifier(self, hash, identifier).await
@@ -522,14 +520,14 @@ where
 
     async fn identifier<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Option<I>, StoreError> {
         T::identifier(self, hash).await
     }
 
     async fn relate_variant_identifier<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         variant: String,
         identifier: &I,
     ) -> Result<(), StoreError> {
@@ -538,7 +536,7 @@ where
 
     async fn variant_identifier<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         variant: String,
     ) -> Result<Option<I>, StoreError> {
         T::variant_identifier(self, hash, variant).await
@@ -546,18 +544,18 @@ where
 
     async fn variants<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Vec<(String, I)>, StoreError> {
         T::variants(self, hash).await
     }
 
-    async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+    async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         T::remove_variant(self, hash, variant).await
     }
 
     async fn relate_motion_identifier<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         identifier: &I,
     ) -> Result<(), StoreError> {
         T::relate_motion_identifier(self, hash, identifier).await
@@ -565,12 +563,12 @@ where
 
     async fn motion_identifier<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Option<I>, StoreError> {
         T::motion_identifier(self, hash).await
     }
 
-    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), RepoError> {
+    async fn cleanup(&self, hash: Hash) -> Result<(), RepoError> {
         T::cleanup(self, hash).await
     }
 }
@@ -581,14 +579,14 @@ pub(crate) trait AliasRepo: BaseRepo {
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Result<(), AliasAlreadyExists>, RepoError>;
 
     async fn delete_token(&self, alias: &Alias) -> Result<Option<DeleteToken>, RepoError>;
 
-    async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError>;
+    async fn hash(&self, alias: &Alias) -> Result<Option<Hash>, RepoError>;
 
-    async fn for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError>;
+    async fn for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError>;
 
     async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError>;
 }
@@ -602,7 +600,7 @@ where
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
         T::create(self, alias, delete_token, hash).await
     }
@@ -611,11 +609,11 @@ where
         T::delete_token(self, alias).await
     }
 
-    async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError> {
+    async fn hash(&self, alias: &Alias) -> Result<Option<Hash>, RepoError> {
         T::hash(self, alias).await
     }
 
-    async fn for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError> {
+    async fn for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError> {
         T::for_hash(self, hash).await
     }
 
