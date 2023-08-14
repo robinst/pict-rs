@@ -4,7 +4,7 @@ use crate::{
     error::{Error, UploadError},
     ffmpeg::ThumbnailFormat,
     formats::{InputProcessableFormat, InternalVideoFormat},
-    repo::{Alias, FullRepo},
+    repo::{Alias, FullRepo, Hash},
     store::Store,
 };
 use actix_web::web::Bytes;
@@ -51,7 +51,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     input_format: Option<InternalVideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
     media: &crate::config::Media,
-    hash: R::Bytes,
+    hash: Hash,
 ) -> Result<(Details, Bytes), Error> {
     let process_fut = process(
         repo,
@@ -67,7 +67,7 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
     );
 
     let (details, bytes) = process_map
-        .process(hash.as_ref(), thumbnail_path, process_fut)
+        .process(hash, thumbnail_path, process_fut)
         .await?;
 
     Ok((details, bytes))
@@ -85,7 +85,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
     input_format: Option<InternalVideoFormat>,
     thumbnail_format: Option<ThumbnailFormat>,
     media: &crate::config::Media,
-    hash: R::Bytes,
+    hash: Hash,
 ) -> Result<(Details, Bytes), Error> {
     let guard = MetricsGuard::guard();
     let permit = crate::PROCESS_SEMAPHORE.acquire().await;

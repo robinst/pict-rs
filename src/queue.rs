@@ -4,7 +4,7 @@ use crate::{
     error::Error,
     formats::InputProcessableFormat,
     repo::{
-        Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, JobId, QueueRepo,
+        Alias, AliasRepo, DeleteToken, FullRepo, Hash, HashRepo, IdentifierRepo, JobId, QueueRepo,
         UploadId,
     },
     serde_str::Serde,
@@ -54,7 +54,7 @@ const PROCESS_QUEUE: &str = "process";
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 enum Cleanup {
     Hash {
-        hash: Base64Bytes,
+        hash: Hash,
     },
     Identifier {
         identifier: Base64Bytes,
@@ -64,7 +64,7 @@ enum Cleanup {
         token: Serde<DeleteToken>,
     },
     Variant {
-        hash: Base64Bytes,
+        hash: Hash,
         #[serde(skip_serializing_if = "Option::is_none")]
         variant: Option<String>,
     },
@@ -101,10 +101,8 @@ pub(crate) async fn cleanup_alias<R: QueueRepo>(
     Ok(())
 }
 
-pub(crate) async fn cleanup_hash<R: QueueRepo>(repo: &R, hash: R::Bytes) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::Hash {
-        hash: Base64Bytes(hash.as_ref().to_vec()),
-    })?;
+pub(crate) async fn cleanup_hash<R: QueueRepo>(repo: &R, hash: Hash) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Cleanup::Hash { hash })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
@@ -122,13 +120,10 @@ pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
 
 async fn cleanup_variants<R: QueueRepo>(
     repo: &R,
-    hash: R::Bytes,
+    hash: Hash,
     variant: Option<String>,
 ) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::Variant {
-        hash: Base64Bytes(hash.as_ref().to_vec()),
-        variant,
-    })?;
+    let job = serde_json::to_vec(&Cleanup::Variant { hash, variant })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }

@@ -208,7 +208,7 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait VariantAccessRepo: BaseRepo {
-    type VariantAccessStream: Stream<Item = Result<(Self::Bytes, String), RepoError>>;
+    type VariantAccessStream: Stream<Item = Result<(Hash, String), RepoError>>;
 
     async fn accessed(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 

@@ -3,12 +3,11 @@ use crate::{
     either::Either,
     error::{Error, UploadError},
     formats::{InternalFormat, Validations},
-    repo::{Alias, AliasRepo, DeleteToken, FullRepo, HashRepo},
+    repo::{Alias, AliasRepo, DeleteToken, FullRepo, Hash, HashRepo},
     store::Store,
 };
 use actix_web::web::Bytes;
 use futures_util::{Stream, StreamExt};
-use sha2::{Digest, Sha256};
 use tracing::{Instrument, Span};
 
 mod hasher;
@@ -22,7 +21,7 @@ where
 {
     repo: R,
     delete_token: DeleteToken,
-    hash: Option<Vec<u8>>,
+    hash: Option<Hash>,
     alias: Option<Alias>,
     identifier: Option<S::Identifier>,
 }
@@ -97,8 +96,8 @@ where
         Either::right(validated_reader)
     };
 
-    let hasher_reader = Hasher::new(processed_reader, Sha256::new());
-    let hasher = hasher_reader.hasher();
+    let hasher_reader = Hasher::new(processed_reader);
+    let state = hasher_reader.state();
 
     let identifier = store
         .save_async_read(hasher_reader, input_type.media_type())
@@ -114,14 +113,16 @@ where
         identifier: Some(identifier.clone()),
     };
 
-    let hash = hasher.borrow_mut().finalize_reset().to_vec();
+    let (hash, size) = state.borrow_mut().finalize_reset();
 
-    save_upload(&mut session, repo, store, &hash, &identifier).await?;
+    let hash = Hash::new(hash, size, input_type);
+
+    save_upload(&mut session, repo, store, hash.clone(), &identifier).await?;
 
     if let Some(alias) = declared_alias {
-        session.add_existing_alias(&hash, alias).await?
+        session.add_existing_alias(hash, alias).await?
     } else {
-        session.create_alias(&hash, input_type).await?
+        session.create_alias(hash, input_type).await?
     };
 
     Ok(session)
@@ -132,14 +133,14 @@ async fn save_upload<R, S>(
     session: &mut Session<R, S>,
     repo: &R,
     store: &S,
-    hash: &[u8],
+    hash: Hash,
     identifier: &S::Identifier,
 ) -> Result<(), Error>
 where
     S: Store,
     R: FullRepo,
 {
-    if HashRepo::create(repo, hash.to_vec().into(), identifier)
+    if HashRepo::create(repo, hash.clone(), identifier)
         .await?
         .is_err()
     {
@@ -150,7 +151,7 @@ where
     }
 
     // Set hash after upload uniquness check so we don't clean existing files on failure
-    session.hash = Some(Vec::from(hash));
+    session.hash = Some(hash);
 
     Ok(())
 }
@@ -177,10 +178,8 @@ where
     }
 
     #[tracing::instrument(skip(self, hash))]
-    async fn add_existing_alias(&mut self, hash: &[u8], alias: Alias) -> Result<(), Error> {
-        let hash: R::Bytes = hash.to_vec().into();
-
-        AliasRepo::create(&self.repo, &alias, &self.delete_token, hash.clone())
+    async fn add_existing_alias(&mut self, hash: Hash, alias: Alias) -> Result<(), Error> {
+        AliasRepo::create(&self.repo, &alias, &self.delete_token, hash)
             .await?
             .map_err(|_| UploadError::DuplicateAlias)?;
 
@@ -190,9 +189,7 @@ where
     }
 
     #[tracing::instrument(level = "debug", skip(self, hash))]
-    async fn create_alias(&mut self, hash: &[u8], input_type: InternalFormat) -> Result<(), Error> {
-        let hash: R::Bytes = hash.to_vec().into();
-
+    async fn create_alias(&mut self, hash: Hash, input_type: InternalFormat) -> Result<(), Error> {
         loop {
             let alias = Alias::generate(input_type.file_extension().to_string());
 
@@ -232,7 +229,7 @@ where
                 tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                     actix_rt::spawn(
                         async move {
-                            let _ = crate::queue::cleanup_hash(&repo, hash.into()).await;
+                            let _ = crate::queue::cleanup_hash(&repo, hash).await;
                         }
                         .instrument(cleanup_span),
                     )

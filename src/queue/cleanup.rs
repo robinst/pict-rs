@@ -3,7 +3,7 @@ use crate::{
     error::{Error, UploadError},
     queue::{Base64Bytes, Cleanup, LocalBoxFuture},
     repo::{
-        Alias, AliasAccessRepo, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo,
+        Alias, AliasAccessRepo, AliasRepo, DeleteToken, FullRepo, Hash, HashRepo, IdentifierRepo,
         VariantAccessRepo,
     },
     serde_str::Serde,
@@ -24,9 +24,7 @@ where
     Box::pin(async move {
         match serde_json::from_slice(job) {
             Ok(job) => match job {
-                Cleanup::Hash {
-                    hash: Base64Bytes(in_hash),
-                } => hash::<R, S>(repo, in_hash).await?,
+                Cleanup::Hash { hash: in_hash } => hash::<R, S>(repo, in_hash).await?,
                 Cleanup::Identifier {
                     identifier: Base64Bytes(in_identifier),
                 } => identifier(repo, store, in_identifier).await?,
@@ -41,10 +39,9 @@ where
                     )
                     .await?
                 }
-                Cleanup::Variant {
-                    hash: Base64Bytes(hash),
-                    variant,
-                } => hash_variant::<R, S>(repo, hash, variant).await?,
+                Cleanup::Variant { hash, variant } => {
+                    hash_variant::<R, S>(repo, hash, variant).await?
+                }
                 Cleanup::AllVariants => all_variants::<R, S>(repo).await?,
                 Cleanup::OutdatedVariants => outdated_variants::<R, S>(repo, configuration).await?,
                 Cleanup::OutdatedProxies => outdated_proxies::<R, S>(repo, configuration).await?,
@@ -89,13 +86,11 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-async fn hash<R, S>(repo: &R, hash: Vec<u8>) -> Result<(), Error>
+async fn hash<R, S>(repo: &R, hash: Hash) -> Result<(), Error>
 where
     R: FullRepo,
     S: Store,
 {
-    let hash: R::Bytes = hash.into();
-
     let aliases = repo.for_hash(hash.clone()).await?;
 
     if !aliases.is_empty() {
@@ -221,15 +216,13 @@ where
 #[tracing::instrument(skip_all)]
 async fn hash_variant<R, S>(
     repo: &R,
-    hash: Vec<u8>,
+    hash: Hash,
     target_variant: Option<String>,
 ) -> Result<(), Error>
 where
     R: FullRepo,
     S: Store,
 {
-    let hash: R::Bytes = hash.into();
-
     if let Some(target_variant) = target_variant {
         if let Some(identifier) = repo
             .variant_identifier::<S::Identifier>(hash.clone(), target_variant.clone())

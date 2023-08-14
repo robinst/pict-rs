@@ -1,9 +1,10 @@
 use crate::{
     details::MaybeHumanDate,
     repo::{
-        hash::Hash, Alias, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, Details, FullRepo,
-        HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, JobId, MigrationRepo, QueueRepo,
-        SettingsRepo, UploadId, UploadRepo, UploadResult,
+        hash::Hash, Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken,
+        Details, FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, JobId,
+        MigrationRepo, ProxyRepo, QueueRepo, RepoError, SettingsRepo, UploadId, UploadRepo,
+        UploadResult, VariantAccessRepo,
     },
     serde_str::Serde,
     store::StoreError,
@@ -23,8 +24,6 @@ use std::{
 };
 use tokio::{sync::Notify, task::JoinHandle};
 use url::Url;
-
-use super::{AliasAccessRepo, ProxyRepo, RepoError, VariantAccessRepo};
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -317,7 +316,7 @@ impl futures_util::Stream for AliasAccessStream {
 }
 
 impl futures_util::Stream for VariantAccessStream {
-    type Item = Result<(IVec, String), RepoError>;
+    type Item = Result<(Hash, String), RepoError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -888,9 +887,12 @@ pub(crate) enum VariantKeyError {
 
     #[error("Invalid utf8 in Variant")]
     Utf8,
+
+    #[error("Hash format is invalid")]
+    InvalidHash,
 }
 
-fn parse_variant_access_key(bytes: IVec) -> Result<(IVec, String), VariantKeyError> {
+fn parse_variant_access_key(bytes: IVec) -> Result<(Hash, String), VariantKeyError> {
     if bytes.len() < 8 {
         return Err(VariantKeyError::TooShort);
     }
@@ -903,6 +905,8 @@ fn parse_variant_access_key(bytes: IVec) -> Result<(IVec, String), VariantKeyErr
     }
 
     let hash = bytes.subslice(8, hash_len);
+
+    let hash = Hash::from_ivec(hash).ok_or(VariantKeyError::InvalidHash)?;
 
     let variant_len = bytes.len().saturating_sub(8).saturating_sub(hash_len);
 
@@ -1421,10 +1425,10 @@ impl From<actix_rt::task::JoinError> for SledError {
 mod tests {
     #[test]
     fn round_trip() {
-        let hash = sled::IVec::from(b"some hash value");
+        let hash = crate::repo::Hash::test_value();
         let variant = String::from("some string value");
 
-        let key = super::variant_access_key(&hash, &variant);
+        let key = super::variant_access_key(&hash.to_bytes(), &variant);
 
         let (out_hash, out_variant) =
             super::parse_variant_access_key(sled::IVec::from(key)).expect("Parsed bytes");

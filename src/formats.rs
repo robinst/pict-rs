@@ -25,10 +25,12 @@ pub(crate) enum InputFile {
     Video(VideoFormat),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub(crate) enum InternalFormat {
-    Image(ImageFormat),
     Animation(AnimationFormat),
+    Image(ImageFormat),
     Video(InternalVideoFormat),
 }
 
