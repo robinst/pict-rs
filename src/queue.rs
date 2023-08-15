@@ -213,7 +213,6 @@ async fn process_jobs<R, S, F>(
     callback: F,
 ) where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
     S: Store,
     for<'a> F: Fn(&'a R, &'a S, &'a Configuration, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
@@ -274,7 +273,6 @@ async fn job_loop<R, S, F>(
 ) -> Result<(), Error>
 where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
     S: Store,
     for<'a> F: Fn(&'a R, &'a S, &'a Configuration, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
@@ -315,7 +313,6 @@ async fn process_image_jobs<R, S, F>(
     callback: F,
 ) where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
     S: Store,
     for<'a> F: Fn(
             &'a R,
@@ -353,7 +350,6 @@ async fn image_job_loop<R, S, F>(
 ) -> Result<(), Error>
 where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
     S: Store,
     for<'a> F: Fn(
             &'a R,

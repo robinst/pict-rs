@@ -181,9 +181,7 @@ impl SledRepo {
     }
 }
 
-impl BaseRepo for SledRepo {
-    type Bytes = IVec;
-}
+impl BaseRepo for SledRepo {}
 
 #[async_trait::async_trait(?Send)]
 impl FullRepo for SledRepo {
@@ -661,7 +659,7 @@ fn job_key(queue: &'static str, job_id: JobId) -> Arc<[u8]> {
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for SledRepo {
     #[tracing::instrument(skip(self, job), fields(job = %String::from_utf8_lossy(&job)))]
-    async fn push(&self, queue_name: &'static str, job: Self::Bytes) -> Result<JobId, RepoError> {
+    async fn push(&self, queue_name: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError> {
         let metrics_guard = PushMetricsGuard::guard(queue_name);
 
         let id = JobId::gen();
@@ -674,7 +672,7 @@ impl QueueRepo for SledRepo {
             (&queue, &job_state).transaction(|(queue, job_state)| {
                 let state = JobState::pending();
 
-                queue.insert(&key[..], &job)?;
+                queue.insert(&key[..], &job[..])?;
                 job_state.insert(&key[..], state.as_bytes())?;
 
                 Ok(())
@@ -706,7 +704,7 @@ impl QueueRepo for SledRepo {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn pop(&self, queue_name: &'static str) -> Result<(JobId, Self::Bytes), RepoError> {
+    async fn pop(&self, queue_name: &'static str) -> Result<(JobId, Arc<[u8]>), RepoError> {
         let metrics_guard = PopMetricsGuard::guard(queue_name);
 
         let now = time::OffsetDateTime::now_utc();
@@ -754,9 +752,11 @@ impl QueueRepo for SledRepo {
 
                     let job_id = JobId::from_bytes(id_bytes);
 
-                    let opt = queue.get(&key)?.map(|job_bytes| (job_id, job_bytes));
+                    let opt = queue
+                        .get(&key)?
+                        .map(|job_bytes| (job_id, Arc::from(job_bytes.to_vec())));
 
-                    return Ok(opt) as Result<Option<(JobId, Self::Bytes)>, SledError>;
+                    return Ok(opt) as Result<Option<(JobId, Arc<[u8]>)>, SledError>;
                 }
 
                 Ok(None)
@@ -842,17 +842,17 @@ impl QueueRepo for SledRepo {
 #[async_trait::async_trait(?Send)]
 impl SettingsRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(value))]
-    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), RepoError> {
-        b!(self.settings, settings.insert(key, value));
+    async fn set(&self, key: &'static str, value: Arc<[u8]>) -> Result<(), RepoError> {
+        b!(self.settings, settings.insert(key, &value[..]));
 
         Ok(())
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, RepoError> {
+    async fn get(&self, key: &'static str) -> Result<Option<Arc<[u8]>>, RepoError> {
         let opt = b!(self.settings, settings.get(key));
 
-        Ok(opt)
+        Ok(opt.map(|ivec| Arc::from(ivec.to_vec())))
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

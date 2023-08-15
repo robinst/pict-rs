@@ -4,7 +4,7 @@ use crate::{
     store::{Identifier, StoreError},
 };
 use futures_util::Stream;
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 use url::Url;
 use uuid::Uuid;
 
@@ -131,16 +131,9 @@ where
     }
 }
 
-pub(crate) trait BaseRepo {
-    type Bytes: AsRef<[u8]> + From<Vec<u8>> + Clone;
-}
+pub(crate) trait BaseRepo {}
 
-impl<T> BaseRepo for actix_web::web::Data<T>
-where
-    T: BaseRepo,
-{
-    type Bytes = T::Bytes;
-}
+impl<T> BaseRepo for actix_web::web::Data<T> where T: BaseRepo {}
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait ProxyRepo: BaseRepo {
@@ -301,9 +294,9 @@ impl JobId {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<JobId, RepoError>;
+    async fn push(&self, queue: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError>;
 
-    async fn pop(&self, queue: &'static str) -> Result<(JobId, Self::Bytes), RepoError>;
+    async fn pop(&self, queue: &'static str) -> Result<(JobId, Arc<[u8]>), RepoError>;
 
     async fn heartbeat(&self, queue: &'static str, job_id: JobId) -> Result<(), RepoError>;
 
@@ -315,11 +308,11 @@ impl<T> QueueRepo for actix_web::web::Data<T>
 where
     T: QueueRepo,
 {
-    async fn push(&self, queue: &'static str, job: Self::Bytes) -> Result<JobId, RepoError> {
+    async fn push(&self, queue: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError> {
         T::push(self, queue, job).await
     }
 
-    async fn pop(&self, queue: &'static str) -> Result<(JobId, Self::Bytes), RepoError> {
+    async fn pop(&self, queue: &'static str) -> Result<(JobId, Arc<[u8]>), RepoError> {
         T::pop(self, queue).await
     }
 
@@ -334,8 +327,8 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait SettingsRepo: BaseRepo {
-    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), RepoError>;
-    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, RepoError>;
+    async fn set(&self, key: &'static str, value: Arc<[u8]>) -> Result<(), RepoError>;
+    async fn get(&self, key: &'static str) -> Result<Option<Arc<[u8]>>, RepoError>;
     async fn remove(&self, key: &'static str) -> Result<(), RepoError>;
 }
 
@@ -344,11 +337,11 @@ impl<T> SettingsRepo for actix_web::web::Data<T>
 where
     T: SettingsRepo,
 {
-    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), RepoError> {
+    async fn set(&self, key: &'static str, value: Arc<[u8]>) -> Result<(), RepoError> {
         T::set(self, key, value).await
     }
 
-    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, RepoError> {
+    async fn get(&self, key: &'static str) -> Result<Option<Arc<[u8]>>, RepoError> {
         T::get(self, key).await
     }
 
