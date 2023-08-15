@@ -8,7 +8,7 @@ use std::{
 use crate::{
     details::Details,
     error::{Error, UploadError},
-    repo::{HashRepo, IdentifierRepo, MigrationRepo, QueueRepo},
+    repo::{Hash, HashRepo, IdentifierRepo, MigrationRepo, QueueRepo},
     store::{Identifier, Store},
 };
 
@@ -125,7 +125,7 @@ where
     let mut joinset = tokio::task::JoinSet::new();
 
     while let Some(hash) = stream.next().await {
-        let hash = hash?.as_ref().to_vec();
+        let hash = hash?;
 
         if joinset.len() >= 32 {
             if let Some(res) = joinset.join_next().await {
@@ -149,11 +149,8 @@ where
     Ok(())
 }
 
-#[tracing::instrument(skip(state, hash), fields(hash = %hex::encode(&hash)))]
-async fn migrate_hash<R, S1, S2>(
-    state: &MigrateState<R, S1, S2>,
-    hash: Vec<u8>,
-) -> Result<(), Error>
+#[tracing::instrument(skip(state))]
+async fn migrate_hash<R, S1, S2>(state: &MigrateState<R, S1, S2>, hash: Hash) -> Result<(), Error>
 where
     S1: Store,
     S2: Store,
@@ -175,14 +172,13 @@ where
 
     let current_index = index.fetch_add(1, Ordering::Relaxed);
 
-    let original_identifier = match repo.identifier(hash.clone().into()).await {
+    let original_identifier = match repo.identifier(hash.clone()).await {
         Ok(Some(identifier)) => identifier,
         Ok(None) => {
             tracing::warn!(
-                "Original File identifier for hash {} is missing, queue cleanup task",
-                hex::encode(&hash)
+                "Original File identifier for hash {hash:?} is missing, queue cleanup task",
             );
-            crate::queue::cleanup_hash(repo, hash.clone().into()).await?;
+            crate::queue::cleanup_hash(repo, hash.clone()).await?;
             return Ok(());
         }
         Err(e) => return Err(e.into()),
@@ -221,24 +217,21 @@ where
         }
     }
 
-    if let Some(identifier) = repo.motion_identifier(hash.clone().into()).await? {
+    if let Some(identifier) = repo.motion_identifier(hash.clone()).await? {
         if !repo.is_migrated(&identifier).await? {
             match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
                 Ok(new_identifier) => {
                     migrate_details(repo, &identifier, &new_identifier).await?;
-                    repo.relate_motion_identifier(hash.clone().into(), &new_identifier)
+                    repo.relate_motion_identifier(hash.clone(), &new_identifier)
                         .await?;
 
                     repo.mark_migrated(&identifier, &new_identifier).await?;
                 }
                 Err(MigrateError::From(e)) if e.is_not_found() && *skip_missing_files => {
-                    tracing::warn!("Skipping motion file for hash {}", hex::encode(&hash));
+                    tracing::warn!("Skipping motion file for hash {hash:?}");
                 }
                 Err(MigrateError::Details(e)) => {
-                    tracing::warn!(
-                        "Error generating details for motion file for hash {}",
-                        hex::encode(&hash)
-                    );
+                    tracing::warn!("Error generating details for motion file for hash {hash:?}");
                     return Err(e);
                 }
                 Err(MigrateError::From(e)) => {
@@ -253,30 +246,22 @@ where
         }
     }
 
-    for (variant, identifier) in repo.variants(hash.clone().into()).await? {
+    for (variant, identifier) in repo.variants(hash.clone()).await? {
         if !repo.is_migrated(&identifier).await? {
             match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
                 Ok(new_identifier) => {
                     migrate_details(repo, &identifier, &new_identifier).await?;
-                    repo.remove_variant(hash.clone().into(), variant.clone())
-                        .await?;
-                    repo.relate_variant_identifier(hash.clone().into(), variant, &new_identifier)
+                    repo.remove_variant(hash.clone(), variant.clone()).await?;
+                    repo.relate_variant_identifier(hash.clone(), variant, &new_identifier)
                         .await?;
 
                     repo.mark_migrated(&identifier, &new_identifier).await?;
                 }
                 Err(MigrateError::From(e)) if e.is_not_found() && *skip_missing_files => {
-                    tracing::warn!(
-                        "Skipping variant {} for hash {}",
-                        variant,
-                        hex::encode(&hash)
-                    );
+                    tracing::warn!("Skipping variant {variant} for hash {hash:?}",);
                 }
                 Err(MigrateError::Details(e)) => {
-                    tracing::warn!(
-                        "Error generating details for motion file for hash {}",
-                        hex::encode(&hash)
-                    );
+                    tracing::warn!("Error generating details for motion file for hash {hash:?}",);
                     return Err(e);
                 }
                 Err(MigrateError::From(e)) => {
@@ -303,19 +288,16 @@ where
     {
         Ok(new_identifier) => {
             migrate_details(repo, &original_identifier, &new_identifier).await?;
-            repo.update_identifier(hash.clone().into(), &new_identifier)
+            repo.update_identifier(hash.clone(), &new_identifier)
                 .await?;
             repo.mark_migrated(&original_identifier, &new_identifier)
                 .await?;
         }
         Err(MigrateError::From(e)) if e.is_not_found() && *skip_missing_files => {
-            tracing::warn!("Skipping original file for hash {}", hex::encode(&hash));
+            tracing::warn!("Skipping original file for hash {hash:?}");
         }
         Err(MigrateError::Details(e)) => {
-            tracing::warn!(
-                "Error generating details for motion file for hash {}",
-                hex::encode(&hash)
-            );
+            tracing::warn!("Error generating details for motion file for hash {hash:?}",);
             return Err(e);
         }
         Err(MigrateError::From(e)) => {

@@ -68,8 +68,8 @@ use self::{
     migrate_store::migrate_store,
     queue::queue_generate,
     repo::{
-        sled::SledRepo, Alias, AliasAccessRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo,
-        Repo, SettingsRepo, UploadId, UploadResult, VariantAccessRepo,
+        sled::SledRepo, Alias, AliasAccessRepo, DeleteToken, FullRepo, Hash, HashRepo,
+        IdentifierRepo, Repo, SettingsRepo, UploadId, UploadResult, VariantAccessRepo,
     },
     serde_str::Serde,
     store::{
@@ -696,7 +696,7 @@ async fn process_details<R: FullRepo, S: Store>(
     Ok(HttpResponse::Ok().json(&details))
 }
 
-async fn not_found_hash<R: FullRepo>(repo: &R) -> Result<Option<(Alias, R::Bytes)>, Error> {
+async fn not_found_hash<R: FullRepo>(repo: &R) -> Result<Option<(Alias, Hash)>, Error> {
     let Some(not_found) = repo.get(NOT_FOUND_KEY).await? else {
         return Ok(None);
     };
@@ -1115,8 +1115,7 @@ async fn do_serve<R: FullRepo, S: Store + 'static>(
 
     let Some(identifier) = repo.identifier(hash.clone()).await? else {
         tracing::warn!(
-            "Original File identifier for hash {} is missing, queue cleanup task",
-            hex::encode(&hash)
+            "Original File identifier for hash {hash:?} is missing, queue cleanup task",
         );
         crate::queue::cleanup_hash(&repo, hash).await?;
         return Ok(HttpResponse::NotFound().finish());

@@ -1,6 +1,7 @@
 use crate::{
     details::Details,
     error::{Error, UploadError},
+    repo::Hash,
 };
 use actix_web::web;
 use dashmap::{mapref::entry::Entry, DashMap};
@@ -16,7 +17,7 @@ use tracing::Span;
 
 type OutcomeReceiver = Receiver<(Details, web::Bytes)>;
 
-type ProcessMapKey = (Vec<u8>, PathBuf);
+type ProcessMapKey = (Hash, PathBuf);
 
 type ProcessMapInner = DashMap<ProcessMapKey, OutcomeReceiver>;
 
@@ -32,14 +33,14 @@ impl ProcessMap {
 
     pub(super) async fn process<Fut>(
         &self,
-        hash: &[u8],
+        hash: Hash,
         path: PathBuf,
         fut: Fut,
     ) -> Result<(Details, web::Bytes), Error>
     where
         Fut: Future<Output = Result<(Details, web::Bytes), Error>>,
     {
-        let key = (hash.to_vec(), path.clone());
+        let key = (hash.clone(), path.clone());
 
         let (sender, receiver) = flume::bounded(1);
 
@@ -51,8 +52,8 @@ impl ProcessMap {
 
                 let span = tracing::info_span!(
                     "Processing image",
-                    hash = &tracing::field::debug(&hex::encode(hash)),
-                    path = &tracing::field::debug(&path),
+                    hash = ?hash,
+                    path = ?path,
                     completed = &tracing::field::Empty,
                 );
 
@@ -63,8 +64,8 @@ impl ProcessMap {
             Entry::Occupied(receiver) => {
                 let span = tracing::info_span!(
                     "Waiting for processed image",
-                    hash = &tracing::field::debug(&hex::encode(hash)),
-                    path = &tracing::field::debug(&path),
+                    hash = ?hash,
+                    path = ?path,
                 );
 
                 let receiver = receiver.get().clone().into_recv_async();

@@ -4,7 +4,7 @@ use crate::{
     error::Error,
     formats::InputProcessableFormat,
     repo::{
-        Alias, AliasRepo, DeleteToken, FullRepo, HashRepo, IdentifierRepo, JobId, QueueRepo,
+        Alias, AliasRepo, DeleteToken, FullRepo, Hash, HashRepo, IdentifierRepo, JobId, QueueRepo,
         UploadId,
     },
     serde_str::Serde,
@@ -54,7 +54,7 @@ const PROCESS_QUEUE: &str = "process";
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 enum Cleanup {
     Hash {
-        hash: Base64Bytes,
+        hash: Hash,
     },
     Identifier {
         identifier: Base64Bytes,
@@ -64,7 +64,7 @@ enum Cleanup {
         token: Serde<DeleteToken>,
     },
     Variant {
-        hash: Base64Bytes,
+        hash: Hash,
         #[serde(skip_serializing_if = "Option::is_none")]
         variant: Option<String>,
     },
@@ -101,10 +101,8 @@ pub(crate) async fn cleanup_alias<R: QueueRepo>(
     Ok(())
 }
 
-pub(crate) async fn cleanup_hash<R: QueueRepo>(repo: &R, hash: R::Bytes) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::Hash {
-        hash: Base64Bytes(hash.as_ref().to_vec()),
-    })?;
+pub(crate) async fn cleanup_hash<R: QueueRepo>(repo: &R, hash: Hash) -> Result<(), Error> {
+    let job = serde_json::to_vec(&Cleanup::Hash { hash })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
@@ -122,13 +120,10 @@ pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
 
 async fn cleanup_variants<R: QueueRepo>(
     repo: &R,
-    hash: R::Bytes,
+    hash: Hash,
     variant: Option<String>,
 ) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::Variant {
-        hash: Base64Bytes(hash.as_ref().to_vec()),
-        variant,
-    })?;
+    let job = serde_json::to_vec(&Cleanup::Variant { hash, variant })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
@@ -218,7 +213,6 @@ async fn process_jobs<R, S, F>(
     callback: F,
 ) where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
     S: Store,
     for<'a> F: Fn(&'a R, &'a S, &'a Configuration, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
@@ -279,35 +273,42 @@ async fn job_loop<R, S, F>(
 ) -> Result<(), Error>
 where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
     S: Store,
     for<'a> F: Fn(&'a R, &'a S, &'a Configuration, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
     loop {
-        let (job_id, bytes) = repo.pop(queue).await?;
+        let fut = async {
+            let (job_id, bytes) = repo.pop(queue, worker_id).await?;
 
-        let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
+            let span = tracing::info_span!("Running Job");
 
-        let guard = MetricsGuard::guard(worker_id, queue);
+            let guard = MetricsGuard::guard(worker_id, queue);
 
-        let res = span
-            .in_scope(|| {
-                heartbeat(
-                    repo,
-                    queue,
-                    job_id,
-                    (callback)(repo, store, config, bytes.as_ref()),
-                )
-            })
-            .instrument(span)
-            .await;
+            let res = span
+                .in_scope(|| {
+                    heartbeat(
+                        repo,
+                        queue,
+                        worker_id,
+                        job_id,
+                        (callback)(repo, store, config, bytes.as_ref()),
+                    )
+                })
+                .instrument(span)
+                .await;
 
-        repo.complete_job(queue, job_id).await?;
+            repo.complete_job(queue, worker_id, job_id).await?;
 
-        res?;
+            res?;
 
-        guard.disarm();
+            guard.disarm();
+
+            Ok(()) as Result<(), Error>
+        };
+
+        fut.instrument(tracing::info_span!("tick", worker_id = %worker_id))
+            .await?;
     }
 }
 
@@ -320,7 +321,6 @@ async fn process_image_jobs<R, S, F>(
     callback: F,
 ) where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
     S: Store,
     for<'a> F: Fn(
             &'a R,
@@ -358,7 +358,6 @@ async fn image_job_loop<R, S, F>(
 ) -> Result<(), Error>
 where
     R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
-    R::Bytes: Clone,
     S: Store,
     for<'a> F: Fn(
             &'a R,
@@ -370,38 +369,52 @@ where
         + Copy,
 {
     loop {
-        let (job_id, bytes) = repo.pop(queue).await?;
+        let fut = async {
+            let (job_id, bytes) = repo.pop(queue, worker_id).await?;
 
-        let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
+            let span = tracing::info_span!("Running Job");
 
-        let guard = MetricsGuard::guard(worker_id, queue);
+            let guard = MetricsGuard::guard(worker_id, queue);
 
-        let res = span
-            .in_scope(|| {
-                heartbeat(
-                    repo,
-                    queue,
-                    job_id,
-                    (callback)(repo, store, process_map, config, bytes.as_ref()),
-                )
-            })
-            .instrument(span)
-            .await;
+            let res = span
+                .in_scope(|| {
+                    heartbeat(
+                        repo,
+                        queue,
+                        worker_id,
+                        job_id,
+                        (callback)(repo, store, process_map, config, bytes.as_ref()),
+                    )
+                })
+                .instrument(span)
+                .await;
 
-        repo.complete_job(queue, job_id).await?;
+            repo.complete_job(queue, worker_id, job_id).await?;
 
-        res?;
+            res?;
 
-        guard.disarm();
+            guard.disarm();
+            Ok(()) as Result<(), Error>
+        };
+
+        fut.instrument(tracing::info_span!("tick", worker_id = %worker_id))
+            .await?;
     }
 }
 
-async fn heartbeat<R, Fut>(repo: &R, queue: &'static str, job_id: JobId, fut: Fut) -> Fut::Output
+async fn heartbeat<R, Fut>(
+    repo: &R,
+    queue: &'static str,
+    worker_id: uuid::Uuid,
+    job_id: JobId,
+    fut: Fut,
+) -> Fut::Output
 where
     R: QueueRepo,
     Fut: std::future::Future,
 {
-    let mut fut = std::pin::pin!(fut);
+    let mut fut =
+        std::pin::pin!(fut.instrument(tracing::info_span!("job-future", job_id = ?job_id)));
 
     let mut interval = actix_rt::time::interval(Duration::from_secs(5));
 
@@ -414,10 +427,12 @@ where
             }
             _ = interval.tick() => {
                 if hb.is_none() {
-                    hb = Some(repo.heartbeat(queue, job_id));
+                    hb = Some(repo.heartbeat(queue, worker_id, job_id));
                 }
             }
             opt = poll_opt(hb.as_mut()), if hb.is_some() => {
+                hb.take();
+
                 if let Some(Err(e)) = opt {
                     tracing::warn!("Failed heartbeat\n{}", format!("{e:?}"));
                 }
@@ -432,6 +447,6 @@ where
 {
     match opt {
         None => None,
-        Some(fut) => std::future::poll_fn(|cx| Pin::new(&mut *fut).poll(cx).map(Some)).await,
+        Some(fut) => Some(fut.await),
     }
 }

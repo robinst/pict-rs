@@ -1,9 +1,10 @@
 use crate::{
     details::MaybeHumanDate,
     repo::{
-        Alias, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, Details, FullRepo,
-        HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, JobId, MigrationRepo, QueueRepo,
-        SettingsRepo, UploadId, UploadRepo, UploadResult,
+        hash::Hash, Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken,
+        Details, FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, JobId,
+        MigrationRepo, ProxyRepo, QueueRepo, RepoError, SettingsRepo, UploadId, UploadRepo,
+        UploadResult, VariantAccessRepo,
     },
     serde_str::Serde,
     store::StoreError,
@@ -23,8 +24,7 @@ use std::{
 };
 use tokio::{sync::Notify, task::JoinHandle};
 use url::Url;
-
-use super::{AliasAccessRepo, ProxyRepo, RepoError, VariantAccessRepo};
+use uuid::Uuid;
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -182,9 +182,7 @@ impl SledRepo {
     }
 }
 
-impl BaseRepo for SledRepo {
-    type Bytes = IVec;
-}
+impl BaseRepo for SledRepo {}
 
 #[async_trait::async_trait(?Send)]
 impl FullRepo for SledRepo {
@@ -317,7 +315,7 @@ impl futures_util::Stream for AliasAccessStream {
 }
 
 impl futures_util::Stream for VariantAccessStream {
-    type Item = Result<(IVec, String), RepoError>;
+    type Item = Result<(Hash, String), RepoError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -405,8 +403,9 @@ impl AliasAccessRepo for SledRepo {
 impl VariantAccessRepo for SledRepo {
     type VariantAccessStream = VariantAccessStream;
 
-    #[tracing::instrument(level = "debug", skip_all, fields(hash = %hex::encode(&hash), variant = %variant))]
-    async fn accessed(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn accessed(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        let hash = hash.to_bytes();
         let key = variant_access_key(&hash, &variant);
 
         let now_string = time::OffsetDateTime::now_utc()
@@ -428,12 +427,9 @@ impl VariantAccessRepo for SledRepo {
         .map_err(RepoError::from)
     }
 
-    #[tracing::instrument(level = "debug", skip_all, fields(hash = %hex::encode(&hash), variant = %variant))]
-    async fn contains_variant(
-        &self,
-        hash: Self::Bytes,
-        variant: String,
-    ) -> Result<bool, RepoError> {
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn contains_variant(&self, hash: Hash, variant: String) -> Result<bool, RepoError> {
+        let hash = hash.to_bytes();
         let key = variant_access_key(&hash, &variant);
 
         let timestamp = b!(self.variant_access, variant_access.get(key));
@@ -465,8 +461,9 @@ impl VariantAccessRepo for SledRepo {
         })
     }
 
-    #[tracing::instrument(level = "debug", skip_all, fields(hash = %hex::encode(&hash), variant = %variant))]
-    async fn remove_access(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn remove_access(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        let hash = hash.to_bytes();
         let key = variant_access_key(&hash, &variant);
 
         let variant_access = self.variant_access.clone();
@@ -629,7 +626,7 @@ impl UploadRepo for SledRepo {
 
 enum JobState {
     Pending,
-    Running([u8; 8]),
+    Running([u8; 24]),
 }
 
 impl JobState {
@@ -637,12 +634,26 @@ impl JobState {
         Self::Pending
     }
 
-    fn running() -> Self {
-        Self::Running(
-            time::OffsetDateTime::now_utc()
-                .unix_timestamp()
-                .to_be_bytes(),
-        )
+    fn running(worker_id: Uuid) -> Self {
+        let first_eight = time::OffsetDateTime::now_utc()
+            .unix_timestamp()
+            .to_be_bytes();
+
+        let next_sixteen = worker_id.into_bytes();
+
+        let mut bytes = [0u8; 24];
+
+        bytes[0..8]
+            .iter_mut()
+            .zip(&first_eight)
+            .for_each(|(dest, src)| *dest = *src);
+
+        bytes[8..24]
+            .iter_mut()
+            .zip(&next_sixteen)
+            .for_each(|(dest, src)| *dest = *src);
+
+        Self::Running(bytes)
     }
 
     fn as_bytes(&self) -> &[u8] {
@@ -663,7 +674,7 @@ fn job_key(queue: &'static str, job_id: JobId) -> Arc<[u8]> {
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for SledRepo {
     #[tracing::instrument(skip(self, job), fields(job = %String::from_utf8_lossy(&job)))]
-    async fn push(&self, queue_name: &'static str, job: Self::Bytes) -> Result<JobId, RepoError> {
+    async fn push(&self, queue_name: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError> {
         let metrics_guard = PushMetricsGuard::guard(queue_name);
 
         let id = JobId::gen();
@@ -676,7 +687,7 @@ impl QueueRepo for SledRepo {
             (&queue, &job_state).transaction(|(queue, job_state)| {
                 let state = JobState::pending();
 
-                queue.insert(&key[..], &job)?;
+                queue.insert(&key[..], &job[..])?;
                 job_state.insert(&key[..], state.as_bytes())?;
 
                 Ok(())
@@ -707,8 +718,12 @@ impl QueueRepo for SledRepo {
         Ok(id)
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn pop(&self, queue_name: &'static str) -> Result<(JobId, Self::Bytes), RepoError> {
+    #[tracing::instrument(skip(self, worker_id), fields(job_id))]
+    async fn pop(
+        &self,
+        queue_name: &'static str,
+        worker_id: Uuid,
+    ) -> Result<(JobId, Arc<[u8]>), RepoError> {
         let metrics_guard = PopMetricsGuard::guard(queue_name);
 
         let now = time::OffsetDateTime::now_utc();
@@ -717,13 +732,15 @@ impl QueueRepo for SledRepo {
             let queue = self.queue.clone();
             let job_state = self.job_state.clone();
 
+            let span = tracing::Span::current();
             let opt = actix_rt::task::spawn_blocking(move || {
+                let _guard = span.enter();
                 // Job IDs are generated with Uuid version 7 - defining their first bits as a
                 // timestamp. Scanning a prefix should give us jobs in the order they were queued.
                 for res in job_state.scan_prefix(queue_name) {
                     let (key, value) = res?;
 
-                    if value.len() == 8 {
+                    if value.len() > 8 {
                         let unix_timestamp =
                             i64::from_be_bytes(value[0..8].try_into().expect("Verified length"));
 
@@ -738,13 +755,14 @@ impl QueueRepo for SledRepo {
                         }
                     }
 
-                    let state = JobState::running();
+                    let state = JobState::running(worker_id);
 
-                    match job_state.compare_and_swap(&key, Some(value), Some(state.as_bytes())) {
-                        Ok(_) => {
+                    match job_state.compare_and_swap(&key, Some(value), Some(state.as_bytes()))? {
+                        Ok(()) => {
                             // acquired job
                         }
                         Err(_) => {
+                            tracing::debug!("Contested");
                             // someone else acquired job
                             continue;
                         }
@@ -756,9 +774,13 @@ impl QueueRepo for SledRepo {
 
                     let job_id = JobId::from_bytes(id_bytes);
 
-                    let opt = queue.get(&key)?.map(|job_bytes| (job_id, job_bytes));
+                    tracing::Span::current().record("job_id", &format!("{job_id:?}"));
 
-                    return Ok(opt) as Result<Option<(JobId, Self::Bytes)>, SledError>;
+                    let opt = queue
+                        .get(&key)?
+                        .map(|job_bytes| (job_id, Arc::from(job_bytes.to_vec())));
+
+                    return Ok(opt) as Result<Option<(JobId, Arc<[u8]>)>, SledError>;
                 }
 
                 Ok(None)
@@ -792,18 +814,23 @@ impl QueueRepo for SledRepo {
         }
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn heartbeat(&self, queue_name: &'static str, job_id: JobId) -> Result<(), RepoError> {
+    #[tracing::instrument(skip(self, worker_id))]
+    async fn heartbeat(
+        &self,
+        queue_name: &'static str,
+        worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError> {
         let key = job_key(queue_name, job_id);
 
         let job_state = self.job_state.clone();
 
         actix_rt::task::spawn_blocking(move || {
             if let Some(state) = job_state.get(&key)? {
-                let new_state = JobState::running();
+                let new_state = JobState::running(worker_id);
 
                 match job_state.compare_and_swap(&key, Some(state), Some(new_state.as_bytes()))? {
-                    Ok(_) => Ok(()),
+                    Ok(()) => Ok(()),
                     Err(_) => Err(SledError::Conflict),
                 }
             } else {
@@ -816,8 +843,13 @@ impl QueueRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn complete_job(&self, queue_name: &'static str, job_id: JobId) -> Result<(), RepoError> {
+    #[tracing::instrument(skip(self, _worker_id))]
+    async fn complete_job(
+        &self,
+        queue_name: &'static str,
+        _worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError> {
         let key = job_key(queue_name, job_id);
 
         let queue = self.queue.clone();
@@ -844,17 +876,17 @@ impl QueueRepo for SledRepo {
 #[async_trait::async_trait(?Send)]
 impl SettingsRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(value))]
-    async fn set(&self, key: &'static str, value: Self::Bytes) -> Result<(), RepoError> {
-        b!(self.settings, settings.insert(key, value));
+    async fn set(&self, key: &'static str, value: Arc<[u8]>) -> Result<(), RepoError> {
+        b!(self.settings, settings.insert(key, &value[..]));
 
         Ok(())
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn get(&self, key: &'static str) -> Result<Option<Self::Bytes>, RepoError> {
+    async fn get(&self, key: &'static str) -> Result<Option<Arc<[u8]>>, RepoError> {
         let opt = b!(self.settings, settings.get(key));
 
-        Ok(opt)
+        Ok(opt.map(|ivec| Arc::from(ivec.to_vec())))
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -889,9 +921,12 @@ pub(crate) enum VariantKeyError {
 
     #[error("Invalid utf8 in Variant")]
     Utf8,
+
+    #[error("Hash format is invalid")]
+    InvalidHash,
 }
 
-fn parse_variant_access_key(bytes: IVec) -> Result<(IVec, String), VariantKeyError> {
+fn parse_variant_access_key(bytes: IVec) -> Result<(Hash, String), VariantKeyError> {
     if bytes.len() < 8 {
         return Err(VariantKeyError::TooShort);
     }
@@ -904,6 +939,8 @@ fn parse_variant_access_key(bytes: IVec) -> Result<(IVec, String), VariantKeyErr
     }
 
     let hash = bytes.subslice(8, hash_len);
+
+    let hash = Hash::from_ivec(hash).ok_or(VariantKeyError::InvalidHash)?;
 
     let variant_len = bytes.len().saturating_sub(8).saturating_sub(hash_len);
 
@@ -1012,7 +1049,7 @@ impl MigrationRepo for SledRepo {
     }
 }
 
-type StreamItem = Result<IVec, RepoError>;
+type StreamItem = Result<Hash, RepoError>;
 type LocalBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + 'a>>;
 
 #[async_trait::async_trait(?Send)]
@@ -1028,19 +1065,20 @@ impl HashRepo for SledRepo {
     }
 
     async fn hashes(&self) -> Self::Stream {
-        let iter = self
-            .hashes
-            .iter()
-            .keys()
-            .map(|res| res.map_err(SledError::from).map_err(RepoError::from));
+        let iter = self.hashes.iter().keys().filter_map(|res| {
+            res.map_err(SledError::from)
+                .map_err(RepoError::from)
+                .map(Hash::from_ivec)
+                .transpose()
+        });
 
         Box::pin(from_iterator(iter, 8))
     }
 
-    #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn create<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         identifier: &I,
     ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
         let identifier: sled::IVec = identifier.to_bytes()?.into();
@@ -1048,14 +1086,16 @@ impl HashRepo for SledRepo {
         let hashes = self.hashes.clone();
         let hash_identifiers = self.hash_identifiers.clone();
 
+        let hash = hash.to_ivec();
+
         let res = actix_web::web::block(move || {
             (&hashes, &hash_identifiers).transaction(|(hashes, hash_identifiers)| {
-                if hashes.get(&hash)?.is_some() {
+                if hashes.get(hash.clone())?.is_some() {
                     return Ok(Err(HashAlreadyExists));
                 }
 
-                hashes.insert(&hash, &hash)?;
-                hash_identifiers.insert(&hash, &identifier)?;
+                hashes.insert(hash.clone(), hash.clone())?;
+                hash_identifiers.insert(hash.clone(), &identifier)?;
 
                 Ok(Ok(()))
             })
@@ -1073,10 +1113,12 @@ impl HashRepo for SledRepo {
 
     async fn update_identifier<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         identifier: &I,
     ) -> Result<(), StoreError> {
         let identifier = identifier.to_bytes()?;
+
+        let hash = hash.to_ivec();
 
         b!(
             self.hash_identifiers,
@@ -1086,11 +1128,13 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn identifier<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Option<I>, StoreError> {
+        let hash = hash.to_ivec();
+
         let Some(ivec) = b!(self.hash_identifiers, hash_identifiers.get(hash)) else {
             return Ok(None);
         };
@@ -1098,13 +1142,15 @@ impl HashRepo for SledRepo {
         Ok(Some(I::from_bytes(ivec.to_vec())?))
     }
 
-    #[tracing::instrument(level = "trace", skip(self, hash, identifier), fields(hash = hex::encode(&hash), identifier = identifier.string_repr()))]
+    #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
     async fn relate_variant_identifier<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         variant: String,
         identifier: &I,
     ) -> Result<(), StoreError> {
+        let hash = hash.to_bytes();
+
         let key = variant_key(&hash, &variant);
         let value = identifier.to_bytes()?;
 
@@ -1116,12 +1162,14 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn variant_identifier<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         variant: String,
     ) -> Result<Option<I>, StoreError> {
+        let hash = hash.to_bytes();
+
         let key = variant_key(&hash, &variant);
 
         let opt = b!(
@@ -1132,15 +1180,17 @@ impl HashRepo for SledRepo {
         opt.map(|ivec| I::from_bytes(ivec.to_vec())).transpose()
     }
 
-    #[tracing::instrument(level = "debug", skip(self, hash), fields(hash = hex::encode(&hash)))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn variants<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Vec<(String, I)>, StoreError> {
+        let hash = hash.to_ivec();
+
         let vec = b!(
             self.hash_variant_identifiers,
             Ok(hash_variant_identifiers
-                .scan_prefix(&hash)
+                .scan_prefix(hash.clone())
                 .filter_map(|res| res.ok())
                 .filter_map(|(key, ivec)| {
                     let identifier = I::from_bytes(ivec.to_vec()).ok();
@@ -1164,8 +1214,10 @@ impl HashRepo for SledRepo {
         Ok(vec)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn remove_variant(&self, hash: Self::Bytes, variant: String) -> Result<(), RepoError> {
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        let hash = hash.to_bytes();
+
         let key = variant_key(&hash, &variant);
 
         b!(
@@ -1176,12 +1228,13 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, hash, identifier), fields(hash = hex::encode(&hash), identifier = identifier.string_repr()))]
+    #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
     async fn relate_motion_identifier<I: Identifier>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
         identifier: &I,
     ) -> Result<(), StoreError> {
+        let hash = hash.to_ivec();
         let bytes = identifier.to_bytes()?;
 
         b!(
@@ -1192,11 +1245,13 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn motion_identifier<I: Identifier + 'static>(
         &self,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Option<I>, StoreError> {
+        let hash = hash.to_ivec();
+
         let opt = b!(
             self.hash_motion_identifiers,
             hash_motion_identifiers.get(hash)
@@ -1205,8 +1260,10 @@ impl HashRepo for SledRepo {
         opt.map(|ivec| I::from_bytes(ivec.to_vec())).transpose()
     }
 
-    #[tracing::instrument(skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn cleanup(&self, hash: Self::Bytes) -> Result<(), RepoError> {
+    #[tracing::instrument(skip(self))]
+    async fn cleanup(&self, hash: Hash) -> Result<(), RepoError> {
+        let hash = hash.to_ivec();
+
         let hashes = self.hashes.clone();
         let hash_identifiers = self.hash_identifiers.clone();
         let hash_motion_identifiers = self.hash_motion_identifiers.clone();
@@ -1274,8 +1331,9 @@ impl AliasRepo for SledRepo {
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
-        hash: Self::Bytes,
+        hash: Hash,
     ) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
+        let hash = hash.to_ivec();
         let alias: sled::IVec = alias.to_bytes().into();
         let delete_token: sled::IVec = delete_token.to_bytes().into();
 
@@ -1328,16 +1386,18 @@ impl AliasRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn hash(&self, alias: &Alias) -> Result<Option<Self::Bytes>, RepoError> {
+    async fn hash(&self, alias: &Alias) -> Result<Option<Hash>, RepoError> {
         let key = alias.to_bytes();
 
         let opt = b!(self.alias_hashes, alias_hashes.get(key));
 
-        Ok(opt)
+        Ok(opt.and_then(Hash::from_ivec))
     }
 
     #[tracing::instrument(skip_all)]
-    async fn for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError> {
+    async fn for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError> {
+        let hash = hash.to_ivec();
+
         let v = b!(self.hash_aliases, {
             Ok(hash_aliases
                 .scan_prefix(hash)
@@ -1399,10 +1459,10 @@ impl From<actix_rt::task::JoinError> for SledError {
 mod tests {
     #[test]
     fn round_trip() {
-        let hash = sled::IVec::from(b"some hash value");
+        let hash = crate::repo::Hash::test_value();
         let variant = String::from("some string value");
 
-        let key = super::variant_access_key(&hash, &variant);
+        let key = super::variant_access_key(&hash.to_bytes(), &variant);
 
         let (out_hash, out_variant) =
             super::parse_variant_access_key(sled::IVec::from(key)).expect("Parsed bytes");

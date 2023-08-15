@@ -1,4 +1,4 @@
-use sha2::{digest::FixedOutputReset, Digest};
+use sha2::{digest::FixedOutputReset, Digest, Sha256};
 use std::{
     cell::RefCell,
     pin::Pin,
@@ -7,35 +7,47 @@ use std::{
 };
 use tokio::io::{AsyncRead, ReadBuf};
 
+pub(super) struct State {
+    hasher: Sha256,
+    size: u64,
+}
+
 pin_project_lite::pin_project! {
-    pub(crate) struct Hasher<I, D> {
+    pub(crate) struct Hasher<I> {
         #[pin]
         inner: I,
 
-        hasher: Rc<RefCell<D>>,
+        state: Rc<RefCell<State>>,
     }
 }
 
-impl<I, D> Hasher<I, D>
-where
-    D: Digest + FixedOutputReset + Send + 'static,
-{
-    pub(super) fn new(reader: I, digest: D) -> Self {
+impl<I> Hasher<I> {
+    pub(super) fn new(reader: I) -> Self {
         Hasher {
             inner: reader,
-            hasher: Rc::new(RefCell::new(digest)),
+            state: Rc::new(RefCell::new(State {
+                hasher: Sha256::new(),
+                size: 0,
+            })),
         }
     }
 
-    pub(super) fn hasher(&self) -> Rc<RefCell<D>> {
-        Rc::clone(&self.hasher)
+    pub(super) fn state(&self) -> Rc<RefCell<State>> {
+        Rc::clone(&self.state)
     }
 }
 
-impl<I, D> AsyncRead for Hasher<I, D>
+impl State {
+    pub(super) fn finalize_reset(&mut self) -> ([u8; 32], u64) {
+        let arr = self.hasher.finalize_fixed_reset().into();
+
+        (arr, self.size)
+    }
+}
+
+impl<I> AsyncRead for Hasher<I>
 where
     I: AsyncRead,
-    D: Digest,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -45,15 +57,15 @@ where
         let this = self.as_mut().project();
 
         let reader = this.inner;
-        let hasher = this.hasher;
+        let state = this.state;
 
         let before_len = buf.filled().len();
         let poll_res = reader.poll_read(cx, buf);
         let after_len = buf.filled().len();
         if after_len > before_len {
-            hasher
-                .borrow_mut()
-                .update(&buf.filled()[before_len..after_len]);
+            let mut guard = state.borrow_mut();
+            guard.hasher.update(&buf.filled()[before_len..after_len]);
+            guard.size += u64::try_from(after_len - before_len).expect("Size is reasonable");
         }
         poll_res
     }
@@ -86,24 +98,26 @@ mod test {
 
     #[test]
     fn hasher_works() {
-        let hash = test_on_arbiter!(async move {
+        let (hash, size) = test_on_arbiter!(async move {
             let file1 = tokio::fs::File::open("./client-examples/earth.gif").await?;
 
-            let mut reader = Hasher::new(file1, Sha256::new());
+            let mut reader = Hasher::new(file1);
 
             tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
 
-            Ok(reader.hasher().borrow_mut().finalize_reset().to_vec()) as std::io::Result<_>
+            Ok(reader.state().borrow_mut().finalize_reset()) as std::io::Result<_>
         })
         .unwrap();
 
         let mut file = std::fs::File::open("./client-examples/earth.gif").unwrap();
         let mut vec = Vec::new();
         file.read_to_end(&mut vec).unwrap();
+        let correct_size = vec.len() as u64;
         let mut hasher = Sha256::new();
         hasher.update(vec);
-        let correct_hash = hasher.finalize_reset().to_vec();
+        let correct_hash: [u8; 32] = hasher.finalize_reset().into();
 
         assert_eq!(hash, correct_hash);
+        assert_eq!(size, correct_size);
     }
 }
