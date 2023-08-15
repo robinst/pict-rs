@@ -73,13 +73,8 @@ where
         errors.push(e);
     }
 
-    if !errors.is_empty() {
-        let span = tracing::error_span!("Error deleting files");
-        span.in_scope(|| {
-            for error in errors {
-                tracing::error!("{}", format!("{error}"));
-            }
-        });
+    for error in errors {
+        tracing::error!("{}", format!("{error:?}"));
     }
 
     Ok(())

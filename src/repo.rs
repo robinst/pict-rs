@@ -296,11 +296,25 @@ impl JobId {
 pub(crate) trait QueueRepo: BaseRepo {
     async fn push(&self, queue: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError>;
 
-    async fn pop(&self, queue: &'static str) -> Result<(JobId, Arc<[u8]>), RepoError>;
+    async fn pop(
+        &self,
+        queue: &'static str,
+        worker_id: Uuid,
+    ) -> Result<(JobId, Arc<[u8]>), RepoError>;
 
-    async fn heartbeat(&self, queue: &'static str, job_id: JobId) -> Result<(), RepoError>;
+    async fn heartbeat(
+        &self,
+        queue: &'static str,
+        worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError>;
 
-    async fn complete_job(&self, queue: &'static str, job_id: JobId) -> Result<(), RepoError>;
+    async fn complete_job(
+        &self,
+        queue: &'static str,
+        worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -312,16 +326,30 @@ where
         T::push(self, queue, job).await
     }
 
-    async fn pop(&self, queue: &'static str) -> Result<(JobId, Arc<[u8]>), RepoError> {
-        T::pop(self, queue).await
+    async fn pop(
+        &self,
+        queue: &'static str,
+        worker_id: Uuid,
+    ) -> Result<(JobId, Arc<[u8]>), RepoError> {
+        T::pop(self, queue, worker_id).await
     }
 
-    async fn heartbeat(&self, queue: &'static str, job_id: JobId) -> Result<(), RepoError> {
-        T::heartbeat(self, queue, job_id).await
+    async fn heartbeat(
+        &self,
+        queue: &'static str,
+        worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError> {
+        T::heartbeat(self, queue, worker_id, job_id).await
     }
 
-    async fn complete_job(&self, queue: &'static str, job_id: JobId) -> Result<(), RepoError> {
-        T::complete_job(self, queue, job_id).await
+    async fn complete_job(
+        &self,
+        queue: &'static str,
+        worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError> {
+        T::complete_job(self, queue, worker_id, job_id).await
     }
 }
 

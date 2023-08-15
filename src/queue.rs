@@ -278,29 +278,37 @@ where
         + Copy,
 {
     loop {
-        let (job_id, bytes) = repo.pop(queue).await?;
+        let fut = async {
+            let (job_id, bytes) = repo.pop(queue, worker_id).await?;
 
-        let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
+            let span = tracing::info_span!("Running Job");
 
-        let guard = MetricsGuard::guard(worker_id, queue);
+            let guard = MetricsGuard::guard(worker_id, queue);
 
-        let res = span
-            .in_scope(|| {
-                heartbeat(
-                    repo,
-                    queue,
-                    job_id,
-                    (callback)(repo, store, config, bytes.as_ref()),
-                )
-            })
-            .instrument(span)
-            .await;
+            let res = span
+                .in_scope(|| {
+                    heartbeat(
+                        repo,
+                        queue,
+                        worker_id,
+                        job_id,
+                        (callback)(repo, store, config, bytes.as_ref()),
+                    )
+                })
+                .instrument(span)
+                .await;
 
-        repo.complete_job(queue, job_id).await?;
+            repo.complete_job(queue, worker_id, job_id).await?;
 
-        res?;
+            res?;
 
-        guard.disarm();
+            guard.disarm();
+
+            Ok(()) as Result<(), Error>
+        };
+
+        fut.instrument(tracing::info_span!("tick", worker_id = %worker_id))
+            .await?;
     }
 }
 
@@ -361,38 +369,52 @@ where
         + Copy,
 {
     loop {
-        let (job_id, bytes) = repo.pop(queue).await?;
+        let fut = async {
+            let (job_id, bytes) = repo.pop(queue, worker_id).await?;
 
-        let span = tracing::info_span!("Running Job", worker_id = ?worker_id);
+            let span = tracing::info_span!("Running Job");
 
-        let guard = MetricsGuard::guard(worker_id, queue);
+            let guard = MetricsGuard::guard(worker_id, queue);
 
-        let res = span
-            .in_scope(|| {
-                heartbeat(
-                    repo,
-                    queue,
-                    job_id,
-                    (callback)(repo, store, process_map, config, bytes.as_ref()),
-                )
-            })
-            .instrument(span)
-            .await;
+            let res = span
+                .in_scope(|| {
+                    heartbeat(
+                        repo,
+                        queue,
+                        worker_id,
+                        job_id,
+                        (callback)(repo, store, process_map, config, bytes.as_ref()),
+                    )
+                })
+                .instrument(span)
+                .await;
 
-        repo.complete_job(queue, job_id).await?;
+            repo.complete_job(queue, worker_id, job_id).await?;
 
-        res?;
+            res?;
 
-        guard.disarm();
+            guard.disarm();
+            Ok(()) as Result<(), Error>
+        };
+
+        fut.instrument(tracing::info_span!("tick", worker_id = %worker_id))
+            .await?;
     }
 }
 
-async fn heartbeat<R, Fut>(repo: &R, queue: &'static str, job_id: JobId, fut: Fut) -> Fut::Output
+async fn heartbeat<R, Fut>(
+    repo: &R,
+    queue: &'static str,
+    worker_id: uuid::Uuid,
+    job_id: JobId,
+    fut: Fut,
+) -> Fut::Output
 where
     R: QueueRepo,
     Fut: std::future::Future,
 {
-    let mut fut = std::pin::pin!(fut);
+    let mut fut =
+        std::pin::pin!(fut.instrument(tracing::info_span!("job-future", job_id = ?job_id)));
 
     let mut interval = actix_rt::time::interval(Duration::from_secs(5));
 
@@ -405,10 +427,12 @@ where
             }
             _ = interval.tick() => {
                 if hb.is_none() {
-                    hb = Some(repo.heartbeat(queue, job_id));
+                    hb = Some(repo.heartbeat(queue, worker_id, job_id));
                 }
             }
             opt = poll_opt(hb.as_mut()), if hb.is_some() => {
+                hb.take();
+
                 if let Some(Err(e)) = opt {
                     tracing::warn!("Failed heartbeat\n{}", format!("{e:?}"));
                 }
@@ -423,6 +447,6 @@ where
 {
     match opt {
         None => None,
-        Some(fut) => std::future::poll_fn(|cx| Pin::new(&mut *fut).poll(cx).map(Some)).await,
+        Some(fut) => Some(fut.await),
     }
 }

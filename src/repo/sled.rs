@@ -24,6 +24,7 @@ use std::{
 };
 use tokio::{sync::Notify, task::JoinHandle};
 use url::Url;
+use uuid::Uuid;
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -625,7 +626,7 @@ impl UploadRepo for SledRepo {
 
 enum JobState {
     Pending,
-    Running([u8; 8]),
+    Running([u8; 24]),
 }
 
 impl JobState {
@@ -633,12 +634,26 @@ impl JobState {
         Self::Pending
     }
 
-    fn running() -> Self {
-        Self::Running(
-            time::OffsetDateTime::now_utc()
-                .unix_timestamp()
-                .to_be_bytes(),
-        )
+    fn running(worker_id: Uuid) -> Self {
+        let first_eight = time::OffsetDateTime::now_utc()
+            .unix_timestamp()
+            .to_be_bytes();
+
+        let next_sixteen = worker_id.into_bytes();
+
+        let mut bytes = [0u8; 24];
+
+        bytes[0..8]
+            .iter_mut()
+            .zip(&first_eight)
+            .for_each(|(dest, src)| *dest = *src);
+
+        bytes[8..24]
+            .iter_mut()
+            .zip(&next_sixteen)
+            .for_each(|(dest, src)| *dest = *src);
+
+        Self::Running(bytes)
     }
 
     fn as_bytes(&self) -> &[u8] {
@@ -703,8 +718,12 @@ impl QueueRepo for SledRepo {
         Ok(id)
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn pop(&self, queue_name: &'static str) -> Result<(JobId, Arc<[u8]>), RepoError> {
+    #[tracing::instrument(skip(self, worker_id), fields(job_id))]
+    async fn pop(
+        &self,
+        queue_name: &'static str,
+        worker_id: Uuid,
+    ) -> Result<(JobId, Arc<[u8]>), RepoError> {
         let metrics_guard = PopMetricsGuard::guard(queue_name);
 
         let now = time::OffsetDateTime::now_utc();
@@ -713,13 +732,15 @@ impl QueueRepo for SledRepo {
             let queue = self.queue.clone();
             let job_state = self.job_state.clone();
 
+            let span = tracing::Span::current();
             let opt = actix_rt::task::spawn_blocking(move || {
+                let _guard = span.enter();
                 // Job IDs are generated with Uuid version 7 - defining their first bits as a
                 // timestamp. Scanning a prefix should give us jobs in the order they were queued.
                 for res in job_state.scan_prefix(queue_name) {
                     let (key, value) = res?;
 
-                    if value.len() == 8 {
+                    if value.len() > 8 {
                         let unix_timestamp =
                             i64::from_be_bytes(value[0..8].try_into().expect("Verified length"));
 
@@ -734,13 +755,14 @@ impl QueueRepo for SledRepo {
                         }
                     }
 
-                    let state = JobState::running();
+                    let state = JobState::running(worker_id);
 
-                    match job_state.compare_and_swap(&key, Some(value), Some(state.as_bytes())) {
-                        Ok(_) => {
+                    match job_state.compare_and_swap(&key, Some(value), Some(state.as_bytes()))? {
+                        Ok(()) => {
                             // acquired job
                         }
                         Err(_) => {
+                            tracing::debug!("Contested");
                             // someone else acquired job
                             continue;
                         }
@@ -751,6 +773,8 @@ impl QueueRepo for SledRepo {
                     let id_bytes: [u8; 16] = id_bytes.try_into().expect("Key length");
 
                     let job_id = JobId::from_bytes(id_bytes);
+
+                    tracing::Span::current().record("job_id", &format!("{job_id:?}"));
 
                     let opt = queue
                         .get(&key)?
@@ -790,18 +814,23 @@ impl QueueRepo for SledRepo {
         }
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn heartbeat(&self, queue_name: &'static str, job_id: JobId) -> Result<(), RepoError> {
+    #[tracing::instrument(skip(self, worker_id))]
+    async fn heartbeat(
+        &self,
+        queue_name: &'static str,
+        worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError> {
         let key = job_key(queue_name, job_id);
 
         let job_state = self.job_state.clone();
 
         actix_rt::task::spawn_blocking(move || {
             if let Some(state) = job_state.get(&key)? {
-                let new_state = JobState::running();
+                let new_state = JobState::running(worker_id);
 
                 match job_state.compare_and_swap(&key, Some(state), Some(new_state.as_bytes()))? {
-                    Ok(_) => Ok(()),
+                    Ok(()) => Ok(()),
                     Err(_) => Err(SledError::Conflict),
                 }
             } else {
@@ -814,8 +843,13 @@ impl QueueRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn complete_job(&self, queue_name: &'static str, job_id: JobId) -> Result<(), RepoError> {
+    #[tracing::instrument(skip(self, _worker_id))]
+    async fn complete_job(
+        &self,
+        queue_name: &'static str,
+        _worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError> {
         let key = job_key(queue_name, job_id);
 
         let queue = self.queue.clone();
