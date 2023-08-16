@@ -61,7 +61,7 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
         }
 
         while set.len() >= MIGRATE_CONCURRENCY {
-            if let Some(_) = set.join_next().await {
+            if set.join_next().await.is_some() {
                 index += 1;
 
                 if index % pct == 0 {
@@ -73,7 +73,7 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
         }
     }
 
-    while let Some(_) = set.join_next().await {
+    while set.join_next().await.is_some() {
         index += 1;
 
         if index % pct == 0 {
