@@ -8,7 +8,7 @@ use std::{
 use crate::{
     details::Details,
     error::{Error, UploadError},
-    repo::{ArcRepo, Hash, IdentifierRepo},
+    repo::{ArcRepo, Hash},
     store::{Identifier, Store},
 };
 
@@ -429,7 +429,7 @@ where
 {
     if let Some(details) = repo.details(from).await? {
         repo.relate_details(to, &details).await?;
-        IdentifierRepo::cleanup(repo.as_ref(), from).await?;
+        repo.cleanup_details(from).await?;
     }
 
     Ok(())

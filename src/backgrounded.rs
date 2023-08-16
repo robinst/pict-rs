@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    repo::{ArcRepo, UploadId, UploadRepo},
+    repo::{ArcRepo, UploadId},
     store::Store,
 };
 use actix_web::web::Bytes;
@@ -53,11 +53,9 @@ where
     where
         P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     {
-        UploadRepo::create(
-            self.repo.as_ref(),
-            self.upload_id.expect("Upload id exists"),
-        )
-        .await?;
+        self.repo
+            .create_upload(self.upload_id.expect("Upload id exists"))
+            .await?;
 
         let stream = stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
 

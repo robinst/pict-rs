@@ -69,10 +69,7 @@ use self::{
     middleware::{Deadline, Internal},
     migrate_store::migrate_store,
     queue::queue_generate,
-    repo::{
-        sled::SledRepo, Alias, AliasAccessRepo, DeleteToken, Hash, Repo, UploadId, UploadResult,
-        VariantAccessRepo,
-    },
+    repo::{sled::SledRepo, Alias, DeleteToken, Hash, Repo, UploadId, UploadResult},
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
     stream::{StreamLimit, StreamTimeout},
@@ -673,7 +670,7 @@ async fn process_details<S: Store>(
     let thumbnail_string = thumbnail_path.to_string_lossy().to_string();
 
     if !config.server.read_only {
-        VariantAccessRepo::accessed((**repo).as_ref(), hash.clone(), thumbnail_string.clone())
+        repo.accessed_variant(hash.clone(), thumbnail_string.clone())
             .await?;
     }
 
@@ -745,7 +742,7 @@ async fn process<S: Store + 'static>(
             };
 
             if !config.server.read_only {
-                AliasAccessRepo::accessed((**repo).as_ref(), alias.clone()).await?;
+                repo.accessed_alias(alias.clone()).await?;
             }
 
             alias
@@ -768,7 +765,8 @@ async fn process<S: Store + 'static>(
     };
 
     if !config.server.read_only {
-        VariantAccessRepo::accessed((**repo).as_ref(), hash.clone(), path_string.clone()).await?;
+        repo.accessed_variant(hash.clone(), path_string.clone())
+            .await?;
     }
 
     let identifier_opt = repo
@@ -894,7 +892,8 @@ async fn process_head<S: Store + 'static>(
     };
 
     if !config.server.read_only {
-        VariantAccessRepo::accessed((**repo).as_ref(), hash.clone(), path_string.clone()).await?;
+        repo.accessed_variant(hash.clone(), path_string.clone())
+            .await?;
     }
 
     let identifier_opt = repo
@@ -1056,7 +1055,7 @@ async fn serve_query<S: Store + 'static>(
             };
 
             if !config.server.read_only {
-                AliasAccessRepo::accessed((**repo).as_ref(), alias.clone()).await?;
+                repo.accessed_alias(alias.clone()).await?;
             }
 
             alias

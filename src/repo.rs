@@ -72,7 +72,7 @@ pub(crate) enum RepoError {
 pub(crate) trait FullRepo:
     UploadRepo
     + SettingsRepo
-    + IdentifierRepo
+    + DetailsRepo
     + AliasRepo
     + QueueRepo
     + HashRepo
@@ -170,14 +170,28 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait AliasAccessRepo: BaseRepo {
-    async fn accessed(&self, alias: Alias) -> Result<(), RepoError>;
+    async fn accessed_alias(&self, alias: Alias) -> Result<(), RepoError> {
+        self.set_accessed_alias(alias, time::OffsetDateTime::now_utc())
+            .await
+    }
+
+    async fn set_accessed_alias(
+        &self,
+        alias: Alias,
+        accessed: time::OffsetDateTime,
+    ) -> Result<(), RepoError>;
+
+    async fn alias_accessed_at(
+        &self,
+        alias: Alias,
+    ) -> Result<Option<time::OffsetDateTime>, RepoError>;
 
     async fn older_aliases(
         &self,
         timestamp: time::OffsetDateTime,
     ) -> Result<LocalBoxStream<'static, Result<Alias, RepoError>>, RepoError>;
 
-    async fn remove_access(&self, alias: Alias) -> Result<(), RepoError>;
+    async fn remove_alias_access(&self, alias: Alias) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -185,8 +199,19 @@ impl<T> AliasAccessRepo for Arc<T>
 where
     T: AliasAccessRepo,
 {
-    async fn accessed(&self, alias: Alias) -> Result<(), RepoError> {
-        T::accessed(self, alias).await
+    async fn set_accessed_alias(
+        &self,
+        alias: Alias,
+        accessed: time::OffsetDateTime,
+    ) -> Result<(), RepoError> {
+        T::set_accessed_alias(self, alias, accessed).await
+    }
+
+    async fn alias_accessed_at(
+        &self,
+        alias: Alias,
+    ) -> Result<Option<time::OffsetDateTime>, RepoError> {
+        T::alias_accessed_at(self, alias).await
     }
 
     async fn older_aliases(
@@ -196,23 +221,37 @@ where
         T::older_aliases(self, timestamp).await
     }
 
-    async fn remove_access(&self, alias: Alias) -> Result<(), RepoError> {
-        T::remove_access(self, alias).await
+    async fn remove_alias_access(&self, alias: Alias) -> Result<(), RepoError> {
+        T::remove_alias_access(self, alias).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait VariantAccessRepo: BaseRepo {
-    async fn accessed(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
+    async fn accessed_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        self.set_accessed_variant(hash, variant, time::OffsetDateTime::now_utc())
+            .await
+    }
 
-    async fn contains_variant(&self, hash: Hash, variant: String) -> Result<bool, RepoError>;
+    async fn set_accessed_variant(
+        &self,
+        hash: Hash,
+        variant: String,
+        accessed: time::OffsetDateTime,
+    ) -> Result<(), RepoError>;
+
+    async fn variant_accessed_at(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Option<time::OffsetDateTime>, RepoError>;
 
     async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,
     ) -> Result<LocalBoxStream<'static, Result<(Hash, String), RepoError>>, RepoError>;
 
-    async fn remove_access(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
+    async fn remove_variant_access(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -220,12 +259,21 @@ impl<T> VariantAccessRepo for Arc<T>
 where
     T: VariantAccessRepo,
 {
-    async fn accessed(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
-        T::accessed(self, hash, variant).await
+    async fn set_accessed_variant(
+        &self,
+        hash: Hash,
+        variant: String,
+        accessed: time::OffsetDateTime,
+    ) -> Result<(), RepoError> {
+        T::set_accessed_variant(self, hash, variant, accessed).await
     }
 
-    async fn contains_variant(&self, hash: Hash, variant: String) -> Result<bool, RepoError> {
-        T::contains_variant(self, hash, variant).await
+    async fn variant_accessed_at(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Option<time::OffsetDateTime>, RepoError> {
+        T::variant_accessed_at(self, hash, variant).await
     }
 
     async fn older_variants(
@@ -235,14 +283,14 @@ where
         T::older_variants(self, timestamp).await
     }
 
-    async fn remove_access(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
-        T::remove_access(self, hash, variant).await
+    async fn remove_variant_access(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        T::remove_variant_access(self, hash, variant).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait UploadRepo: BaseRepo {
-    async fn create(&self, upload_id: UploadId) -> Result<(), RepoError>;
+    async fn create_upload(&self, upload_id: UploadId) -> Result<(), RepoError>;
 
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, RepoError>;
 
@@ -256,8 +304,8 @@ impl<T> UploadRepo for Arc<T>
 where
     T: UploadRepo,
 {
-    async fn create(&self, upload_id: UploadId) -> Result<(), RepoError> {
-        T::create(self, upload_id).await
+    async fn create_upload(&self, upload_id: UploadId) -> Result<(), RepoError> {
+        T::create_upload(self, upload_id).await
     }
 
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, RepoError> {
@@ -377,7 +425,7 @@ where
 }
 
 #[async_trait::async_trait(?Send)]
-pub(crate) trait IdentifierRepo: BaseRepo {
+pub(crate) trait DetailsRepo: BaseRepo {
     async fn relate_details(
         &self,
         identifier: &dyn Identifier,
@@ -385,13 +433,13 @@ pub(crate) trait IdentifierRepo: BaseRepo {
     ) -> Result<(), StoreError>;
     async fn details(&self, identifier: &dyn Identifier) -> Result<Option<Details>, StoreError>;
 
-    async fn cleanup(&self, identifier: &dyn Identifier) -> Result<(), StoreError>;
+    async fn cleanup_details(&self, identifier: &dyn Identifier) -> Result<(), StoreError>;
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> IdentifierRepo for Arc<T>
+impl<T> DetailsRepo for Arc<T>
 where
-    T: IdentifierRepo,
+    T: DetailsRepo,
 {
     async fn relate_details(
         &self,
@@ -405,8 +453,8 @@ where
         T::details(self, identifier).await
     }
 
-    async fn cleanup(&self, identifier: &dyn Identifier) -> Result<(), StoreError> {
-        T::cleanup(self, identifier).await
+    async fn cleanup_details(&self, identifier: &dyn Identifier) -> Result<(), StoreError> {
+        T::cleanup_details(self, identifier).await
     }
 }
 
@@ -457,7 +505,7 @@ pub(crate) trait HashRepo: BaseRepo {
 
     async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>>;
 
-    async fn create(
+    async fn create_hash(
         &self,
         hash: Hash,
         identifier: &dyn Identifier,
@@ -492,7 +540,7 @@ pub(crate) trait HashRepo: BaseRepo {
     ) -> Result<(), StoreError>;
     async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError>;
 
-    async fn cleanup(&self, hash: Hash) -> Result<(), RepoError>;
+    async fn cleanup_hash(&self, hash: Hash) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -508,12 +556,12 @@ where
         T::hashes(self).await
     }
 
-    async fn create(
+    async fn create_hash(
         &self,
         hash: Hash,
         identifier: &dyn Identifier,
     ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
-        T::create(self, hash, identifier).await
+        T::create_hash(self, hash, identifier).await
     }
 
     async fn update_identifier(
@@ -565,14 +613,14 @@ where
         T::motion_identifier(self, hash).await
     }
 
-    async fn cleanup(&self, hash: Hash) -> Result<(), RepoError> {
-        T::cleanup(self, hash).await
+    async fn cleanup_hash(&self, hash: Hash) -> Result<(), RepoError> {
+        T::cleanup_hash(self, hash).await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait AliasRepo: BaseRepo {
-    async fn create(
+    async fn create_alias(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
@@ -585,7 +633,7 @@ pub(crate) trait AliasRepo: BaseRepo {
 
     async fn for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError>;
 
-    async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError>;
+    async fn cleanup_alias(&self, alias: &Alias) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -593,13 +641,13 @@ impl<T> AliasRepo for Arc<T>
 where
     T: AliasRepo,
 {
-    async fn create(
+    async fn create_alias(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
         hash: Hash,
     ) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
-        T::create(self, alias, delete_token, hash).await
+        T::create_alias(self, alias, delete_token, hash).await
     }
 
     async fn delete_token(&self, alias: &Alias) -> Result<Option<DeleteToken>, RepoError> {
@@ -614,8 +662,8 @@ where
         T::for_hash(self, hash).await
     }
 
-    async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError> {
-        T::cleanup(self, alias).await
+    async fn cleanup_alias(&self, alias: &Alias) -> Result<(), RepoError> {
+        T::cleanup_alias(self, alias).await
     }
 }
 

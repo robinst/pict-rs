@@ -3,7 +3,7 @@ use crate::{
     either::Either,
     error::{Error, UploadError},
     formats::{InternalFormat, Validations},
-    repo::{Alias, AliasRepo, ArcRepo, DeleteToken, Hash, HashRepo},
+    repo::{Alias, ArcRepo, DeleteToken, Hash},
     store::Store,
 };
 use actix_web::web::Bytes;
@@ -137,10 +137,7 @@ async fn save_upload<S>(
 where
     S: Store,
 {
-    if HashRepo::create(repo.as_ref(), hash.clone(), identifier)
-        .await?
-        .is_err()
-    {
+    if repo.create_hash(hash.clone(), identifier).await?.is_err() {
         // duplicate upload
         store.remove(identifier).await?;
         session.identifier.take();
@@ -175,7 +172,8 @@ where
 
     #[tracing::instrument(skip(self, hash))]
     async fn add_existing_alias(&mut self, hash: Hash, alias: Alias) -> Result<(), Error> {
-        AliasRepo::create(self.repo.as_ref(), &alias, &self.delete_token, hash)
+        self.repo
+            .create_alias(&alias, &self.delete_token, hash)
             .await?
             .map_err(|_| UploadError::DuplicateAlias)?;
 
@@ -189,7 +187,9 @@ where
         loop {
             let alias = Alias::generate(input_type.file_extension().to_string());
 
-            if AliasRepo::create(self.repo.as_ref(), &alias, &self.delete_token, hash.clone())
+            if self
+                .repo
+                .create_alias(&alias, &self.delete_token, hash.clone())
                 .await?
                 .is_ok()
             {

@@ -2,9 +2,9 @@ use crate::{
     details::MaybeHumanDate,
     repo::{
         hash::Hash, Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken,
-        Details, FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, JobId,
-        ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
-        UploadResult, VariantAccessRepo, VariantAlreadyExists,
+        Details, DetailsRepo, FullRepo, HashAlreadyExists, HashRepo, Identifier, JobId, ProxyRepo,
+        QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo, UploadResult,
+        VariantAccessRepo, VariantAlreadyExists,
     },
     serde_str::Serde,
     store::StoreError,
@@ -218,11 +218,12 @@ impl ProxyRepo for SledRepo {
 #[async_trait::async_trait(?Send)]
 impl AliasAccessRepo for SledRepo {
     #[tracing::instrument(level = "debug", skip(self))]
-    async fn accessed(&self, alias: Alias) -> Result<(), RepoError> {
-        let mut value_bytes = time::OffsetDateTime::now_utc()
-            .unix_timestamp_nanos()
-            .to_be_bytes()
-            .to_vec();
+    async fn set_accessed_alias(
+        &self,
+        alias: Alias,
+        accessed: time::OffsetDateTime,
+    ) -> Result<(), RepoError> {
+        let mut value_bytes = accessed.unix_timestamp_nanos().to_be_bytes().to_vec();
         value_bytes.extend_from_slice(&alias.to_bytes());
         let value_bytes = IVec::from(value_bytes);
 
@@ -251,6 +252,25 @@ impl AliasAccessRepo for SledRepo {
         Ok(())
     }
 
+    async fn alias_accessed_at(
+        &self,
+        alias: Alias,
+    ) -> Result<Option<time::OffsetDateTime>, RepoError> {
+        let alias = alias.to_bytes();
+
+        let Some(timestamp) = b!(self.variant_access, variant_access.get(alias)) else {
+            return Ok(None);
+        };
+
+        let timestamp = timestamp[0..16].try_into().expect("valid timestamp bytes");
+
+        let timestamp =
+            time::OffsetDateTime::from_unix_timestamp_nanos(i128::from_be_bytes(timestamp))
+                .expect("valid timestamp");
+
+        Ok(Some(timestamp))
+    }
+
     #[tracing::instrument(level = "debug", skip(self))]
     async fn older_aliases(
         &self,
@@ -272,7 +292,7 @@ impl AliasAccessRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
-    async fn remove_access(&self, alias: Alias) -> Result<(), RepoError> {
+    async fn remove_alias_access(&self, alias: Alias) -> Result<(), RepoError> {
         let alias_access = self.alias_access.clone();
         let inverse_alias_access = self.inverse_alias_access.clone();
 
@@ -300,14 +320,16 @@ impl AliasAccessRepo for SledRepo {
 #[async_trait::async_trait(?Send)]
 impl VariantAccessRepo for SledRepo {
     #[tracing::instrument(level = "debug", skip(self))]
-    async fn accessed(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+    async fn set_accessed_variant(
+        &self,
+        hash: Hash,
+        variant: String,
+        accessed: time::OffsetDateTime,
+    ) -> Result<(), RepoError> {
         let hash = hash.to_bytes();
         let key = IVec::from(variant_access_key(&hash, &variant));
 
-        let mut value_bytes = time::OffsetDateTime::now_utc()
-            .unix_timestamp_nanos()
-            .to_be_bytes()
-            .to_vec();
+        let mut value_bytes = accessed.unix_timestamp_nanos().to_be_bytes().to_vec();
         value_bytes.extend_from_slice(&key);
         let value_bytes = IVec::from(value_bytes);
 
@@ -337,13 +359,25 @@ impl VariantAccessRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
-    async fn contains_variant(&self, hash: Hash, variant: String) -> Result<bool, RepoError> {
+    async fn variant_accessed_at(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Option<time::OffsetDateTime>, RepoError> {
         let hash = hash.to_bytes();
         let key = variant_access_key(&hash, &variant);
 
-        let timestamp = b!(self.variant_access, variant_access.get(key));
+        let Some(timestamp) = b!(self.variant_access, variant_access.get(key)) else {
+            return Ok(None);
+        };
 
-        Ok(timestamp.is_some())
+        let timestamp = timestamp[0..16].try_into().expect("valid timestamp bytes");
+
+        let timestamp =
+            time::OffsetDateTime::from_unix_timestamp_nanos(i128::from_be_bytes(timestamp))
+                .expect("valid timestamp");
+
+        Ok(Some(timestamp))
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
@@ -365,7 +399,7 @@ impl VariantAccessRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
-    async fn remove_access(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+    async fn remove_variant_access(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         let hash = hash.to_bytes();
         let key = IVec::from(variant_access_key(&hash, &variant));
 
@@ -480,7 +514,7 @@ impl Drop for PopMetricsGuard {
 #[async_trait::async_trait(?Send)]
 impl UploadRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn create(&self, upload_id: UploadId) -> Result<(), RepoError> {
+    async fn create_upload(&self, upload_id: UploadId) -> Result<(), RepoError> {
         b!(self.uploads, uploads.insert(upload_id.as_bytes(), b"1"));
         Ok(())
     }
@@ -884,7 +918,7 @@ fn variant_from_key(hash: &[u8], key: &[u8]) -> Option<String> {
 }
 
 #[async_trait::async_trait(?Send)]
-impl IdentifierRepo for SledRepo {
+impl DetailsRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
     async fn relate_details(
         &self,
@@ -918,7 +952,7 @@ impl IdentifierRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
-    async fn cleanup(&self, identifier: &dyn Identifier) -> Result<(), StoreError> {
+    async fn cleanup_details(&self, identifier: &dyn Identifier) -> Result<(), StoreError> {
         let key = identifier.to_bytes()?;
 
         b!(self.identifier_details, identifier_details.remove(key));
@@ -984,7 +1018,7 @@ impl HashRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn create(
+    async fn create_hash(
         &self,
         hash: Hash,
         identifier: &dyn Identifier,
@@ -1160,7 +1194,7 @@ impl HashRepo for SledRepo {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn cleanup(&self, hash: Hash) -> Result<(), RepoError> {
+    async fn cleanup_hash(&self, hash: Hash) -> Result<(), RepoError> {
         let hash = hash.to_ivec();
 
         let hashes = self.hashes.clone();
@@ -1226,7 +1260,7 @@ fn hash_alias_key(hash: &IVec, alias: &IVec) -> Vec<u8> {
 #[async_trait::async_trait(?Send)]
 impl AliasRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn create(
+    async fn create_alias(
         &self,
         alias: &Alias,
         delete_token: &DeleteToken,
@@ -1310,7 +1344,7 @@ impl AliasRepo for SledRepo {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn cleanup(&self, alias: &Alias) -> Result<(), RepoError> {
+    async fn cleanup_alias(&self, alias: &Alias) -> Result<(), RepoError> {
         let alias: IVec = alias.to_bytes().into();
 
         let aliases = self.aliases.clone();

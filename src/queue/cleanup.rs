@@ -2,10 +2,7 @@ use crate::{
     config::Configuration,
     error::{Error, UploadError},
     queue::{Base64Bytes, Cleanup, LocalBoxFuture},
-    repo::{
-        Alias, AliasAccessRepo, AliasRepo, ArcRepo, DeleteToken, Hash, HashRepo, IdentifierRepo,
-        VariantAccessRepo,
-    },
+    repo::{Alias, ArcRepo, DeleteToken, Hash},
     serde_str::Serde,
     store::{Identifier, Store},
 };
@@ -65,7 +62,7 @@ where
         errors.push(e);
     }
 
-    if let Err(e) = IdentifierRepo::cleanup(repo.as_ref(), &identifier).await {
+    if let Err(e) = repo.cleanup_details(&identifier).await {
         errors.push(e);
     }
 
@@ -106,7 +103,7 @@ async fn hash(repo: &ArcRepo, hash: Hash) -> Result<(), Error> {
         let _ = super::cleanup_identifier(repo, identifier).await;
     }
 
-    HashRepo::cleanup(repo.as_ref(), hash).await?;
+    repo.cleanup_hash(hash).await?;
 
     Ok(())
 }
@@ -121,9 +118,9 @@ async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> Result<(), E
 
     let hash = repo.hash(&alias).await?;
 
-    AliasRepo::cleanup(repo.as_ref(), &alias).await?;
+    repo.cleanup_alias(&alias).await?;
     repo.remove_relation(alias.clone()).await?;
-    AliasAccessRepo::remove_access(repo.as_ref(), alias.clone()).await?;
+    repo.remove_alias_access(alias.clone()).await?;
 
     let Some(hash) = hash else {
         // hash doesn't exist, nothing to do
@@ -178,7 +175,7 @@ async fn outdated_proxies(repo: &ArcRepo, config: &Configuration) -> Result<(), 
         } else {
             tracing::warn!("Skipping alias cleanup - no delete token");
             repo.remove_relation(alias.clone()).await?;
-            AliasAccessRepo::remove_access(repo.as_ref(), alias).await?;
+            repo.remove_alias_access(alias).await?;
         }
     }
 
@@ -201,11 +198,11 @@ async fn hash_variant(
 
         repo.remove_variant(hash.clone(), target_variant.clone())
             .await?;
-        VariantAccessRepo::remove_access(repo.as_ref(), hash, target_variant).await?;
+        repo.remove_variant_access(hash, target_variant).await?;
     } else {
         for (variant, identifier) in repo.variants(hash.clone()).await? {
             repo.remove_variant(hash.clone(), variant.clone()).await?;
-            VariantAccessRepo::remove_access(repo.as_ref(), hash.clone(), variant).await?;
+            repo.remove_variant_access(hash.clone(), variant).await?;
             super::cleanup_identifier(repo, identifier).await?;
         }
     }
