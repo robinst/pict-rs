@@ -14,8 +14,9 @@ buffer_capacity = 102400
 service_name = 'pict-rs'
 targets = 'info'
 
-[old_db]
-path = 'data/'
+[old_repo]
+path = 'data/sled-repo-local'
+cache_capacity = 67108864
 
 [media]
 max_file_size = 40

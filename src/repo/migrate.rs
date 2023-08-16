@@ -11,6 +11,7 @@ use crate::{
     stream::IntoStreamer,
 };
 
+#[tracing::instrument(skip_all)]
 pub(crate) async fn migrate_04<S: Store>(
     old_repo: OldSledRepo,
     new_repo: &ArcRepo,
@@ -31,16 +32,26 @@ pub(crate) async fn migrate_04<S: Store>(
         return Err(e.into());
     }
 
+    let total_size = old_repo.size().await?;
+    let pct = (total_size / 100).max(1);
     tracing::warn!("Checks complete, migrating repo");
-    tracing::warn!("{} hashes will be migrated", old_repo.size().await?);
+    tracing::warn!("{total_size} hashes will be migrated");
 
     let mut hash_stream = old_repo.hashes().await.into_streamer();
 
+    let mut index = 0;
     while let Some(res) = hash_stream.next().await {
+        index += 1;
         if let Ok(hash) = res {
             let _ = migrate_hash_04(&old_repo, new_repo, store, config, hash).await;
         } else {
             tracing::warn!("Failed to read hash, skipping");
+        }
+
+        if index % pct == 0 {
+            let percent = index / pct;
+
+            tracing::warn!("Migration {percent}% complete - {index}/{total_size}");
         }
     }
 
@@ -84,6 +95,7 @@ async fn migrate_hash_04<S: Store>(
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 async fn do_migrate_hash_04<S: Store>(
     old_repo: &OldSledRepo,
     new_repo: &ArcRepo,
@@ -156,6 +168,7 @@ async fn do_migrate_hash_04<S: Store>(
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 async fn details<S: Store>(
     old_repo: &OldSledRepo,
     store: &S,
