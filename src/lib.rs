@@ -1949,7 +1949,8 @@ impl PictRsConfiguration {
 
                 if arc_repo.get("migrate-0.4").await?.is_none() {
                     if let Some(old_repo) = repo_04::open(&config.old_repo)? {
-                        repo::migrate_04(old_repo, &arc_repo, &store, &config).await?;
+                        repo::migrate_04(old_repo, arc_repo.clone(), store.clone(), config.clone())
+                            .await?;
                         arc_repo
                             .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
                             .await?;
@@ -2005,7 +2006,8 @@ impl PictRsConfiguration {
 
                 if arc_repo.get("migrate-0.4").await?.is_none() {
                     if let Some(old_repo) = repo_04::open(&config.old_repo)? {
-                        repo::migrate_04(old_repo, &arc_repo, &store, &config).await?;
+                        repo::migrate_04(old_repo, arc_repo.clone(), store.clone(), config.clone())
+                            .await?;
                         arc_repo
                             .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
                             .await?;

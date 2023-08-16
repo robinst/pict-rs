@@ -1,3 +1,5 @@
+use tokio::task::JoinSet;
+
 use crate::{
     config::Configuration,
     details::Details,
@@ -11,12 +13,15 @@ use crate::{
     stream::IntoStreamer,
 };
 
+const MIGRATE_CONCURRENCY: usize = 32;
+const GENERATOR_KEY: &str = "last-path";
+
 #[tracing::instrument(skip_all)]
-pub(crate) async fn migrate_04<S: Store>(
+pub(crate) async fn migrate_04<S: Store + 'static>(
     old_repo: OldSledRepo,
-    new_repo: &ArcRepo,
-    store: &S,
-    config: &Configuration,
+    new_repo: ArcRepo,
+    store: S,
+    config: Configuration,
 ) -> Result<(), Error> {
     tracing::warn!("Running checks");
     if let Err(e) = old_repo.health_check().await {
@@ -39,14 +44,37 @@ pub(crate) async fn migrate_04<S: Store>(
 
     let mut hash_stream = old_repo.hashes().await.into_streamer();
 
+    let mut set = JoinSet::new();
+
     let mut index = 0;
     while let Some(res) = hash_stream.next().await {
-        index += 1;
         if let Ok(hash) = res {
-            let _ = migrate_hash_04(&old_repo, new_repo, store, config, hash).await;
+            set.spawn_local(migrate_hash_04(
+                old_repo.clone(),
+                new_repo.clone(),
+                store.clone(),
+                config.clone(),
+                hash.clone(),
+            ));
         } else {
             tracing::warn!("Failed to read hash, skipping");
         }
+
+        while set.len() >= MIGRATE_CONCURRENCY {
+            if let Some(_) = set.join_next().await {
+                index += 1;
+
+                if index % pct == 0 {
+                    let percent = index / pct;
+
+                    tracing::warn!("Migration {percent}% complete - {index}/{total_size}");
+                }
+            }
+        }
+    }
+
+    while let Some(_) = set.join_next().await {
+        index += 1;
 
         if index % pct == 0 {
             let percent = index / pct;
@@ -55,25 +83,28 @@ pub(crate) async fn migrate_04<S: Store>(
         }
     }
 
-    if let Some(generator_state) = old_repo.get("last-path").await? {
+    if let Some(generator_state) = old_repo.get(GENERATOR_KEY).await? {
         new_repo
-            .set("last-path", generator_state.to_vec().into())
+            .set(GENERATOR_KEY, generator_state.to_vec().into())
             .await?;
     }
+
+    tracing::warn!("Migration complete");
 
     Ok(())
 }
 
 async fn migrate_hash_04<S: Store>(
-    old_repo: &OldSledRepo,
-    new_repo: &ArcRepo,
-    store: &S,
-    config: &Configuration,
+    old_repo: OldSledRepo,
+    new_repo: ArcRepo,
+    store: S,
+    config: Configuration,
     old_hash: sled::IVec,
 ) -> Result<(), Error> {
     let mut hash_failures = 0;
 
-    while let Err(e) = do_migrate_hash_04(old_repo, new_repo, store, config, old_hash.clone()).await
+    while let Err(e) =
+        do_migrate_hash_04(&old_repo, &new_repo, &store, &config, old_hash.clone()).await
     {
         hash_failures += 1;
 

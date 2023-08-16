@@ -3,7 +3,7 @@ use crate::{
     repo::{
         hash::Hash, Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken,
         Details, FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, JobId,
-        MigrationRepo, ProxyRepo, QueueRepo, RepoError, SettingsRepo, UploadId, UploadRepo,
+        ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
         UploadResult, VariantAccessRepo,
     },
     serde_str::Serde,
@@ -928,7 +928,7 @@ impl IdentifierRepo for SledRepo {
 }
 
 #[async_trait::async_trait(?Send)]
-impl MigrationRepo for SledRepo {
+impl StoreMigrationRepo for SledRepo {
     async fn is_continuing_migration(&self) -> Result<bool, RepoError> {
         Ok(!self.migration_identifiers.is_empty())
     }

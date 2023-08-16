@@ -74,7 +74,7 @@ pub(crate) trait FullRepo:
     + AliasRepo
     + QueueRepo
     + HashRepo
-    + MigrationRepo
+    + StoreMigrationRepo
     + AliasAccessRepo
     + VariantAccessRepo
     + ProxyRepo
@@ -409,7 +409,7 @@ where
 }
 
 #[async_trait::async_trait(?Send)]
-pub(crate) trait MigrationRepo: BaseRepo {
+pub(crate) trait StoreMigrationRepo: BaseRepo {
     async fn is_continuing_migration(&self) -> Result<bool, RepoError>;
 
     async fn mark_migrated(
@@ -424,9 +424,9 @@ pub(crate) trait MigrationRepo: BaseRepo {
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> MigrationRepo for Arc<T>
+impl<T> StoreMigrationRepo for Arc<T>
 where
-    T: MigrationRepo,
+    T: StoreMigrationRepo,
 {
     async fn is_continuing_migration(&self) -> Result<bool, RepoError> {
         T::is_continuing_migration(self).await
