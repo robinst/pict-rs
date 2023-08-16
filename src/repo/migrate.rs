@@ -117,7 +117,7 @@ async fn migrate_hash_04<S: Store>(
             return Err(e);
         } else {
             tracing::warn!(
-                "Failed to migrate hash {}, retrying +1",
+                "Failed to migrate hash {}, retrying +{hash_failures}",
                 hex::encode(&old_hash[..])
             );
         }
