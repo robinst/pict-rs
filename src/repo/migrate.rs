@@ -151,11 +151,7 @@ async fn do_migrate_hash_04<S: Store>(
 
     let hash = old_hash[..].try_into().expect("Invalid hash size");
 
-    let hash = Hash::new(
-        hash,
-        size,
-        hash_details.internal_format().expect("format exists"),
-    );
+    let hash = Hash::new(hash, size, hash_details.internal_format());
 
     let _ = HashRepo::create(new_repo.as_ref(), hash.clone(), &identifier).await?;
 
@@ -212,13 +208,7 @@ async fn fetch_or_generate_details<S: Store>(
     config: &Configuration,
     identifier: &S::Identifier,
 ) -> Result<Details, Error> {
-    let details_opt = old_repo.details(identifier).await?.and_then(|details| {
-        if details.internal_format().is_some() {
-            Some(details)
-        } else {
-            None
-        }
-    });
+    let details_opt = old_repo.details(identifier).await?;
 
     if let Some(details) = details_opt {
         Ok(details)

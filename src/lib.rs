@@ -102,13 +102,7 @@ async fn ensure_details<S: Store + 'static>(
         return Err(UploadError::MissingAlias.into());
     };
 
-    let details = repo.details(&identifier).await?.and_then(|details| {
-        if details.internal_format().is_some() {
-            Some(details)
-        } else {
-            None
-        }
-    });
+    let details = repo.details(&identifier).await?;
 
     if let Some(details) = details {
         tracing::debug!("details exist");
@@ -784,13 +778,7 @@ async fn process<S: Store + 'static>(
         .transpose()?;
 
     if let Some(identifier) = identifier_opt {
-        let details = repo.details(&identifier).await?.and_then(|details| {
-            if details.internal_format().is_some() {
-                Some(details)
-            } else {
-                None
-            }
-        });
+        let details = repo.details(&identifier).await?;
 
         let details = if let Some(details) = details {
             tracing::debug!("details exist");
@@ -916,13 +904,7 @@ async fn process_head<S: Store + 'static>(
         .transpose()?;
 
     if let Some(identifier) = identifier_opt {
-        let details = repo.details(&identifier).await?.and_then(|details| {
-            if details.internal_format().is_some() {
-                Some(details)
-            } else {
-                None
-            }
-        });
+        let details = repo.details(&identifier).await?;
 
         let details = if let Some(details) = details {
             tracing::debug!("details exist");

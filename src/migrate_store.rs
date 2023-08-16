@@ -398,14 +398,7 @@ where
         .details(identifier)
         .await
         .map_err(Error::from)
-        .map_err(MigrateError::Details)?
-        .and_then(|details| {
-            if details.internal_format().is_some() {
-                Some(details)
-            } else {
-                None
-            }
-        });
+        .map_err(MigrateError::Details)?;
 
     let details = if let Some(details) = details_opt {
         details

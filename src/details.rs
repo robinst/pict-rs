@@ -22,8 +22,7 @@ pub(crate) struct Details {
     frames: Option<u32>,
     content_type: Serde<mime::Mime>,
     created_at: MaybeHumanDate,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    format: Option<InternalFormat>,
+    format: InternalFormat,
 }
 
 impl Details {
@@ -57,12 +56,8 @@ impl Details {
         Ok(Details::from_parts(format, width, height, frames))
     }
 
-    pub(crate) fn internal_format(&self) -> Option<InternalFormat> {
-        if let Some(format) = self.format {
-            return Some(format);
-        }
-
-        InternalFormat::maybe_from_media_type(&self.content_type, self.frames.is_some())
+    pub(crate) fn internal_format(&self) -> InternalFormat {
+        self.format
     }
 
     pub(crate) fn media_type(&self) -> mime::Mime {
@@ -74,15 +69,27 @@ impl Details {
     }
 
     pub(crate) fn video_format(&self) -> Option<InternalVideoFormat> {
-        if *self.content_type == crate::formats::mimes::video_mp4() {
-            return Some(InternalVideoFormat::Mp4);
+        match self.format {
+            InternalFormat::Video(format) => Some(format),
+            _ => None,
         }
+    }
 
-        if *self.content_type == crate::formats::mimes::video_webm() {
-            return Some(InternalVideoFormat::Webm);
+    pub(crate) fn from_parts_full(
+        format: InternalFormat,
+        width: u16,
+        height: u16,
+        frames: Option<u32>,
+        created_at: MaybeHumanDate,
+    ) -> Self {
+        Self {
+            width,
+            height,
+            frames,
+            content_type: Serde::new(format.media_type()),
+            created_at,
+            format,
         }
-
-        None
     }
 
     pub(crate) fn from_parts(
@@ -97,7 +104,7 @@ impl Details {
             frames,
             content_type: Serde::new(format.media_type()),
             created_at: MaybeHumanDate::HumanDate(OffsetDateTime::now_utc()),
-            format: Some(format),
+            format,
         }
     }
 }

@@ -57,6 +57,41 @@ pub(crate) struct SledRepo {
     _db: Db,
 }
 
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct OldDetails {
+    width: u16,
+    height: u16,
+    frames: Option<u32>,
+    content_type: crate::serde_str::Serde<mime::Mime>,
+    created_at: crate::details::MaybeHumanDate,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<crate::formats::InternalFormat>,
+}
+
+impl OldDetails {
+    fn into_details(self) -> Option<Details> {
+        let OldDetails {
+            width,
+            height,
+            frames,
+            content_type,
+            created_at,
+            format,
+        } = self;
+
+        let format = format.or_else(|| {
+            crate::formats::InternalFormat::maybe_from_media_type(
+                &content_type,
+                self.frames.is_some(),
+            )
+        })?;
+
+        Some(Details::from_parts_full(
+            format, width, height, frames, created_at,
+        ))
+    }
+}
+
 impl SledRepo {
     #[tracing::instrument]
     pub(crate) fn build(path: PathBuf, cache_capacity: u64) -> color_eyre::Result<Option<Self>> {
@@ -135,11 +170,12 @@ impl IdentifierRepo for SledRepo {
 
         let opt = b!(self.identifier_details, identifier_details.get(key));
 
-        opt.map(|ivec| serde_json::from_slice(&ivec))
+        opt.map(|ivec| serde_json::from_slice::<OldDetails>(&ivec))
             .transpose()
             .map_err(SledError::from)
             .map_err(RepoError::from)
             .map_err(StoreError::from)
+            .map(|opt| opt.and_then(OldDetails::into_details))
     }
 }
 

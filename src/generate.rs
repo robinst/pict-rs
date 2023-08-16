@@ -130,8 +130,8 @@ async fn process<S: Store + 'static>(
 
     let input_format = input_details
         .internal_format()
-        .and_then(|format| format.processable_format())
-        .expect("Valid details should always have internal format");
+        .processable_format()
+        .expect("Already verified format is processable");
 
     let Some(format) = input_format.process_to(output_format) else {
         return Err(UploadError::InvalidProcessExtension.into());
