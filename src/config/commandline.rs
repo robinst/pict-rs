@@ -346,6 +346,35 @@ impl Args {
                     }
                 }
             }
+            Command::MigrateRepo(MigrateRepo { repo }) => {
+                let server = Server::default();
+                let client = Client::default();
+                let media = Media::default();
+                let metrics = Metrics::default();
+
+                match repo {
+                    MigrateRepoFrom::Sled(MigrateSledRepo { from, to }) => match to {
+                        MigrateRepoTo::Sled(MigrateSledInner { to }) => Output {
+                            config_format: ConfigFormat {
+                                server,
+                                client,
+                                old_repo,
+                                tracing,
+                                metrics,
+                                media,
+                                repo: None,
+                                store: None,
+                            },
+                            operation: Operation::MigrateRepo {
+                                from: from.into(),
+                                to: to.into(),
+                            },
+                            config_file,
+                            save_to,
+                        },
+                    },
+                }
+            }
         }
     }
 }
@@ -365,6 +394,10 @@ pub(crate) enum Operation {
         skip_missing_files: bool,
         from: crate::config::primitives::Store,
         to: crate::config::primitives::Store,
+    },
+    MigrateRepo {
+        from: crate::config::file::Repo,
+        to: crate::config::file::Repo,
     },
 }
 
@@ -750,6 +783,9 @@ enum Command {
 
     /// Migrates from one provided media store to another
     MigrateStore(MigrateStore),
+
+    /// Migrates from one provided repo to another
+    MigrateRepo(MigrateRepo),
 }
 
 #[derive(Debug, Parser)]
@@ -1000,6 +1036,12 @@ struct MigrateStore {
     store: MigrateStoreFrom,
 }
 
+#[derive(Debug, Parser)]
+struct MigrateRepo {
+    #[command(subcommand)]
+    repo: MigrateRepoFrom,
+}
+
 /// Configure the pict-rs storage migration
 #[derive(Debug, Subcommand)]
 // allow large enum variant - this is an instantiated-once config
@@ -1010,6 +1052,12 @@ enum MigrateStoreFrom {
 
     /// Migrate from the provided object storage
     ObjectStorage(MigrateObjectStorage),
+}
+
+/// Configure the pict-rs repo migration
+#[derive(Debug, Subcommand)]
+enum MigrateRepoFrom {
+    Sled(MigrateSledRepo),
 }
 
 /// Configure the destination storage for pict-rs storage migration
@@ -1024,6 +1072,13 @@ enum MigrateStoreTo {
     ObjectStorage(MigrateObjectStorageInner),
 }
 
+/// Configure the destination repo for pict-rs repo migration
+#[derive(Debug, Subcommand)]
+enum MigrateRepoTo {
+    /// Migrate to the provided sled storage
+    Sled(MigrateSledInner),
+}
+
 /// Migrate pict-rs' storage from the provided filesystem storage
 #[derive(Debug, Parser)]
 struct MigrateFilesystem {
@@ -1034,6 +1089,16 @@ struct MigrateFilesystem {
     to: MigrateStoreTo,
 }
 
+/// Migrate pict-rs' repo from the provided sled repo
+#[derive(Debug, Parser)]
+struct MigrateSledRepo {
+    #[command(flatten)]
+    from: Sled,
+
+    #[command(subcommand)]
+    to: MigrateRepoTo,
+}
+
 /// Migrate pict-rs' storage to the provided filesystem storage
 #[derive(Debug, Parser)]
 struct MigrateFilesystemInner {
@@ -1042,6 +1107,13 @@ struct MigrateFilesystemInner {
 
     #[command(subcommand)]
     repo: Option<Repo>,
+}
+
+/// Migrate pict-rs' repo to the provided sled repo
+#[derive(Debug, Parser)]
+struct MigrateSledInner {
+    #[command(flatten)]
+    to: Sled,
 }
 
 /// Migrate pict-rs' storage from the provided object storage
@@ -1166,20 +1238,20 @@ struct ObjectStorage {
 /// Configuration for the sled-backed data repository
 #[derive(Debug, Parser, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-struct Sled {
+pub(super) struct Sled {
     /// The path to store the sled database
     #[arg(short, long)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<PathBuf>,
+    pub(super) path: Option<PathBuf>,
 
     /// The cache capacity, in bytes, allowed to sled for in-memory operations
     #[arg(short, long)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    cache_capacity: Option<u64>,
+    pub(super) cache_capacity: Option<u64>,
 
     #[arg(short, long)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    export_path: Option<PathBuf>,
+    pub(super) export_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser, serde::Serialize)]

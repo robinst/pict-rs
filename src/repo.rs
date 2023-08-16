@@ -13,7 +13,7 @@ mod migrate;
 pub(crate) mod sled;
 
 pub(crate) use hash::Hash;
-pub(crate) use migrate::migrate_04;
+pub(crate) use migrate::{migrate_04, migrate_repo};
 
 pub(crate) type ArcRepo = Arc<dyn FullRepo>;
 

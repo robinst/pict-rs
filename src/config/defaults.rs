@@ -353,3 +353,21 @@ impl From<crate::config::commandline::Filesystem> for crate::config::primitives:
         crate::config::primitives::Store::Filesystem(value.into())
     }
 }
+
+impl From<crate::config::commandline::Sled> for crate::config::file::Sled {
+    fn from(value: crate::config::commandline::Sled) -> Self {
+        let defaults = SledDefaults::default();
+
+        crate::config::file::Sled {
+            path: value.path.unwrap_or(defaults.path),
+            cache_capacity: value.cache_capacity.unwrap_or(defaults.cache_capacity),
+            export_path: defaults.export_path,
+        }
+    }
+}
+
+impl From<crate::config::commandline::Sled> for crate::config::file::Repo {
+    fn from(value: crate::config::commandline::Sled) -> Self {
+        crate::config::file::Repo::Sled(value.into())
+    }
+}

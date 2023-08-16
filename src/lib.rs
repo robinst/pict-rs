@@ -1916,6 +1916,12 @@ impl PictRsConfiguration {
 
                 return Ok(());
             }
+            Operation::MigrateRepo { from, to } => {
+                let from = Repo::open(from)?.to_arc();
+                let to = Repo::open(to)?.to_arc();
+
+                repo::migrate_repo(from, to).await?;
+            }
         }
 
         if config.server.read_only {
