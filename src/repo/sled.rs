@@ -47,9 +47,6 @@ pub(crate) enum SledError {
     #[error("Invalid details json")]
     Details(#[from] serde_json::Error),
 
-    #[error("Error formatting timestamp")]
-    Format(#[source] time::error::Format),
-
     #[error("Error parsing variant key")]
     VariantKey(#[from] VariantKeyError),
 
