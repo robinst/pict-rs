@@ -1844,8 +1844,6 @@ impl PictRsConfiguration {
     pub async fn run(self) -> color_eyre::Result<()> {
         let PictRsConfiguration { config, operation } = self;
 
-        let repo = Repo::open(config.repo.clone())?;
-
         let client = build_client(&config)?;
 
         match operation {
@@ -1855,6 +1853,8 @@ impl PictRsConfiguration {
                 from,
                 to,
             } => {
+                let repo = Repo::open(config.repo.clone())?;
+
                 match from {
                     config::primitives::Store::Filesystem(config::Filesystem { path }) => {
                         let from = FileStore::build(path.clone(), repo.clone()).await?;
@@ -1924,6 +1924,8 @@ impl PictRsConfiguration {
                 return Ok(());
             }
         }
+
+        let repo = Repo::open(config.repo.clone())?;
 
         if config.server.read_only {
             tracing::warn!("Launching in READ ONLY mode");
