@@ -3,10 +3,7 @@ use crate::{
     config::Configuration,
     error::Error,
     formats::InputProcessableFormat,
-    repo::{
-        Alias, AliasRepo, DeleteToken, FullRepo, Hash, HashRepo, IdentifierRepo, JobId, QueueRepo,
-        UploadId,
-    },
+    repo::{Alias, DeleteToken, FullRepo, Hash, JobId, UploadId},
     serde_str::Serde,
     store::{Identifier, Store},
 };
@@ -15,6 +12,7 @@ use std::{
     future::Future,
     path::PathBuf,
     pin::Pin,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::Instrument;
@@ -88,8 +86,8 @@ enum Process {
     },
 }
 
-pub(crate) async fn cleanup_alias<R: QueueRepo>(
-    repo: &R,
+pub(crate) async fn cleanup_alias(
+    repo: &Arc<dyn FullRepo>,
     alias: Alias,
     token: DeleteToken,
 ) -> Result<(), Error> {
@@ -101,14 +99,14 @@ pub(crate) async fn cleanup_alias<R: QueueRepo>(
     Ok(())
 }
 
-pub(crate) async fn cleanup_hash<R: QueueRepo>(repo: &R, hash: Hash) -> Result<(), Error> {
+pub(crate) async fn cleanup_hash(repo: &Arc<dyn FullRepo>, hash: Hash) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::Hash { hash })?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
 
-pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
-    repo: &R,
+pub(crate) async fn cleanup_identifier<I: Identifier>(
+    repo: &Arc<dyn FullRepo>,
     identifier: I,
 ) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::Identifier {
@@ -118,8 +116,8 @@ pub(crate) async fn cleanup_identifier<R: QueueRepo, I: Identifier>(
     Ok(())
 }
 
-async fn cleanup_variants<R: QueueRepo>(
-    repo: &R,
+async fn cleanup_variants(
+    repo: &Arc<dyn FullRepo>,
     hash: Hash,
     variant: Option<String>,
 ) -> Result<(), Error> {
@@ -128,26 +126,26 @@ async fn cleanup_variants<R: QueueRepo>(
     Ok(())
 }
 
-pub(crate) async fn cleanup_outdated_proxies<R: QueueRepo>(repo: &R) -> Result<(), Error> {
+pub(crate) async fn cleanup_outdated_proxies(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::OutdatedProxies)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
 
-pub(crate) async fn cleanup_outdated_variants<R: QueueRepo>(repo: &R) -> Result<(), Error> {
+pub(crate) async fn cleanup_outdated_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::OutdatedVariants)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
 
-pub(crate) async fn cleanup_all_variants<R: QueueRepo>(repo: &R) -> Result<(), Error> {
+pub(crate) async fn cleanup_all_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::AllVariants)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
 
-pub(crate) async fn queue_ingest<R: QueueRepo>(
-    repo: &R,
+pub(crate) async fn queue_ingest(
+    repo: &Arc<dyn FullRepo>,
     identifier: Vec<u8>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
@@ -161,8 +159,8 @@ pub(crate) async fn queue_ingest<R: QueueRepo>(
     Ok(())
 }
 
-pub(crate) async fn queue_generate<R: QueueRepo>(
-    repo: &R,
+pub(crate) async fn queue_generate(
+    repo: &Arc<dyn FullRepo>,
     target_format: InputProcessableFormat,
     source: Alias,
     process_path: PathBuf,
@@ -178,16 +176,16 @@ pub(crate) async fn queue_generate<R: QueueRepo>(
     Ok(())
 }
 
-pub(crate) async fn process_cleanup<R: FullRepo, S: Store>(
-    repo: R,
+pub(crate) async fn process_cleanup<S: Store>(
+    repo: Arc<dyn FullRepo>,
     store: S,
     config: Configuration,
 ) {
     process_jobs(&repo, &store, &config, CLEANUP_QUEUE, cleanup::perform).await
 }
 
-pub(crate) async fn process_images<R: FullRepo + 'static, S: Store + 'static>(
-    repo: R,
+pub(crate) async fn process_images<S: Store + 'static>(
+    repo: Arc<dyn FullRepo>,
     store: S,
     process_map: ProcessMap,
     config: Configuration,
@@ -205,16 +203,20 @@ pub(crate) async fn process_images<R: FullRepo + 'static, S: Store + 'static>(
 
 type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-async fn process_jobs<R, S, F>(
-    repo: &R,
+async fn process_jobs<S, F>(
+    repo: &Arc<dyn FullRepo>,
     store: &S,
     config: &Configuration,
     queue: &'static str,
     callback: F,
 ) where
-    R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
     S: Store,
-    for<'a> F: Fn(&'a R, &'a S, &'a Configuration, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>>
+    for<'a> F: Fn(
+            &'a Arc<dyn FullRepo>,
+            &'a S,
+            &'a Configuration,
+            &'a [u8],
+        ) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
     let worker_id = uuid::Uuid::new_v4();
@@ -263,8 +265,8 @@ impl Drop for MetricsGuard {
     }
 }
 
-async fn job_loop<R, S, F>(
-    repo: &R,
+async fn job_loop<S, F>(
+    repo: &Arc<dyn FullRepo>,
     store: &S,
     config: &Configuration,
     worker_id: uuid::Uuid,
@@ -272,9 +274,13 @@ async fn job_loop<R, S, F>(
     callback: F,
 ) -> Result<(), Error>
 where
-    R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
     S: Store,
-    for<'a> F: Fn(&'a R, &'a S, &'a Configuration, &'a [u8]) -> LocalBoxFuture<'a, Result<(), Error>>
+    for<'a> F: Fn(
+            &'a Arc<dyn FullRepo>,
+            &'a S,
+            &'a Configuration,
+            &'a [u8],
+        ) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
     loop {
@@ -312,18 +318,17 @@ where
     }
 }
 
-async fn process_image_jobs<R, S, F>(
-    repo: &R,
+async fn process_image_jobs<S, F>(
+    repo: &Arc<dyn FullRepo>,
     store: &S,
     process_map: &ProcessMap,
     config: &Configuration,
     queue: &'static str,
     callback: F,
 ) where
-    R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
     S: Store,
     for<'a> F: Fn(
-            &'a R,
+            &'a Arc<dyn FullRepo>,
             &'a S,
             &'a ProcessMap,
             &'a Configuration,
@@ -347,8 +352,8 @@ async fn process_image_jobs<R, S, F>(
     }
 }
 
-async fn image_job_loop<R, S, F>(
-    repo: &R,
+async fn image_job_loop<S, F>(
+    repo: &Arc<dyn FullRepo>,
     store: &S,
     process_map: &ProcessMap,
     config: &Configuration,
@@ -357,10 +362,9 @@ async fn image_job_loop<R, S, F>(
     callback: F,
 ) -> Result<(), Error>
 where
-    R: QueueRepo + HashRepo + IdentifierRepo + AliasRepo,
     S: Store,
     for<'a> F: Fn(
-            &'a R,
+            &'a Arc<dyn FullRepo>,
             &'a S,
             &'a ProcessMap,
             &'a Configuration,
@@ -402,15 +406,14 @@ where
     }
 }
 
-async fn heartbeat<R, Fut>(
-    repo: &R,
+async fn heartbeat<Fut>(
+    repo: &Arc<dyn FullRepo>,
     queue: &'static str,
     worker_id: uuid::Uuid,
     job_id: JobId,
     fut: Fut,
 ) -> Fut::Output
 where
-    R: QueueRepo,
     Fut: std::future::Future,
 {
     let mut fut =

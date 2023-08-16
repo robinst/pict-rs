@@ -3,7 +3,7 @@ use crate::{
     error::{Error, UploadError},
     queue::{Base64Bytes, Cleanup, LocalBoxFuture},
     repo::{
-        Alias, AliasAccessRepo, AliasRepo, DeleteToken, FullRepo, Hash, HashRepo, IdentifierRepo,
+        Alias, AliasAccessRepo, AliasRepo, ArcRepo, DeleteToken, Hash, HashRepo, IdentifierRepo,
         VariantAccessRepo,
     },
     serde_str::Serde,
@@ -11,20 +11,19 @@ use crate::{
 };
 use futures_util::StreamExt;
 
-pub(super) fn perform<'a, R, S>(
-    repo: &'a R,
+pub(super) fn perform<'a, S>(
+    repo: &'a ArcRepo,
     store: &'a S,
     configuration: &'a Configuration,
     job: &'a [u8],
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
-    R: FullRepo,
     S: Store,
 {
     Box::pin(async move {
         match serde_json::from_slice(job) {
             Ok(job) => match job {
-                Cleanup::Hash { hash: in_hash } => hash::<R, S>(repo, in_hash).await?,
+                Cleanup::Hash { hash: in_hash } => hash(repo, in_hash).await?,
                 Cleanup::Identifier {
                     identifier: Base64Bytes(in_identifier),
                 } => identifier(repo, store, in_identifier).await?,
@@ -39,12 +38,10 @@ where
                     )
                     .await?
                 }
-                Cleanup::Variant { hash, variant } => {
-                    hash_variant::<R, S>(repo, hash, variant).await?
-                }
-                Cleanup::AllVariants => all_variants::<R, S>(repo).await?,
-                Cleanup::OutdatedVariants => outdated_variants::<R, S>(repo, configuration).await?,
-                Cleanup::OutdatedProxies => outdated_proxies::<R, S>(repo, configuration).await?,
+                Cleanup::Variant { hash, variant } => hash_variant(repo, hash, variant).await?,
+                Cleanup::AllVariants => all_variants(repo).await?,
+                Cleanup::OutdatedVariants => outdated_variants(repo, configuration).await?,
+                Cleanup::OutdatedProxies => outdated_proxies(repo, configuration).await?,
             },
             Err(e) => {
                 tracing::warn!("Invalid job: {}", format!("{e}"));
@@ -56,9 +53,8 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-async fn identifier<R, S>(repo: &R, store: &S, identifier: Vec<u8>) -> Result<(), Error>
+async fn identifier<S>(repo: &ArcRepo, store: &S, identifier: Vec<u8>) -> Result<(), Error>
 where
-    R: FullRepo,
     S: Store,
 {
     let identifier = S::Identifier::from_bytes(identifier)?;
@@ -69,7 +65,7 @@ where
         errors.push(e);
     }
 
-    if let Err(e) = IdentifierRepo::cleanup(repo, &identifier).await {
+    if let Err(e) = IdentifierRepo::cleanup(repo.as_ref(), &identifier).await {
         errors.push(e);
     }
 
@@ -81,11 +77,7 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-async fn hash<R, S>(repo: &R, hash: Hash) -> Result<(), Error>
-where
-    R: FullRepo,
-    S: Store,
-{
+async fn hash(repo: &ArcRepo, hash: Hash) -> Result<(), Error> {
     let aliases = repo.for_hash(hash.clone()).await?;
 
     if !aliases.is_empty() {
@@ -102,7 +94,7 @@ where
     }
 
     let mut idents = repo
-        .variants::<S::Identifier>(hash.clone())
+        .variants(hash.clone())
         .await?
         .into_iter()
         .map(|(_, v)| v)
@@ -114,16 +106,13 @@ where
         let _ = super::cleanup_identifier(repo, identifier).await;
     }
 
-    HashRepo::cleanup(repo, hash).await?;
+    HashRepo::cleanup(repo.as_ref(), hash).await?;
 
     Ok(())
 }
 
 #[tracing::instrument(skip_all)]
-async fn alias<R>(repo: &R, alias: Alias, token: DeleteToken) -> Result<(), Error>
-where
-    R: FullRepo,
-{
+async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> Result<(), Error> {
     let saved_delete_token = repo.delete_token(&alias).await?;
 
     if saved_delete_token.is_some() && saved_delete_token != Some(token) {
@@ -132,9 +121,9 @@ where
 
     let hash = repo.hash(&alias).await?;
 
-    AliasRepo::cleanup(repo, &alias).await?;
+    AliasRepo::cleanup(repo.as_ref(), &alias).await?;
     repo.remove_relation(alias.clone()).await?;
-    AliasAccessRepo::remove_access(repo, alias.clone()).await?;
+    AliasAccessRepo::remove_access(repo.as_ref(), alias.clone()).await?;
 
     let Some(hash) = hash else {
         // hash doesn't exist, nothing to do
@@ -149,11 +138,7 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-async fn all_variants<R, S>(repo: &R) -> Result<(), Error>
-where
-    R: FullRepo,
-    S: Store,
-{
+async fn all_variants(repo: &ArcRepo) -> Result<(), Error> {
     let mut hash_stream = Box::pin(repo.hashes().await);
 
     while let Some(res) = hash_stream.next().await {
@@ -165,11 +150,7 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-async fn outdated_variants<R, S>(repo: &R, config: &Configuration) -> Result<(), Error>
-where
-    R: FullRepo,
-    S: Store,
-{
+async fn outdated_variants(repo: &ArcRepo, config: &Configuration) -> Result<(), Error> {
     let now = time::OffsetDateTime::now_utc();
     let since = now.saturating_sub(config.media.retention.variants.to_duration());
 
@@ -184,11 +165,7 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-async fn outdated_proxies<R, S>(repo: &R, config: &Configuration) -> Result<(), Error>
-where
-    R: FullRepo,
-    S: Store,
-{
+async fn outdated_proxies(repo: &ArcRepo, config: &Configuration) -> Result<(), Error> {
     let now = time::OffsetDateTime::now_utc();
     let since = now.saturating_sub(config.media.retention.proxy.to_duration());
 
@@ -201,7 +178,7 @@ where
         } else {
             tracing::warn!("Skipping alias cleanup - no delete token");
             repo.remove_relation(alias.clone()).await?;
-            AliasAccessRepo::remove_access(repo, alias).await?;
+            AliasAccessRepo::remove_access(repo.as_ref(), alias).await?;
         }
     }
 
@@ -209,18 +186,14 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-async fn hash_variant<R, S>(
-    repo: &R,
+async fn hash_variant(
+    repo: &ArcRepo,
     hash: Hash,
     target_variant: Option<String>,
-) -> Result<(), Error>
-where
-    R: FullRepo,
-    S: Store,
-{
+) -> Result<(), Error> {
     if let Some(target_variant) = target_variant {
         if let Some(identifier) = repo
-            .variant_identifier::<S::Identifier>(hash.clone(), target_variant.clone())
+            .variant_identifier(hash.clone(), target_variant.clone())
             .await?
         {
             super::cleanup_identifier(repo, identifier).await?;
@@ -228,11 +201,11 @@ where
 
         repo.remove_variant(hash.clone(), target_variant.clone())
             .await?;
-        VariantAccessRepo::remove_access(repo, hash, target_variant).await?;
+        VariantAccessRepo::remove_access(repo.as_ref(), hash, target_variant).await?;
     } else {
-        for (variant, identifier) in repo.variants::<S::Identifier>(hash.clone()).await? {
+        for (variant, identifier) in repo.variants(hash.clone()).await? {
             repo.remove_variant(hash.clone(), variant.clone()).await?;
-            VariantAccessRepo::remove_access(repo, hash.clone(), variant).await?;
+            VariantAccessRepo::remove_access(repo.as_ref(), hash.clone(), variant).await?;
             super::cleanup_identifier(repo, identifier).await?;
         }
     }

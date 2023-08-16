@@ -18,7 +18,7 @@ pub(crate) struct ConfigFile {
     #[serde(default)]
     pub(crate) metrics: Metrics,
 
-    pub(crate) old_db: OldDb,
+    pub(crate) old_repo: Sled,
 
     pub(crate) media: Media,
 

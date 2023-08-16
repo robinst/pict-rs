@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    repo::{FullRepo, UploadId, UploadRepo},
+    repo::{ArcRepo, UploadId, UploadRepo},
     store::Store,
 };
 use actix_web::web::Bytes;
@@ -8,19 +8,17 @@ use futures_util::{Stream, TryStreamExt};
 use mime::APPLICATION_OCTET_STREAM;
 use tracing::{Instrument, Span};
 
-pub(crate) struct Backgrounded<R, S>
+pub(crate) struct Backgrounded<S>
 where
-    R: FullRepo + 'static,
     S: Store,
 {
-    repo: R,
+    repo: ArcRepo,
     identifier: Option<S::Identifier>,
     upload_id: Option<UploadId>,
 }
 
-impl<R, S> Backgrounded<R, S>
+impl<S> Backgrounded<S>
 where
-    R: FullRepo + 'static,
     S: Store,
 {
     pub(crate) fn disarm(mut self) {
@@ -36,7 +34,7 @@ where
         self.identifier.as_ref()
     }
 
-    pub(crate) async fn proxy<P>(repo: R, store: S, stream: P) -> Result<Self, Error>
+    pub(crate) async fn proxy<P>(repo: ArcRepo, store: S, stream: P) -> Result<Self, Error>
     where
         P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     {
@@ -55,7 +53,11 @@ where
     where
         P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     {
-        UploadRepo::create(&self.repo, self.upload_id.expect("Upload id exists")).await?;
+        UploadRepo::create(
+            self.repo.as_ref(),
+            self.upload_id.expect("Upload id exists"),
+        )
+        .await?;
 
         let stream = stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
 
@@ -68,9 +70,8 @@ where
     }
 }
 
-impl<R, S> Drop for Backgrounded<R, S>
+impl<S> Drop for Backgrounded<S>
 where
-    R: FullRepo + 'static,
     S: Store,
 {
     fn drop(&mut self) {

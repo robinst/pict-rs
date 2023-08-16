@@ -2,16 +2,20 @@ use crate::{
     config,
     details::Details,
     store::{Identifier, StoreError},
+    stream::LocalBoxStream,
 };
-use futures_util::Stream;
 use std::{fmt::Debug, sync::Arc};
 use url::Url;
 use uuid::Uuid;
 
 mod hash;
+mod migrate;
 pub(crate) mod sled;
 
 pub(crate) use hash::Hash;
+pub(crate) use migrate::migrate_04;
+
+pub(crate) type ArcRepo = Arc<dyn FullRepo>;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Repo {
@@ -35,7 +39,9 @@ pub(crate) struct DeleteToken {
     id: MaybeUuid,
 }
 
+#[derive(Debug)]
 pub(crate) struct HashAlreadyExists;
+#[derive(Debug)]
 pub(crate) struct AliasAlreadyExists;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -74,16 +80,12 @@ pub(crate) trait FullRepo:
     + ProxyRepo
     + Send
     + Sync
-    + Clone
     + Debug
 {
     async fn health_check(&self) -> Result<(), RepoError>;
 
     #[tracing::instrument(skip(self))]
-    async fn identifier_from_alias<I: Identifier + 'static>(
-        &self,
-        alias: &Alias,
-    ) -> Result<Option<I>, StoreError> {
+    async fn identifier_from_alias(&self, alias: &Alias) -> Result<Option<Arc<[u8]>>, RepoError> {
         let Some(hash) = self.hash(alias).await? else {
             return Ok(None);
         };
@@ -101,20 +103,22 @@ pub(crate) trait FullRepo:
     }
 
     #[tracing::instrument(skip(self))]
-    async fn still_identifier_from_alias<I: Identifier + 'static>(
+    async fn still_identifier_from_alias(
         &self,
         alias: &Alias,
-    ) -> Result<Option<I>, StoreError> {
+    ) -> Result<Option<Arc<[u8]>>, StoreError> {
         let Some(hash) = self.hash(alias).await? else {
             return Ok(None);
         };
 
-        let Some(identifier) = self.identifier::<I>(hash.clone()).await? else {
+        let Some(identifier) = self.identifier(hash.clone()).await? else {
             return Ok(None);
         };
 
         match self.details(&identifier).await? {
-            Some(details) if details.is_video() => self.motion_identifier::<I>(hash).await,
+            Some(details) if details.is_video() => {
+                self.motion_identifier(hash).await.map_err(From::from)
+            }
             Some(_) => Ok(Some(identifier)),
             None => Ok(None),
         }
@@ -122,7 +126,7 @@ pub(crate) trait FullRepo:
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> FullRepo for actix_web::web::Data<T>
+impl<T> FullRepo for Arc<T>
 where
     T: FullRepo,
 {
@@ -133,7 +137,7 @@ where
 
 pub(crate) trait BaseRepo {}
 
-impl<T> BaseRepo for actix_web::web::Data<T> where T: BaseRepo {}
+impl<T> BaseRepo for Arc<T> where T: BaseRepo {}
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait ProxyRepo: BaseRepo {
@@ -145,7 +149,7 @@ pub(crate) trait ProxyRepo: BaseRepo {
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> ProxyRepo for actix_web::web::Data<T>
+impl<T> ProxyRepo for Arc<T>
 where
     T: ProxyRepo,
 {
@@ -164,25 +168,21 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait AliasAccessRepo: BaseRepo {
-    type AliasAccessStream: Stream<Item = Result<Alias, RepoError>>;
-
     async fn accessed(&self, alias: Alias) -> Result<(), RepoError>;
 
     async fn older_aliases(
         &self,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Self::AliasAccessStream, RepoError>;
+    ) -> Result<LocalBoxStream<'static, Result<Alias, RepoError>>, RepoError>;
 
     async fn remove_access(&self, alias: Alias) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> AliasAccessRepo for actix_web::web::Data<T>
+impl<T> AliasAccessRepo for Arc<T>
 where
     T: AliasAccessRepo,
 {
-    type AliasAccessStream = T::AliasAccessStream;
-
     async fn accessed(&self, alias: Alias) -> Result<(), RepoError> {
         T::accessed(self, alias).await
     }
@@ -190,7 +190,7 @@ where
     async fn older_aliases(
         &self,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Self::AliasAccessStream, RepoError> {
+    ) -> Result<LocalBoxStream<'static, Result<Alias, RepoError>>, RepoError> {
         T::older_aliases(self, timestamp).await
     }
 
@@ -201,8 +201,6 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait VariantAccessRepo: BaseRepo {
-    type VariantAccessStream: Stream<Item = Result<(Hash, String), RepoError>>;
-
     async fn accessed(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
     async fn contains_variant(&self, hash: Hash, variant: String) -> Result<bool, RepoError>;
@@ -210,18 +208,16 @@ pub(crate) trait VariantAccessRepo: BaseRepo {
     async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Self::VariantAccessStream, RepoError>;
+    ) -> Result<LocalBoxStream<'static, Result<(Hash, String), RepoError>>, RepoError>;
 
     async fn remove_access(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> VariantAccessRepo for actix_web::web::Data<T>
+impl<T> VariantAccessRepo for Arc<T>
 where
     T: VariantAccessRepo,
 {
-    type VariantAccessStream = T::VariantAccessStream;
-
     async fn accessed(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         T::accessed(self, hash, variant).await
     }
@@ -233,7 +229,7 @@ where
     async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Self::VariantAccessStream, RepoError> {
+    ) -> Result<LocalBoxStream<'static, Result<(Hash, String), RepoError>>, RepoError> {
         T::older_variants(self, timestamp).await
     }
 
@@ -254,7 +250,7 @@ pub(crate) trait UploadRepo: BaseRepo {
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> UploadRepo for actix_web::web::Data<T>
+impl<T> UploadRepo for Arc<T>
 where
     T: UploadRepo,
 {
@@ -318,7 +314,7 @@ pub(crate) trait QueueRepo: BaseRepo {
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> QueueRepo for actix_web::web::Data<T>
+impl<T> QueueRepo for Arc<T>
 where
     T: QueueRepo,
 {
@@ -361,7 +357,7 @@ pub(crate) trait SettingsRepo: BaseRepo {
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> SettingsRepo for actix_web::web::Data<T>
+impl<T> SettingsRepo for Arc<T>
 where
     T: SettingsRepo,
 {
@@ -380,34 +376,34 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait IdentifierRepo: BaseRepo {
-    async fn relate_details<I: Identifier>(
+    async fn relate_details(
         &self,
-        identifier: &I,
+        identifier: &dyn Identifier,
         details: &Details,
     ) -> Result<(), StoreError>;
-    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, StoreError>;
+    async fn details(&self, identifier: &dyn Identifier) -> Result<Option<Details>, StoreError>;
 
-    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), StoreError>;
+    async fn cleanup(&self, identifier: &dyn Identifier) -> Result<(), StoreError>;
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> IdentifierRepo for actix_web::web::Data<T>
+impl<T> IdentifierRepo for Arc<T>
 where
     T: IdentifierRepo,
 {
-    async fn relate_details<I: Identifier>(
+    async fn relate_details(
         &self,
-        identifier: &I,
+        identifier: &dyn Identifier,
         details: &Details,
     ) -> Result<(), StoreError> {
         T::relate_details(self, identifier, details).await
     }
 
-    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, StoreError> {
+    async fn details(&self, identifier: &dyn Identifier) -> Result<Option<Details>, StoreError> {
         T::details(self, identifier).await
     }
 
-    async fn cleanup<I: Identifier>(&self, identifier: &I) -> Result<(), StoreError> {
+    async fn cleanup(&self, identifier: &dyn Identifier) -> Result<(), StoreError> {
         T::cleanup(self, identifier).await
     }
 }
@@ -416,19 +412,19 @@ where
 pub(crate) trait MigrationRepo: BaseRepo {
     async fn is_continuing_migration(&self) -> Result<bool, RepoError>;
 
-    async fn mark_migrated<I1: Identifier, I2: Identifier>(
+    async fn mark_migrated(
         &self,
-        old_identifier: &I1,
-        new_identifier: &I2,
+        old_identifier: &dyn Identifier,
+        new_identifier: &dyn Identifier,
     ) -> Result<(), StoreError>;
 
-    async fn is_migrated<I: Identifier>(&self, identifier: &I) -> Result<bool, StoreError>;
+    async fn is_migrated(&self, identifier: &dyn Identifier) -> Result<bool, StoreError>;
 
     async fn clear(&self) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> MigrationRepo for actix_web::web::Data<T>
+impl<T> MigrationRepo for Arc<T>
 where
     T: MigrationRepo,
 {
@@ -436,15 +432,15 @@ where
         T::is_continuing_migration(self).await
     }
 
-    async fn mark_migrated<I1: Identifier, I2: Identifier>(
+    async fn mark_migrated(
         &self,
-        old_identifier: &I1,
-        new_identifier: &I2,
+        old_identifier: &dyn Identifier,
+        new_identifier: &dyn Identifier,
     ) -> Result<(), StoreError> {
         T::mark_migrated(self, old_identifier, new_identifier).await
     }
 
-    async fn is_migrated<I: Identifier>(&self, identifier: &I) -> Result<bool, StoreError> {
+    async fn is_migrated(&self, identifier: &dyn Identifier) -> Result<bool, StoreError> {
         T::is_migrated(self, identifier).await
     }
 
@@ -455,118 +451,99 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait HashRepo: BaseRepo {
-    type Stream: Stream<Item = Result<Hash, RepoError>>;
-
     async fn size(&self) -> Result<u64, RepoError>;
 
-    async fn hashes(&self) -> Self::Stream;
+    async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>>;
 
-    async fn create<I: Identifier>(
+    async fn create(
         &self,
         hash: Hash,
-        identifier: &I,
+        identifier: &dyn Identifier,
     ) -> Result<Result<(), HashAlreadyExists>, StoreError>;
 
-    async fn update_identifier<I: Identifier>(
+    async fn update_identifier(
         &self,
         hash: Hash,
-        identifier: &I,
+        identifier: &dyn Identifier,
     ) -> Result<(), StoreError>;
 
-    async fn identifier<I: Identifier + 'static>(
-        &self,
-        hash: Hash,
-    ) -> Result<Option<I>, StoreError>;
+    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError>;
 
-    async fn relate_variant_identifier<I: Identifier>(
+    async fn relate_variant_identifier(
         &self,
         hash: Hash,
         variant: String,
-        identifier: &I,
+        identifier: &dyn Identifier,
     ) -> Result<(), StoreError>;
-    async fn variant_identifier<I: Identifier + 'static>(
+    async fn variant_identifier(
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Option<I>, StoreError>;
-    async fn variants<I: Identifier + 'static>(
-        &self,
-        hash: Hash,
-    ) -> Result<Vec<(String, I)>, StoreError>;
+    ) -> Result<Option<Arc<[u8]>>, RepoError>;
+    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<[u8]>)>, RepoError>;
     async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
-    async fn relate_motion_identifier<I: Identifier>(
+    async fn relate_motion_identifier(
         &self,
         hash: Hash,
-        identifier: &I,
+        identifier: &dyn Identifier,
     ) -> Result<(), StoreError>;
-    async fn motion_identifier<I: Identifier + 'static>(
-        &self,
-        hash: Hash,
-    ) -> Result<Option<I>, StoreError>;
+    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError>;
 
     async fn cleanup(&self, hash: Hash) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> HashRepo for actix_web::web::Data<T>
+impl<T> HashRepo for Arc<T>
 where
     T: HashRepo,
 {
-    type Stream = T::Stream;
-
     async fn size(&self) -> Result<u64, RepoError> {
         T::size(self).await
     }
 
-    async fn hashes(&self) -> Self::Stream {
+    async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>> {
         T::hashes(self).await
     }
 
-    async fn create<I: Identifier>(
+    async fn create(
         &self,
         hash: Hash,
-        identifier: &I,
+        identifier: &dyn Identifier,
     ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
         T::create(self, hash, identifier).await
     }
 
-    async fn update_identifier<I: Identifier>(
+    async fn update_identifier(
         &self,
         hash: Hash,
-        identifier: &I,
+        identifier: &dyn Identifier,
     ) -> Result<(), StoreError> {
         T::update_identifier(self, hash, identifier).await
     }
 
-    async fn identifier<I: Identifier + 'static>(
-        &self,
-        hash: Hash,
-    ) -> Result<Option<I>, StoreError> {
+    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError> {
         T::identifier(self, hash).await
     }
 
-    async fn relate_variant_identifier<I: Identifier>(
+    async fn relate_variant_identifier(
         &self,
         hash: Hash,
         variant: String,
-        identifier: &I,
+        identifier: &dyn Identifier,
     ) -> Result<(), StoreError> {
         T::relate_variant_identifier(self, hash, variant, identifier).await
     }
 
-    async fn variant_identifier<I: Identifier + 'static>(
+    async fn variant_identifier(
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Option<I>, StoreError> {
+    ) -> Result<Option<Arc<[u8]>>, RepoError> {
         T::variant_identifier(self, hash, variant).await
     }
 
-    async fn variants<I: Identifier + 'static>(
-        &self,
-        hash: Hash,
-    ) -> Result<Vec<(String, I)>, StoreError> {
+    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<[u8]>)>, RepoError> {
         T::variants(self, hash).await
     }
 
@@ -574,18 +551,15 @@ where
         T::remove_variant(self, hash, variant).await
     }
 
-    async fn relate_motion_identifier<I: Identifier>(
+    async fn relate_motion_identifier(
         &self,
         hash: Hash,
-        identifier: &I,
+        identifier: &dyn Identifier,
     ) -> Result<(), StoreError> {
         T::relate_motion_identifier(self, hash, identifier).await
     }
 
-    async fn motion_identifier<I: Identifier + 'static>(
-        &self,
-        hash: Hash,
-    ) -> Result<Option<I>, StoreError> {
+    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError> {
         T::motion_identifier(self, hash).await
     }
 
@@ -613,7 +587,7 @@ pub(crate) trait AliasRepo: BaseRepo {
 }
 
 #[async_trait::async_trait(?Send)]
-impl<T> AliasRepo for actix_web::web::Data<T>
+impl<T> AliasRepo for Arc<T>
 where
     T: AliasRepo,
 {
@@ -656,6 +630,12 @@ impl Repo {
 
                 Ok(Self::Sled(repo))
             }
+        }
+    }
+
+    pub(crate) fn to_arc(&self) -> ArcRepo {
+        match self {
+            Self::Sled(sled_repo) => Arc::new(sled_repo.clone()),
         }
     }
 }
@@ -760,11 +740,11 @@ impl DeleteToken {
         }
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         self.id.as_bytes().to_vec()
     }
 
-    fn from_slice(bytes: &[u8]) -> Option<Self> {
+    pub(crate) fn from_slice(bytes: &[u8]) -> Option<Self> {
         if let Ok(s) = std::str::from_utf8(bytes) {
             Some(DeleteToken::from_existing(s))
         } else if bytes.len() == 16 {

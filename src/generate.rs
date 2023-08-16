@@ -4,8 +4,8 @@ use crate::{
     error::{Error, UploadError},
     ffmpeg::ThumbnailFormat,
     formats::{InputProcessableFormat, InternalVideoFormat},
-    repo::{Alias, FullRepo, Hash},
-    store::Store,
+    repo::{Alias, ArcRepo, Hash},
+    store::{Identifier, Store},
 };
 use actix_web::web::Bytes;
 use std::{path::PathBuf, time::Instant};
@@ -40,8 +40,8 @@ impl Drop for MetricsGuard {
 
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(repo, store, hash, process_map, media))]
-pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
-    repo: &R,
+pub(crate) async fn generate<S: Store + 'static>(
+    repo: &ArcRepo,
     store: &S,
     process_map: &ProcessMap,
     format: InputProcessableFormat,
@@ -75,8 +75,8 @@ pub(crate) async fn generate<R: FullRepo, S: Store + 'static>(
 
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(repo, store, hash, media))]
-async fn process<R: FullRepo, S: Store + 'static>(
-    repo: &R,
+async fn process<S: Store + 'static>(
+    repo: &ArcRepo,
     store: &S,
     output_format: InputProcessableFormat,
     alias: Alias,
@@ -90,11 +90,8 @@ async fn process<R: FullRepo, S: Store + 'static>(
     let guard = MetricsGuard::guard();
     let permit = crate::PROCESS_SEMAPHORE.acquire().await;
 
-    let identifier = if let Some(identifier) = repo
-        .still_identifier_from_alias::<S::Identifier>(&alias)
-        .await?
-    {
-        identifier
+    let identifier = if let Some(identifier) = repo.still_identifier_from_alias(&alias).await? {
+        S::Identifier::from_arc(identifier)?
     } else {
         let Some(identifier) = repo.identifier(hash.clone()).await? else {
             return Err(UploadError::MissingIdentifier.into());
@@ -104,7 +101,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
 
         let reader = crate::ffmpeg::thumbnail(
             store.clone(),
-            identifier,
+            S::Identifier::from_arc(identifier)?,
             input_format.unwrap_or(InternalVideoFormat::Mp4),
             thumbnail_format,
             media.process_timeout,

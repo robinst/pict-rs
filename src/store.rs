@@ -1,7 +1,7 @@
 use actix_web::web::Bytes;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_util::stream::Stream;
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub(crate) mod file_store;
@@ -59,10 +59,14 @@ impl From<crate::store::object_store::ObjectError> for StoreError {
     }
 }
 
-pub(crate) trait Identifier: Send + Sync + Clone + Debug {
+pub(crate) trait Identifier: Send + Sync + Debug {
     fn to_bytes(&self) -> Result<Vec<u8>, StoreError>;
 
     fn from_bytes(bytes: Vec<u8>) -> Result<Self, StoreError>
+    where
+        Self: Sized;
+
+    fn from_arc(arc: Arc<[u8]>) -> Result<Self, StoreError>
     where
         Self: Sized;
 
@@ -71,7 +75,7 @@ pub(crate) trait Identifier: Send + Sync + Clone + Debug {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait Store: Clone + Debug {
-    type Identifier: Identifier + 'static;
+    type Identifier: Identifier + Clone + 'static;
     type Stream: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static;
 
     async fn health_check(&self) -> Result<(), StoreError>;
@@ -278,11 +282,42 @@ impl Identifier for Vec<u8> {
         Ok(bytes)
     }
 
+    fn from_arc(arc: Arc<[u8]>) -> Result<Self, StoreError>
+    where
+        Self: Sized,
+    {
+        Ok(Vec::from(&arc[..]))
+    }
+
     fn to_bytes(&self) -> Result<Vec<u8>, StoreError> {
         Ok(self.clone())
     }
 
     fn string_repr(&self) -> String {
         BASE64_STANDARD.encode(self.as_slice())
+    }
+}
+
+impl Identifier for Arc<[u8]> {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, StoreError>
+    where
+        Self: Sized,
+    {
+        Ok(Arc::from(bytes))
+    }
+
+    fn from_arc(arc: Arc<[u8]>) -> Result<Self, StoreError>
+    where
+        Self: Sized,
+    {
+        Ok(arc)
+    }
+
+    fn to_bytes(&self) -> Result<Vec<u8>, StoreError> {
+        Ok(Vec::from(&self[..]))
+    }
+
+    fn string_repr(&self) -> String {
+        BASE64_STANDARD.encode(&self[..])
     }
 }

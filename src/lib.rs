@@ -41,6 +41,7 @@ use futures_util::{
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::Metrics;
 use once_cell::sync::Lazy;
+use repo::ArcRepo;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
 use rusty_s3::UrlStyle;
@@ -48,6 +49,7 @@ use std::{
     future::ready,
     path::Path,
     path::PathBuf,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 use tokio::sync::Semaphore;
@@ -68,15 +70,11 @@ use self::{
     migrate_store::migrate_store,
     queue::queue_generate,
     repo::{
-        sled::SledRepo, Alias, AliasAccessRepo, DeleteToken, FullRepo, Hash, HashRepo,
-        IdentifierRepo, Repo, SettingsRepo, UploadId, UploadResult, VariantAccessRepo,
+        sled::SledRepo, Alias, AliasAccessRepo, DeleteToken, Hash, Repo, UploadId, UploadResult,
+        VariantAccessRepo,
     },
     serde_str::Serde,
-    store::{
-        file_store::FileStore,
-        object_store::{ObjectStore, ObjectStoreConfig},
-        Identifier, Store,
-    },
+    store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
     stream::{StreamLimit, StreamTimeout},
 };
 
@@ -94,13 +92,13 @@ static PROCESS_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
         .in_scope(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
 });
 
-async fn ensure_details<R: FullRepo, S: Store + 'static>(
-    repo: &R,
+async fn ensure_details<S: Store + 'static>(
+    repo: &ArcRepo,
     store: &S,
     config: &Configuration,
     alias: &Alias,
 ) -> Result<Details, Error> {
-    let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(alias).await? else {
+    let Some(identifier) = repo.identifier_from_alias(alias).await?.map(S::Identifier::from_arc).transpose()? else {
         return Err(UploadError::MissingAlias.into());
     };
 
@@ -130,10 +128,10 @@ async fn ensure_details<R: FullRepo, S: Store + 'static>(
     }
 }
 
-struct Upload<R: FullRepo + 'static, S: Store + 'static>(Value<Session<R, S>>);
+struct Upload<S: Store + 'static>(Value<Session<S>>);
 
-impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
-    type Item = Session<R, S>;
+impl<S: Store + 'static> FormData for Upload<S> {
+    type Item = Session<S>;
     type Error = Error;
 
     fn form(req: &HttpRequest) -> Form<Self::Item, Self::Error> {
@@ -141,7 +139,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
         //
         // This form is expecting a single array field, 'images' with at most 10 files in it
         let repo = req
-            .app_data::<web::Data<R>>()
+            .app_data::<web::Data<ArcRepo>>()
             .expect("No repo in request")
             .clone();
         let store = req
@@ -176,7 +174,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
                                 return Err(UploadError::ReadOnly.into());
                             }
 
-                            ingest::ingest(&**repo, &**store, stream, None, &config.media).await
+                            ingest::ingest(&repo, &**store, stream, None, &config.media).await
                         }
                         .instrument(span),
                     )
@@ -184,20 +182,20 @@ impl<R: FullRepo, S: Store + 'static> FormData for Upload<R, S> {
             )
     }
 
-    fn extract(value: Value<Session<R, S>>) -> Result<Self, Self::Error> {
+    fn extract(value: Value<Self::Item>) -> Result<Self, Self::Error> {
         Ok(Upload(value))
     }
 }
 
-struct Import<R: FullRepo + 'static, S: Store + 'static>(Value<Session<R, S>>);
+struct Import<S: Store + 'static>(Value<Session<S>>);
 
-impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
-    type Item = Session<R, S>;
+impl<S: Store + 'static> FormData for Import<S> {
+    type Item = Session<S>;
     type Error = Error;
 
     fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
         let repo = req
-            .app_data::<web::Data<R>>()
+            .app_data::<web::Data<ArcRepo>>()
             .expect("No repo in request")
             .clone();
         let store = req
@@ -236,7 +234,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
                             }
 
                             ingest::ingest(
-                                &**repo,
+                                &repo,
                                 &**store,
                                 stream,
                                 Some(Alias::from_existing(&filename)),
@@ -260,9 +258,9 @@ impl<R: FullRepo, S: Store + 'static> FormData for Import<R, S> {
 
 /// Handle responding to successful uploads
 #[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
-async fn upload<R: FullRepo, S: Store + 'static>(
-    Multipart(Upload(value)): Multipart<Upload<R, S>>,
-    repo: web::Data<R>,
+async fn upload<S: Store + 'static>(
+    Multipart(Upload(value)): Multipart<Upload<S>>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -271,9 +269,9 @@ async fn upload<R: FullRepo, S: Store + 'static>(
 
 /// Handle responding to successful uploads
 #[tracing::instrument(name = "Imported files", skip(value, repo, store, config))]
-async fn import<R: FullRepo, S: Store + 'static>(
-    Multipart(Import(value)): Multipart<Import<R, S>>,
-    repo: web::Data<R>,
+async fn import<S: Store + 'static>(
+    Multipart(Import(value)): Multipart<Import<S>>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -282,9 +280,9 @@ async fn import<R: FullRepo, S: Store + 'static>(
 
 /// Handle responding to successful uploads
 #[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
-async fn handle_upload<R: FullRepo, S: Store + 'static>(
-    value: Value<Session<R, S>>,
-    repo: web::Data<R>,
+async fn handle_upload<S: Store + 'static>(
+    value: Value<Session<S>>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -325,10 +323,10 @@ async fn handle_upload<R: FullRepo, S: Store + 'static>(
     })))
 }
 
-struct BackgroundedUpload<R: FullRepo + 'static, S: Store + 'static>(Value<Backgrounded<R, S>>);
+struct BackgroundedUpload<S: Store + 'static>(Value<Backgrounded<S>>);
 
-impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
-    type Item = Backgrounded<R, S>;
+impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
+    type Item = Backgrounded<S>;
     type Error = Error;
 
     fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
@@ -336,7 +334,7 @@ impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
         //
         // This form is expecting a single array field, 'images' with at most 10 files in it
         let repo = req
-            .app_data::<web::Data<R>>()
+            .app_data::<web::Data<ArcRepo>>()
             .expect("No repo in request")
             .clone();
         let store = req
@@ -389,9 +387,9 @@ impl<R: FullRepo, S: Store + 'static> FormData for BackgroundedUpload<R, S> {
 }
 
 #[tracing::instrument(name = "Uploaded files", skip(value, repo))]
-async fn upload_backgrounded<R: FullRepo, S: Store>(
-    Multipart(BackgroundedUpload(value)): Multipart<BackgroundedUpload<R, S>>,
-    repo: web::Data<R>,
+async fn upload_backgrounded<S: Store>(
+    Multipart(BackgroundedUpload(value)): Multipart<BackgroundedUpload<S>>,
+    repo: web::Data<ArcRepo>,
 ) -> Result<HttpResponse, Error> {
     let images = value
         .map()
@@ -437,8 +435,8 @@ struct ClaimQuery {
 
 /// Claim a backgrounded upload
 #[tracing::instrument(name = "Waiting on upload", skip_all)]
-async fn claim_upload<R: FullRepo, S: Store + 'static>(
-    repo: web::Data<R>,
+async fn claim_upload<S: Store + 'static>(
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
     query: web::Query<ClaimQuery>,
@@ -483,9 +481,9 @@ struct UrlQuery {
     backgrounded: bool,
 }
 
-async fn ingest_inline<R: FullRepo, S: Store + 'static>(
+async fn ingest_inline<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
-    repo: &R,
+    repo: &ArcRepo,
     store: &S,
     config: &Configuration,
 ) -> Result<(Alias, DeleteToken, Details), Error> {
@@ -502,9 +500,9 @@ async fn ingest_inline<R: FullRepo, S: Store + 'static>(
 
 /// download an image from a URL
 #[tracing::instrument(name = "Downloading file", skip(client, repo, store, config))]
-async fn download<R: FullRepo + 'static, S: Store + 'static>(
+async fn download<S: Store + 'static>(
     client: web::Data<ClientWithMiddleware>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
     query: web::Query<UrlQuery>,
@@ -542,9 +540,9 @@ async fn download_stream(
 }
 
 #[tracing::instrument(name = "Downloading file inline", skip(stream, repo, store, config))]
-async fn do_download_inline<R: FullRepo, S: Store + 'static>(
+async fn do_download_inline<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -563,9 +561,9 @@ async fn do_download_inline<R: FullRepo, S: Store + 'static>(
 }
 
 #[tracing::instrument(name = "Downloading file in background", skip(stream, repo, store))]
-async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
+async fn do_download_backgrounded<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     metrics::increment_counter!("pict-rs.files", "download" => "background");
@@ -592,8 +590,8 @@ async fn do_download_backgrounded<R: FullRepo + 'static, S: Store + 'static>(
 
 /// Delete aliases and files
 #[tracing::instrument(name = "Deleting file", skip(repo, config))]
-async fn delete<R: FullRepo>(
-    repo: web::Data<R>,
+async fn delete(
+    repo: web::Data<ArcRepo>,
     config: web::Data<Configuration>,
     path_entries: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
@@ -649,10 +647,10 @@ fn prepare_process(
 }
 
 #[tracing::instrument(name = "Fetching derived details", skip(repo, config))]
-async fn process_details<R: FullRepo, S: Store>(
+async fn process_details<S: Store>(
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let alias = match source {
@@ -681,12 +679,15 @@ async fn process_details<R: FullRepo, S: Store>(
     let thumbnail_string = thumbnail_path.to_string_lossy().to_string();
 
     if !config.server.read_only {
-        VariantAccessRepo::accessed(&repo, hash.clone(), thumbnail_string.clone()).await?;
+        VariantAccessRepo::accessed((**repo).as_ref(), hash.clone(), thumbnail_string.clone())
+            .await?;
     }
 
     let identifier = repo
-        .variant_identifier::<S::Identifier>(hash, thumbnail_string)
+        .variant_identifier(hash, thumbnail_string)
         .await?
+        .map(S::Identifier::from_arc)
+        .transpose()?
         .ok_or(UploadError::MissingAlias)?;
 
     let details = repo.details(&identifier).await?;
@@ -696,7 +697,7 @@ async fn process_details<R: FullRepo, S: Store>(
     Ok(HttpResponse::Ok().json(&details))
 }
 
-async fn not_found_hash<R: FullRepo>(repo: &R) -> Result<Option<(Alias, Hash)>, Error> {
+async fn not_found_hash(repo: &ArcRepo) -> Result<Option<(Alias, Hash)>, Error> {
     let Some(not_found) = repo.get(NOT_FOUND_KEY).await? else {
         return Ok(None);
     };
@@ -720,11 +721,11 @@ async fn not_found_hash<R: FullRepo>(repo: &R) -> Result<Option<(Alias, Hash)>, 
     name = "Serving processed image",
     skip(repo, store, client, config, process_map)
 )]
-async fn process<R: FullRepo, S: Store + 'static>(
+async fn process<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     client: web::Data<ClientWithMiddleware>,
     config: web::Data<Configuration>,
@@ -750,7 +751,7 @@ async fn process<R: FullRepo, S: Store + 'static>(
             };
 
             if !config.server.read_only {
-                AliasAccessRepo::accessed(&repo, alias.clone()).await?;
+                AliasAccessRepo::accessed((**repo).as_ref(), alias.clone()).await?;
             }
 
             alias
@@ -773,12 +774,14 @@ async fn process<R: FullRepo, S: Store + 'static>(
     };
 
     if !config.server.read_only {
-        VariantAccessRepo::accessed(&repo, hash.clone(), path_string.clone()).await?;
+        VariantAccessRepo::accessed((**repo).as_ref(), hash.clone(), path_string.clone()).await?;
     }
 
     let identifier_opt = repo
-        .variant_identifier::<S::Identifier>(hash.clone(), path_string)
-        .await?;
+        .variant_identifier(hash.clone(), path_string)
+        .await?
+        .map(S::Identifier::from_arc)
+        .transpose()?;
 
     if let Some(identifier) = identifier_opt {
         let details = repo.details(&identifier).await?.and_then(|details| {
@@ -874,11 +877,11 @@ async fn process<R: FullRepo, S: Store + 'static>(
 }
 
 #[tracing::instrument(name = "Serving processed image headers", skip(repo, store, config))]
-async fn process_head<R: FullRepo, S: Store + 'static>(
+async fn process_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -903,12 +906,14 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
     };
 
     if !config.server.read_only {
-        VariantAccessRepo::accessed(&repo, hash.clone(), path_string.clone()).await?;
+        VariantAccessRepo::accessed((**repo).as_ref(), hash.clone(), path_string.clone()).await?;
     }
 
     let identifier_opt = repo
-        .variant_identifier::<S::Identifier>(hash.clone(), path_string)
-        .await?;
+        .variant_identifier(hash.clone(), path_string)
+        .await?
+        .map(S::Identifier::from_arc)
+        .transpose()?;
 
     if let Some(identifier) = identifier_opt {
         let details = repo.details(&identifier).await?.and_then(|details| {
@@ -950,10 +955,10 @@ async fn process_head<R: FullRepo, S: Store + 'static>(
 
 /// Process files
 #[tracing::instrument(name = "Spawning image process", skip(repo))]
-async fn process_backgrounded<R: FullRepo, S: Store>(
+async fn process_backgrounded<S: Store>(
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     let source = match source {
@@ -978,8 +983,10 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
     };
 
     let identifier_opt = repo
-        .variant_identifier::<S::Identifier>(hash.clone(), path_string)
-        .await?;
+        .variant_identifier(hash.clone(), path_string)
+        .await?
+        .map(S::Identifier::from_arc)
+        .transpose()?;
 
     if identifier_opt.is_some() {
         return Ok(HttpResponse::Accepted().finish());
@@ -996,9 +1003,9 @@ async fn process_backgrounded<R: FullRepo, S: Store>(
 
 /// Fetch file details
 #[tracing::instrument(name = "Fetching query details", skip(repo, store, config))]
-async fn details_query<R: FullRepo, S: Store + 'static>(
+async fn details_query<S: Store + 'static>(
     web::Query(alias_query): web::Query<AliasQuery>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -1019,18 +1026,18 @@ async fn details_query<R: FullRepo, S: Store + 'static>(
 
 /// Fetch file details
 #[tracing::instrument(name = "Fetching details", skip(repo, store, config))]
-async fn details<R: FullRepo, S: Store + 'static>(
+async fn details<S: Store + 'static>(
     alias: web::Path<Serde<Alias>>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     do_details(Serde::into_inner(alias.into_inner()), repo, store, config).await
 }
 
-async fn do_details<R: FullRepo, S: Store + 'static>(
+async fn do_details<S: Store + 'static>(
     alias: Alias,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -1041,10 +1048,10 @@ async fn do_details<R: FullRepo, S: Store + 'static>(
 
 /// Serve files based on alias query
 #[tracing::instrument(name = "Serving file query", skip(repo, store, client, config))]
-async fn serve_query<R: FullRepo, S: Store + 'static>(
+async fn serve_query<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(alias_query): web::Query<AliasQuery>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     client: web::Data<ClientWithMiddleware>,
     config: web::Data<Configuration>,
@@ -1067,7 +1074,7 @@ async fn serve_query<R: FullRepo, S: Store + 'static>(
             };
 
             if !config.server.read_only {
-                AliasAccessRepo::accessed(&repo, alias.clone()).await?;
+                AliasAccessRepo::accessed((**repo).as_ref(), alias.clone()).await?;
             }
 
             alias
@@ -1079,10 +1086,10 @@ async fn serve_query<R: FullRepo, S: Store + 'static>(
 
 /// Serve files
 #[tracing::instrument(name = "Serving file", skip(repo, store, config))]
-async fn serve<R: FullRepo, S: Store + 'static>(
+async fn serve<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -1096,10 +1103,10 @@ async fn serve<R: FullRepo, S: Store + 'static>(
     .await
 }
 
-async fn do_serve<R: FullRepo, S: Store + 'static>(
+async fn do_serve<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: Alias,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -1113,7 +1120,7 @@ async fn do_serve<R: FullRepo, S: Store + 'static>(
         (hash, alias, true)
     };
 
-    let Some(identifier) = repo.identifier(hash.clone()).await? else {
+    let Some(identifier) = repo.identifier(hash.clone()).await?.map(Identifier::from_arc).transpose()? else {
         tracing::warn!(
             "Original File identifier for hash {hash:?} is missing, queue cleanup task",
         );
@@ -1133,10 +1140,10 @@ async fn do_serve<R: FullRepo, S: Store + 'static>(
 }
 
 #[tracing::instrument(name = "Serving query file headers", skip(repo, store, config))]
-async fn serve_query_head<R: FullRepo, S: Store + 'static>(
+async fn serve_query_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(alias_query): web::Query<AliasQuery>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -1154,10 +1161,10 @@ async fn serve_query_head<R: FullRepo, S: Store + 'static>(
 }
 
 #[tracing::instrument(name = "Serving file headers", skip(repo, store, config))]
-async fn serve_head<R: FullRepo, S: Store + 'static>(
+async fn serve_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -1171,14 +1178,14 @@ async fn serve_head<R: FullRepo, S: Store + 'static>(
     .await
 }
 
-async fn do_serve_head<R: FullRepo, S: Store + 'static>(
+async fn do_serve_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: Alias,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(&alias).await? else {
+    let Some(identifier) = repo.identifier_from_alias(&alias).await?.map(S::Identifier::from_arc).transpose()? else {
         // Invalid alias
         return Ok(HttpResponse::NotFound().finish());
     };
@@ -1327,8 +1334,8 @@ fn srv_head(
 }
 
 #[tracing::instrument(name = "Spawning variant cleanup", skip(repo, config))]
-async fn clean_variants<R: FullRepo>(
-    repo: web::Data<R>,
+async fn clean_variants(
+    repo: web::Data<ArcRepo>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     if config.server.read_only {
@@ -1347,9 +1354,9 @@ enum AliasQuery {
 }
 
 #[tracing::instrument(name = "Setting 404 Image", skip(repo, config))]
-async fn set_not_found<R: FullRepo>(
+async fn set_not_found(
     json: web::Json<AliasQuery>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     client: web::Data<ClientWithMiddleware>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
@@ -1380,9 +1387,9 @@ async fn set_not_found<R: FullRepo>(
 }
 
 #[tracing::instrument(name = "Purging file", skip(repo, config))]
-async fn purge<R: FullRepo>(
+async fn purge(
     web::Query(alias_query): web::Query<AliasQuery>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
     if config.server.read_only {
@@ -1415,9 +1422,9 @@ async fn purge<R: FullRepo>(
 }
 
 #[tracing::instrument(name = "Fetching aliases", skip(repo))]
-async fn aliases<R: FullRepo>(
+async fn aliases(
     web::Query(alias_query): web::Query<AliasQuery>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
 ) -> Result<HttpResponse, Error> {
     let alias = match alias_query {
         AliasQuery::Alias { alias } => Serde::into_inner(alias),
@@ -1438,9 +1445,9 @@ async fn aliases<R: FullRepo>(
 }
 
 #[tracing::instrument(name = "Fetching identifier", skip(repo))]
-async fn identifier<R: FullRepo, S: Store>(
+async fn identifier<S: Store>(
     web::Query(alias_query): web::Query<AliasQuery>,
-    repo: web::Data<R>,
+    repo: web::Data<ArcRepo>,
 ) -> Result<HttpResponse, Error> {
     let alias = match alias_query {
         AliasQuery::Alias { alias } => Serde::into_inner(alias),
@@ -1452,7 +1459,7 @@ async fn identifier<R: FullRepo, S: Store>(
         }
     };
 
-    let Some(identifier) = repo.identifier_from_alias::<S::Identifier>(&alias).await? else {
+    let Some(identifier) = repo.identifier_from_alias(&alias).await?.map(S::Identifier::from_arc).transpose()? else {
         // Invalid alias
         return Ok(HttpResponse::NotFound().json(serde_json::json!({
             "msg": "No identifiers associated with provided alias"
@@ -1465,8 +1472,8 @@ async fn identifier<R: FullRepo, S: Store>(
     })))
 }
 
-async fn healthz<R: FullRepo, S: Store>(
-    repo: web::Data<R>,
+async fn healthz<S: Store>(
+    repo: web::Data<ArcRepo>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
     repo.health_check().await?;
@@ -1493,13 +1500,9 @@ fn build_client(config: &Configuration) -> Result<ClientWithMiddleware, Error> {
         .build())
 }
 
-fn configure_endpoints<
-    R: FullRepo + 'static,
-    S: Store + 'static,
-    F: Fn(&mut web::ServiceConfig),
->(
+fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
     config: &mut web::ServiceConfig,
-    repo: R,
+    repo: ArcRepo,
     store: S,
     configuration: Configuration,
     client: ClientWithMiddleware,
@@ -1510,68 +1513,63 @@ fn configure_endpoints<
         .app_data(web::Data::new(store))
         .app_data(web::Data::new(client))
         .app_data(web::Data::new(configuration.clone()))
-        .route("/healthz", web::get().to(healthz::<R, S>))
+        .route("/healthz", web::get().to(healthz::<S>))
         .service(
             web::scope("/image")
                 .service(
                     web::resource("")
                         .guard(guard::Post())
-                        .route(web::post().to(upload::<R, S>)),
+                        .route(web::post().to(upload::<S>)),
                 )
                 .service(
                     web::scope("/backgrounded")
                         .service(
                             web::resource("")
                                 .guard(guard::Post())
-                                .route(web::post().to(upload_backgrounded::<R, S>)),
+                                .route(web::post().to(upload_backgrounded::<S>)),
                         )
-                        .service(
-                            web::resource("/claim").route(web::get().to(claim_upload::<R, S>)),
-                        ),
+                        .service(web::resource("/claim").route(web::get().to(claim_upload::<S>))),
                 )
-                .service(web::resource("/download").route(web::get().to(download::<R, S>)))
+                .service(web::resource("/download").route(web::get().to(download::<S>)))
                 .service(
                     web::resource("/delete/{delete_token}/{filename}")
-                        .route(web::delete().to(delete::<R>))
-                        .route(web::get().to(delete::<R>)),
+                        .route(web::delete().to(delete))
+                        .route(web::get().to(delete)),
                 )
                 .service(
                     web::scope("/original")
                         .service(
                             web::resource("")
-                                .route(web::get().to(serve_query::<R, S>))
-                                .route(web::head().to(serve_query_head::<R, S>)),
+                                .route(web::get().to(serve_query::<S>))
+                                .route(web::head().to(serve_query_head::<S>)),
                         )
                         .service(
                             web::resource("/{filename}")
-                                .route(web::get().to(serve::<R, S>))
-                                .route(web::head().to(serve_head::<R, S>)),
+                                .route(web::get().to(serve::<S>))
+                                .route(web::head().to(serve_head::<S>)),
                         ),
                 )
                 .service(
                     web::resource("/process.{ext}")
-                        .route(web::get().to(process::<R, S>))
-                        .route(web::head().to(process_head::<R, S>)),
+                        .route(web::get().to(process::<S>))
+                        .route(web::head().to(process_head::<S>)),
                 )
                 .service(
                     web::resource("/process_backgrounded.{ext}")
-                        .route(web::get().to(process_backgrounded::<R, S>)),
+                        .route(web::get().to(process_backgrounded::<S>)),
                 )
                 .service(
                     web::scope("/details")
                         .service(
                             web::scope("/original")
+                                .service(web::resource("").route(web::get().to(details_query::<S>)))
                                 .service(
-                                    web::resource("").route(web::get().to(details_query::<R, S>)),
-                                )
-                                .service(
-                                    web::resource("/{filename}")
-                                        .route(web::get().to(details::<R, S>)),
+                                    web::resource("/{filename}").route(web::get().to(details::<S>)),
                                 ),
                         )
                         .service(
                             web::resource("/process.{ext}")
-                                .route(web::get().to(process_details::<R, S>)),
+                                .route(web::get().to(process_details::<S>)),
                         ),
                 ),
         )
@@ -1580,20 +1578,17 @@ fn configure_endpoints<
                 .wrap(Internal(
                     configuration.server.api_key.as_ref().map(|s| s.to_owned()),
                 ))
-                .service(web::resource("/import").route(web::post().to(import::<R, S>)))
-                .service(web::resource("/variants").route(web::delete().to(clean_variants::<R>)))
-                .service(web::resource("/purge").route(web::post().to(purge::<R>)))
-                .service(web::resource("/aliases").route(web::get().to(aliases::<R>)))
-                .service(web::resource("/identifier").route(web::get().to(identifier::<R, S>)))
-                .service(web::resource("/set_not_found").route(web::post().to(set_not_found::<R>)))
+                .service(web::resource("/import").route(web::post().to(import::<S>)))
+                .service(web::resource("/variants").route(web::delete().to(clean_variants)))
+                .service(web::resource("/purge").route(web::post().to(purge)))
+                .service(web::resource("/aliases").route(web::get().to(aliases)))
+                .service(web::resource("/identifier").route(web::get().to(identifier::<S>)))
+                .service(web::resource("/set_not_found").route(web::post().to(set_not_found)))
                 .configure(extra_config),
         );
 }
 
-fn spawn_cleanup<R>(repo: R, config: &Configuration)
-where
-    R: FullRepo + 'static,
-{
+fn spawn_cleanup(repo: ArcRepo, config: &Configuration) {
     if config.server.read_only {
         return;
     }
@@ -1623,9 +1618,8 @@ where
     })
 }
 
-fn spawn_workers<R, S>(repo: R, store: S, config: Configuration, process_map: ProcessMap)
+fn spawn_workers<S>(repo: ArcRepo, store: S, config: Configuration, process_map: ProcessMap)
 where
-    R: FullRepo + 'static,
     S: Store + 'static,
 {
     tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
@@ -1639,8 +1633,8 @@ where
         .in_scope(|| actix_rt::spawn(queue::process_images(repo, store, process_map, config)));
 }
 
-async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig) + Send + Clone>(
-    repo: R,
+async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(
+    repo: ArcRepo,
     store: FileStore,
     client: ClientWithMiddleware,
     config: Configuration,
@@ -1678,12 +1672,9 @@ async fn launch_file_store<R: FullRepo + 'static, F: Fn(&mut web::ServiceConfig)
     .await
 }
 
-async fn launch_object_store<
-    R: FullRepo + 'static,
-    F: Fn(&mut web::ServiceConfig) + Send + Clone,
->(
-    repo: R,
-    store_config: ObjectStoreConfig,
+async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(
+    repo: ArcRepo,
+    store: ObjectStore,
     client: ClientWithMiddleware,
     config: Configuration,
     extra_config: F,
@@ -1696,7 +1687,7 @@ async fn launch_object_store<
 
     HttpServer::new(move || {
         let client = client.clone();
-        let store = store_config.clone().build(client.clone());
+        let store = store.clone();
         let repo = repo.clone();
         let config = config.clone();
         let extra_config = extra_config.clone();
@@ -1737,7 +1728,7 @@ where
 
             match repo {
                 Repo::Sled(repo) => {
-                    migrate_store(repo, from, to, skip_missing_files, timeout).await?
+                    migrate_store(Arc::new(repo), from, to, skip_missing_files, timeout).await?
                 }
             }
         }
@@ -1775,7 +1766,7 @@ where
 
             match repo {
                 Repo::Sled(repo) => {
-                    migrate_store(repo, from, to, skip_missing_files, timeout).await?
+                    migrate_store(Arc::new(repo), from, to, skip_missing_files, timeout).await?
                 }
             }
         }
@@ -1833,8 +1824,9 @@ async fn export_handler(repo: web::Data<SledRepo>) -> Result<HttpResponse, Error
     })))
 }
 
-fn sled_extra_config(sc: &mut web::ServiceConfig) {
-    sc.service(web::resource("/export").route(web::post().to(export_handler)));
+fn sled_extra_config(sc: &mut web::ServiceConfig, repo: SledRepo) {
+    sc.app_data(web::Data::new(repo))
+        .service(web::resource("/export").route(web::post().to(export_handler)));
 }
 
 impl PictRsConfiguration {
@@ -1872,6 +1864,7 @@ impl PictRsConfiguration {
         let PictRsConfiguration { config, operation } = self;
 
         let repo = Repo::open(config.repo.clone())?;
+
         let client = build_client(&config)?;
 
         match operation {
@@ -1951,14 +1944,28 @@ impl PictRsConfiguration {
         match config.store.clone() {
             config::Store::Filesystem(config::Filesystem { path }) => {
                 let store = FileStore::build(path, repo.clone()).await?;
+
+                let arc_repo = repo.to_arc();
+
+                if arc_repo.get("migrate-0.4").await?.is_none() {
+                    if let Some(old_repo) = repo_04::open(&config.old_repo)? {
+                        repo::migrate_04(old_repo, &arc_repo, &store, &config).await?;
+                        arc_repo
+                            .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
+                            .await?;
+                    }
+                }
+
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        sled_repo
-                            .mark_accessed::<<FileStore as Store>::Identifier>()
-                            .await?;
-
-                        launch_file_store(sled_repo, store, client, config, sled_extra_config)
-                            .await?;
+                        launch_file_store(
+                            Arc::new(sled_repo.clone()),
+                            store,
+                            client,
+                            config,
+                            move |sc| sled_extra_config(sc, sled_repo.clone()),
+                        )
+                        .await?;
                     }
                 }
             }
@@ -1991,16 +1998,26 @@ impl PictRsConfiguration {
                     public_endpoint,
                     repo.clone(),
                 )
-                .await?;
+                .await?
+                .build(client.clone());
+
+                let arc_repo = repo.to_arc();
+
+                if arc_repo.get("migrate-0.4").await?.is_none() {
+                    if let Some(old_repo) = repo_04::open(&config.old_repo)? {
+                        repo::migrate_04(old_repo, &arc_repo, &store, &config).await?;
+                        arc_repo
+                            .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
+                            .await?;
+                    }
+                }
 
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        sled_repo
-                            .mark_accessed::<<ObjectStore as Store>::Identifier>()
-                            .await?;
-
-                        launch_object_store(sled_repo, store, client, config, sled_extra_config)
-                            .await?;
+                        launch_object_store(arc_repo, store, client, config, move |sc| {
+                            sled_extra_config(sc, sled_repo.clone())
+                        })
+                        .await?;
                     }
                 }
             }

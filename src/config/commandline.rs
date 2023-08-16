@@ -13,7 +13,8 @@ impl Args {
     pub(super) fn into_output(self) -> Output {
         let Args {
             config_file,
-            old_db_path,
+            old_repo_path,
+            old_repo_cache_capacity,
             log_format,
             log_targets,
             console_address,
@@ -25,7 +26,11 @@ impl Args {
             command,
         } = self;
 
-        let old_db = OldDb { path: old_db_path };
+        let old_repo = OldSled {
+            path: old_repo_path,
+            cache_capacity: old_repo_cache_capacity,
+        }
+        .set();
 
         let tracing = Tracing {
             logging: Logging {
@@ -193,7 +198,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
-                                old_db,
+                                old_repo,
                                 tracing,
                                 metrics,
                                 media,
@@ -211,7 +216,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
-                                old_db,
+                                old_repo,
                                 tracing,
                                 metrics,
                                 media,
@@ -227,7 +232,7 @@ impl Args {
                         config_format: ConfigFormat {
                             server,
                             client,
-                            old_db,
+                            old_repo,
                             tracing,
                             metrics,
                             media,
@@ -255,7 +260,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
-                                old_db,
+                                old_repo,
                                 tracing,
                                 metrics,
                                 media,
@@ -275,7 +280,7 @@ impl Args {
                                 config_format: ConfigFormat {
                                     server,
                                     client,
-                                    old_db,
+                                    old_repo,
                                     tracing,
                                     metrics,
                                     media,
@@ -299,7 +304,7 @@ impl Args {
                                     config_format: ConfigFormat {
                                         server,
                                         client,
-                                        old_db,
+                                        old_repo,
                                         tracing,
                                         metrics,
                                         media,
@@ -322,7 +327,7 @@ impl Args {
                                 config_format: ConfigFormat {
                                     server,
                                     client,
-                                    old_db,
+                                    old_repo,
                                     tracing,
                                     metrics,
                                     media,
@@ -368,7 +373,8 @@ pub(crate) enum Operation {
 pub(super) struct ConfigFormat {
     server: Server,
     client: Client,
-    old_db: OldDb,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    old_repo: Option<OldSled>,
     tracing: Tracing,
     metrics: Metrics,
     media: Media,
@@ -442,13 +448,6 @@ struct OpenTelemetry {
 struct Metrics {
     #[serde(skip_serializing_if = "Option::is_none")]
     prometheus_address: Option<SocketAddr>,
-}
-
-#[derive(Debug, Default, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-struct OldDb {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -706,7 +705,11 @@ pub(super) struct Args {
 
     /// Path to the old pict-rs sled database
     #[arg(long)]
-    old_db_path: Option<PathBuf>,
+    old_repo_path: Option<PathBuf>,
+
+    /// The cache capacity, in bytes, allowed to sled for in-memory operations
+    #[arg(long)]
+    old_repo_cache_capacity: Option<u64>,
 
     /// Format of logs printed to stdout
     #[arg(long)]
@@ -1177,4 +1180,30 @@ struct Sled {
     #[arg(short, long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     export_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Parser, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct OldSled {
+    /// The path to store the sled database
+    #[arg(short, long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<PathBuf>,
+
+    /// The cache capacity, in bytes, allowed to sled for in-memory operations
+    #[arg(short, long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_capacity: Option<u64>,
+}
+
+impl OldSled {
+    fn set(self) -> Option<Self> {
+        let any_set = self.path.is_some() || self.cache_capacity.is_some();
+
+        if any_set {
+            Some(self)
+        } else {
+            None
+        }
+    }
 }

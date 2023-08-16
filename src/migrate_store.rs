@@ -8,12 +8,12 @@ use std::{
 use crate::{
     details::Details,
     error::{Error, UploadError},
-    repo::{Hash, HashRepo, IdentifierRepo, MigrationRepo, QueueRepo},
+    repo::{ArcRepo, Hash, IdentifierRepo},
     store::{Identifier, Store},
 };
 
-pub(super) async fn migrate_store<R, S1, S2>(
-    repo: R,
+pub(super) async fn migrate_store<S1, S2>(
+    repo: ArcRepo,
     from: S1,
     to: S2,
     skip_missing_files: bool,
@@ -22,7 +22,6 @@ pub(super) async fn migrate_store<R, S1, S2>(
 where
     S1: Store + Clone + 'static,
     S2: Store + Clone + 'static,
-    R: IdentifierRepo + HashRepo + QueueRepo + MigrationRepo + Clone + 'static,
 {
     tracing::warn!("Running checks");
 
@@ -65,8 +64,8 @@ where
     Ok(())
 }
 
-struct MigrateState<R, S1, S2> {
-    repo: R,
+struct MigrateState<S1, S2> {
+    repo: ArcRepo,
     from: S1,
     to: S2,
     continuing_migration: bool,
@@ -79,8 +78,8 @@ struct MigrateState<R, S1, S2> {
     timeout: u64,
 }
 
-async fn do_migrate_store<R, S1, S2>(
-    repo: R,
+async fn do_migrate_store<S1, S2>(
+    repo: ArcRepo,
     from: S1,
     to: S2,
     skip_missing_files: bool,
@@ -89,7 +88,6 @@ async fn do_migrate_store<R, S1, S2>(
 where
     S1: Store + 'static,
     S2: Store + 'static,
-    R: IdentifierRepo + HashRepo + QueueRepo + MigrationRepo + Clone + 'static,
 {
     let continuing_migration = repo.is_continuing_migration().await?;
     let initial_repo_size = repo.size().await?;
@@ -150,11 +148,10 @@ where
 }
 
 #[tracing::instrument(skip(state))]
-async fn migrate_hash<R, S1, S2>(state: &MigrateState<R, S1, S2>, hash: Hash) -> Result<(), Error>
+async fn migrate_hash<S1, S2>(state: &MigrateState<S1, S2>, hash: Hash) -> Result<(), Error>
 where
     S1: Store,
     S2: Store,
-    R: IdentifierRepo + HashRepo + QueueRepo + MigrationRepo,
 {
     let MigrateState {
         repo,
@@ -173,7 +170,7 @@ where
     let current_index = index.fetch_add(1, Ordering::Relaxed);
 
     let original_identifier = match repo.identifier(hash.clone()).await {
-        Ok(Some(identifier)) => identifier,
+        Ok(Some(identifier)) => S1::Identifier::from_arc(identifier)?,
         Ok(None) => {
             tracing::warn!(
                 "Original File identifier for hash {hash:?} is missing, queue cleanup task",
@@ -218,6 +215,8 @@ where
     }
 
     if let Some(identifier) = repo.motion_identifier(hash.clone()).await? {
+        let identifier = S1::Identifier::from_arc(identifier)?;
+
         if !repo.is_migrated(&identifier).await? {
             match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
                 Ok(new_identifier) => {
@@ -247,6 +246,8 @@ where
     }
 
     for (variant, identifier) in repo.variants(hash.clone()).await? {
+        let identifier = S1::Identifier::from_arc(identifier)?;
+
         if !repo.is_migrated(&identifier).await? {
             match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
                 Ok(new_identifier) => {
@@ -334,8 +335,8 @@ where
     Ok(())
 }
 
-async fn migrate_file<R, S1, S2>(
-    repo: &R,
+async fn migrate_file<S1, S2>(
+    repo: &ArcRepo,
     from: &S1,
     to: &S2,
     identifier: &S1::Identifier,
@@ -343,7 +344,6 @@ async fn migrate_file<R, S1, S2>(
     timeout: u64,
 ) -> Result<S2::Identifier, MigrateError>
 where
-    R: IdentifierRepo,
     S1: Store,
     S2: Store,
 {
@@ -378,15 +378,14 @@ enum MigrateError {
     To(crate::store::StoreError),
 }
 
-async fn do_migrate_file<R, S1, S2>(
-    repo: &R,
+async fn do_migrate_file<S1, S2>(
+    repo: &ArcRepo,
     from: &S1,
     to: &S2,
     identifier: &S1::Identifier,
     timeout: u64,
 ) -> Result<S2::Identifier, MigrateError>
 where
-    R: IdentifierRepo,
     S1: Store,
     S2: Store,
 {
@@ -429,15 +428,14 @@ where
     Ok(new_identifier)
 }
 
-async fn migrate_details<R, I1, I2>(repo: &R, from: &I1, to: &I2) -> Result<(), Error>
+async fn migrate_details<I1, I2>(repo: &ArcRepo, from: &I1, to: &I2) -> Result<(), Error>
 where
-    R: IdentifierRepo,
     I1: Identifier,
     I2: Identifier,
 {
     if let Some(details) = repo.details(from).await? {
         repo.relate_details(to, &details).await?;
-        repo.cleanup(from).await?;
+        IdentifierRepo::cleanup(repo.as_ref(), from).await?;
     }
 
     Ok(())

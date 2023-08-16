@@ -128,12 +128,17 @@ targets = 'info'
 prometheus_address = "0.0.0.0:9000"
 
 
-## Configuration for migrating from pict-rs 0.2
-[old_db]
-## Optional: path to old pict-rs directory
-# environment variable: PICTRS__OLD_DB__PATH
-# default: /mnt
-path = '/mnt'
+## Configuration for migrating from pict-rs 0.4
+[old_repo]
+## Optional: path to sled repository
+# environment variable: PICTRS__OLD_REPO__PATH
+# default: /mnt/sled-repo
+path = '/mnt/sled-repo'
+
+## Optional: in-memory cache capacity for sled data (in bytes)
+# environment variable: PICTRS__OLD_REPO__CACHE_CAPACITY
+# default: 67,108,864 (1024 * 1024 * 64, or 64MB)
+cache_capacity = 67108864
 
 
 ## Media Processing Configuration

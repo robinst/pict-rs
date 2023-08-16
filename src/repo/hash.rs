@@ -70,7 +70,7 @@ impl Hash {
 impl std::fmt::Debug for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("Hash")
-            .field("hash", &hex::encode(&*self.hash))
+            .field("hash", &hex::encode(*self.hash))
             .field("format", &self.format)
             .field("size", &self.size)
             .finish()

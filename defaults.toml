@@ -20,8 +20,10 @@ targets = "info"
 
 [metrics]
 
-[old_db]
-path = "/mnt"
+[old_repo]
+path = "/mnt/sled-repo"
+cache_capacity = 67108864
+export_path = "/mnt/exports"
 
 [media]
 max_file_size = 40

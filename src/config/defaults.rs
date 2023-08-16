@@ -11,7 +11,7 @@ pub(crate) struct Defaults {
     server: ServerDefaults,
     client: ClientDefaults,
     tracing: TracingDefaults,
-    old_db: OldDbDefaults,
+    old_repo: SledDefaults,
     media: MediaDefaults,
     repo: RepoDefaults,
     store: StoreDefaults,
@@ -60,12 +60,6 @@ struct ConsoleDefaults {
 struct OpenTelemetryDefaults {
     service_name: String,
     targets: Serde<Targets>,
-}
-
-#[derive(Clone, Debug, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-struct OldDbDefaults {
-    path: PathBuf,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -221,14 +215,6 @@ impl Default for OpenTelemetryDefaults {
         OpenTelemetryDefaults {
             service_name: String::from("pict-rs"),
             targets: "info".parse().expect("Valid targets string"),
-        }
-    }
-}
-
-impl Default for OldDbDefaults {
-    fn default() -> Self {
-        OldDbDefaults {
-            path: PathBuf::from(String::from("/mnt")),
         }
     }
 }

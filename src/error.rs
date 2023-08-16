@@ -52,8 +52,8 @@ pub(crate) enum UploadError {
     #[error("Error in DB")]
     Repo(#[from] crate::repo::RepoError),
 
-    #[error("Error in old sled DB")]
-    OldSled(#[from] ::sled::Error),
+    #[error("Error in old repo")]
+    OldRepo(#[from] crate::repo_04::RepoError),
 
     #[error("Error parsing string")]
     ParseString(#[from] std::string::FromUtf8Error),

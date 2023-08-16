@@ -12,6 +12,8 @@ use std::{
     time::Duration,
 };
 
+pub(crate) type LocalBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + 'a>>;
+
 pub(crate) trait StreamLimit {
     fn limit(self, limit: u64) -> Limit<Self>
     where
@@ -39,6 +41,17 @@ pub(crate) trait StreamTimeout {
     }
 }
 
+pub(crate) trait IntoStreamer: Stream {
+    fn into_streamer(self) -> Streamer<Self>
+    where
+        Self: Sized,
+    {
+        Streamer(Some(self))
+    }
+}
+
+impl<T> IntoStreamer for T where T: Stream + Unpin {}
+
 pub(crate) fn from_iterator<I: IntoIterator + Unpin + Send + 'static>(
     iterator: I,
     buffer: usize,
@@ -50,6 +63,28 @@ pub(crate) fn from_iterator<I: IntoIterator + Unpin + Send + 'static>(
 
 impl<S, E> StreamLimit for S where S: Stream<Item = Result<Bytes, E>> {}
 impl<S> StreamTimeout for S where S: Stream {}
+
+pub(crate) struct Streamer<S>(Option<S>);
+
+impl<S> Streamer<S> {
+    pub(crate) async fn next(&mut self) -> Option<S::Item>
+    where
+        S: Stream + Unpin,
+    {
+        let opt = match self.0 {
+            Some(ref mut stream) => {
+                std::future::poll_fn(|cx| Pin::new(&mut *stream).poll_next(cx)).await
+            }
+            None => None,
+        };
+
+        if opt.is_none() {
+            self.0.take();
+        }
+
+        opt
+    }
+}
 
 pin_project_lite::pin_project! {
     pub(crate) struct Limit<S> {

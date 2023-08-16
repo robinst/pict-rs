@@ -5,22 +5,21 @@ use crate::{
     formats::InputProcessableFormat,
     ingest::Session,
     queue::{Base64Bytes, LocalBoxFuture, Process},
-    repo::{Alias, FullRepo, UploadId, UploadResult},
+    repo::{Alias, ArcRepo, UploadId, UploadResult},
     serde_str::Serde,
     store::{Identifier, Store},
 };
 use futures_util::TryStreamExt;
 use std::path::PathBuf;
 
-pub(super) fn perform<'a, R, S>(
-    repo: &'a R,
+pub(super) fn perform<'a, S>(
+    repo: &'a ArcRepo,
     store: &'a S,
     process_map: &'a ProcessMap,
     config: &'a Configuration,
     job: &'a [u8],
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
-    R: FullRepo + 'static,
     S: Store + 'static,
 {
     Box::pin(async move {
@@ -70,8 +69,8 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-async fn process_ingest<R, S>(
-    repo: &R,
+async fn process_ingest<S>(
+    repo: &ArcRepo,
     store: &S,
     unprocessed_identifier: Vec<u8>,
     upload_id: UploadId,
@@ -79,7 +78,6 @@ async fn process_ingest<R, S>(
     media: &crate::config::Media,
 ) -> Result<(), Error>
 where
-    R: FullRepo + 'static,
     S: Store + 'static,
 {
     let fut = async {
@@ -99,7 +97,7 @@ where
             let session =
                 crate::ingest::ingest(&repo, &store2, stream, declared_alias, &media).await?;
 
-            Ok(session) as Result<Session<R, S>, Error>
+            Ok(session) as Result<Session<S>, Error>
         })
         .await;
 
@@ -130,8 +128,8 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all)]
-async fn generate<R: FullRepo, S: Store + 'static>(
-    repo: &R,
+async fn generate<S: Store + 'static>(
+    repo: &ArcRepo,
     store: &S,
     process_map: &ProcessMap,
     target_format: InputProcessableFormat,
@@ -146,9 +144,7 @@ async fn generate<R: FullRepo, S: Store + 'static>(
     };
 
     let path_string = process_path.to_string_lossy().to_string();
-    let identifier_opt = repo
-        .variant_identifier::<S::Identifier>(hash.clone(), path_string)
-        .await?;
+    let identifier_opt = repo.variant_identifier(hash.clone(), path_string).await?;
 
     if identifier_opt.is_some() {
         return Ok(());

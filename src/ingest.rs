@@ -3,7 +3,7 @@ use crate::{
     either::Either,
     error::{Error, UploadError},
     formats::{InternalFormat, Validations},
-    repo::{Alias, AliasRepo, DeleteToken, FullRepo, Hash, HashRepo},
+    repo::{Alias, AliasRepo, ArcRepo, DeleteToken, Hash, HashRepo},
     store::Store,
 };
 use actix_web::web::Bytes;
@@ -14,12 +14,11 @@ mod hasher;
 use hasher::Hasher;
 
 #[derive(Debug)]
-pub(crate) struct Session<R, S>
+pub(crate) struct Session<S>
 where
-    R: FullRepo + 'static,
     S: Store,
 {
-    repo: R,
+    repo: ArcRepo,
     delete_token: DeleteToken,
     hash: Option<Hash>,
     alias: Option<Alias>,
@@ -41,15 +40,14 @@ where
 }
 
 #[tracing::instrument(skip(repo, store, stream, media))]
-pub(crate) async fn ingest<R, S>(
-    repo: &R,
+pub(crate) async fn ingest<S>(
+    repo: &ArcRepo,
     store: &S,
     stream: impl Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     declared_alias: Option<Alias>,
     media: &crate::config::Media,
-) -> Result<Session<R, S>, Error>
+) -> Result<Session<S>, Error>
 where
-    R: FullRepo + 'static,
     S: Store,
 {
     let permit = crate::PROCESS_SEMAPHORE.acquire().await;
@@ -129,18 +127,17 @@ where
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn save_upload<R, S>(
-    session: &mut Session<R, S>,
-    repo: &R,
+async fn save_upload<S>(
+    session: &mut Session<S>,
+    repo: &ArcRepo,
     store: &S,
     hash: Hash,
     identifier: &S::Identifier,
 ) -> Result<(), Error>
 where
     S: Store,
-    R: FullRepo,
 {
-    if HashRepo::create(repo, hash.clone(), identifier)
+    if HashRepo::create(repo.as_ref(), hash.clone(), identifier)
         .await?
         .is_err()
     {
@@ -156,9 +153,8 @@ where
     Ok(())
 }
 
-impl<R, S> Session<R, S>
+impl<S> Session<S>
 where
-    R: FullRepo + 'static,
     S: Store,
 {
     pub(crate) fn disarm(mut self) -> DeleteToken {
@@ -179,7 +175,7 @@ where
 
     #[tracing::instrument(skip(self, hash))]
     async fn add_existing_alias(&mut self, hash: Hash, alias: Alias) -> Result<(), Error> {
-        AliasRepo::create(&self.repo, &alias, &self.delete_token, hash)
+        AliasRepo::create(self.repo.as_ref(), &alias, &self.delete_token, hash)
             .await?
             .map_err(|_| UploadError::DuplicateAlias)?;
 
@@ -193,7 +189,7 @@ where
         loop {
             let alias = Alias::generate(input_type.file_extension().to_string());
 
-            if AliasRepo::create(&self.repo, &alias, &self.delete_token, hash.clone())
+            if AliasRepo::create(self.repo.as_ref(), &alias, &self.delete_token, hash.clone())
                 .await?
                 .is_ok()
             {
@@ -207,9 +203,8 @@ where
     }
 }
 
-impl<R, S> Drop for Session<R, S>
+impl<S> Drop for Session<S>
 where
-    R: FullRepo + 'static,
     S: Store,
 {
     fn drop(&mut self) {

@@ -14,6 +14,13 @@ impl Identifier for ObjectId {
         ))
     }
 
+    fn from_arc(arc: std::sync::Arc<[u8]>) -> Result<Self, StoreError>
+    where
+        Self: Sized,
+    {
+        Self::from_bytes(Vec::from(&arc[..]))
+    }
+
     fn string_repr(&self) -> String {
         self.0.clone()
     }
