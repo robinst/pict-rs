@@ -125,9 +125,7 @@ async fn do_migrate_hash_04<S: Store>(
         hash_details.internal_format().expect("format exists"),
     );
 
-    HashRepo::create(new_repo.as_ref(), hash.clone(), &identifier)
-        .await?
-        .expect("not duplicate");
+    let _ = HashRepo::create(new_repo.as_ref(), hash.clone(), &identifier).await?;
     new_repo.relate_details(&identifier, &hash_details).await?;
 
     for alias in aliases {
@@ -136,9 +134,7 @@ async fn do_migrate_hash_04<S: Store>(
             .await?
             .unwrap_or_else(DeleteToken::generate);
 
-        AliasRepo::create(new_repo.as_ref(), &alias, &delete_token, hash.clone())
-            .await?
-            .expect("not duplicate");
+        let _ = AliasRepo::create(new_repo.as_ref(), &alias, &delete_token, hash.clone()).await?;
     }
 
     if let Some(motion_identifier) = motion_identifier {
