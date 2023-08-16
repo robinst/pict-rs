@@ -173,7 +173,7 @@ async fn do_migrate_hash_04<S: Store>(
     }
 
     for (variant, identifier) in variants {
-        new_repo
+        let _ = new_repo
             .relate_variant_identifier(hash.clone(), variant.clone(), &identifier)
             .await?;
 

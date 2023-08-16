@@ -4,7 +4,7 @@ use crate::{
         hash::Hash, Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken,
         Details, FullRepo, HashAlreadyExists, HashRepo, Identifier, IdentifierRepo, JobId,
         ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
-        UploadResult, VariantAccessRepo,
+        UploadResult, VariantAccessRepo, VariantAlreadyExists,
     },
     serde_str::Serde,
     store::StoreError,
@@ -1053,18 +1053,24 @@ impl HashRepo for SledRepo {
         hash: Hash,
         variant: String,
         identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Result<(), VariantAlreadyExists>, StoreError> {
         let hash = hash.to_bytes();
 
         let key = variant_key(&hash, &variant);
         let value = identifier.to_bytes()?;
 
-        b!(
-            self.hash_variant_identifiers,
-            hash_variant_identifiers.insert(key, value)
-        );
+        let hash_variant_identifiers = self.hash_variant_identifiers.clone();
 
-        Ok(())
+        actix_rt::task::spawn_blocking(move || {
+            hash_variant_identifiers
+                .compare_and_swap(key, Option::<&[u8]>::None, Some(value))
+                .map(|res| res.map_err(|_| VariantAlreadyExists))
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)?
+        .map_err(SledError::from)
+        .map_err(RepoError::from)
+        .map_err(StoreError::from)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

@@ -43,6 +43,8 @@ pub(crate) struct DeleteToken {
 pub(crate) struct HashAlreadyExists;
 #[derive(Debug)]
 pub(crate) struct AliasAlreadyExists;
+#[derive(Debug)]
+pub(crate) struct VariantAlreadyExists;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct UploadId {
@@ -474,7 +476,7 @@ pub(crate) trait HashRepo: BaseRepo {
         hash: Hash,
         variant: String,
         identifier: &dyn Identifier,
-    ) -> Result<(), StoreError>;
+    ) -> Result<Result<(), VariantAlreadyExists>, StoreError>;
     async fn variant_identifier(
         &self,
         hash: Hash,
@@ -531,7 +533,7 @@ where
         hash: Hash,
         variant: String,
         identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Result<(), VariantAlreadyExists>, StoreError> {
         T::relate_variant_identifier(self, hash, variant, identifier).await
     }
 

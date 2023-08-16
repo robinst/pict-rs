@@ -4,7 +4,7 @@ use crate::{
     error::{Error, UploadError},
     ffmpeg::ThumbnailFormat,
     formats::{InputProcessableFormat, InternalVideoFormat},
-    repo::{Alias, ArcRepo, Hash},
+    repo::{Alias, ArcRepo, Hash, VariantAlreadyExists},
     store::{Identifier, Store},
 };
 use actix_web::web::Bytes;
@@ -167,13 +167,19 @@ async fn process<S: Store + 'static>(
     let identifier = store
         .save_bytes(bytes.clone(), details.media_type())
         .await?;
+
+    if let Err(VariantAlreadyExists) = repo
+        .relate_variant_identifier(
+            hash,
+            thumbnail_path.to_string_lossy().to_string(),
+            &identifier,
+        )
+        .await?
+    {
+        store.remove(&identifier).await?;
+    }
+
     repo.relate_details(&identifier, &details).await?;
-    repo.relate_variant_identifier(
-        hash,
-        thumbnail_path.to_string_lossy().to_string(),
-        &identifier,
-    )
-    .await?;
 
     guard.disarm();
 

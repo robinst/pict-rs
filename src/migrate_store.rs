@@ -253,7 +253,8 @@ where
                 Ok(new_identifier) => {
                     migrate_details(repo, &identifier, &new_identifier).await?;
                     repo.remove_variant(hash.clone(), variant.clone()).await?;
-                    repo.relate_variant_identifier(hash.clone(), variant, &new_identifier)
+                    let _ = repo
+                        .relate_variant_identifier(hash.clone(), variant, &new_identifier)
                         .await?;
 
                     repo.mark_migrated(&identifier, &new_identifier).await?;
