@@ -141,7 +141,8 @@ async fn do_migrate_hash_04<S: Store>(
 
     let size = store.len(&identifier).await?;
 
-    let hash_details = details(old_repo, store, config, &identifier).await?;
+    let hash_details = set_details(old_repo, new_repo, store, config, &identifier).await?;
+
     let aliases = old_repo.for_hash(old_hash.clone()).await?;
     let variants = old_repo.variants::<S::Identifier>(old_hash.clone()).await?;
     let motion_identifier = old_repo
@@ -157,7 +158,6 @@ async fn do_migrate_hash_04<S: Store>(
     );
 
     let _ = HashRepo::create(new_repo.as_ref(), hash.clone(), &identifier).await?;
-    new_repo.relate_details(&identifier, &hash_details).await?;
 
     for alias in aliases {
         let delete_token = old_repo
@@ -168,26 +168,20 @@ async fn do_migrate_hash_04<S: Store>(
         let _ = AliasRepo::create(new_repo.as_ref(), &alias, &delete_token, hash.clone()).await?;
     }
 
-    if let Some(motion_identifier) = motion_identifier {
-        let motion_details = details(old_repo, store, config, &motion_identifier).await?;
+    if let Some(identifier) = motion_identifier {
+        new_repo
+            .relate_motion_identifier(hash.clone(), &identifier)
+            .await?;
 
-        new_repo
-            .relate_motion_identifier(hash.clone(), &motion_identifier)
-            .await?;
-        new_repo
-            .relate_details(&motion_identifier, &motion_details)
-            .await?;
+        set_details(old_repo, new_repo, store, config, &identifier).await?;
     }
 
     for (variant, identifier) in variants {
-        let variant_details = details(old_repo, store, config, &identifier).await?;
-
         new_repo
             .relate_variant_identifier(hash.clone(), variant.clone(), &identifier)
             .await?;
-        new_repo
-            .relate_details(&identifier, &variant_details)
-            .await?;
+
+        set_details(old_repo, new_repo, store, config, &identifier).await?;
 
         VariantAccessRepo::accessed(new_repo.as_ref(), hash.clone(), variant).await?;
     }
@@ -195,8 +189,24 @@ async fn do_migrate_hash_04<S: Store>(
     Ok(())
 }
 
+async fn set_details<S: Store>(
+    old_repo: &OldSledRepo,
+    new_repo: &ArcRepo,
+    store: &S,
+    config: &Configuration,
+    identifier: &S::Identifier,
+) -> Result<Details, Error> {
+    if let Some(details) = new_repo.details(identifier).await? {
+        Ok(details)
+    } else {
+        let details = fetch_or_generate_details(old_repo, store, config, identifier).await?;
+        new_repo.relate_details(identifier, &details).await?;
+        Ok(details)
+    }
+}
+
 #[tracing::instrument(skip_all)]
-async fn details<S: Store>(
+async fn fetch_or_generate_details<S: Store>(
     old_repo: &OldSledRepo,
     store: &S,
     config: &Configuration,
