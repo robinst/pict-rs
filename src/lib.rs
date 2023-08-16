@@ -1921,6 +1921,7 @@ impl PictRsConfiguration {
                 let to = Repo::open(to)?.to_arc();
 
                 repo::migrate_repo(from, to).await?;
+                return Ok(());
             }
         }
 
