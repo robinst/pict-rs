@@ -22,6 +22,8 @@ rustPlatform.buildRustPackage {
   PROTOC = "${protobuf}/bin/protoc";
   PROTOC_INCLUDE = "${protobuf}/include";
 
+  RUSTFLAGS = "--cfg tokio_unstable --cfg uuid_unstable";
+
   nativeBuildInputs = [ makeWrapper ];
   buildInputs = lib.optionals stdenv.isDarwin [ Security ];
 
