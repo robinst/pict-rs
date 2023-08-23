@@ -4,7 +4,7 @@ use crate::{
     store::Store,
 };
 use actix_web::web::Bytes;
-use futures_util::stream::Stream;
+use futures_core::Stream;
 use std::{
     path::{Path, PathBuf},
     pin::Pin,

@@ -4,7 +4,8 @@ use crate::{
     store::Store,
 };
 use actix_web::web::Bytes;
-use futures_util::{Stream, TryStreamExt};
+use futures_core::Stream;
+use futures_util::TryStreamExt;
 use mime::APPLICATION_OCTET_STREAM;
 use tracing::{Instrument, Span};
 

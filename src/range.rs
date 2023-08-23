@@ -1,13 +1,13 @@
 use crate::{
     error::{Error, UploadError},
     store::Store,
+    stream::once,
 };
 use actix_web::{
     http::header::{ByteRangeSpec, ContentRange, ContentRangeSpec, Range},
     web::Bytes,
 };
-use futures_util::stream::{once, Stream};
-use std::future::ready;
+use futures_core::Stream;
 
 pub(crate) fn chop_bytes(
     byte_range: &ByteRangeSpec,
@@ -17,7 +17,7 @@ pub(crate) fn chop_bytes(
     if let Some((start, end)) = byte_range.to_satisfiable_range(length) {
         // END IS INCLUSIVE
         let end = end as usize + 1;
-        return Ok(once(ready(Ok(bytes.slice(start as usize..end)))));
+        return Ok(once(Ok(bytes.slice(start as usize..end))));
     }
 
     Err(UploadError::Range.into())

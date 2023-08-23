@@ -2,6 +2,7 @@ use crate::{
     bytes_stream::BytesStream,
     repo::{Repo, SettingsRepo},
     store::Store,
+    stream::IntoStreamer,
 };
 use actix_rt::task::JoinError;
 use actix_web::{
@@ -13,7 +14,8 @@ use actix_web::{
     web::Bytes,
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
-use futures_util::{Stream, StreamExt, TryStreamExt};
+use futures_core::Stream;
+use futures_util::TryStreamExt;
 use reqwest::{header::RANGE, Body, Response};
 use reqwest_middleware::{ClientWithMiddleware, RequestBuilder};
 use rusty_s3::{actions::S3Action, Bucket, BucketError, Credentials, UrlStyle};
@@ -142,6 +144,8 @@ where
     S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
 {
     let mut buf = BytesStream::new();
+
+    let mut stream = stream.into_streamer();
 
     while buf.len() < CHUNK_SIZE {
         if let Some(res) = stream.next().await {
@@ -404,7 +408,7 @@ impl Store for ObjectStore {
             ));
         }
 
-        let mut stream = response.bytes_stream();
+        let mut stream = response.bytes_stream().into_streamer();
 
         while let Some(res) = stream.next().await {
             let mut bytes = res.map_err(payload_to_io_error)?;

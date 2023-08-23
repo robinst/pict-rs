@@ -1,4 +1,3 @@
-use futures_util::StreamExt;
 use std::{
     rc::Rc,
     sync::atomic::{AtomicU64, Ordering},
@@ -10,6 +9,7 @@ use crate::{
     error::{Error, UploadError},
     repo::{ArcRepo, Hash},
     store::{Identifier, Store},
+    stream::IntoStreamer,
 };
 
 pub(super) async fn migrate_store<S1, S2>(
@@ -103,8 +103,7 @@ where
     }
 
     // Hashes are read in a consistent order
-    let stream = repo.hashes().await;
-    let mut stream = Box::pin(stream);
+    let mut stream = repo.hashes().await.into_streamer();
 
     let state = Rc::new(MigrateState {
         repo: repo.clone(),

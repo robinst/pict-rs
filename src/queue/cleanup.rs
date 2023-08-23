@@ -5,8 +5,8 @@ use crate::{
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     serde_str::Serde,
     store::{Identifier, Store},
+    stream::IntoStreamer,
 };
-use futures_util::StreamExt;
 
 pub(super) fn perform<'a, S>(
     repo: &'a ArcRepo,
@@ -136,7 +136,7 @@ async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> Result<(), E
 
 #[tracing::instrument(skip_all)]
 async fn all_variants(repo: &ArcRepo) -> Result<(), Error> {
-    let mut hash_stream = Box::pin(repo.hashes().await);
+    let mut hash_stream = repo.hashes().await.into_streamer();
 
     while let Some(res) = hash_stream.next().await {
         let hash = res?;
@@ -151,7 +151,7 @@ async fn outdated_variants(repo: &ArcRepo, config: &Configuration) -> Result<(),
     let now = time::OffsetDateTime::now_utc();
     let since = now.saturating_sub(config.media.retention.variants.to_duration());
 
-    let mut variant_stream = Box::pin(repo.older_variants(since).await?);
+    let mut variant_stream = repo.older_variants(since).await?.into_streamer();
 
     while let Some(res) = variant_stream.next().await {
         let (hash, variant) = res?;
@@ -166,7 +166,7 @@ async fn outdated_proxies(repo: &ArcRepo, config: &Configuration) -> Result<(), 
     let now = time::OffsetDateTime::now_utc();
     let since = now.saturating_sub(config.media.retention.proxy.to_duration());
 
-    let mut alias_stream = Box::pin(repo.older_aliases(since).await?);
+    let mut alias_stream = repo.older_aliases(since).await?.into_streamer();
 
     while let Some(res) = alias_stream.next().await {
         let alias = res?;

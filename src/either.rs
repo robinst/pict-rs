@@ -1,4 +1,4 @@
-use futures_util::stream::Stream;
+use futures_core::Stream;
 use std::{
     pin::Pin,
     task::{Context, Poll},

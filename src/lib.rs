@@ -34,10 +34,8 @@ use actix_web::{
     http::header::{CacheControl, CacheDirective, LastModified, Range, ACCEPT_RANGES},
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
-use futures_util::{
-    stream::{empty, once},
-    Stream, StreamExt, TryStreamExt,
-};
+use futures_core::Stream;
+use futures_util::{StreamExt, TryStreamExt};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::Metrics;
 use once_cell::sync::Lazy;
@@ -46,7 +44,6 @@ use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
 use rusty_s3::UrlStyle;
 use std::{
-    future::ready,
     path::Path,
     path::PathBuf,
     sync::Arc,
@@ -72,7 +69,7 @@ use self::{
     repo::{sled::SledRepo, Alias, DeleteToken, Hash, Repo, UploadId, UploadResult},
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
-    stream::{StreamLimit, StreamTimeout},
+    stream::{empty, once, StreamLimit, StreamTimeout},
 };
 
 pub use self::config::{ConfigSource, PictRsConfiguration};
@@ -845,12 +842,9 @@ async fn process<S: Store + 'static>(
             return Err(UploadError::Range.into());
         }
     } else if not_found {
-        (
-            HttpResponse::NotFound(),
-            Either::right(once(ready(Ok(bytes)))),
-        )
+        (HttpResponse::NotFound(), Either::right(once(Ok(bytes))))
     } else {
-        (HttpResponse::Ok(), Either::right(once(ready(Ok(bytes)))))
+        (HttpResponse::Ok(), Either::right(once(Ok(bytes))))
     };
 
     Ok(srv_response(

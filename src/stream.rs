@@ -1,8 +1,9 @@
 use actix_rt::{task::JoinHandle, time::Sleep};
 use actix_web::web::Bytes;
-use futures_util::Stream;
+use futures_core::Stream;
 use std::{
     future::Future,
+    marker::PhantomData,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -11,6 +12,37 @@ use std::{
     task::{Context, Poll, Wake, Waker},
     time::Duration,
 };
+
+pub(crate) struct Empty<T>(PhantomData<T>);
+
+impl<T> Stream for Empty<T> {
+    type Item = T;
+
+    fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(None)
+    }
+}
+
+pub(crate) fn empty<T>() -> Empty<T> {
+    Empty(PhantomData)
+}
+
+pub(crate) struct Once<T>(Option<T>);
+
+impl<T> Stream for Once<T>
+where
+    T: Unpin,
+{
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(self.0.take())
+    }
+}
+
+pub(crate) fn once<T>(value: T) -> Once<T> {
+    Once(Some(value))
+}
 
 pub(crate) type LocalBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + 'a>>;
 

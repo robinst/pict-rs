@@ -2,7 +2,7 @@
 mod tests;
 
 use actix_web::web::Bytes;
-use futures_util::Stream;
+use futures_core::Stream;
 use tokio::io::AsyncReadExt;
 
 use crate::{

@@ -5,9 +5,10 @@ use crate::{
     formats::{InternalFormat, Validations},
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     store::Store,
+    stream::IntoStreamer,
 };
 use actix_web::web::Bytes;
-use futures_util::{Stream, StreamExt};
+use futures_core::Stream;
 use tracing::{Instrument, Span};
 
 mod hasher;
@@ -26,11 +27,13 @@ where
 }
 
 #[tracing::instrument(skip(stream))]
-async fn aggregate<S>(mut stream: S) -> Result<Bytes, Error>
+async fn aggregate<S>(stream: S) -> Result<Bytes, Error>
 where
     S: Stream<Item = Result<Bytes, Error>> + Unpin,
 {
     let mut buf = BytesStream::new();
+
+    let mut stream = stream.into_streamer();
 
     while let Some(res) = stream.next().await {
         buf.add_bytes(res?);

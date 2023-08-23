@@ -1743,6 +1743,7 @@ dependencies = [
  "console-subscriber",
  "dashmap",
  "flume",
+ "futures-core",
  "futures-util",
  "hex",
  "md-5",

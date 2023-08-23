@@ -6,9 +6,10 @@ pub(crate) use tokio_file::File;
 
 #[cfg(not(feature = "io-uring"))]
 mod tokio_file {
-    use crate::{store::file_store::FileError, Either};
+    use crate::{store::file_store::FileError, stream::IntoStreamer, Either};
     use actix_web::web::{Bytes, BytesMut};
-    use futures_util::{Stream, StreamExt, TryStreamExt};
+    use futures_core::Stream;
+    use futures_util::TryStreamExt;
     use std::{io::SeekFrom, path::Path};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
     use tokio_util::codec::{BytesCodec, FramedRead};
@@ -43,7 +44,8 @@ mod tokio_file {
         where
             S: Stream<Item = std::io::Result<Bytes>>,
         {
-            futures_util::pin_mut!(stream);
+            let stream = std::pin::pin!(stream);
+            let mut stream = stream.into_streamer();
 
             while let Some(res) = stream.next().await {
                 let mut bytes = res?;
@@ -102,9 +104,9 @@ mod tokio_file {
 
 #[cfg(feature = "io-uring")]
 mod io_uring {
-    use crate::store::file_store::FileError;
+    use crate::{store::file_store::FileError, stream::IntoStreamer};
     use actix_web::web::{Bytes, BytesMut};
-    use futures_util::stream::{Stream, StreamExt};
+    use futures_core::Stream;
     use std::{
         convert::TryInto,
         fs::Metadata,
@@ -181,7 +183,8 @@ mod io_uring {
         where
             S: Stream<Item = std::io::Result<Bytes>>,
         {
-            futures_util::pin_mut!(stream);
+            let stream = std::pin::pin!(stream);
+            let mut stream = stream.into_streamer();
             let mut cursor: u64 = 0;
 
             while let Some(res) = stream.next().await {

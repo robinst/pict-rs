@@ -4,7 +4,7 @@ use crate::{
     repo::{Alias, DeleteToken},
     store::{Identifier, StoreError},
 };
-use futures_util::Stream;
+use futures_core::Stream;
 use std::fmt::Debug;
 
 pub(crate) use self::sled::SledRepo;

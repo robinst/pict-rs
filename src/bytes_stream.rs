@@ -2,7 +2,7 @@ use actix_web::{
     body::MessageBody,
     web::{Bytes, BytesMut},
 };
-use futures_util::Stream;
+use futures_core::Stream;
 use std::{
     collections::{vec_deque::IntoIter, VecDeque},
     convert::Infallible,

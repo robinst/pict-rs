@@ -1,6 +1,6 @@
 use actix_web::web::Bytes;
 use base64::{prelude::BASE64_STANDARD, Engine};
-use futures_util::stream::Stream;
+use futures_core::Stream;
 use std::{fmt::Debug, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
 
