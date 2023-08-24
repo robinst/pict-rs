@@ -139,12 +139,9 @@ impl<S> Streamer<S> {
     where
         S: Stream + Unpin,
     {
-        let opt = match self.0 {
-            Some(ref mut stream) => {
-                std::future::poll_fn(|cx| Pin::new(&mut *stream).poll_next(cx)).await
-            }
-            None => None,
-        };
+        let stream = self.0.as_mut().take()?;
+
+        let opt = std::future::poll_fn(|cx| Pin::new(&mut *stream).poll_next(cx)).await;
 
         if opt.is_none() {
             self.0.take();
