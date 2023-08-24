@@ -2,7 +2,7 @@ use crate::{
     bytes_stream::BytesStream,
     repo::{Repo, SettingsRepo},
     store::Store,
-    stream::IntoStreamer,
+    stream::{IntoStreamer, StreamMap},
 };
 use actix_rt::task::JoinError;
 use actix_web::{
@@ -15,7 +15,6 @@ use actix_web::{
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_core::Stream;
-use futures_util::TryStreamExt;
 use reqwest::{header::RANGE, Body, Response};
 use reqwest_middleware::{ClientWithMiddleware, RequestBuilder};
 use rusty_s3::{actions::S3Action, Bucket, BucketError, Credentials, UrlStyle};
@@ -382,7 +381,9 @@ impl Store for ObjectStore {
         }
 
         Ok(Box::pin(
-            response.bytes_stream().map_err(payload_to_io_error),
+            response
+                .bytes_stream()
+                .map(|res| res.map_err(payload_to_io_error)),
         ))
     }
 

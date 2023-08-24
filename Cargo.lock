@@ -1744,7 +1744,6 @@ dependencies = [
  "dashmap",
  "flume",
  "futures-core",
- "futures-util",
  "hex",
  "md-5",
  "metrics",

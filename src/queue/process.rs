@@ -8,8 +8,8 @@ use crate::{
     repo::{Alias, ArcRepo, UploadId, UploadResult},
     serde_str::Serde,
     store::{Identifier, Store},
+    stream::StreamMap,
 };
-use futures_util::TryStreamExt;
 use std::path::PathBuf;
 
 pub(super) fn perform<'a, S>(
@@ -92,7 +92,7 @@ where
             let stream = store2
                 .to_stream(&ident, None, None)
                 .await?
-                .map_err(Error::from);
+                .map(|res| res.map_err(Error::from));
 
             let session =
                 crate::ingest::ingest(&repo, &store2, stream, declared_alias, &media).await?;

@@ -13,6 +13,42 @@ use std::{
     time::Duration,
 };
 
+pin_project_lite::pin_project! {
+    pub(crate) struct Map<S, F> {
+        #[pin]
+        stream: S,
+        func: F,
+    }
+}
+
+pub(crate) trait StreamMap: Stream {
+    fn map<F, U>(self, func: F) -> Map<Self, F>
+    where
+        F: FnMut(Self::Item) -> U,
+        Self: Sized,
+    {
+        Map { stream: self, func }
+    }
+}
+
+impl<T> StreamMap for T where T: Stream {}
+
+impl<S, F, U> Stream for Map<S, F>
+where
+    S: Stream,
+    F: FnMut(S::Item) -> U,
+{
+    type Item = U;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+
+        let value = std::task::ready!(this.stream.poll_next(cx));
+
+        Poll::Ready(value.map(this.func))
+    }
+}
+
 pub(crate) struct Empty<T>(PhantomData<T>);
 
 impl<T> Stream for Empty<T> {

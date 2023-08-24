@@ -2,10 +2,10 @@ use crate::{
     error::Error,
     repo::{ArcRepo, UploadId},
     store::Store,
+    stream::StreamMap,
 };
 use actix_web::web::Bytes;
 use futures_core::Stream;
-use futures_util::TryStreamExt;
 use mime::APPLICATION_OCTET_STREAM;
 use tracing::{Instrument, Span};
 
@@ -58,7 +58,8 @@ where
             .create_upload(self.upload_id.expect("Upload id exists"))
             .await?;
 
-        let stream = stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+        let stream =
+            stream.map(|res| res.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
 
         // use octet-stream, we don't know the upload's real type yet
         let identifier = store.save_stream(stream, APPLICATION_OCTET_STREAM).await?;

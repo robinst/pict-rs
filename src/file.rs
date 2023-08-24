@@ -6,10 +6,13 @@ pub(crate) use tokio_file::File;
 
 #[cfg(not(feature = "io-uring"))]
 mod tokio_file {
-    use crate::{store::file_store::FileError, stream::IntoStreamer, Either};
+    use crate::{
+        store::file_store::FileError,
+        stream::{IntoStreamer, StreamMap},
+        Either,
+    };
     use actix_web::web::{Bytes, BytesMut};
     use futures_core::Stream;
-    use futures_util::TryStreamExt;
     use std::{io::SeekFrom, path::Path};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
     use tokio_util::codec::{BytesCodec, FramedRead};
@@ -97,7 +100,7 @@ mod tokio_file {
                 (None, None) => Either::right(self.inner),
             };
 
-            Ok(FramedRead::new(obj, BytesCodec::new()).map_ok(BytesMut::freeze))
+            Ok(FramedRead::new(obj, BytesCodec::new()).map(|res| res.map(BytesMut::freeze)))
         }
     }
 }

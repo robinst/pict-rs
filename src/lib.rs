@@ -35,7 +35,6 @@ use actix_web::{
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use futures_core::Stream;
-use futures_util::{StreamExt, TryStreamExt};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::Metrics;
 use once_cell::sync::Lazy;
@@ -69,7 +68,7 @@ use self::{
     repo::{sled::SledRepo, Alias, DeleteToken, Hash, Repo, UploadId, UploadResult},
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
-    stream::{empty, once, StreamLimit, StreamTimeout},
+    stream::{empty, once, StreamLimit, StreamMap, StreamTimeout},
 };
 
 pub use self::config::{ConfigSource, PictRsConfiguration};
@@ -154,7 +153,7 @@ impl<S: Store + 'static> FormData for Upload<S> {
 
                     let span = tracing::info_span!("file-upload", ?filename);
 
-                    let stream = stream.map_err(Error::from);
+                    let stream = stream.map(|res| res.map_err(Error::from));
 
                     Box::pin(
                         async move {
@@ -213,7 +212,7 @@ impl<S: Store + 'static> FormData for Import<S> {
 
                     let span = tracing::info_span!("file-import", ?filename);
 
-                    let stream = stream.map_err(Error::from);
+                    let stream = stream.map(|res| res.map_err(Error::from));
 
                     Box::pin(
                         async move {
@@ -350,7 +349,7 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
 
                     let span = tracing::info_span!("file-proxy", ?filename);
 
-                    let stream = stream.map_err(Error::from);
+                    let stream = stream.map(|res| res.map_err(Error::from));
 
                     Box::pin(
                         async move {
@@ -521,7 +520,7 @@ async fn download_stream(
 
     let stream = res
         .bytes_stream()
-        .map_err(Error::from)
+        .map(|res| res.map_err(Error::from))
         .limit((config.media.max_file_size * MEGABYTES) as u64);
 
     Ok(stream)
@@ -1231,7 +1230,7 @@ async fn ranged_file_resp<S: Store + 'static>(
                     Either::left(Either::left(
                         range::chop_store(range, store, &identifier, len)
                             .await?
-                            .map_err(Error::from),
+                            .map(|res| res.map_err(Error::from)),
                     )),
                 )
             } else {
@@ -1248,7 +1247,7 @@ async fn ranged_file_resp<S: Store + 'static>(
         let stream = store
             .to_stream(&identifier, None, None)
             .await?
-            .map_err(Error::from);
+            .map(|res| res.map_err(Error::from));
 
         if not_found {
             (HttpResponse::NotFound(), Either::right(stream))
