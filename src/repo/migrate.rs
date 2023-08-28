@@ -285,7 +285,9 @@ async fn do_migrate_hash_04<S: Store>(
 
     let hash = Hash::new(hash, size, hash_details.internal_format());
 
-    let _ = new_repo.create_hash(hash.clone(), &identifier).await?;
+    let _ = new_repo
+        .create_hash_with_timestamp(hash.clone(), &identifier, hash_details.created_at())
+        .await?;
 
     for alias in aliases {
         let delete_token = old_repo

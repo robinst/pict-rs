@@ -30,6 +30,13 @@ impl Details {
         self.content_type.type_() == "video"
     }
 
+    pub(crate) fn created_at(&self) -> time::OffsetDateTime {
+        match self.created_at {
+            MaybeHumanDate::OldDate(timestamp) => timestamp,
+            MaybeHumanDate::HumanDate(timestamp) => timestamp,
+        }
+    }
+
     pub(crate) async fn from_bytes(timeout: u64, input: web::Bytes) -> Result<Self, Error> {
         let DiscoveryLite {
             format,

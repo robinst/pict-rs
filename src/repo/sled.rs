@@ -1055,7 +1055,7 @@ impl HashRepo for SledRepo {
             Some(ordered_hash) => {
                 let hash_bytes = serialize_ordered_hash(ordered_hash);
                 (
-                    self.hashes_inverse.range(..hash_bytes.clone()),
+                    self.hashes_inverse.range(..=hash_bytes.clone()),
                     Some(self.hashes_inverse.range(hash_bytes..)),
                 )
             }
@@ -1067,21 +1067,27 @@ impl HashRepo for SledRepo {
                 .keys()
                 .rev()
                 .filter_map(|res| res.map(parse_ordered_hash).transpose())
-                .take(limit);
+                .take(limit + 1);
 
             let prev = prev_iter
                 .and_then(|prev_iter| {
                     prev_iter
                         .keys()
                         .filter_map(|res| res.map(parse_ordered_hash).transpose())
-                        .take(limit)
+                        .take(limit + 1)
                         .last()
                 })
                 .transpose()?;
 
-            let hashes = page_iter.collect::<Result<Vec<_>, _>>()?;
+            let mut hashes = page_iter.collect::<Result<Vec<_>, _>>()?;
 
-            let next = hashes.last().cloned();
+            let next = if hashes.len() > limit {
+                hashes.pop()
+            } else {
+                None
+            };
+
+            let prev = if prev == bound { None } else { prev };
 
             Ok(HashPage {
                 limit,
@@ -1099,10 +1105,11 @@ impl HashRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn create_hash(
+    async fn create_hash_with_timestamp(
         &self,
         hash: Hash,
         identifier: &dyn Identifier,
+        timestamp: time::OffsetDateTime,
     ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
         let identifier: sled::IVec = identifier.to_bytes()?.into();
 
@@ -1111,7 +1118,7 @@ impl HashRepo for SledRepo {
         let hash_identifiers = self.hash_identifiers.clone();
 
         let created_key = serialize_ordered_hash(&OrderedHash {
-            timestamp: time::OffsetDateTime::now_utc(),
+            timestamp,
             hash: hash.clone(),
         });
 

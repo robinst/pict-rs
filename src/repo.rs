@@ -500,7 +500,7 @@ where
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct OrderedHash {
     timestamp: time::OffsetDateTime,
     hash: Hash,
@@ -561,6 +561,16 @@ pub(crate) trait HashRepo: BaseRepo {
         &self,
         hash: Hash,
         identifier: &dyn Identifier,
+    ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
+        self.create_hash_with_timestamp(hash, identifier, time::OffsetDateTime::now_utc())
+            .await
+    }
+
+    async fn create_hash_with_timestamp(
+        &self,
+        hash: Hash,
+        identifier: &dyn Identifier,
+        timestamp: time::OffsetDateTime,
     ) -> Result<Result<(), HashAlreadyExists>, StoreError>;
 
     async fn update_identifier(
@@ -616,12 +626,13 @@ where
         T::hashes_ordered(self, bound, limit).await
     }
 
-    async fn create_hash(
+    async fn create_hash_with_timestamp(
         &self,
         hash: Hash,
         identifier: &dyn Identifier,
+        timestamp: time::OffsetDateTime,
     ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
-        T::create_hash(self, hash, identifier).await
+        T::create_hash_with_timestamp(self, hash, identifier, timestamp).await
     }
 
     async fn update_identifier(
