@@ -4,6 +4,7 @@ use crate::{
     store::{Identifier, StoreError},
     stream::LocalBoxStream,
 };
+use base64::Engine;
 use std::{fmt::Debug, sync::Arc};
 use url::Url;
 use uuid::Uuid;
@@ -499,11 +500,62 @@ where
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct OrderedHash {
+    timestamp: time::OffsetDateTime,
+    hash: Hash,
+}
+
+pub(crate) struct HashPage {
+    pub(crate) limit: usize,
+    prev: Option<OrderedHash>,
+    next: Option<OrderedHash>,
+    pub(crate) hashes: Vec<Hash>,
+}
+
+fn ordered_hash_to_string(OrderedHash { timestamp, hash }: &OrderedHash) -> String {
+    let mut bytes: Vec<u8> = timestamp.unix_timestamp_nanos().to_be_bytes().into();
+    bytes.extend(hash.to_bytes());
+    base64::prelude::BASE64_URL_SAFE.encode(bytes)
+}
+
+fn ordered_hash_from_string(s: &str) -> Option<OrderedHash> {
+    let bytes = base64::prelude::BASE64_URL_SAFE.decode(s).ok()?;
+    let timestamp: [u8; 16] = bytes[0..16].try_into().ok()?;
+    let timestamp = i128::from_be_bytes(timestamp);
+    let timestamp = time::OffsetDateTime::from_unix_timestamp_nanos(timestamp).ok()?;
+    let hash = Hash::from_bytes(&bytes[16..])?;
+
+    Some(OrderedHash { timestamp, hash })
+}
+
+impl HashPage {
+    pub(crate) fn next(&self) -> Option<String> {
+        self.next.as_ref().map(ordered_hash_to_string)
+    }
+
+    pub(crate) fn prev(&self) -> Option<String> {
+        self.prev.as_ref().map(ordered_hash_to_string)
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 pub(crate) trait HashRepo: BaseRepo {
     async fn size(&self) -> Result<u64, RepoError>;
 
     async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>>;
+
+    async fn hash_page(&self, slug: Option<String>, limit: usize) -> Result<HashPage, RepoError> {
+        let bound = slug.as_deref().and_then(ordered_hash_from_string);
+
+        self.hashes_ordered(bound, limit).await
+    }
+
+    async fn hashes_ordered(
+        &self,
+        bound: Option<OrderedHash>,
+        limit: usize,
+    ) -> Result<HashPage, RepoError>;
 
     async fn create_hash(
         &self,
@@ -554,6 +606,14 @@ where
 
     async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>> {
         T::hashes(self).await
+    }
+
+    async fn hashes_ordered(
+        &self,
+        bound: Option<OrderedHash>,
+        limit: usize,
+    ) -> Result<HashPage, RepoError> {
+        T::hashes_ordered(self, bound, limit).await
     }
 
     async fn create_hash(

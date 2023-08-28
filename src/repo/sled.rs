@@ -1,11 +1,5 @@
 use crate::{
     details::MaybeHumanDate,
-    repo::{
-        hash::Hash, Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken,
-        Details, DetailsRepo, FullRepo, HashAlreadyExists, HashRepo, Identifier, JobId, ProxyRepo,
-        QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo, UploadResult,
-        VariantAccessRepo, VariantAlreadyExists,
-    },
     serde_str::Serde,
     store::StoreError,
     stream::{from_iterator, LocalBoxStream},
@@ -23,6 +17,13 @@ use std::{
 use tokio::sync::Notify;
 use url::Url;
 use uuid::Uuid;
+
+use super::{
+    hash::Hash, Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken,
+    Details, DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, Identifier, JobId,
+    OrderedHash, ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId,
+    UploadRepo, UploadResult, VariantAccessRepo, VariantAlreadyExists,
+};
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -64,6 +65,7 @@ pub(crate) struct SledRepo {
     settings: Tree,
     identifier_details: Tree,
     hashes: Tree,
+    hashes_inverse: Tree,
     hash_aliases: Tree,
     hash_identifiers: Tree,
     hash_variant_identifiers: Tree,
@@ -102,6 +104,7 @@ impl SledRepo {
             settings: db.open_tree("pict-rs-settings-tree")?,
             identifier_details: db.open_tree("pict-rs-identifier-details-tree")?,
             hashes: db.open_tree("pict-rs-hashes-tree")?,
+            hashes_inverse: db.open_tree("pict-rs-hashes-inverse-tree")?,
             hash_aliases: db.open_tree("pict-rs-hash-aliases-tree")?,
             hash_identifiers: db.open_tree("pict-rs-hash-identifiers-tree")?,
             hash_variant_identifiers: db.open_tree("pict-rs-hash-variant-identifiers-tree")?,
@@ -996,6 +999,32 @@ impl StoreMigrationRepo for SledRepo {
     }
 }
 
+fn parse_ordered_hash(key: IVec) -> Option<OrderedHash> {
+    if key.len() < 16 {
+        return None;
+    }
+
+    let timestamp_bytes: [u8; 16] = key[0..16].try_into().ok()?;
+    let timestamp_i128 = i128::from_be_bytes(timestamp_bytes);
+    let timestamp = time::OffsetDateTime::from_unix_timestamp_nanos(timestamp_i128).ok()?;
+
+    let hash = Hash::from_bytes(&key[16..])?;
+
+    Some(OrderedHash { timestamp, hash })
+}
+
+fn serialize_ordered_hash(ordered_hash: &OrderedHash) -> IVec {
+    let mut bytes: Vec<u8> = ordered_hash
+        .timestamp
+        .unix_timestamp_nanos()
+        .to_be_bytes()
+        .into();
+
+    bytes.extend(ordered_hash.hash.to_bytes());
+
+    IVec::from(bytes)
+}
+
 #[async_trait::async_trait(?Send)]
 impl HashRepo for SledRepo {
     async fn size(&self) -> Result<u64, RepoError> {
@@ -1017,6 +1046,58 @@ impl HashRepo for SledRepo {
         Box::pin(from_iterator(iter, 8))
     }
 
+    async fn hashes_ordered(
+        &self,
+        bound: Option<OrderedHash>,
+        limit: usize,
+    ) -> Result<HashPage, RepoError> {
+        let (page_iter, prev_iter) = match &bound {
+            Some(ordered_hash) => {
+                let hash_bytes = serialize_ordered_hash(ordered_hash);
+                (
+                    self.hashes_inverse.range(..hash_bytes.clone()),
+                    Some(self.hashes_inverse.range(hash_bytes..)),
+                )
+            }
+            None => (self.hashes_inverse.iter(), None),
+        };
+
+        actix_rt::task::spawn_blocking(move || {
+            let page_iter = page_iter
+                .keys()
+                .rev()
+                .filter_map(|res| res.map(parse_ordered_hash).transpose())
+                .take(limit);
+
+            let prev = prev_iter
+                .and_then(|prev_iter| {
+                    prev_iter
+                        .keys()
+                        .filter_map(|res| res.map(parse_ordered_hash).transpose())
+                        .take(limit)
+                        .last()
+                })
+                .transpose()?;
+
+            let hashes = page_iter.collect::<Result<Vec<_>, _>>()?;
+
+            let next = hashes.last().cloned();
+
+            Ok(HashPage {
+                limit,
+                prev,
+                next,
+                hashes: hashes
+                    .into_iter()
+                    .map(|OrderedHash { hash, .. }| hash)
+                    .collect(),
+            }) as Result<HashPage, SledError>
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)?
+        .map_err(RepoError::from)
+    }
+
     #[tracing::instrument(level = "trace", skip(self))]
     async fn create_hash(
         &self,
@@ -1026,21 +1107,30 @@ impl HashRepo for SledRepo {
         let identifier: sled::IVec = identifier.to_bytes()?.into();
 
         let hashes = self.hashes.clone();
+        let hashes_inverse = self.hashes_inverse.clone();
         let hash_identifiers = self.hash_identifiers.clone();
+
+        let created_key = serialize_ordered_hash(&OrderedHash {
+            timestamp: time::OffsetDateTime::now_utc(),
+            hash: hash.clone(),
+        });
 
         let hash = hash.to_ivec();
 
         let res = actix_web::web::block(move || {
-            (&hashes, &hash_identifiers).transaction(|(hashes, hash_identifiers)| {
-                if hashes.get(hash.clone())?.is_some() {
-                    return Ok(Err(HashAlreadyExists));
-                }
+            (&hashes, &hashes_inverse, &hash_identifiers).transaction(
+                |(hashes, hashes_inverse, hash_identifiers)| {
+                    if hashes.get(hash.clone())?.is_some() {
+                        return Ok(Err(HashAlreadyExists));
+                    }
 
-                hashes.insert(hash.clone(), hash.clone())?;
-                hash_identifiers.insert(hash.clone(), &identifier)?;
+                    hashes.insert(hash.clone(), created_key.clone())?;
+                    hashes_inverse.insert(created_key.clone(), hash.clone())?;
+                    hash_identifiers.insert(hash.clone(), &identifier)?;
 
-                Ok(Ok(()))
-            })
+                    Ok(Ok(()))
+                },
+            )
         })
         .await
         .map_err(|_| RepoError::Canceled)?;
@@ -1198,6 +1288,7 @@ impl HashRepo for SledRepo {
         let hash = hash.to_ivec();
 
         let hashes = self.hashes.clone();
+        let hashes_inverse = self.hashes_inverse.clone();
         let hash_identifiers = self.hash_identifiers.clone();
         let hash_motion_identifiers = self.hash_motion_identifiers.clone();
         let hash_variant_identifiers = self.hash_variant_identifiers.clone();
@@ -1216,6 +1307,7 @@ impl HashRepo for SledRepo {
         let res = actix_web::web::block(move || {
             (
                 &hashes,
+                &hashes_inverse,
                 &hash_identifiers,
                 &hash_motion_identifiers,
                 &hash_variant_identifiers,
@@ -1223,11 +1315,15 @@ impl HashRepo for SledRepo {
                 .transaction(
                     |(
                         hashes,
+                        hashes_inverse,
                         hash_identifiers,
                         hash_motion_identifiers,
                         hash_variant_identifiers,
                     )| {
-                        hashes.remove(&hash)?;
+                        if let Some(value) = hashes.remove(&hash)? {
+                            hashes_inverse.remove(value)?;
+                        }
+
                         hash_identifiers.remove(&hash)?;
                         hash_motion_identifiers.remove(&hash)?;
 

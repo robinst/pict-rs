@@ -26,6 +26,10 @@ impl Hash {
         }
     }
 
+    pub(crate) fn to_hex(&self) -> String {
+        hex::encode(self.to_bytes())
+    }
+
     pub(super) fn to_bytes(&self) -> Vec<u8> {
         let format = self.format.to_bytes();
 

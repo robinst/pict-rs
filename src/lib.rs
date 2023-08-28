@@ -575,6 +575,80 @@ async fn do_download_backgrounded<S: Store + 'static>(
     })))
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct PageQuery {
+    slug: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(serde::Serialize)]
+struct PageJson {
+    limit: usize,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prev: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next: Option<String>,
+
+    hashes: Vec<HashJson>,
+}
+
+#[derive(serde::Serialize)]
+struct HashJson {
+    hex: String,
+    aliases: Vec<String>,
+    details: Option<Details>,
+}
+
+/// Get a page of hashes
+#[tracing::instrument(name = "Hash Page", skip(repo))]
+async fn page(
+    repo: web::Data<ArcRepo>,
+    web::Query(PageQuery { slug, limit }): web::Query<PageQuery>,
+) -> Result<HttpResponse, Error> {
+    let limit = limit.unwrap_or(20);
+
+    let page = repo.hash_page(slug, limit).await?;
+
+    let mut hashes = Vec::with_capacity(page.hashes.len());
+
+    for hash in &page.hashes {
+        let hex = hash.to_hex();
+        let aliases = repo
+            .for_hash(hash.clone())
+            .await?
+            .into_iter()
+            .map(|a| a.to_string())
+            .collect();
+
+        let identifier = repo.identifier(hash.clone()).await?;
+        let details = if let Some(identifier) = identifier {
+            repo.details(&identifier).await?
+        } else {
+            None
+        };
+
+        hashes.push(HashJson {
+            hex,
+            aliases,
+            details,
+        });
+    }
+
+    let page = PageJson {
+        limit: page.limit,
+        prev: page.prev(),
+        next: page.next(),
+        hashes,
+    };
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "msg": "ok",
+        "page": page,
+    })))
+}
+
 /// Delete aliases and files
 #[tracing::instrument(name = "Deleting file", skip(repo, config))]
 async fn delete(
@@ -1558,6 +1632,7 @@ fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
                 .service(web::resource("/aliases").route(web::get().to(aliases)))
                 .service(web::resource("/identifier").route(web::get().to(identifier::<S>)))
                 .service(web::resource("/set_not_found").route(web::post().to(set_not_found)))
+                .service(web::resource("/hashes").route(web::get().to(page)))
                 .configure(extra_config),
         );
 }
