@@ -110,18 +110,14 @@ pub(crate) fn build_chain(
 
     let (mut path, args) =
         args.iter()
-            .fold(Ok((PathBuf::default(), vec![])), |inner, (name, value)| {
-                if let Ok(inner) = inner {
-                    parse!(inner, Identity, name, value);
-                    parse!(inner, Thumbnail, name, value);
-                    parse!(inner, Resize, name, value);
-                    parse!(inner, Crop, name, value);
-                    parse!(inner, Blur, name, value);
+            .try_fold((PathBuf::default(), vec![]), |inner, (name, value)| {
+                parse!(inner, Identity, name, value);
+                parse!(inner, Thumbnail, name, value);
+                parse!(inner, Resize, name, value);
+                parse!(inner, Crop, name, value);
+                parse!(inner, Blur, name, value);
 
-                    Err(Error::from(UploadError::ParsePath))
-                } else {
-                    inner
-                }
+                Err(Error::from(UploadError::ParsePath))
             })?;
 
     path.push(ext);
