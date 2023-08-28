@@ -136,6 +136,12 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
             .await?;
     }
 
+    if let Some(generator_state) = old_repo.get(crate::NOT_FOUND_KEY).await? {
+        new_repo
+            .set(crate::NOT_FOUND_KEY, generator_state.to_vec().into())
+            .await?;
+    }
+
     tracing::warn!("Migration complete");
 
     Ok(())
