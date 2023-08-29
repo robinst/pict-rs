@@ -1120,7 +1120,7 @@ impl HashRepo for SledRepo {
     ) -> Result<HashPage, RepoError> {
         let date_nanos = date.unix_timestamp_nanos().to_be_bytes();
 
-        let page_iter = self.hashes_inverse.range(..=date_nanos.clone());
+        let page_iter = self.hashes_inverse.range(..=date_nanos);
         let prev_iter = Some(self.hashes_inverse.range(date_nanos..));
 
         actix_rt::task::spawn_blocking(move || {
