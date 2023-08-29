@@ -1046,6 +1046,12 @@ impl HashRepo for SledRepo {
         Box::pin(from_iterator(iter, 8))
     }
 
+    async fn bound(&self, hash: Hash) -> Result<Option<OrderedHash>, RepoError> {
+        let opt = b!(self.hashes, hashes.get(hash.to_ivec()));
+
+        Ok(opt.and_then(parse_ordered_hash))
+    }
+
     async fn hashes_ordered(
         &self,
         bound: Option<OrderedHash>,
@@ -1091,8 +1097,8 @@ impl HashRepo for SledRepo {
 
             Ok(HashPage {
                 limit,
-                prev,
-                next,
+                prev: prev.map(|OrderedHash { hash, .. }| hash),
+                next: next.map(|OrderedHash { hash, .. }| hash),
                 hashes: hashes
                     .into_iter()
                     .map(|OrderedHash { hash, .. }| hash)

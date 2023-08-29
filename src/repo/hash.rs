@@ -31,13 +31,13 @@ impl Hash {
     }
 
     pub(super) fn to_bytes(&self) -> Vec<u8> {
-        let format = self.format.to_bytes();
+        let format_byte = self.format.to_byte();
 
-        let mut vec = Vec::with_capacity(32 + 8 + format.len());
+        let mut vec = Vec::with_capacity(32 + 6 + 1);
 
         vec.extend_from_slice(&self.hash[..]);
-        vec.extend(self.size.to_be_bytes());
-        vec.extend(format);
+        vec.extend_from_slice(&self.size.to_be_bytes()[2..]);
+        vec.push(format_byte);
 
         vec
     }
@@ -51,17 +51,18 @@ impl Hash {
     }
 
     pub(super) fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < 32 + 8 + 5 {
+        if bytes.len() != 32 + 6 + 1 {
             return None;
         }
 
         let hash = &bytes[..32];
-        let size = &bytes[32..40];
-        let format = &bytes[40..];
+        let size_bytes = &bytes[32..38];
+        let format_byte = bytes[38];
 
         let hash: [u8; 32] = hash.try_into().expect("Correct length");
-        let size: [u8; 8] = size.try_into().expect("Correct length");
-        let format = InternalFormat::from_bytes(format)?;
+        let mut size = [0u8; 8];
+        size[2..].copy_from_slice(size_bytes);
+        let format = InternalFormat::from_byte(format_byte)?;
 
         Some(Self {
             hash: Arc::new(hash),

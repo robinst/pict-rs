@@ -79,35 +79,35 @@ impl InternalFormat {
         }
     }
 
-    pub(crate) const fn to_bytes(self) -> &'static [u8] {
+    pub(crate) const fn to_byte(self) -> u8 {
         match self {
-            Self::Animation(AnimationFormat::Apng) => b"a-apng",
-            Self::Animation(AnimationFormat::Avif) => b"a-avif",
-            Self::Animation(AnimationFormat::Gif) => b"a-gif",
-            Self::Animation(AnimationFormat::Webp) => b"a-webp",
-            Self::Image(ImageFormat::Avif) => b"i-avif",
-            Self::Image(ImageFormat::Jpeg) => b"i-jpeg",
-            Self::Image(ImageFormat::Jxl) => b"i-jxl",
-            Self::Image(ImageFormat::Png) => b"i-png",
-            Self::Image(ImageFormat::Webp) => b"i-webp",
-            Self::Video(InternalVideoFormat::Mp4) => b"v-mp4",
-            Self::Video(InternalVideoFormat::Webm) => b"v-webm",
+            Self::Animation(AnimationFormat::Apng) => 0,
+            Self::Animation(AnimationFormat::Avif) => 1,
+            Self::Animation(AnimationFormat::Gif) => 2,
+            Self::Animation(AnimationFormat::Webp) => 3,
+            Self::Image(ImageFormat::Avif) => 4,
+            Self::Image(ImageFormat::Jpeg) => 5,
+            Self::Image(ImageFormat::Jxl) => 6,
+            Self::Image(ImageFormat::Png) => 7,
+            Self::Image(ImageFormat::Webp) => 8,
+            Self::Video(InternalVideoFormat::Mp4) => 9,
+            Self::Video(InternalVideoFormat::Webm) => 10,
         }
     }
 
-    pub(crate) const fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        match bytes {
-            b"a-apng" => Some(Self::Animation(AnimationFormat::Apng)),
-            b"a-avif" => Some(Self::Animation(AnimationFormat::Avif)),
-            b"a-gif" => Some(Self::Animation(AnimationFormat::Gif)),
-            b"a-webp" => Some(Self::Animation(AnimationFormat::Webp)),
-            b"i-avif" => Some(Self::Image(ImageFormat::Avif)),
-            b"i-jpeg" => Some(Self::Image(ImageFormat::Jpeg)),
-            b"i-jxl" => Some(Self::Image(ImageFormat::Jxl)),
-            b"i-png" => Some(Self::Image(ImageFormat::Png)),
-            b"i-webp" => Some(Self::Image(ImageFormat::Webp)),
-            b"v-mp4" => Some(Self::Video(InternalVideoFormat::Mp4)),
-            b"v-webm" => Some(Self::Video(InternalVideoFormat::Webm)),
+    pub(crate) const fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::Animation(AnimationFormat::Apng)),
+            1 => Some(Self::Animation(AnimationFormat::Avif)),
+            2 => Some(Self::Animation(AnimationFormat::Gif)),
+            3 => Some(Self::Animation(AnimationFormat::Webp)),
+            4 => Some(Self::Image(ImageFormat::Avif)),
+            5 => Some(Self::Image(ImageFormat::Jpeg)),
+            6 => Some(Self::Image(ImageFormat::Jxl)),
+            7 => Some(Self::Image(ImageFormat::Png)),
+            8 => Some(Self::Image(ImageFormat::Webp)),
+            9 => Some(Self::Video(InternalVideoFormat::Mp4)),
+            10 => Some(Self::Video(InternalVideoFormat::Webm)),
             _ => None,
         }
     }

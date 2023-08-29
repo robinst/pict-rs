@@ -612,7 +612,7 @@ async fn page(
 ) -> Result<HttpResponse, Error> {
     let limit = limit.unwrap_or(20);
 
-    let page = repo.hash_page(slug.clone(), limit).await?;
+    let page = repo.hash_page(slug, limit).await?;
 
     let mut hashes = Vec::with_capacity(page.hashes.len());
 
@@ -641,7 +641,7 @@ async fn page(
 
     let page = PageJson {
         limit: page.limit,
-        current: slug,
+        current: page.current(),
         prev: page.prev(),
         next: page.next(),
         hashes,
