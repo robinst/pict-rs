@@ -1113,6 +1113,62 @@ impl HashRepo for SledRepo {
         .map_err(RepoError::from)
     }
 
+    async fn hash_page_by_date(
+        &self,
+        date: time::OffsetDateTime,
+        limit: usize,
+    ) -> Result<HashPage, RepoError> {
+        let date_nanos = date.unix_timestamp_nanos().to_be_bytes();
+
+        let page_iter = self.hashes_inverse.range(..=date_nanos.clone());
+        let prev_iter = Some(self.hashes_inverse.range(date_nanos..));
+
+        actix_rt::task::spawn_blocking(move || {
+            let page_iter = page_iter
+                .keys()
+                .rev()
+                .filter_map(|res| res.map(parse_ordered_hash).transpose())
+                .take(limit + 1);
+
+            let prev = prev_iter
+                .and_then(|prev_iter| {
+                    prev_iter
+                        .keys()
+                        .filter_map(|res| res.map(parse_ordered_hash).transpose())
+                        .take(limit + 1)
+                        .last()
+                })
+                .transpose()?;
+
+            let mut hashes = page_iter.collect::<Result<Vec<_>, _>>()?;
+
+            let next = if hashes.len() > limit {
+                hashes.pop()
+            } else {
+                None
+            };
+
+            let prev = if prev.as_ref() == hashes.get(0) {
+                None
+            } else {
+                prev
+            };
+
+            Ok(HashPage {
+                limit,
+                prev: prev.map(|OrderedHash { hash, .. }| hash),
+                next: next.map(|OrderedHash { hash, .. }| hash),
+                hashes: hashes
+                    .into_iter()
+                    .map(|OrderedHash { hash, .. }| hash)
+                    .collect(),
+            }) as Result<HashPage, SledError>
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)?
+        .map_err(RepoError::from)
+    }
+
     #[tracing::instrument(level = "trace", skip(self))]
     async fn create_hash_with_timestamp(
         &self,

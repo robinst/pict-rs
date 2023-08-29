@@ -556,6 +556,12 @@ pub(crate) trait HashRepo: BaseRepo {
         self.hashes_ordered(bound, limit).await
     }
 
+    async fn hash_page_by_date(
+        &self,
+        date: time::OffsetDateTime,
+        limit: usize,
+    ) -> Result<HashPage, RepoError>;
+
     async fn bound(&self, hash: Hash) -> Result<Option<OrderedHash>, RepoError>;
 
     async fn hashes_ordered(
@@ -635,6 +641,14 @@ where
         limit: usize,
     ) -> Result<HashPage, RepoError> {
         T::hashes_ordered(self, bound, limit).await
+    }
+
+    async fn hash_page_by_date(
+        &self,
+        date: time::OffsetDateTime,
+        limit: usize,
+    ) -> Result<HashPage, RepoError> {
+        T::hash_page_by_date(self, date, limit).await
     }
 
     async fn create_hash_with_timestamp(

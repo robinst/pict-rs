@@ -34,6 +34,7 @@ use actix_web::{
     http::header::{CacheControl, CacheDirective, LastModified, Range, ACCEPT_RANGES},
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
+use details::HumanDate;
 use futures_core::Stream;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::Metrics;
@@ -578,6 +579,7 @@ async fn do_download_backgrounded<S: Store + 'static>(
 #[derive(Debug, serde::Deserialize)]
 struct PageQuery {
     slug: Option<String>,
+    timestamp: Option<HumanDate>,
     limit: Option<usize>,
 }
 
@@ -608,11 +610,19 @@ struct HashJson {
 #[tracing::instrument(name = "Hash Page", skip(repo))]
 async fn page(
     repo: web::Data<ArcRepo>,
-    web::Query(PageQuery { slug, limit }): web::Query<PageQuery>,
+    web::Query(PageQuery {
+        slug,
+        timestamp,
+        limit,
+    }): web::Query<PageQuery>,
 ) -> Result<HttpResponse, Error> {
     let limit = limit.unwrap_or(20);
 
-    let page = repo.hash_page(slug, limit).await?;
+    let page = if let Some(timestamp) = timestamp {
+        repo.hash_page_by_date(timestamp.timestamp, limit).await?
+    } else {
+        repo.hash_page(slug, limit).await?
+    };
 
     let mut hashes = Vec::with_capacity(page.hashes.len());
 
