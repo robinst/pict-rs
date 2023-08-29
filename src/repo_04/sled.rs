@@ -1,4 +1,5 @@
 use crate::{
+    details::HumanDate,
     repo_04::{
         Alias, AliasRepo, BaseRepo, DeleteToken, Details, HashRepo, Identifier, IdentifierRepo,
         RepoError, SettingsRepo,
@@ -14,6 +15,21 @@ use std::{
         Arc,
     },
 };
+
+#[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(untagged)]
+enum MaybeHumanDate {
+    HumanDate(#[serde(with = "time::serde::rfc3339")] time::OffsetDateTime),
+    OldDate(#[serde(serialize_with = "time::serde::rfc3339::serialize")] time::OffsetDateTime),
+}
+
+impl MaybeHumanDate {
+    fn into_human_date(self) -> HumanDate {
+        match self {
+            Self::HumanDate(timestamp) | Self::OldDate(timestamp) => HumanDate { timestamp },
+        }
+    }
+}
 
 macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
@@ -63,7 +79,7 @@ pub(crate) struct OldDetails {
     height: u16,
     frames: Option<u32>,
     content_type: crate::serde_str::Serde<mime::Mime>,
-    created_at: crate::details::MaybeHumanDate,
+    created_at: MaybeHumanDate,
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<crate::formats::InternalFormat>,
 }
@@ -87,7 +103,11 @@ impl OldDetails {
         })?;
 
         Some(Details::from_parts_full(
-            format, width, height, frames, created_at,
+            format,
+            width,
+            height,
+            frames,
+            created_at.into_human_date(),
         ))
     }
 }

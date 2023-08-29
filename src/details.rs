@@ -9,10 +9,10 @@ use actix_web::web;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
-#[serde(untagged)]
-pub(crate) enum MaybeHumanDate {
-    HumanDate(#[serde(with = "time::serde::rfc3339")] time::OffsetDateTime),
-    OldDate(#[serde(serialize_with = "time::serde::rfc3339::serialize")] time::OffsetDateTime),
+#[serde(transparent)]
+pub(crate) struct HumanDate {
+    #[serde(with = "time::serde::rfc3339")]
+    pub(crate) timestamp: time::OffsetDateTime,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -21,7 +21,7 @@ pub(crate) struct Details {
     height: u16,
     frames: Option<u32>,
     content_type: Serde<mime::Mime>,
-    created_at: MaybeHumanDate,
+    created_at: HumanDate,
     format: InternalFormat,
 }
 
@@ -31,10 +31,7 @@ impl Details {
     }
 
     pub(crate) fn created_at(&self) -> time::OffsetDateTime {
-        match self.created_at {
-            MaybeHumanDate::OldDate(timestamp) => timestamp,
-            MaybeHumanDate::HumanDate(timestamp) => timestamp,
-        }
+        self.created_at.timestamp
     }
 
     pub(crate) async fn from_bytes(timeout: u64, input: web::Bytes) -> Result<Self, Error> {
@@ -87,7 +84,7 @@ impl Details {
         width: u16,
         height: u16,
         frames: Option<u32>,
-        created_at: MaybeHumanDate,
+        created_at: HumanDate,
     ) -> Self {
         Self {
             width,
@@ -110,29 +107,27 @@ impl Details {
             height,
             frames,
             content_type: Serde::new(format.media_type()),
-            created_at: MaybeHumanDate::HumanDate(OffsetDateTime::now_utc()),
+            created_at: HumanDate {
+                timestamp: OffsetDateTime::now_utc(),
+            },
             format,
         }
     }
 }
 
-impl From<MaybeHumanDate> for std::time::SystemTime {
-    fn from(this: MaybeHumanDate) -> Self {
-        match this {
-            MaybeHumanDate::OldDate(old) => old.into(),
-            MaybeHumanDate::HumanDate(human) => human.into(),
-        }
+impl From<HumanDate> for std::time::SystemTime {
+    fn from(HumanDate { timestamp }: HumanDate) -> Self {
+        timestamp.into()
     }
 }
 
-impl std::fmt::Display for MaybeHumanDate {
+impl std::fmt::Display for HumanDate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::OldDate(date) | Self::HumanDate(date) => {
-                let s = date.format(&Rfc3339).map_err(|_| std::fmt::Error)?;
+        let s = self
+            .timestamp
+            .format(&Rfc3339)
+            .map_err(|_| std::fmt::Error)?;
 
-                f.write_str(&s)
-            }
-        }
+        f.write_str(&s)
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    details::MaybeHumanDate,
+    details::HumanDate,
     serde_str::Serde,
     store::StoreError,
     stream::{from_iterator, LocalBoxStream},
@@ -142,9 +142,12 @@ impl SledRepo {
 
     #[tracing::instrument(level = "warn", skip_all)]
     pub(crate) async fn export(&self) -> Result<(), RepoError> {
-        let path = self
-            .export_path
-            .join(MaybeHumanDate::HumanDate(time::OffsetDateTime::now_utc()).to_string());
+        let path = self.export_path.join(
+            HumanDate {
+                timestamp: time::OffsetDateTime::now_utc(),
+            }
+            .to_string(),
+        );
 
         let export_db = Self::open(path, self.cache_capacity)?;
 
