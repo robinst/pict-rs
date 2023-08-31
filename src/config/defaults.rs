@@ -261,10 +261,10 @@ impl Default for ImageDefaults {
 impl Default for AnimationDefaults {
     fn default() -> Self {
         AnimationDefaults {
-            max_height: 256,
-            max_width: 256,
-            max_area: 65_536,
-            max_frame_count: 100,
+            max_height: 1920,
+            max_width: 1920,
+            max_area: 2_073_600,
+            max_frame_count: 900,
             max_file_size: 40,
             quality: AnimationQualityDefaults {},
         }

@@ -281,47 +281,37 @@ webp = 100
 [media.animation]
 ## Optional: max animation width (in pixels)
 # environment variable: PICTRS__MEDIA__ANIMATION__MAX_WIDTH
-# default: 256
-#
-# If an animation exceeds this value, it may be converted to a silent video
-max_width = 256
+# default: 1920
+max_width = 1920
 
 ## Optional: max animation height (in pixels)
 # environment variable: PICTRS__MEDIA__ANIMATION__MAX_HEIGHT
-# default: 256
-#
-# If an animation exceeds this value, it may be converted to a silent video
-max_height = 256
+# default: 1920
+max_height = 1920
 
 ## Optional: max animation area (in pixels)
 # environment variable: PICTRS__MEDIA__ANIMATION__MAX_AREA
-# default: 65,526
-#
-# If an animation exceeds this value, it may be converted to a silent video
-max_area = 65536
+# default: 2,073,600
+max_area = 2073600
 
 ## Optional: max animation size (in Megabytes)
 # environment variable: PICTRS__MEDIA__ANIMATION__MAX_FILE_SIZE
 # default: 40
-#
-# If an animation exceeds this value, it may be converted to a silent video
 max_file_size = 40
 
 ## Optional: max frame count
 # environment variable: PICTRS__MEDIA__ANIMATION__MAX_FRAME_COUNT
 # default: 100
-#
-# If an animation exceeds this value, it may be converted to a silent video
-max_frame_count = 100
+max_frame_count = 900
 
 ## Optional: set file type for all animations
 # environment variable: PICTRS__MEDIA__ANIMATION__FORMAT
 # default: empty
 #
 # available options: apng, avif, gif, webp
-# When set, all uploaded still images will be converted to this file type. For balancing quality vs
-# file size vs browser support, 'avif', 'jxl', and 'webp' should be considered. By default, images
-# are stored in their original file type.
+# When set, all uploaded animated images will be converted to this file type. For balancing quality
+# vs file size vs browser support, 'avif', 'jxl', and 'webp' should be considered. By default,
+# images are stored in their original file type.
 format = "webp"
 
 
