@@ -81,7 +81,7 @@ pub(crate) async fn validate_bytes(
         InputFile::Video(input) => {
             let (format, read) = process_video(
                 bytes,
-                input.clone(),
+                *input,
                 width,
                 height,
                 frames.unwrap_or(1),
