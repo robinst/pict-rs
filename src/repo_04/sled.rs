@@ -80,8 +80,6 @@ pub(crate) struct OldDetails {
     frames: Option<u32>,
     content_type: crate::serde_str::Serde<mime::Mime>,
     created_at: MaybeHumanDate,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    format: Option<crate::formats::InternalFormat>,
 }
 
 impl OldDetails {
@@ -92,15 +90,12 @@ impl OldDetails {
             frames,
             content_type,
             created_at,
-            format,
         } = self;
 
-        let format = format.or_else(|| {
-            crate::formats::InternalFormat::maybe_from_media_type(
-                &content_type,
-                self.frames.is_some(),
-            )
-        })?;
+        let format = crate::formats::InternalFormat::maybe_from_media_type(
+            &content_type,
+            self.frames.is_some(),
+        )?;
 
         Some(Details::from_parts_full(
             format,
