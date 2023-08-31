@@ -276,7 +276,10 @@ impl InputVideoFormat {
                     transcode_audio,
                 }
             }
-            Self::Mp4 { audio_codec, .. } => {
+            Self::Mp4 {
+                video_codec,
+                audio_codec,
+            } => {
                 let (audio_codec, transcode_audio) = webm_audio(
                     allow_audio,
                     audio_codec.is_some(),
@@ -289,7 +292,7 @@ impl InputVideoFormat {
                         video_codec: WebmCodec::Av1,
                         audio_codec,
                     },
-                    transcode_video: true,
+                    transcode_video: !video_codec.is_av1(),
                     transcode_audio,
                 }
             }
@@ -450,6 +453,10 @@ impl OutputVideoFormat {
 }
 
 impl Mp4Codec {
+    const fn is_av1(self) -> bool {
+        matches!(self, Self::Av1)
+    }
+
     const fn const_eq(self, rhs: Self) -> bool {
         match (self, rhs) {
             (Self::Av1, Self::Av1) | (Self::H264, Self::H264) | (Self::H265, Self::H265) => true,
