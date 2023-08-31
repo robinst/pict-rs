@@ -61,7 +61,6 @@ max_height = 3840
 max_area = 8294400
 max_file_size = 40
 max_frame_count = 900
-video_codec = "vp9"
 
 [media.video.quality]
 crf_max = 32

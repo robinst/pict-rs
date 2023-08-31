@@ -46,7 +46,6 @@ webp = 60
 [media.video]
 enable = true
 allow_audio = true
-video_codec = "vp9"
 max_area = 884000000
 
 [media.video.quality]
