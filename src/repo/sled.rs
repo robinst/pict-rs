@@ -932,7 +932,7 @@ impl DetailsRepo for SledRepo {
         details: &Details,
     ) -> Result<(), StoreError> {
         let key = identifier.to_bytes()?;
-        let details = serde_json::to_vec(&details)
+        let details = serde_json::to_vec(&details.inner)
             .map_err(SledError::from)
             .map_err(RepoError::from)?;
 
@@ -950,7 +950,7 @@ impl DetailsRepo for SledRepo {
 
         let opt = b!(self.identifier_details, identifier_details.get(key));
 
-        opt.map(|ivec| serde_json::from_slice(&ivec))
+        opt.map(|ivec| serde_json::from_slice(&ivec).map(|inner| Details { inner }))
             .transpose()
             .map_err(SledError::from)
             .map_err(RepoError::from)

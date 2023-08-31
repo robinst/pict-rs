@@ -17,8 +17,30 @@ pub(crate) struct HumanDate {
     pub(crate) timestamp: time::OffsetDateTime,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, serde::Serialize)]
+enum ApiFormat {
+    Image,
+    Animation,
+    Video,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct ApiDetails {
+    width: u16,
+    height: u16,
+    frames: Option<u32>,
+    content_type: Serde<mime::Mime>,
+    created_at: HumanDate,
+    format: ApiFormat,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct Details {
+    pub(crate) inner: DetailsInner,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct DetailsInner {
     width: u16,
     height: u16,
     frames: Option<u32>,
@@ -28,12 +50,39 @@ pub(crate) struct Details {
 }
 
 impl Details {
+    pub(crate) fn into_api_details(self) -> ApiDetails {
+        let Details {
+            inner:
+                DetailsInner {
+                    width,
+                    height,
+                    frames,
+                    content_type,
+                    created_at,
+                    format,
+                },
+        } = self;
+
+        ApiDetails {
+            width,
+            height,
+            frames,
+            content_type,
+            created_at,
+            format: match format {
+                InternalFormat::Image(_) => ApiFormat::Image,
+                InternalFormat::Animation(_) => ApiFormat::Animation,
+                InternalFormat::Video(_) => ApiFormat::Video,
+            },
+        }
+    }
+
     pub(crate) fn is_video(&self) -> bool {
-        self.content_type.type_() == "video"
+        self.inner.content_type.type_() == "video"
     }
 
     pub(crate) fn created_at(&self) -> time::OffsetDateTime {
-        self.created_at.timestamp
+        self.inner.created_at.timestamp
     }
 
     pub(crate) async fn from_bytes(timeout: u64, input: web::Bytes) -> Result<Self, Error> {
@@ -74,19 +123,19 @@ impl Details {
     }
 
     pub(crate) fn internal_format(&self) -> InternalFormat {
-        self.format
+        self.inner.format
     }
 
     pub(crate) fn media_type(&self) -> mime::Mime {
-        (*self.content_type).clone()
+        (*self.inner.content_type).clone()
     }
 
     pub(crate) fn system_time(&self) -> std::time::SystemTime {
-        self.created_at.into()
+        self.inner.created_at.into()
     }
 
     pub(crate) fn video_format(&self) -> Option<InternalVideoFormat> {
-        match self.format {
+        match self.inner.format {
             InternalFormat::Video(format) => Some(format),
             _ => None,
         }
@@ -100,12 +149,14 @@ impl Details {
         created_at: HumanDate,
     ) -> Self {
         Self {
-            width,
-            height,
-            frames,
-            content_type: Serde::new(format.media_type()),
-            created_at,
-            format,
+            inner: DetailsInner {
+                width,
+                height,
+                frames,
+                content_type: Serde::new(format.media_type()),
+                created_at,
+                format,
+            },
         }
     }
 
@@ -116,14 +167,16 @@ impl Details {
         frames: Option<u32>,
     ) -> Self {
         Self {
-            width,
-            height,
-            frames,
-            content_type: Serde::new(format.media_type()),
-            created_at: HumanDate {
-                timestamp: OffsetDateTime::now_utc(),
+            inner: DetailsInner {
+                width,
+                height,
+                frames,
+                content_type: Serde::new(format.media_type()),
+                created_at: HumanDate {
+                    timestamp: OffsetDateTime::now_utc(),
+                },
+                format,
             },
-            format,
         }
     }
 }

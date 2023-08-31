@@ -34,7 +34,7 @@ use actix_web::{
     http::header::{CacheControl, CacheDirective, LastModified, Range, ACCEPT_RANGES},
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
-use details::HumanDate;
+use details::{ApiDetails, HumanDate};
 use futures_core::Stream;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::Metrics;
@@ -296,7 +296,7 @@ async fn handle_upload<S: Store + 'static>(
             files.push(serde_json::json!({
                 "file": alias.to_string(),
                 "delete_token": delete_token.to_string(),
-                "details": details,
+                "details": details.into_api_details(),
             }));
         }
     }
@@ -446,7 +446,7 @@ async fn claim_upload<S: Store + 'static>(
                         "files": [{
                             "file": alias.to_string(),
                             "delete_token": token.to_string(),
-                            "details": details,
+                            "details": details.into_api_details(),
                         }]
                     })))
                 }
@@ -543,7 +543,7 @@ async fn do_download_inline<S: Store + 'static>(
         "files": [{
             "file": alias.to_string(),
             "delete_token": delete_token.to_string(),
-            "details": details,
+            "details": details.into_api_details(),
         }]
     })))
 }
@@ -603,7 +603,7 @@ struct PageJson {
 struct HashJson {
     hex: String,
     aliases: Vec<String>,
-    details: Option<Details>,
+    details: Option<ApiDetails>,
 }
 
 /// Get a page of hashes
@@ -637,7 +637,9 @@ async fn page(
 
         let identifier = repo.identifier(hash.clone()).await?;
         let details = if let Some(identifier) = identifier {
-            repo.details(&identifier).await?
+            repo.details(&identifier)
+                .await?
+                .map(|d| d.into_api_details())
         } else {
             None
         };
@@ -769,7 +771,7 @@ async fn process_details<S: Store>(
 
     let details = details.ok_or(UploadError::NoFiles)?;
 
-    Ok(HttpResponse::Ok().json(&details))
+    Ok(HttpResponse::Ok().json(&details.into_api_details()))
 }
 
 async fn not_found_hash(repo: &ArcRepo) -> Result<Option<(Alias, Hash)>, Error> {
@@ -1105,7 +1107,7 @@ async fn do_details<S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let details = ensure_details(&repo, &store, &config, &alias).await?;
 
-    Ok(HttpResponse::Ok().json(&details))
+    Ok(HttpResponse::Ok().json(&details.into_api_details()))
 }
 
 /// Serve files based on alias query
