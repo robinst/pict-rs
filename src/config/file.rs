@@ -300,7 +300,8 @@ pub(crate) struct Video {
 
     pub(crate) max_frame_count: u32,
 
-    pub(crate) video_codec: VideoCodec,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) video_codec: Option<VideoCodec>,
 
     pub(crate) quality: VideoQuality,
 

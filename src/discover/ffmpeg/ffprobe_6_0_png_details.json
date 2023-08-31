@@ -4,8 +4,10 @@
     ],
     "streams": [
         {
+            "codec_name": "png",
             "width": 450,
             "height": 401,
+            "pix_fmt": "rgb24",
             "nb_read_frames": "1"
         }
     ],

@@ -8,7 +8,8 @@ use std::str::FromStr;
 pub(crate) use animation::{AnimationFormat, AnimationOutput};
 pub(crate) use image::{ImageFormat, ImageInput, ImageOutput};
 pub(crate) use video::{
-    AudioCodec, InternalVideoFormat, OutputVideoFormat, VideoCodec, VideoFormat,
+    AlphaCodec, AudioCodec, InputVideoFormat, InternalVideoFormat, Mp4AudioCodec, Mp4Codec,
+    OutputVideo, VideoCodec, WebmAlphaCodec, WebmAudioCodec, WebmCodec,
 };
 
 #[derive(Clone, Debug)]
@@ -22,7 +23,7 @@ pub(crate) struct Validations<'a> {
 pub(crate) enum InputFile {
     Image(ImageInput),
     Animation(AnimationFormat),
-    Video(VideoFormat),
+    Video(InputVideoFormat),
 }
 
 #[derive(

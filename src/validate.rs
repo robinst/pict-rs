@@ -7,8 +7,8 @@ use crate::{
     either::Either,
     error::Error,
     formats::{
-        AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InternalFormat,
-        OutputVideoFormat, Validations, VideoFormat,
+        AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InputVideoFormat,
+        InternalFormat, Validations,
     },
 };
 use actix_web::web::Bytes;
@@ -71,7 +71,7 @@ pub(crate) async fn validate_bytes(
                 width,
                 height,
                 frames.unwrap_or(1),
-                &validations,
+                validations.animation,
                 timeout,
             )
             .await?;
@@ -81,7 +81,7 @@ pub(crate) async fn validate_bytes(
         InputFile::Video(input) => {
             let (format, read) = process_video(
                 bytes,
-                *input,
+                input.clone(),
                 width,
                 height,
                 frames.unwrap_or(1),
@@ -166,47 +166,25 @@ async fn process_animation(
     width: u16,
     height: u16,
     frames: u32,
-    validations: &Validations<'_>,
+    validations: &crate::config::Animation,
     timeout: u64,
 ) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
-    match validate_animation(bytes.len(), width, height, frames, validations.animation) {
-        Ok(()) => {
-            let AnimationOutput {
-                format,
-                needs_transcode,
-            } = input.build_output(validations.animation.format);
+    validate_animation(bytes.len(), width, height, frames, validations)?;
 
-            let read = if needs_transcode {
-                let quality = validations.animation.quality_for(format);
+    let AnimationOutput {
+        format,
+        needs_transcode,
+    } = input.build_output(validations.format);
 
-                Either::left(
-                    magick::convert_animation(input, format, quality, timeout, bytes).await?,
-                )
-            } else {
-                Either::right(Either::left(exiftool::clear_metadata_bytes_read(
-                    bytes, timeout,
-                )?))
-            };
+    let read = if needs_transcode {
+        let quality = validations.quality_for(format);
 
-            Ok((InternalFormat::Animation(format), read))
-        }
-        Err(_) => match validate_video(bytes.len(), width, height, frames, validations.video) {
-            Ok(()) => {
-                let output = OutputVideoFormat::from_parts(
-                    validations.video.video_codec,
-                    validations.video.audio_codec,
-                    validations.video.allow_audio,
-                );
+        Either::left(magick::convert_animation(input, format, quality, timeout, bytes).await?)
+    } else {
+        Either::right(exiftool::clear_metadata_bytes_read(bytes, timeout)?)
+    };
 
-                let read = Either::right(Either::right(
-                    magick::convert_video(input, output, timeout, bytes).await?,
-                ));
-
-                Ok((InternalFormat::Video(output.internal_format()), read))
-            }
-            Err(e) => Err(e.into()),
-        },
-    }
+    Ok((InternalFormat::Animation(format), read))
 }
 
 fn validate_video(
@@ -241,7 +219,7 @@ fn validate_video(
 #[tracing::instrument(skip(bytes, validations))]
 async fn process_video(
     bytes: Bytes,
-    input: VideoFormat,
+    input: InputVideoFormat,
     width: u16,
     height: u16,
     frames: u32,
@@ -260,5 +238,5 @@ async fn process_video(
 
     let read = ffmpeg::transcode_bytes(input, output, crf, timeout, bytes).await?;
 
-    Ok((InternalFormat::Video(output.internal_format()), read))
+    Ok((InternalFormat::Video(output.format.internal_format()), read))
 }

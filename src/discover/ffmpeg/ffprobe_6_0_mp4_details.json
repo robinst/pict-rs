@@ -4,9 +4,11 @@
     ],
     "streams": [
         {
-            "width": 852,
-            "height": 480,
-            "nb_read_frames": "35364"
+            "codec_name": "h264",
+            "width": 1426,
+            "height": 834,
+            "pix_fmt": "yuv420p",
+            "nb_read_frames": "105"
         }
     ],
     "format": {

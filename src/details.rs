@@ -1,9 +1,11 @@
 use crate::{
-    discover::DiscoveryLite,
+    bytes_stream::BytesStream,
+    discover::Discovery,
     error::Error,
     formats::{InternalFormat, InternalVideoFormat},
     serde_str::Serde,
     store::Store,
+    stream::IntoStreamer,
 };
 use actix_web::web;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -35,14 +37,19 @@ impl Details {
     }
 
     pub(crate) async fn from_bytes(timeout: u64, input: web::Bytes) -> Result<Self, Error> {
-        let DiscoveryLite {
-            format,
+        let Discovery {
+            input,
             width,
             height,
             frames,
-        } = crate::discover::discover_bytes_lite(timeout, input).await?;
+        } = crate::discover::discover_bytes(timeout, input).await?;
 
-        Ok(Details::from_parts(format, width, height, frames))
+        Ok(Details::from_parts(
+            input.internal_format(),
+            width,
+            height,
+            frames,
+        ))
     }
 
     pub(crate) async fn from_store<S: Store>(
@@ -50,14 +57,20 @@ impl Details {
         identifier: &S::Identifier,
         timeout: u64,
     ) -> Result<Self, Error> {
-        let DiscoveryLite {
-            format,
-            width,
-            height,
-            frames,
-        } = crate::discover::discover_store_lite(store, identifier, timeout).await?;
+        let mut buf = BytesStream::new();
 
-        Ok(Details::from_parts(format, width, height, frames))
+        let mut stream = store
+            .to_stream(identifier, None, None)
+            .await?
+            .into_streamer();
+
+        while let Some(res) = stream.next().await {
+            buf.add_bytes(res?);
+        }
+
+        let bytes = buf.into_bytes();
+
+        Self::from_bytes(timeout, bytes).await
     }
 
     pub(crate) fn internal_format(&self) -> InternalFormat {

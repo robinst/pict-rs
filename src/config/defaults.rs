@@ -1,6 +1,5 @@
 use crate::{
     config::primitives::{LogFormat, Targets},
-    formats::VideoCodec,
     serde_str::Serde,
 };
 use std::{net::SocketAddr, path::PathBuf};
@@ -120,7 +119,6 @@ struct VideoDefaults {
     max_area: u32,
     max_frame_count: u32,
     max_file_size: usize,
-    video_codec: VideoCodec,
     quality: VideoQualityDefaults,
 }
 
@@ -283,7 +281,6 @@ impl Default for VideoDefaults {
             max_area: 8_294_400,
             max_frame_count: 900,
             max_file_size: 40,
-            video_codec: VideoCodec::Vp9,
             quality: VideoQualityDefaults::default(),
         }
     }

@@ -4,8 +4,10 @@
     ],
     "streams": [
         {
+            "codec_name": "av1",
             "width": 112,
             "height": 112,
+            "pix_fmt": "gbrp",
             "nb_read_frames": "27"
         }
     ],

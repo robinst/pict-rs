@@ -4,22 +4,11 @@ mod magick;
 
 use actix_web::web::Bytes;
 
-use crate::{
-    formats::{InputFile, InternalFormat},
-    store::Store,
-};
+use crate::formats::InputFile;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Discovery {
     pub(crate) input: InputFile,
-    pub(crate) width: u16,
-    pub(crate) height: u16,
-    pub(crate) frames: Option<u32>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct DiscoveryLite {
-    pub(crate) format: InternalFormat,
     pub(crate) width: u16,
     pub(crate) height: u16,
     pub(crate) frames: Option<u32>,
@@ -35,41 +24,6 @@ pub(crate) enum DiscoverError {
 
     #[error("Input file type {0} is unsupported")]
     UnsupportedFileType(String),
-}
-
-pub(crate) async fn discover_bytes_lite(
-    timeout: u64,
-    bytes: Bytes,
-) -> Result<DiscoveryLite, crate::error::Error> {
-    if let Some(discovery) = ffmpeg::discover_bytes_lite(timeout, bytes.clone()).await? {
-        return Ok(discovery);
-    }
-
-    let discovery = magick::discover_bytes_lite(timeout, bytes).await?;
-
-    Ok(discovery)
-}
-
-pub(crate) async fn discover_store_lite<S>(
-    store: &S,
-    identifier: &S::Identifier,
-    timeout: u64,
-) -> Result<DiscoveryLite, crate::error::Error>
-where
-    S: Store,
-{
-    if let Some(discovery) =
-        ffmpeg::discover_stream_lite(timeout, store.to_stream(identifier, None, None).await?)
-            .await?
-    {
-        return Ok(discovery);
-    }
-
-    let discovery =
-        magick::discover_stream_lite(timeout, store.to_stream(identifier, None, None).await?)
-            .await?;
-
-    Ok(discovery)
 }
 
 pub(crate) async fn discover_bytes(

@@ -4,14 +4,14 @@
     ],
     "streams": [
         {
-            "codec_name": "vp9",
+            "codec_name": "av1",
             "width": 112,
             "height": 112,
             "pix_fmt": "yuv420p",
-            "nb_read_frames": "27"
+            "nb_read_frames": "1"
         }
     ],
     "format": {
-        "format_name": "matroska,webm"
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2"
     }
 }

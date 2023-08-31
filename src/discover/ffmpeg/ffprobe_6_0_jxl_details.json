@@ -4,6 +4,7 @@
     ],
     "streams": [
         {
+            "codec_name": "jpegxl",
             "width": 0,
             "height": 0
         }

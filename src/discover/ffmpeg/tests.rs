@@ -1,22 +1,34 @@
-use crate::formats::{AnimationFormat, ImageFormat, InternalFormat, InternalVideoFormat};
+use crate::formats::{
+    AlphaCodec, AnimationFormat, ImageFormat, ImageInput, InputFile, InputVideoFormat, Mp4Codec,
+    WebmAlphaCodec, WebmCodec,
+};
 
-use super::{DiscoveryLite, FfMpegDiscovery, PixelFormatOutput};
+use super::{Discovery, FfMpegDiscovery, PixelFormatOutput};
 
-fn details_tests() -> [(&'static str, Option<DiscoveryLite>); 11] {
+fn details_tests() -> [(&'static str, Option<Discovery>); 13] {
     [
         (
             "animated_webp",
-            Some(DiscoveryLite {
-                format: InternalFormat::Animation(AnimationFormat::Webp),
+            Some(Discovery {
+                input: InputFile::Animation(AnimationFormat::Webp),
                 width: 0,
                 height: 0,
                 frames: None,
             }),
         ),
         (
+            "animated_avif",
+            Some(Discovery {
+                input: InputFile::Animation(AnimationFormat::Avif),
+                width: 112,
+                height: 112,
+                frames: None,
+            }),
+        ),
+        (
             "apng",
-            Some(DiscoveryLite {
-                format: InternalFormat::Animation(AnimationFormat::Apng),
+            Some(Discovery {
+                input: InputFile::Animation(AnimationFormat::Apng),
                 width: 112,
                 height: 112,
                 frames: Some(27),
@@ -24,37 +36,77 @@ fn details_tests() -> [(&'static str, Option<DiscoveryLite>); 11] {
         ),
         (
             "avif",
-            Some(DiscoveryLite {
-                format: InternalFormat::Animation(AnimationFormat::Avif),
-                width: 1920,
-                height: 1080,
+            Some(Discovery {
+                input: InputFile::Animation(AnimationFormat::Avif),
+                width: 1200,
+                height: 1387,
                 frames: None,
             }),
         ),
         (
             "gif",
-            Some(DiscoveryLite {
-                format: InternalFormat::Animation(AnimationFormat::Gif),
-                width: 160,
-                height: 227,
-                frames: Some(28),
+            Some(Discovery {
+                input: InputFile::Animation(AnimationFormat::Gif),
+                width: 112,
+                height: 112,
+                frames: Some(27),
             }),
         ),
-        ("jpeg", None),
-        ("jxl", None),
+        (
+            "jpeg",
+            Some(Discovery {
+                input: InputFile::Image(ImageInput {
+                    format: ImageFormat::Jpeg,
+                    needs_reorient: false,
+                }),
+                width: 1663,
+                height: 1247,
+                frames: None,
+            }),
+        ),
+        (
+            "jxl",
+            Some(Discovery {
+                input: InputFile::Image(ImageInput {
+                    format: ImageFormat::Jxl,
+                    needs_reorient: false,
+                }),
+                width: 0,
+                height: 0,
+                frames: None,
+            }),
+        ),
         (
             "mp4",
-            Some(DiscoveryLite {
-                format: InternalFormat::Video(InternalVideoFormat::Mp4),
-                width: 852,
-                height: 480,
-                frames: Some(35364),
+            Some(Discovery {
+                input: InputFile::Video(InputVideoFormat::Mp4 {
+                    video_codec: Mp4Codec::H264,
+                    audio_codec: None,
+                }),
+                width: 1426,
+                height: 834,
+                frames: Some(105),
+            }),
+        ),
+        (
+            "mp4_av1",
+            Some(Discovery {
+                input: InputFile::Video(InputVideoFormat::Mp4 {
+                    video_codec: Mp4Codec::Av1,
+                    audio_codec: None,
+                }),
+                width: 112,
+                height: 112,
+                frames: Some(27),
             }),
         ),
         (
             "png",
-            Some(DiscoveryLite {
-                format: InternalFormat::Image(ImageFormat::Png),
+            Some(Discovery {
+                input: InputFile::Image(ImageInput {
+                    format: ImageFormat::Png,
+                    needs_reorient: false,
+                }),
                 width: 450,
                 height: 401,
                 frames: None,
@@ -62,17 +114,26 @@ fn details_tests() -> [(&'static str, Option<DiscoveryLite>); 11] {
         ),
         (
             "webm",
-            Some(DiscoveryLite {
-                format: InternalFormat::Video(InternalVideoFormat::Webm),
-                width: 640,
-                height: 480,
-                frames: Some(34650),
+            Some(Discovery {
+                input: InputFile::Video(InputVideoFormat::Webm {
+                    video_codec: WebmCodec::Alpha(AlphaCodec {
+                        alpha: false,
+                        codec: WebmAlphaCodec::Vp9,
+                    }),
+                    audio_codec: None,
+                }),
+                width: 112,
+                height: 112,
+                frames: Some(27),
             }),
         ),
         (
             "webm_av1",
-            Some(DiscoveryLite {
-                format: InternalFormat::Video(InternalVideoFormat::Webm),
+            Some(Discovery {
+                input: InputFile::Video(InputVideoFormat::Webm {
+                    video_codec: WebmCodec::Av1,
+                    audio_codec: None,
+                }),
                 width: 112,
                 height: 112,
                 frames: Some(27),
@@ -80,10 +141,13 @@ fn details_tests() -> [(&'static str, Option<DiscoveryLite>); 11] {
         ),
         (
             "webp",
-            Some(DiscoveryLite {
-                format: InternalFormat::Image(ImageFormat::Webp),
-                width: 1920,
-                height: 1080,
+            Some(Discovery {
+                input: InputFile::Image(ImageInput {
+                    format: ImageFormat::Webp,
+                    needs_reorient: false,
+                }),
+                width: 1200,
+                height: 1387,
                 frames: None,
             }),
         ),
@@ -100,7 +164,7 @@ fn parse_discovery() {
 
         let json: FfMpegDiscovery = serde_json::from_str(&string).expect("Valid json");
 
-        let output = super::parse_discovery(json).expect("Parsed details");
+        let (output, _) = super::parse_discovery(json).expect("Parsed details");
 
         assert_eq!(output, expected);
     }

@@ -1,13 +1,13 @@
-use crate::formats::{AnimationFormat, ImageFormat, InternalFormat, InternalVideoFormat};
+use crate::formats::{AnimationFormat, ImageFormat, ImageInput, InputFile};
 
-use super::{DiscoveryLite, MagickDiscovery};
+use super::{Discovery, MagickDiscovery};
 
-fn details_tests() -> [(&'static str, DiscoveryLite); 9] {
+fn details_tests() -> [(&'static str, Discovery); 7] {
     [
         (
             "animated_webp",
-            DiscoveryLite {
-                format: InternalFormat::Animation(AnimationFormat::Webp),
+            Discovery {
+                input: InputFile::Animation(AnimationFormat::Webp),
                 width: 112,
                 height: 112,
                 frames: Some(27),
@@ -15,8 +15,11 @@ fn details_tests() -> [(&'static str, DiscoveryLite); 9] {
         ),
         (
             "avif",
-            DiscoveryLite {
-                format: InternalFormat::Image(ImageFormat::Avif),
+            Discovery {
+                input: InputFile::Image(ImageInput {
+                    format: ImageFormat::Avif,
+                    needs_reorient: false,
+                }),
                 width: 1920,
                 height: 1080,
                 frames: None,
@@ -24,8 +27,8 @@ fn details_tests() -> [(&'static str, DiscoveryLite); 9] {
         ),
         (
             "gif",
-            DiscoveryLite {
-                format: InternalFormat::Animation(AnimationFormat::Gif),
+            Discovery {
+                input: InputFile::Animation(AnimationFormat::Gif),
                 width: 414,
                 height: 261,
                 frames: Some(17),
@@ -33,8 +36,11 @@ fn details_tests() -> [(&'static str, DiscoveryLite); 9] {
         ),
         (
             "jpeg",
-            DiscoveryLite {
-                format: InternalFormat::Image(ImageFormat::Jpeg),
+            Discovery {
+                input: InputFile::Image(ImageInput {
+                    format: ImageFormat::Jpeg,
+                    needs_reorient: false,
+                }),
                 width: 1920,
                 height: 1080,
                 frames: None,
@@ -42,44 +48,35 @@ fn details_tests() -> [(&'static str, DiscoveryLite); 9] {
         ),
         (
             "jxl",
-            DiscoveryLite {
-                format: InternalFormat::Image(ImageFormat::Jxl),
+            Discovery {
+                input: InputFile::Image(ImageInput {
+                    format: ImageFormat::Jxl,
+                    needs_reorient: false,
+                }),
                 width: 1920,
                 height: 1080,
                 frames: None,
             },
         ),
         (
-            "mp4",
-            DiscoveryLite {
-                format: InternalFormat::Video(InternalVideoFormat::Mp4),
-                width: 414,
-                height: 261,
-                frames: Some(17),
-            },
-        ),
-        (
             "png",
-            DiscoveryLite {
-                format: InternalFormat::Image(ImageFormat::Png),
+            Discovery {
+                input: InputFile::Image(ImageInput {
+                    format: ImageFormat::Png,
+                    needs_reorient: false,
+                }),
                 width: 497,
                 height: 694,
                 frames: None,
             },
         ),
         (
-            "webm",
-            DiscoveryLite {
-                format: InternalFormat::Video(InternalVideoFormat::Webm),
-                width: 112,
-                height: 112,
-                frames: Some(27),
-            },
-        ),
-        (
             "webp",
-            DiscoveryLite {
-                format: InternalFormat::Image(ImageFormat::Webp),
+            Discovery {
+                input: InputFile::Image(ImageInput {
+                    format: ImageFormat::Webp,
+                    needs_reorient: false,
+                }),
                 width: 1920,
                 height: 1080,
                 frames: None,
@@ -98,7 +95,7 @@ fn parse_discovery() {
 
         let json: Vec<MagickDiscovery> = serde_json::from_str(&string).expect("Valid json");
 
-        let output = super::parse_discovery(json).expect("Parsed details").lite();
+        let output = super::parse_discovery(json).expect("Parsed details");
 
         assert_eq!(output, expected);
     }

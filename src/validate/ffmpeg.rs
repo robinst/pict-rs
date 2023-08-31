@@ -3,13 +3,13 @@ use tokio::io::AsyncRead;
 
 use crate::{
     ffmpeg::FfMpegError,
-    formats::{OutputVideoFormat, VideoFormat},
+    formats::{InputVideoFormat, OutputVideo},
     process::Process,
 };
 
 pub(super) async fn transcode_bytes(
-    input_format: VideoFormat,
-    output_format: OutputVideoFormat,
+    input_format: InputVideoFormat,
+    output_format: OutputVideo,
     crf: u8,
     timeout: u64,
     bytes: Bytes,
@@ -57,12 +57,20 @@ pub(super) async fn transcode_bytes(
 
 async fn transcode_files(
     input_path: &str,
-    input_format: VideoFormat,
+    input_format: InputVideoFormat,
     output_path: &str,
-    output_format: OutputVideoFormat,
+    output_format: OutputVideo,
     crf: u8,
     timeout: u64,
 ) -> Result<(), FfMpegError> {
+    let crf = crf.to_string();
+
+    let OutputVideo {
+        transcode_video,
+        transcode_audio,
+        format: output_format,
+    } = output_format;
+
     let mut args = vec![
         "-hide_banner",
         "-v",
@@ -71,33 +79,38 @@ async fn transcode_files(
         input_format.ffmpeg_format(),
         "-i",
         input_path,
-        "-pix_fmt",
-        output_format.pix_fmt(),
-        "-vf",
-        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
     ];
 
-    if let Some(audio_codec) = output_format.ffmpeg_audio_codec() {
-        args.extend(["-c:a", audio_codec]);
+    if transcode_video {
+        args.extend([
+            "-pix_fmt",
+            output_format.pix_fmt(),
+            "-vf",
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-c:v",
+            output_format.ffmpeg_video_codec(),
+            "-crf",
+            &crf,
+        ]);
+
+        if output_format.is_vp9() {
+            args.extend(["-b:v", "0"]);
+        }
     } else {
-        args.push("-an")
+        args.extend(["-c:v", "copy"]);
     }
 
-    args.extend(["-c:v", output_format.ffmpeg_video_codec()]);
-
-    if output_format.is_vp9() {
-        args.extend(["-b:v", "0"]);
+    if transcode_audio {
+        if let Some(audio_codec) = output_format.ffmpeg_audio_codec() {
+            args.extend(["-c:a", audio_codec]);
+        } else {
+            args.push("-an")
+        }
+    } else {
+        args.extend(["-c:a", "copy"]);
     }
 
-    let crf = crf.to_string();
-
-    args.extend([
-        "-crf",
-        &crf,
-        "-f",
-        output_format.ffmpeg_format(),
-        output_path,
-    ]);
+    args.extend(["-f", output_format.ffmpeg_format(), output_path]);
 
     Process::run("ffmpeg", &args, timeout)?.wait().await?;
 

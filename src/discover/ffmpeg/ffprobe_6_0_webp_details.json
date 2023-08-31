@@ -4,8 +4,10 @@
     ],
     "streams": [
         {
-            "width": 1920,
-            "height": 1080,
+            "codec_name": "webp",
+            "width": 1200,
+            "height": 1387,
+            "pix_fmt": "yuv420p",
             "nb_read_frames": "1"
         }
     ],

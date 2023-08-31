@@ -2,17 +2,16 @@
 mod tests;
 
 use actix_web::web::Bytes;
-use futures_core::Stream;
 use tokio::io::AsyncReadExt;
 
 use crate::{
     discover::DiscoverError,
-    formats::{AnimationFormat, ImageFormat, ImageInput, InputFile, VideoFormat},
+    formats::{AnimationFormat, ImageFormat, ImageInput, InputFile},
     magick::MagickError,
     process::Process,
 };
 
-use super::{Discovery, DiscoveryLite};
+use super::Discovery;
 
 #[derive(Debug, serde::Deserialize)]
 struct MagickDiscovery {
@@ -29,59 +28,6 @@ struct Image {
 struct Geometry {
     width: u16,
     height: u16,
-}
-
-impl Discovery {
-    fn lite(self) -> DiscoveryLite {
-        let Discovery {
-            input,
-            width,
-            height,
-            frames,
-        } = self;
-
-        DiscoveryLite {
-            format: input.internal_format(),
-            width,
-            height,
-            frames,
-        }
-    }
-}
-
-pub(super) async fn discover_bytes_lite(
-    timeout: u64,
-    bytes: Bytes,
-) -> Result<DiscoveryLite, MagickError> {
-    discover_file_lite(
-        move |mut file| async move {
-            file.write_from_bytes(bytes)
-                .await
-                .map_err(MagickError::Write)?;
-            Ok(file)
-        },
-        timeout,
-    )
-    .await
-}
-
-pub(super) async fn discover_stream_lite<S>(
-    timeout: u64,
-    stream: S,
-) -> Result<DiscoveryLite, MagickError>
-where
-    S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
-{
-    discover_file_lite(
-        move |mut file| async move {
-            file.write_from_stream(stream)
-                .await
-                .map_err(MagickError::Write)?;
-            Ok(file)
-        },
-        timeout,
-    )
-    .await
 }
 
 pub(super) async fn confirm_bytes(
@@ -106,6 +52,18 @@ pub(super) async fn confirm_bytes(
                 timeout,
             )
             .await?;
+
+            if frames == 1 {
+                return Ok(Discovery {
+                    input: InputFile::Image(ImageInput {
+                        format: ImageFormat::Avif,
+                        needs_reorient: false,
+                    }),
+                    width,
+                    height,
+                    frames: None,
+                });
+            }
 
             return Ok(Discovery {
                 input: InputFile::Animation(AnimationFormat::Avif),
@@ -187,14 +145,6 @@ where
     }
 
     Ok(lines)
-}
-
-async fn discover_file_lite<F, Fut>(f: F, timeout: u64) -> Result<DiscoveryLite, MagickError>
-where
-    F: FnOnce(crate::file::File) -> Fut,
-    Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
-{
-    discover_file(f, timeout).await.map(Discovery::lite)
 }
 
 async fn discover_file<F, Fut>(f: F, timeout: u64) -> Result<Discovery, MagickError>
@@ -338,12 +288,6 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, DiscoverEr
             height,
             frames: None,
         }),
-        "MP4" => Ok(Discovery {
-            input: InputFile::Video(VideoFormat::Mp4),
-            width,
-            height,
-            frames: Some(frames),
-        }),
         "PNG" => Ok(Discovery {
             input: InputFile::Image(ImageInput {
                 format: ImageFormat::Png,
@@ -373,12 +317,6 @@ fn parse_discovery(output: Vec<MagickDiscovery>) -> Result<Discovery, DiscoverEr
                 })
             }
         }
-        "WEBM" => Ok(Discovery {
-            input: InputFile::Video(VideoFormat::Webm { alpha: true }),
-            width,
-            height,
-            frames: Some(frames),
-        }),
         otherwise => Err(DiscoverError::UnsupportedFileType(String::from(otherwise))),
     }
 }

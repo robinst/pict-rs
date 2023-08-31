@@ -4,8 +4,10 @@
     ],
     "streams": [
         {
-            "width": 1920,
-            "height": 1080,
+            "codec_name": "mjpeg",
+            "width": 1663,
+            "height": 1247,
+            "pix_fmt": "yuvj420p",
             "nb_read_frames": "1"
         }
     ],

@@ -4,6 +4,7 @@
     ],
     "streams": [
         {
+            "codec_name": "webp",
             "width": 0,
             "height": 0
         }

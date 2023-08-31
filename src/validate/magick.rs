@@ -2,7 +2,7 @@ use actix_web::web::Bytes;
 use tokio::io::AsyncRead;
 
 use crate::{
-    formats::{AnimationFormat, ImageFormat, OutputVideoFormat},
+    formats::{AnimationFormat, ImageFormat},
     magick::MagickError,
     process::Process,
 };
@@ -37,23 +37,6 @@ pub(super) async fn convert_animation(
         output.magick_format(),
         true,
         quality,
-        timeout,
-        bytes,
-    )
-    .await
-}
-
-pub(super) async fn convert_video(
-    input: AnimationFormat,
-    output: OutputVideoFormat,
-    timeout: u64,
-    bytes: Bytes,
-) -> Result<impl AsyncRead + Unpin, MagickError> {
-    convert(
-        input.magick_format(),
-        output.magick_format(),
-        true,
-        None,
         timeout,
         bytes,
     )
