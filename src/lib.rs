@@ -1485,6 +1485,37 @@ async fn purge(
     })))
 }
 
+#[tracing::instrument(name = "Deleting alias", skip(repo, config))]
+async fn delete_alias(
+    web::Query(alias_query): web::Query<AliasQuery>,
+    repo: web::Data<ArcRepo>,
+    config: web::Data<Configuration>,
+) -> Result<HttpResponse, Error> {
+    if config.server.read_only {
+        return Err(UploadError::ReadOnly.into());
+    }
+
+    let alias = match alias_query {
+        AliasQuery::Alias { alias } => Serde::into_inner(alias),
+        AliasQuery::Proxy { proxy } => {
+            let Some(alias) = repo.related(proxy).await? else {
+                return Ok(HttpResponse::NotFound().finish());
+            };
+            alias
+        }
+    };
+
+    if let Some(token) = repo.delete_token(&alias).await? {
+        queue::cleanup_alias(&repo, alias, token).await?;
+    } else {
+        return Ok(HttpResponse::NotFound().finish());
+    }
+
+    Ok(HttpResponse::Ok().json(&serde_json::json!({
+        "msg": "ok",
+    })))
+}
+
 #[tracing::instrument(name = "Fetching aliases", skip(repo))]
 async fn aliases(
     web::Query(alias_query): web::Query<AliasQuery>,
@@ -1645,6 +1676,7 @@ fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
                 .service(web::resource("/import").route(web::post().to(import::<S>)))
                 .service(web::resource("/variants").route(web::delete().to(clean_variants)))
                 .service(web::resource("/purge").route(web::post().to(purge)))
+                .service(web::resource("/delete").route(web::post().to(delete_alias)))
                 .service(web::resource("/aliases").route(web::get().to(aliases)))
                 .service(web::resource("/identifier").route(web::get().to(identifier::<S>)))
                 .service(web::resource("/set_not_found").route(web::post().to(set_not_found)))
