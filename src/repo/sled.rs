@@ -520,9 +520,12 @@ impl Drop for PopMetricsGuard {
 #[async_trait::async_trait(?Send)]
 impl UploadRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn create_upload(&self, upload_id: UploadId) -> Result<(), RepoError> {
+    async fn create_upload(&self) -> Result<UploadId, RepoError> {
+        let upload_id = UploadId::generate();
+
         b!(self.uploads, uploads.insert(upload_id.as_bytes(), b"1"));
-        Ok(())
+
+        Ok(upload_id)
     }
 
     #[tracing::instrument(skip(self))]
@@ -567,7 +570,11 @@ impl UploadRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self, result))]
-    async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), RepoError> {
+    async fn complete_upload(
+        &self,
+        upload_id: UploadId,
+        result: UploadResult,
+    ) -> Result<(), RepoError> {
         let result: InnerUploadResult = result.into();
         let result = serde_json::to_vec(&result).map_err(SledError::from)?;
 
@@ -1496,7 +1503,7 @@ impl AliasRepo for SledRepo {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError> {
+    async fn aliases_for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError> {
         let hash = hash.to_ivec();
 
         let v = b!(self.hash_aliases, {

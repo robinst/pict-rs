@@ -42,7 +42,7 @@ where
         let mut this = Self {
             repo,
             identifier: None,
-            upload_id: Some(UploadId::generate()),
+            upload_id: None,
         };
 
         this.do_proxy(store, stream).await?;
@@ -54,9 +54,7 @@ where
     where
         P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     {
-        self.repo
-            .create_upload(self.upload_id.expect("Upload id exists"))
-            .await?;
+        self.upload_id = Some(self.repo.create_upload().await?);
 
         let stream =
             stream.map(|res| res.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));

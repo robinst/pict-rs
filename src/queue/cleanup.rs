@@ -75,7 +75,7 @@ where
 
 #[tracing::instrument(skip_all)]
 async fn hash(repo: &ArcRepo, hash: Hash) -> Result<(), Error> {
-    let aliases = repo.for_hash(hash.clone()).await?;
+    let aliases = repo.aliases_for_hash(hash.clone()).await?;
 
     if !aliases.is_empty() {
         for alias in aliases {
@@ -127,7 +127,7 @@ async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> Result<(), E
         return Ok(());
     };
 
-    if repo.for_hash(hash.clone()).await?.is_empty() {
+    if repo.aliases_for_hash(hash.clone()).await?.is_empty() {
         super::cleanup_hash(repo, hash).await?;
     }
 

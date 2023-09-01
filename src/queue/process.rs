@@ -121,7 +121,7 @@ where
         }
     };
 
-    repo.complete(upload_id, result).await?;
+    repo.complete_upload(upload_id, result).await?;
 
     Ok(())
 }

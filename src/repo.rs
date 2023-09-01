@@ -102,7 +102,7 @@ pub(crate) trait FullRepo:
             return Ok(vec![]);
         };
 
-        self.for_hash(hash).await
+        self.aliases_for_hash(hash).await
     }
 
     #[tracing::instrument(skip(self))]
@@ -291,13 +291,17 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait UploadRepo: BaseRepo {
-    async fn create_upload(&self, upload_id: UploadId) -> Result<(), RepoError>;
+    async fn create_upload(&self) -> Result<UploadId, RepoError>;
 
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, RepoError>;
 
     async fn claim(&self, upload_id: UploadId) -> Result<(), RepoError>;
 
-    async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), RepoError>;
+    async fn complete_upload(
+        &self,
+        upload_id: UploadId,
+        result: UploadResult,
+    ) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -305,8 +309,8 @@ impl<T> UploadRepo for Arc<T>
 where
     T: UploadRepo,
 {
-    async fn create_upload(&self, upload_id: UploadId) -> Result<(), RepoError> {
-        T::create_upload(self, upload_id).await
+    async fn create_upload(&self) -> Result<UploadId, RepoError> {
+        T::create_upload(self).await
     }
 
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, RepoError> {
@@ -317,8 +321,12 @@ where
         T::claim(self, upload_id).await
     }
 
-    async fn complete(&self, upload_id: UploadId, result: UploadResult) -> Result<(), RepoError> {
-        T::complete(self, upload_id, result).await
+    async fn complete_upload(
+        &self,
+        upload_id: UploadId,
+        result: UploadResult,
+    ) -> Result<(), RepoError> {
+        T::complete_upload(self, upload_id, result).await
     }
 }
 
@@ -727,7 +735,7 @@ pub(crate) trait AliasRepo: BaseRepo {
 
     async fn hash(&self, alias: &Alias) -> Result<Option<Hash>, RepoError>;
 
-    async fn for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError>;
+    async fn aliases_for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError>;
 
     async fn cleanup_alias(&self, alias: &Alias) -> Result<(), RepoError>;
 }
@@ -754,8 +762,8 @@ where
         T::hash(self, alias).await
     }
 
-    async fn for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError> {
-        T::for_hash(self, hash).await
+    async fn aliases_for_hash(&self, hash: Hash) -> Result<Vec<Alias>, RepoError> {
+        T::aliases_for_hash(self, hash).await
     }
 
     async fn cleanup_alias(&self, alias: &Alias) -> Result<(), RepoError> {

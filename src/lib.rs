@@ -629,7 +629,7 @@ async fn page(
     for hash in &page.hashes {
         let hex = hash.to_hex();
         let aliases = repo
-            .for_hash(hash.clone())
+            .aliases_for_hash(hash.clone())
             .await?
             .into_iter()
             .map(|a| a.to_string())

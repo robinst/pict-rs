@@ -294,7 +294,7 @@ impl AliasRepo for SledRepo {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError> {
+    async fn aliases_for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError> {
         let v = b!(self.hash_aliases, {
             Ok(hash_aliases
                 .scan_prefix(hash)

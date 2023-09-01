@@ -77,5 +77,5 @@ pub(crate) trait HashRepo: BaseRepo {
 pub(crate) trait AliasRepo: BaseRepo {
     async fn delete_token(&self, alias: &Alias) -> Result<Option<DeleteToken>, RepoError>;
 
-    async fn for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError>;
+    async fn aliases_for_hash(&self, hash: Self::Bytes) -> Result<Vec<Alias>, RepoError>;
 }

@@ -220,7 +220,7 @@ async fn do_migrate_hash(old_repo: &ArcRepo, new_repo: &ArcRepo, hash: Hash) -> 
         }
     }
 
-    for alias in old_repo.for_hash(hash.clone()).await? {
+    for alias in old_repo.aliases_for_hash(hash.clone()).await? {
         let delete_token = old_repo
             .delete_token(&alias)
             .await?
@@ -275,7 +275,7 @@ async fn do_migrate_hash_04<S: Store>(
 
     let hash_details = set_details(old_repo, new_repo, store, config, &identifier).await?;
 
-    let aliases = old_repo.for_hash(old_hash.clone()).await?;
+    let aliases = old_repo.aliases_for_hash(old_hash.clone()).await?;
     let variants = old_repo.variants::<S::Identifier>(old_hash.clone()).await?;
     let motion_identifier = old_repo
         .motion_identifier::<S::Identifier>(old_hash.clone())
