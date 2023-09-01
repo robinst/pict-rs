@@ -34,7 +34,11 @@ hashes from the repo. This can likely be implemented as a batch-retrieval operat
 methods:
 - size
 - hashes
-- create
+- hash_page
+- hash_page_by_date
+- bound
+- create_hash
+- create_hash_with_timestamp
 - update_identifier
 - identifier
 - relate_variant_identifier
@@ -43,14 +47,18 @@ methods:
 - remove_variant
 - relate_motion_identifier
 - motion_identifier
-- cleanup
+- cleanup_hash
 
 ```sql
 CREATE TABLE hashes (
     hash BYTEA PRIMARY KEY,
     identifer TEXT NOT NULL,
     motion_identifier TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- paging through hashes
+CREATE INDEX ordered_hash_index ON hashes (created_at, hash);
 
 
 CREATE TABLE variants (
@@ -72,11 +80,11 @@ retrieval so maybe this can be used. Delete Tokens are not always UUIDs, even th
 UUIDs in all recent versions of pict-rs.
 
 methods:
-- create
+- create_alias
 - delete_token
 - hash
-- for_hash
-- cleanup
+- aliases_for_hash
+- cleanup_alias
 
 ```sql
 CREATE TABLE aliases (
@@ -84,10 +92,13 @@ CREATE TABLE aliases (
     hash BYTEA NOT NULL REFERENCES hashes(hash) ON DELETE CASCADE,
     delete_token VARCHAR(30) NOT NULL
 );
+
+
+CREATE INDEX alias_hashes_index ON aliases (hash);
 ```
 
 
-### SettingsRepo 
+### SettingsRepo
 This is used for generic server-level storage. The file & object stores keep their current path
 generator values here. This is also used in some migrations to mark completion.
 
@@ -108,7 +119,7 @@ CREATE TABLE settings (
 ```
 
 
-### IdentifierRepo
+### DetailsRepo
 Used to relate details (image metadata) to identifiers (image paths). Identifiers are currently
 treated as bytes, so may need hex-encoding to store in the database. They _should_ be valid strings
 in most environments, so it might be possible to drop the bytes requirement & instead have a string
@@ -117,7 +128,7 @@ requirement.
 methods:
 - relate_details
 - details
-- cleanup
+- cleanup_details
 
 ```sql
 CREATE TABLE details (
@@ -135,9 +146,10 @@ current API, the repo doesn't need to know the shape of a job, and maybe that is
 should take care in the future not to query on the contents of the job.
 
 methods:
-- requeue_in_progress
 - push
 - pop
+- heartbeat
+- complete_job
 
 ```sql
 CREATE TYPE job_status AS ENUM ('new', 'running');
@@ -147,26 +159,27 @@ CREATE TABLE queue (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     queue VARCHAR(30) NOT NULL,
     job JSONB NOT NULL,
-    worker_id VARCHAR(30),
     status job_status NOT NULL DEFAULT 'new',
-    queue_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    queue_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    heartbeat TIMESTAMP
 );
 
 
-CREATE INDEX queue_worker_id_index ON queue INCLUDE worker_id;
 CREATE INDEX queue_status_index ON queue INCLUDE status;
+CREATE INDEX heartbeat_index ON queue
 ```
 
 claiming a job can be
 ```sql
-DELETE FROM queue WHERE worker_id = '$WORKER_ID';
+UPDATE queue SET status = 'new', heartbeat = NULL
+WHERE
+    heartbeat IS NOT NULL AND heartbeat < NOW - INTERVAL '2 MINUTES';
 
-
-UPDATE queue SET status = 'running', worker_id = '$WORKER_ID'
+UPDATE queue SET status = 'running', heartbeat = CURRENT_TIMESTAMP
 WHERE id = (
     SELECT id
     FROM queue
-    WHERE status = 'new'
+    WHERE status = 'new' AND queue = '$QUEUE'
     ORDER BY queue_time ASC
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -196,7 +209,7 @@ EXECUTE PROCEDURE queue_status_notify();
 Postgres queue implementation from this blog post: https://webapp.io/blog/postgres-is-the-answer/
 
 
-### MigrationRepo
+### StoreMigrationRepo
 This is used for migrating from local storage to object storage. It keeps track of which identifiers
 have been migrated, and on a successful migration, it is fully cleared.
 
@@ -235,9 +248,11 @@ when they are not useful to keep around. This might be able to piggyback on the 
 proxies table.
 
 methods:
-- accessed
+- accessed_alias
+- set_accessed_alias
+- alias_accessed_at
 - older_aliases
-- remove_access
+- remove_alias_access
 
 ```sql
 ALTER TABLE aliases ADD COLUMN accessed TIMESTAMP;
@@ -253,11 +268,47 @@ This is used for keeping track of access times for variants of an image to enabl
 from seldom-accessed variants. This might be able to piggyback on the variants table.
 
 methods:
-- accessed
-- contains_variant
+- accessed_variant
+- set_accessed_variant
+- variant_accessed_at
 - older_variants
-- remove_access
+- remove_variant_access
 
 ```sql
 ALTER TABLE variants ADD COLUMN accessed TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+```
+
+### UploadRepo
+Used to keep track of backgrounded uploads.
+
+methods:
+- create_upload
+- wait
+- claim
+- complete_upload
+
+```sql
+CREATE TABLE uploads (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    result JSONB,
+);
+```
+
+Waiting for an upload
+```sql
+CREATE OR REPLACE FUNCTION upload_completion_notify()
+	RETURNS trigger AS
+$$
+BEGIN
+	PERFORM pg_notify('upload_completion_channel', NEW.id::text);
+	RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER upload_result
+	AFTER INSERT OR UPDATE OF result
+	ON uploads
+	FOR EACH ROW
+EXECUTE PROCEDURE upload_completion_notify();
 ```
