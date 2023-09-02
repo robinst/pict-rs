@@ -1810,7 +1810,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
 }
 
 async fn migrate_inner<S1>(
-    repo: Repo,
+    repo: ArcRepo,
     client: ClientWithMiddleware,
     from: S1,
     to: config::primitives::Store,
@@ -1824,11 +1824,7 @@ where
         config::primitives::Store::Filesystem(config::Filesystem { path }) => {
             let to = FileStore::build(path.clone(), repo.clone()).await?;
 
-            match repo {
-                Repo::Sled(repo) => {
-                    migrate_store(Arc::new(repo), from, to, skip_missing_files, timeout).await?
-                }
-            }
+            migrate_store(repo, from, to, skip_missing_files, timeout).await?
         }
         config::primitives::Store::ObjectStorage(config::primitives::ObjectStorage {
             endpoint,
@@ -1862,11 +1858,7 @@ where
             .await?
             .build(client);
 
-            match repo {
-                Repo::Sled(repo) => {
-                    migrate_store(Arc::new(repo), from, to, skip_missing_files, timeout).await?
-                }
-            }
+            migrate_store(repo, from, to, skip_missing_files, timeout).await?
         }
     }
 
@@ -1970,7 +1962,7 @@ impl PictRsConfiguration {
                 from,
                 to,
             } => {
-                let repo = Repo::open(config.repo.clone())?;
+                let repo = Repo::open(config.repo.clone()).await?.to_arc();
 
                 match from {
                     config::primitives::Store::Filesystem(config::Filesystem { path }) => {
@@ -2034,15 +2026,15 @@ impl PictRsConfiguration {
                 return Ok(());
             }
             Operation::MigrateRepo { from, to } => {
-                let from = Repo::open(from)?.to_arc();
-                let to = Repo::open(to)?.to_arc();
+                let from = Repo::open(from).await?.to_arc();
+                let to = Repo::open(to).await?.to_arc();
 
                 repo::migrate_repo(from, to).await?;
                 return Ok(());
             }
         }
 
-        let repo = Repo::open(config.repo.clone())?;
+        let repo = Repo::open(config.repo.clone()).await?;
 
         if config.server.read_only {
             tracing::warn!("Launching in READ ONLY mode");
@@ -2050,9 +2042,9 @@ impl PictRsConfiguration {
 
         match config.store.clone() {
             config::Store::Filesystem(config::Filesystem { path }) => {
-                let store = FileStore::build(path, repo.clone()).await?;
-
                 let arc_repo = repo.to_arc();
+
+                let store = FileStore::build(path, arc_repo.clone()).await?;
 
                 if arc_repo.get("migrate-0.4").await?.is_none() {
                     if let Some(old_repo) = repo_04::open(&config.old_repo)? {
@@ -2075,6 +2067,7 @@ impl PictRsConfiguration {
                         )
                         .await?;
                     }
+                    Repo::Postgres(_) => todo!(),
                 }
             }
             config::Store::ObjectStorage(config::ObjectStorage {
@@ -2089,6 +2082,8 @@ impl PictRsConfiguration {
                 client_timeout,
                 public_endpoint,
             }) => {
+                let arc_repo = repo.to_arc();
+
                 let store = ObjectStore::build(
                     endpoint,
                     bucket_name,
@@ -2104,12 +2099,10 @@ impl PictRsConfiguration {
                     signature_duration,
                     client_timeout,
                     public_endpoint,
-                    repo.clone(),
+                    arc_repo.clone(),
                 )
                 .await?
                 .build(client.clone());
-
-                let arc_repo = repo.to_arc();
 
                 if arc_repo.get("migrate-0.4").await?.is_none() {
                     if let Some(old_repo) = repo_04::open(&config.old_repo)? {
@@ -2128,6 +2121,7 @@ impl PictRsConfiguration {
                         })
                         .await?;
                     }
+                    Repo::Postgres(_) => todo!(),
                 }
             }
         }

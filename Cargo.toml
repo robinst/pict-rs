@@ -20,6 +20,7 @@ actix-server = "2.0.0"
 actix-web = { version = "4.0.0", default-features = false }
 anyhow = "1.0"
 async-trait = "0.1.51"
+barrel = { version = "0.7.0", features = ["pg"] }
 base64 = "0.21.0"
 clap = { version = "4.0.2", features = ["derive"] }
 color-eyre = "0.6"

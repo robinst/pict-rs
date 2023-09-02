@@ -389,6 +389,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "barrel"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad9e605929a6964efbec5ac0884bd0fe93f12a3b1eb271f52c251316640c68d9"
+
+[[package]]
 name = "base64"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1788,6 +1794,7 @@ dependencies = [
  "actix-web",
  "anyhow",
  "async-trait",
+ "barrel",
  "base64 0.21.3",
  "clap",
  "color-eyre",

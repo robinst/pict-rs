@@ -1,9 +1,4 @@
-use crate::{
-    error_code::ErrorCode,
-    file::File,
-    repo::{Repo, SettingsRepo},
-    store::Store,
-};
+use crate::{error_code::ErrorCode, file::File, repo::ArcRepo, store::Store};
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{
@@ -58,7 +53,7 @@ impl FileError {
 pub(crate) struct FileStore {
     path_gen: Generator,
     root_dir: PathBuf,
-    repo: Repo,
+    repo: ArcRepo,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -189,7 +184,7 @@ impl Store for FileStore {
 
 impl FileStore {
     #[tracing::instrument(skip(repo))]
-    pub(crate) async fn build(root_dir: PathBuf, repo: Repo) -> color_eyre::Result<Self> {
+    pub(crate) async fn build(root_dir: PathBuf, repo: ArcRepo) -> color_eyre::Result<Self> {
         let path_gen = init_generator(&repo).await?;
 
         tokio::fs::create_dir_all(&root_dir).await?;
@@ -204,13 +199,9 @@ impl FileStore {
     async fn next_directory(&self) -> Result<PathBuf, StoreError> {
         let path = self.path_gen.next();
 
-        match self.repo {
-            Repo::Sled(ref sled_repo) => {
-                sled_repo
-                    .set(GENERATOR_KEY, path.to_be_bytes().into())
-                    .await?;
-            }
-        }
+        self.repo
+            .set(GENERATOR_KEY, path.to_be_bytes().into())
+            .await?;
 
         let mut target_path = self.root_dir.clone();
         for dir in path.to_strings() {
@@ -308,18 +299,13 @@ pub(crate) async fn safe_create_parent<P: AsRef<Path>>(path: P) -> Result<(), Fi
     Ok(())
 }
 
-async fn init_generator(repo: &Repo) -> Result<Generator, StoreError> {
-    match repo {
-        Repo::Sled(sled_repo) => {
-            if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {
-                Ok(Generator::from_existing(
-                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())
-                        .map_err(FileError::from)?,
-                ))
-            } else {
-                Ok(Generator::new())
-            }
-        }
+async fn init_generator(repo: &ArcRepo) -> Result<Generator, StoreError> {
+    if let Some(ivec) = repo.get(GENERATOR_KEY).await? {
+        Ok(Generator::from_existing(
+            storage_path_generator::Path::from_be_bytes(ivec.to_vec()).map_err(FileError::from)?,
+        ))
+    } else {
+        Ok(Generator::new())
     }
 }
 

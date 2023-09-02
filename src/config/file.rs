@@ -88,6 +88,7 @@ pub(crate) struct ObjectStorage {
 #[serde(tag = "type")]
 pub(crate) enum Repo {
     Sled(Sled),
+    Postgres(Postgres),
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -420,4 +421,10 @@ pub(crate) struct Sled {
     pub(crate) cache_capacity: u64,
 
     pub(crate) export_path: PathBuf,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct Postgres {
+    pub(crate) url: Url,
 }

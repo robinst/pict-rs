@@ -1,7 +1,7 @@
 use crate::{
     bytes_stream::BytesStream,
     error_code::ErrorCode,
-    repo::{Repo, SettingsRepo},
+    repo::ArcRepo,
     store::Store,
     stream::{IntoStreamer, StreamMap},
 };
@@ -107,7 +107,7 @@ impl From<BlockingError> for ObjectError {
 #[derive(Clone)]
 pub(crate) struct ObjectStore {
     path_gen: Generator,
-    repo: Repo,
+    repo: ArcRepo,
     bucket: Bucket,
     credentials: Credentials,
     client: ClientWithMiddleware,
@@ -119,7 +119,7 @@ pub(crate) struct ObjectStore {
 #[derive(Clone)]
 pub(crate) struct ObjectStoreConfig {
     path_gen: Generator,
-    repo: Repo,
+    repo: ArcRepo,
     bucket: Bucket,
     credentials: Credentials,
     signature_expiration: u64,
@@ -493,7 +493,7 @@ impl ObjectStore {
         signature_expiration: u64,
         client_timeout: u64,
         public_endpoint: Option<Url>,
-        repo: Repo,
+        repo: ArcRepo,
     ) -> Result<ObjectStoreConfig, StoreError> {
         let path_gen = init_generator(&repo).await?;
 
@@ -714,13 +714,9 @@ impl ObjectStore {
     async fn next_directory(&self) -> Result<Path, StoreError> {
         let path = self.path_gen.next();
 
-        match self.repo {
-            Repo::Sled(ref sled_repo) => {
-                sled_repo
-                    .set(GENERATOR_KEY, path.to_be_bytes().into())
-                    .await?;
-            }
-        }
+        self.repo
+            .set(GENERATOR_KEY, path.to_be_bytes().into())
+            .await?;
 
         Ok(path)
     }
@@ -733,18 +729,14 @@ impl ObjectStore {
     }
 }
 
-async fn init_generator(repo: &Repo) -> Result<Generator, StoreError> {
-    match repo {
-        Repo::Sled(sled_repo) => {
-            if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {
-                Ok(Generator::from_existing(
-                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())
-                        .map_err(ObjectError::from)?,
-                ))
-            } else {
-                Ok(Generator::new())
-            }
-        }
+async fn init_generator(repo: &ArcRepo) -> Result<Generator, StoreError> {
+    if let Some(ivec) = repo.get(GENERATOR_KEY).await? {
+        Ok(Generator::from_existing(
+            storage_path_generator::Path::from_be_bytes(ivec.to_vec())
+                .map_err(ObjectError::from)?,
+        ))
+    } else {
+        Ok(Generator::new())
     }
 }
 

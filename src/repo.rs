@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 mod hash;
 mod migrate;
+pub(crate) mod postgres;
 pub(crate) mod sled;
 
 pub(crate) use hash::Hash;
@@ -22,6 +23,7 @@ pub(crate) type ArcRepo = Arc<dyn FullRepo>;
 #[derive(Clone, Debug)]
 pub(crate) enum Repo {
     Sled(self::sled::SledRepo),
+    Postgres(self::postgres::PostgresRepo),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -791,7 +793,7 @@ where
 
 impl Repo {
     #[tracing::instrument]
-    pub(crate) fn open(config: config::Repo) -> color_eyre::Result<Self> {
+    pub(crate) async fn open(config: config::Repo) -> color_eyre::Result<Self> {
         match config {
             config::Repo::Sled(config::Sled {
                 path,
@@ -802,12 +804,18 @@ impl Repo {
 
                 Ok(Self::Sled(repo))
             }
+            config::Repo::Postgres(config::Postgres { url }) => {
+                let repo = self::postgres::PostgresRepo::connect(url).await?;
+
+                Ok(Self::Postgres(repo))
+            }
         }
     }
 
     pub(crate) fn to_arc(&self) -> ArcRepo {
         match self {
             Self::Sled(sled_repo) => Arc::new(sled_repo.clone()),
+            Self::Postgres(_) => todo!(),
         }
     }
 }
