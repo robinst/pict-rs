@@ -5,7 +5,7 @@ use crate::{
     ffmpeg::ThumbnailFormat,
     formats::{InputProcessableFormat, InternalVideoFormat},
     repo::{Alias, ArcRepo, Hash, VariantAlreadyExists},
-    store::{Identifier, Store},
+    store::Store,
 };
 use actix_web::web::Bytes;
 use std::{path::PathBuf, time::Instant};
@@ -91,7 +91,7 @@ async fn process<S: Store + 'static>(
     let permit = crate::PROCESS_SEMAPHORE.acquire().await;
 
     let identifier = if let Some(identifier) = repo.still_identifier_from_alias(&alias).await? {
-        S::Identifier::from_arc(identifier)?
+        identifier
     } else {
         let Some(identifier) = repo.identifier(hash.clone()).await? else {
             return Err(UploadError::MissingIdentifier.into());
@@ -101,7 +101,7 @@ async fn process<S: Store + 'static>(
 
         let reader = crate::ffmpeg::thumbnail(
             store.clone(),
-            S::Identifier::from_arc(identifier)?,
+            identifier,
             input_format.unwrap_or(InternalVideoFormat::Mp4),
             thumbnail_format,
             media.process_timeout,

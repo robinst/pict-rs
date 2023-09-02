@@ -1,17 +1,16 @@
-use crate::{error_code::ErrorCode, file::File, repo::ArcRepo, store::Store};
+use crate::{
+    error_code::ErrorCode, file::File, repo::ArcRepo, store::Store, stream::LocalBoxStream,
+};
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{
     path::{Path, PathBuf},
-    pin::Pin,
+    sync::Arc,
 };
 use storage_path_generator::Generator;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::io::StreamReader;
 use tracing::Instrument;
-
-mod file_id;
-pub(crate) use file_id::FileId;
 
 use super::StoreError;
 
@@ -28,11 +27,8 @@ pub(crate) enum FileError {
     #[error("Failed to generate path")]
     PathGenerator(#[from] storage_path_generator::PathError),
 
-    #[error("Error formatting file store ID")]
-    IdError,
-
-    #[error("Malformed file store ID")]
-    PrefixError,
+    #[error("Couldn't convert Path to String")]
+    StringError,
 
     #[error("Tried to save over existing file")]
     FileExists,
@@ -44,7 +40,7 @@ impl FileError {
             Self::Io(_) => ErrorCode::FILE_IO_ERROR,
             Self::PathGenerator(_) => ErrorCode::PARSE_PATH_ERROR,
             Self::FileExists => ErrorCode::FILE_EXISTS,
-            Self::IdError | Self::PrefixError => ErrorCode::FORMAT_FILE_ID_ERROR,
+            Self::StringError => ErrorCode::FORMAT_FILE_ID_ERROR,
         }
     }
 }
@@ -58,9 +54,6 @@ pub(crate) struct FileStore {
 
 #[async_trait::async_trait(?Send)]
 impl Store for FileStore {
-    type Identifier = FileId;
-    type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
-
     async fn health_check(&self) -> Result<(), StoreError> {
         tokio::fs::metadata(&self.root_dir)
             .await
@@ -74,7 +67,7 @@ impl Store for FileStore {
         &self,
         mut reader: Reader,
         _content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
@@ -92,7 +85,7 @@ impl Store for FileStore {
         &self,
         stream: S,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
@@ -105,7 +98,7 @@ impl Store for FileStore {
         &self,
         bytes: Bytes,
         _content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError> {
+    ) -> Result<Arc<str>, StoreError> {
         let path = self.next_file().await?;
 
         if let Err(e) = self.safe_save_bytes(&path, bytes).await {
@@ -116,17 +109,17 @@ impl Store for FileStore {
         Ok(self.file_id_from_path(path)?)
     }
 
-    fn public_url(&self, _identifier: &Self::Identifier) -> Option<url::Url> {
+    fn public_url(&self, _identifier: &Arc<str>) -> Option<url::Url> {
         None
     }
 
     #[tracing::instrument]
     async fn to_stream(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, StoreError> {
+    ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError> {
         let path = self.path_from_file_id(identifier);
 
         let file_span = tracing::trace_span!(parent: None, "File Stream");
@@ -147,7 +140,7 @@ impl Store for FileStore {
     #[tracing::instrument(skip(writer))]
     async fn read_into<Writer>(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
@@ -161,7 +154,7 @@ impl Store for FileStore {
     }
 
     #[tracing::instrument]
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, StoreError> {
+    async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
         let path = self.path_from_file_id(identifier);
 
         let len = tokio::fs::metadata(path)
@@ -173,7 +166,7 @@ impl Store for FileStore {
     }
 
     #[tracing::instrument]
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), StoreError> {
+    async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError> {
         let path = self.path_from_file_id(identifier);
 
         self.safe_remove_file(path).await?;
@@ -194,6 +187,14 @@ impl FileStore {
             path_gen,
             repo,
         })
+    }
+
+    fn file_id_from_path(&self, path: PathBuf) -> Result<Arc<str>, FileError> {
+        path.to_str().ok_or(FileError::StringError).map(Into::into)
+    }
+
+    fn path_from_file_id(&self, file_id: &Arc<str>) -> PathBuf {
+        self.root_dir.join(file_id.as_ref())
     }
 
     async fn next_directory(&self) -> Result<PathBuf, StoreError> {

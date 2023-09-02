@@ -1,11 +1,40 @@
+use diesel::{backend::Backend, sql_types::VarChar, AsExpression, FromSqlRow};
+
 use crate::formats::InternalFormat;
 use std::sync::Arc;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, AsExpression, FromSqlRow)]
+#[diesel(sql_type = VarChar)]
 pub(crate) struct Hash {
     hash: Arc<[u8; 32]>,
     size: u64,
     format: InternalFormat,
+}
+
+impl diesel::serialize::ToSql<VarChar, diesel::pg::Pg> for Hash {
+    fn to_sql<'b>(
+        &'b self,
+        out: &mut diesel::serialize::Output<'b, '_, diesel::pg::Pg>,
+    ) -> diesel::serialize::Result {
+        let s = self.to_base64();
+
+        <String as diesel::serialize::ToSql<VarChar, diesel::pg::Pg>>::to_sql(
+            &s,
+            &mut out.reborrow(),
+        )
+    }
+}
+
+impl<B> diesel::deserialize::FromSql<VarChar, B> for Hash
+where
+    B: Backend,
+    String: diesel::deserialize::FromSql<VarChar, B>,
+{
+    fn from_sql(bytes: <B as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        let s = String::from_sql(bytes)?;
+
+        Self::from_base64(s).ok_or_else(|| format!("Invalid base64 hash").into())
+    }
 }
 
 impl Hash {
@@ -28,6 +57,22 @@ impl Hash {
 
     pub(crate) fn to_hex(&self) -> String {
         hex::encode(self.to_bytes())
+    }
+
+    pub(crate) fn to_base64(&self) -> String {
+        use base64::Engine;
+
+        base64::engine::general_purpose::STANDARD.encode(self.to_bytes())
+    }
+
+    pub(crate) fn from_base64(input: String) -> Option<Self> {
+        use base64::Engine;
+
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(input)
+            .ok()?;
+
+        Self::from_bytes(&bytes)
     }
 
     pub(super) fn to_bytes(&self) -> Vec<u8> {

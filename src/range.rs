@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     error::{Error, UploadError},
     store::Store,
@@ -26,7 +28,7 @@ pub(crate) fn chop_bytes(
 pub(crate) async fn chop_store<S: Store>(
     byte_range: &ByteRangeSpec,
     store: &S,
-    identifier: &S::Identifier,
+    identifier: &Arc<str>,
     length: u64,
 ) -> Result<impl Stream<Item = std::io::Result<Bytes>>, Error> {
     if let Some((start, end)) = byte_range.to_satisfiable_range(length) {

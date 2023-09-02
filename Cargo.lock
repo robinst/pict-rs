@@ -730,6 +730,9 @@ dependencies = [
  "byteorder",
  "diesel_derives",
  "itoa",
+ "serde_json",
+ "time",
+ "uuid",
 ]
 
 [[package]]

@@ -2,10 +2,9 @@ use crate::{
     config,
     details::Details,
     repo::{Alias, DeleteToken},
-    store::{Identifier, StoreError},
 };
 use futures_core::Stream;
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 
 pub(crate) use self::sled::SledRepo;
 
@@ -46,7 +45,7 @@ pub(crate) trait SettingsRepo: BaseRepo {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait IdentifierRepo: BaseRepo {
-    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, StoreError>;
+    async fn details(&self, identifier: Arc<str>) -> Result<Option<Details>, RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -57,20 +56,11 @@ pub(crate) trait HashRepo: BaseRepo {
 
     async fn hashes(&self) -> Self::Stream;
 
-    async fn identifier<I: Identifier + 'static>(
-        &self,
-        hash: Self::Bytes,
-    ) -> Result<Option<I>, StoreError>;
+    async fn identifier(&self, hash: Self::Bytes) -> Result<Option<Arc<str>>, RepoError>;
 
-    async fn variants<I: Identifier + 'static>(
-        &self,
-        hash: Self::Bytes,
-    ) -> Result<Vec<(String, I)>, StoreError>;
+    async fn variants(&self, hash: Self::Bytes) -> Result<Vec<(String, Arc<str>)>, RepoError>;
 
-    async fn motion_identifier<I: Identifier + 'static>(
-        &self,
-        hash: Self::Bytes,
-    ) -> Result<Option<I>, StoreError>;
+    async fn motion_identifier(&self, hash: Self::Bytes) -> Result<Option<Arc<str>>, RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]

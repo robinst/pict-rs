@@ -1,10 +1,9 @@
 use actix_web::web::Bytes;
-use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_core::Stream;
 use std::{fmt::Debug, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::error_code::ErrorCode;
+use crate::{error_code::ErrorCode, stream::LocalBoxStream};
 
 pub(crate) mod file_store;
 pub(crate) mod object_store;
@@ -70,32 +69,15 @@ impl From<crate::store::object_store::ObjectError> for StoreError {
     }
 }
 
-pub(crate) trait Identifier: Send + Sync + Debug {
-    fn to_bytes(&self) -> Result<Vec<u8>, StoreError>;
-
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, StoreError>
-    where
-        Self: Sized;
-
-    fn from_arc(arc: Arc<[u8]>) -> Result<Self, StoreError>
-    where
-        Self: Sized;
-
-    fn string_repr(&self) -> String;
-}
-
 #[async_trait::async_trait(?Send)]
 pub(crate) trait Store: Clone + Debug {
-    type Identifier: Identifier + Clone + 'static;
-    type Stream: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static;
-
     async fn health_check(&self) -> Result<(), StoreError>;
 
     async fn save_async_read<Reader>(
         &self,
         reader: Reader,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static;
 
@@ -103,7 +85,7 @@ pub(crate) trait Store: Clone + Debug {
         &self,
         stream: S,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static;
 
@@ -111,28 +93,28 @@ pub(crate) trait Store: Clone + Debug {
         &self,
         bytes: Bytes,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>;
+    ) -> Result<Arc<str>, StoreError>;
 
-    fn public_url(&self, _: &Self::Identifier) -> Option<url::Url>;
+    fn public_url(&self, _: &Arc<str>) -> Option<url::Url>;
 
     async fn to_stream(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, StoreError>;
+    ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError>;
 
     async fn read_into<Writer>(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
         Writer: AsyncWrite + Unpin;
 
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, StoreError>;
+    async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError>;
 
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), StoreError>;
+    async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -140,9 +122,6 @@ impl<T> Store for actix_web::web::Data<T>
 where
     T: Store,
 {
-    type Identifier = T::Identifier;
-    type Stream = T::Stream;
-
     async fn health_check(&self) -> Result<(), StoreError> {
         T::health_check(self).await
     }
@@ -151,7 +130,7 @@ where
         &self,
         reader: Reader,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
@@ -162,7 +141,7 @@ where
         &self,
         stream: S,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
@@ -173,26 +152,26 @@ where
         &self,
         bytes: Bytes,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError> {
+    ) -> Result<Arc<str>, StoreError> {
         T::save_bytes(self, bytes, content_type).await
     }
 
-    fn public_url(&self, identifier: &Self::Identifier) -> Option<url::Url> {
+    fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
         T::public_url(self, identifier)
     }
 
     async fn to_stream(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, StoreError> {
+    ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError> {
         T::to_stream(self, identifier, from_start, len).await
     }
 
     async fn read_into<Writer>(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
@@ -201,11 +180,83 @@ where
         T::read_into(self, identifier, writer).await
     }
 
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, StoreError> {
+    async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
         T::len(self, identifier).await
     }
 
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), StoreError> {
+    async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError> {
+        T::remove(self, identifier).await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl<T> Store for Arc<T>
+where
+    T: Store,
+{
+    async fn health_check(&self) -> Result<(), StoreError> {
+        T::health_check(self).await
+    }
+
+    async fn save_async_read<Reader>(
+        &self,
+        reader: Reader,
+        content_type: mime::Mime,
+    ) -> Result<Arc<str>, StoreError>
+    where
+        Reader: AsyncRead + Unpin + 'static,
+    {
+        T::save_async_read(self, reader, content_type).await
+    }
+
+    async fn save_stream<S>(
+        &self,
+        stream: S,
+        content_type: mime::Mime,
+    ) -> Result<Arc<str>, StoreError>
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+    {
+        T::save_stream(self, stream, content_type).await
+    }
+
+    async fn save_bytes(
+        &self,
+        bytes: Bytes,
+        content_type: mime::Mime,
+    ) -> Result<Arc<str>, StoreError> {
+        T::save_bytes(self, bytes, content_type).await
+    }
+
+    fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
+        T::public_url(self, identifier)
+    }
+
+    async fn to_stream(
+        &self,
+        identifier: &Arc<str>,
+        from_start: Option<u64>,
+        len: Option<u64>,
+    ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError> {
+        T::to_stream(self, identifier, from_start, len).await
+    }
+
+    async fn read_into<Writer>(
+        &self,
+        identifier: &Arc<str>,
+        writer: &mut Writer,
+    ) -> Result<(), std::io::Error>
+    where
+        Writer: AsyncWrite + Unpin,
+    {
+        T::read_into(self, identifier, writer).await
+    }
+
+    async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
+        T::len(self, identifier).await
+    }
+
+    async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError> {
         T::remove(self, identifier).await
     }
 }
@@ -215,9 +266,6 @@ impl<'a, T> Store for &'a T
 where
     T: Store,
 {
-    type Identifier = T::Identifier;
-    type Stream = T::Stream;
-
     async fn health_check(&self) -> Result<(), StoreError> {
         T::health_check(self).await
     }
@@ -226,7 +274,7 @@ where
         &self,
         reader: Reader,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
@@ -237,7 +285,7 @@ where
         &self,
         stream: S,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
@@ -248,26 +296,26 @@ where
         &self,
         bytes: Bytes,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError> {
+    ) -> Result<Arc<str>, StoreError> {
         T::save_bytes(self, bytes, content_type).await
     }
 
-    fn public_url(&self, identifier: &Self::Identifier) -> Option<url::Url> {
+    fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
         T::public_url(self, identifier)
     }
 
     async fn to_stream(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, StoreError> {
+    ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError> {
         T::to_stream(self, identifier, from_start, len).await
     }
 
     async fn read_into<Writer>(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
@@ -276,59 +324,11 @@ where
         T::read_into(self, identifier, writer).await
     }
 
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, StoreError> {
+    async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
         T::len(self, identifier).await
     }
 
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), StoreError> {
+    async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError> {
         T::remove(self, identifier).await
-    }
-}
-
-impl Identifier for Vec<u8> {
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, StoreError>
-    where
-        Self: Sized,
-    {
-        Ok(bytes)
-    }
-
-    fn from_arc(arc: Arc<[u8]>) -> Result<Self, StoreError>
-    where
-        Self: Sized,
-    {
-        Ok(Vec::from(&arc[..]))
-    }
-
-    fn to_bytes(&self) -> Result<Vec<u8>, StoreError> {
-        Ok(self.clone())
-    }
-
-    fn string_repr(&self) -> String {
-        BASE64_STANDARD.encode(self.as_slice())
-    }
-}
-
-impl Identifier for Arc<[u8]> {
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, StoreError>
-    where
-        Self: Sized,
-    {
-        Ok(Arc::from(bytes))
-    }
-
-    fn from_arc(arc: Arc<[u8]>) -> Result<Self, StoreError>
-    where
-        Self: Sized,
-    {
-        Ok(arc)
-    }
-
-    fn to_bytes(&self) -> Result<Vec<u8>, StoreError> {
-        Ok(Vec::from(&self[..]))
-    }
-
-    fn string_repr(&self) -> String {
-        BASE64_STANDARD.encode(&self[..])
     }
 }

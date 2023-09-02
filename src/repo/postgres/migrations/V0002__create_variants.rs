@@ -7,7 +7,7 @@ pub(crate) fn migration() -> String {
 
     m.create_table("variants", |t| {
         t.inject_custom(r#""id" UUID PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL UNIQUE"#);
-        t.add_column("hash", types::binary().nullable(false));
+        t.add_column("hash", types::text().nullable(false));
         t.add_column("variant", types::text().nullable(false));
         t.add_column("identifier", types::text().nullable(false));
         t.add_column(

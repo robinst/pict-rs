@@ -4,36 +4,36 @@ use crate::{
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     ingest::Session,
-    queue::{Base64Bytes, LocalBoxFuture, Process},
+    queue::{LocalBoxFuture, Process},
     repo::{Alias, ArcRepo, UploadId, UploadResult},
     serde_str::Serde,
-    store::{Identifier, Store},
+    store::Store,
     stream::StreamMap,
 };
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 pub(super) fn perform<'a, S>(
     repo: &'a ArcRepo,
     store: &'a S,
     process_map: &'a ProcessMap,
     config: &'a Configuration,
-    job: &'a [u8],
+    job: &'a str,
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
     S: Store + 'static,
 {
     Box::pin(async move {
-        match serde_json::from_slice(job) {
+        match serde_json::from_str(job) {
             Ok(job) => match job {
                 Process::Ingest {
-                    identifier: Base64Bytes(identifier),
+                    identifier,
                     upload_id,
                     declared_alias,
                 } => {
                     process_ingest(
                         repo,
                         store,
-                        identifier,
+                        Arc::from(identifier),
                         Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
                         &config.media,
@@ -72,7 +72,7 @@ where
 async fn process_ingest<S>(
     repo: &ArcRepo,
     store: &S,
-    unprocessed_identifier: Vec<u8>,
+    unprocessed_identifier: Arc<str>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
     media: &crate::config::Media,
@@ -81,8 +81,6 @@ where
     S: Store + 'static,
 {
     let fut = async {
-        let unprocessed_identifier = S::Identifier::from_bytes(unprocessed_identifier)?;
-
         let ident = unprocessed_identifier.clone();
         let store2 = store.clone();
         let repo = repo.clone();
@@ -97,7 +95,7 @@ where
             let session =
                 crate::ingest::ingest(&repo, &store2, stream, declared_alias, &media).await?;
 
-            Ok(session) as Result<Session<S>, Error>
+            Ok(session) as Result<Session, Error>
         })
         .await;
 

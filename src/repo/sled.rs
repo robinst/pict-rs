@@ -2,7 +2,6 @@ use crate::{
     details::HumanDate,
     error_code::{ErrorCode, OwnedErrorCode},
     serde_str::Serde,
-    store::StoreError,
     stream::{from_iterator, LocalBoxStream},
 };
 use sled::{transaction::TransactionError, Db, IVec, Transactional, Tree};
@@ -21,9 +20,9 @@ use uuid::Uuid;
 
 use super::{
     hash::Hash, Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken,
-    Details, DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, Identifier, JobId,
-    OrderedHash, ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId,
-    UploadRepo, UploadResult, VariantAccessRepo, VariantAlreadyExists,
+    Details, DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, JobId, OrderedHash,
+    ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
+    UploadResult, VariantAccessRepo, VariantAlreadyExists,
 };
 
 macro_rules! b {
@@ -55,6 +54,9 @@ pub(crate) enum SledError {
     #[error("Error parsing variant key")]
     VariantKey(#[from] VariantKeyError),
 
+    #[error("Invalid string data in db")]
+    Utf8(#[source] std::str::Utf8Error),
+
     #[error("Operation panicked")]
     Panic,
 
@@ -65,7 +67,7 @@ pub(crate) enum SledError {
 impl SledError {
     pub(super) const fn error_code(&self) -> ErrorCode {
         match self {
-            Self::Sled(_) | Self::VariantKey(_) => ErrorCode::SLED_ERROR,
+            Self::Sled(_) | Self::VariantKey(_) | Self::Utf8(_) => ErrorCode::SLED_ERROR,
             Self::Details(_) => ErrorCode::EXTRACT_DETAILS,
             Self::UploadResult(_) => ErrorCode::EXTRACT_UPLOAD_RESULT,
             Self::Panic => ErrorCode::PANIC,
@@ -648,10 +650,17 @@ fn job_key(queue: &'static str, job_id: JobId) -> Arc<[u8]> {
     Arc::from(key)
 }
 
+fn try_into_arc_str(ivec: IVec) -> Result<Arc<str>, SledError> {
+    std::str::from_utf8(&ivec[..])
+        .map_err(SledError::Utf8)
+        .map(String::from)
+        .map(Arc::from)
+}
+
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for SledRepo {
-    #[tracing::instrument(skip(self, job), fields(job = %String::from_utf8_lossy(&job)))]
-    async fn push(&self, queue_name: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError> {
+    #[tracing::instrument(skip(self))]
+    async fn push(&self, queue_name: &'static str, job: Arc<str>) -> Result<JobId, RepoError> {
         let metrics_guard = PushMetricsGuard::guard(queue_name);
 
         let id = JobId::gen();
@@ -700,7 +709,7 @@ impl QueueRepo for SledRepo {
         &self,
         queue_name: &'static str,
         worker_id: Uuid,
-    ) -> Result<(JobId, Arc<[u8]>), RepoError> {
+    ) -> Result<(JobId, Arc<str>), RepoError> {
         let metrics_guard = PopMetricsGuard::guard(queue_name);
 
         let now = time::OffsetDateTime::now_utc();
@@ -753,11 +762,10 @@ impl QueueRepo for SledRepo {
 
                     tracing::Span::current().record("job_id", &format!("{job_id:?}"));
 
-                    let opt = queue
-                        .get(&key)?
-                        .map(|job_bytes| (job_id, Arc::from(job_bytes.to_vec())));
+                    let opt = queue.get(&key)?.map(try_into_arc_str).transpose()?;
 
-                    return Ok(opt) as Result<Option<(JobId, Arc<[u8]>)>, SledError>;
+                    return Ok(opt.map(|job| (job_id, job)))
+                        as Result<Option<(JobId, Arc<str>)>, SledError>;
                 }
 
                 Ok(None)
@@ -949,43 +957,46 @@ fn variant_from_key(hash: &[u8], key: &[u8]) -> Option<String> {
 
 #[async_trait::async_trait(?Send)]
 impl DetailsRepo for SledRepo {
-    #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn relate_details(
         &self,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         details: &Details,
-    ) -> Result<(), StoreError> {
-        let key = identifier.to_bytes()?;
-        let details = serde_json::to_vec(&details.inner)
-            .map_err(SledError::Details)
-            .map_err(RepoError::from)?;
+    ) -> Result<(), RepoError> {
+        let key = identifier.clone();
+        let details = serde_json::to_vec(&details.inner).map_err(SledError::Details)?;
 
         b!(
             self.identifier_details,
-            identifier_details.insert(key, details)
+            identifier_details.insert(key.as_bytes(), details)
         );
 
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
-    async fn details(&self, identifier: &dyn Identifier) -> Result<Option<Details>, StoreError> {
-        let key = identifier.to_bytes()?;
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn details(&self, identifier: &Arc<str>) -> Result<Option<Details>, RepoError> {
+        let key = identifier.clone();
 
-        let opt = b!(self.identifier_details, identifier_details.get(key));
+        let opt = b!(
+            self.identifier_details,
+            identifier_details.get(key.as_bytes())
+        );
 
         opt.map(|ivec| serde_json::from_slice(&ivec).map(|inner| Details { inner }))
             .transpose()
             .map_err(SledError::Details)
             .map_err(RepoError::from)
-            .map_err(StoreError::from)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
-    async fn cleanup_details(&self, identifier: &dyn Identifier) -> Result<(), StoreError> {
-        let key = identifier.to_bytes()?;
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn cleanup_details(&self, identifier: &Arc<str>) -> Result<(), RepoError> {
+        let key = identifier.clone();
 
-        b!(self.identifier_details, identifier_details.remove(key));
+        b!(
+            self.identifier_details,
+            identifier_details.remove(key.as_bytes())
+        );
 
         Ok(())
     }
@@ -999,24 +1010,28 @@ impl StoreMigrationRepo for SledRepo {
 
     async fn mark_migrated(
         &self,
-        old_identifier: &dyn Identifier,
-        new_identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
-        let key = new_identifier.to_bytes()?;
-        let value = old_identifier.to_bytes()?;
+        old_identifier: &Arc<str>,
+        new_identifier: &Arc<str>,
+    ) -> Result<(), RepoError> {
+        let key = new_identifier.clone();
+        let value = old_identifier.clone();
 
         b!(
             self.migration_identifiers,
-            migration_identifiers.insert(key, value)
+            migration_identifiers.insert(key.as_bytes(), value.as_bytes())
         );
 
         Ok(())
     }
 
-    async fn is_migrated(&self, identifier: &dyn Identifier) -> Result<bool, StoreError> {
-        let key = identifier.to_bytes()?;
+    async fn is_migrated(&self, identifier: &Arc<str>) -> Result<bool, RepoError> {
+        let key = identifier.clone();
 
-        Ok(b!(self.migration_identifiers, migration_identifiers.get(key)).is_some())
+        Ok(b!(
+            self.migration_identifiers,
+            migration_identifiers.get(key.as_bytes())
+        )
+        .is_some())
     }
 
     async fn clear(&self) -> Result<(), RepoError> {
@@ -1060,17 +1075,6 @@ impl HashRepo for SledRepo {
             Ok(u64::try_from(hashes.len()).expect("Length is reasonable"))
                 as Result<u64, SledError>
         ))
-    }
-
-    async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>> {
-        let iter = self.hashes.iter().keys().filter_map(|res| {
-            res.map_err(SledError::from)
-                .map_err(RepoError::from)
-                .map(Hash::from_ivec)
-                .transpose()
-        });
-
-        Box::pin(from_iterator(iter, 8))
     }
 
     async fn bound(&self, hash: Hash) -> Result<Option<OrderedHash>, RepoError> {
@@ -1197,10 +1201,10 @@ impl HashRepo for SledRepo {
     async fn create_hash_with_timestamp(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
-        let identifier: sled::IVec = identifier.to_bytes()?.into();
+    ) -> Result<Result<(), HashAlreadyExists>, RepoError> {
+        let identifier: sled::IVec = identifier.as_bytes().to_vec().into();
 
         let hashes = self.hashes.clone();
         let hashes_inverse = self.hashes_inverse.clone();
@@ -1234,63 +1238,56 @@ impl HashRepo for SledRepo {
         match res {
             Ok(res) => Ok(res),
             Err(TransactionError::Abort(e) | TransactionError::Storage(e)) => {
-                Err(StoreError::from(RepoError::from(SledError::from(e))))
+                Err(RepoError::from(SledError::from(e)))
             }
         }
     }
 
-    async fn update_identifier(
-        &self,
-        hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
-        let identifier = identifier.to_bytes()?;
+    async fn update_identifier(&self, hash: Hash, identifier: &Arc<str>) -> Result<(), RepoError> {
+        let identifier = identifier.clone();
 
         let hash = hash.to_ivec();
 
         b!(
             self.hash_identifiers,
-            hash_identifiers.insert(hash, identifier)
+            hash_identifiers.insert(hash, identifier.as_bytes())
         );
 
         Ok(())
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError> {
+    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         let hash = hash.to_ivec();
 
-        let Some(ivec) = b!(self.hash_identifiers, hash_identifiers.get(hash)) else {
-            return Ok(None);
-        };
+        let opt = b!(self.hash_identifiers, hash_identifiers.get(hash));
 
-        Ok(Some(Arc::from(ivec.to_vec())))
+        Ok(opt.map(try_into_arc_str).transpose()?)
     }
 
-    #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn relate_variant_identifier(
         &self,
         hash: Hash,
         variant: String,
-        identifier: &dyn Identifier,
-    ) -> Result<Result<(), VariantAlreadyExists>, StoreError> {
+        identifier: &Arc<str>,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
         let hash = hash.to_bytes();
 
         let key = variant_key(&hash, &variant);
-        let value = identifier.to_bytes()?;
+        let value = identifier.clone();
 
         let hash_variant_identifiers = self.hash_variant_identifiers.clone();
 
         actix_rt::task::spawn_blocking(move || {
             hash_variant_identifiers
-                .compare_and_swap(key, Option::<&[u8]>::None, Some(value))
+                .compare_and_swap(key, Option::<&[u8]>::None, Some(value.as_bytes()))
                 .map(|res| res.map_err(|_| VariantAlreadyExists))
         })
         .await
         .map_err(|_| RepoError::Canceled)?
         .map_err(SledError::from)
         .map_err(RepoError::from)
-        .map_err(StoreError::from)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -1298,7 +1295,7 @@ impl HashRepo for SledRepo {
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Option<Arc<[u8]>>, RepoError> {
+    ) -> Result<Option<Arc<str>>, RepoError> {
         let hash = hash.to_bytes();
 
         let key = variant_key(&hash, &variant);
@@ -1308,11 +1305,11 @@ impl HashRepo for SledRepo {
             hash_variant_identifiers.get(key)
         );
 
-        Ok(opt.map(|ivec| Arc::from(ivec.to_vec())))
+        Ok(opt.map(try_into_arc_str).transpose()?)
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
-    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<[u8]>)>, RepoError> {
+    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
         let hash = hash.to_ivec();
 
         let vec = b!(
@@ -1321,14 +1318,14 @@ impl HashRepo for SledRepo {
                 .scan_prefix(hash.clone())
                 .filter_map(|res| res.ok())
                 .filter_map(|(key, ivec)| {
-                    let identifier = Arc::from(ivec.to_vec());
+                    let identifier = try_into_arc_str(ivec).ok();
 
                     let variant = variant_from_key(&hash, &key);
                     if variant.is_none() {
                         tracing::warn!("Skipping a variant: {}", String::from_utf8_lossy(&key));
                     }
 
-                    Some((variant?, identifier))
+                    Some((variant?, identifier?))
                 })
                 .collect::<Vec<_>>()) as Result<Vec<_>, SledError>
         );
@@ -1350,25 +1347,25 @@ impl HashRepo for SledRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn relate_motion_identifier(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
+        identifier: &Arc<str>,
+    ) -> Result<(), RepoError> {
         let hash = hash.to_ivec();
-        let bytes = identifier.to_bytes()?;
+        let bytes = identifier.clone();
 
         b!(
             self.hash_motion_identifiers,
-            hash_motion_identifiers.insert(hash, bytes)
+            hash_motion_identifiers.insert(hash, bytes.as_bytes())
         );
 
         Ok(())
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError> {
+    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         let hash = hash.to_ivec();
 
         let opt = b!(
@@ -1376,7 +1373,7 @@ impl HashRepo for SledRepo {
             hash_motion_identifiers.get(hash)
         );
 
-        Ok(opt.map(|ivec| Arc::from(ivec.to_vec())))
+        Ok(opt.map(try_into_arc_str).transpose()?)
     }
 
     #[tracing::instrument(skip(self))]

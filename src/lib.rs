@@ -45,6 +45,7 @@ use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
 use rusty_s3::UrlStyle;
 use std::{
+    marker::PhantomData,
     path::Path,
     path::PathBuf,
     sync::Arc,
@@ -69,7 +70,7 @@ use self::{
     queue::queue_generate,
     repo::{sled::SledRepo, Alias, DeleteToken, Hash, Repo, UploadId, UploadResult},
     serde_str::Serde,
-    store::{file_store::FileStore, object_store::ObjectStore, Identifier, Store},
+    store::{file_store::FileStore, object_store::ObjectStore, Store},
     stream::{empty, once, StreamLimit, StreamMap, StreamTimeout},
 };
 
@@ -93,7 +94,7 @@ async fn ensure_details<S: Store + 'static>(
     config: &Configuration,
     alias: &Alias,
 ) -> Result<Details, Error> {
-    let Some(identifier) = repo.identifier_from_alias(alias).await?.map(S::Identifier::from_arc).transpose()? else {
+    let Some(identifier) = repo.identifier_from_alias(alias).await? else {
         return Err(UploadError::MissingAlias.into());
     };
 
@@ -117,10 +118,10 @@ async fn ensure_details<S: Store + 'static>(
     }
 }
 
-struct Upload<S: Store + 'static>(Value<Session<S>>);
+struct Upload<S>(Value<Session>, PhantomData<S>);
 
 impl<S: Store + 'static> FormData for Upload<S> {
-    type Item = Session<S>;
+    type Item = Session;
     type Error = Error;
 
     fn form(req: &HttpRequest) -> Form<Self::Item, Self::Error> {
@@ -172,14 +173,14 @@ impl<S: Store + 'static> FormData for Upload<S> {
     }
 
     fn extract(value: Value<Self::Item>) -> Result<Self, Self::Error> {
-        Ok(Upload(value))
+        Ok(Upload(value, PhantomData))
     }
 }
 
-struct Import<S: Store + 'static>(Value<Session<S>>);
+struct Import<S: Store + 'static>(Value<Session>, PhantomData<S>);
 
 impl<S: Store + 'static> FormData for Import<S> {
-    type Item = Session<S>;
+    type Item = Session;
     type Error = Error;
 
     fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
@@ -241,14 +242,14 @@ impl<S: Store + 'static> FormData for Import<S> {
     where
         Self: Sized,
     {
-        Ok(Import(value))
+        Ok(Import(value, PhantomData))
     }
 }
 
 /// Handle responding to successful uploads
 #[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
 async fn upload<S: Store + 'static>(
-    Multipart(Upload(value)): Multipart<Upload<S>>,
+    Multipart(Upload(value, _)): Multipart<Upload<S>>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -259,7 +260,7 @@ async fn upload<S: Store + 'static>(
 /// Handle responding to successful uploads
 #[tracing::instrument(name = "Imported files", skip(value, repo, store, config))]
 async fn import<S: Store + 'static>(
-    Multipart(Import(value)): Multipart<Import<S>>,
+    Multipart(Import(value, _)): Multipart<Import<S>>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -270,7 +271,7 @@ async fn import<S: Store + 'static>(
 /// Handle responding to successful uploads
 #[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
 async fn handle_upload<S: Store + 'static>(
-    value: Value<Session<S>>,
+    value: Value<Session>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -312,10 +313,10 @@ async fn handle_upload<S: Store + 'static>(
     })))
 }
 
-struct BackgroundedUpload<S: Store + 'static>(Value<Backgrounded<S>>);
+struct BackgroundedUpload<S: Store + 'static>(Value<Backgrounded>, PhantomData<S>);
 
 impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
-    type Item = Backgrounded<S>;
+    type Item = Backgrounded;
     type Error = Error;
 
     fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
@@ -371,13 +372,13 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
     where
         Self: Sized,
     {
-        Ok(BackgroundedUpload(value))
+        Ok(BackgroundedUpload(value, PhantomData))
     }
 }
 
 #[tracing::instrument(name = "Uploaded files", skip(value, repo))]
 async fn upload_backgrounded<S: Store>(
-    Multipart(BackgroundedUpload(value)): Multipart<BackgroundedUpload<S>>,
+    Multipart(BackgroundedUpload(value, _)): Multipart<BackgroundedUpload<S>>,
     repo: web::Data<ArcRepo>,
 ) -> Result<HttpResponse, Error> {
     let images = value
@@ -394,11 +395,7 @@ async fn upload_backgrounded<S: Store>(
 
     for image in &images {
         let upload_id = image.result.upload_id().expect("Upload ID exists");
-        let identifier = image
-            .result
-            .identifier()
-            .expect("Identifier exists")
-            .to_bytes()?;
+        let identifier = image.result.identifier().expect("Identifier exists");
 
         queue::queue_ingest(&repo, identifier, upload_id, None).await?;
 
@@ -560,10 +557,7 @@ async fn do_download_backgrounded<S: Store + 'static>(
     let backgrounded = Backgrounded::proxy((**repo).clone(), (**store).clone(), stream).await?;
 
     let upload_id = backgrounded.upload_id().expect("Upload ID exists");
-    let identifier = backgrounded
-        .identifier()
-        .expect("Identifier exists")
-        .to_bytes()?;
+    let identifier = backgrounded.identifier().expect("Identifier exists");
 
     queue::queue_ingest(&repo, identifier, upload_id, None).await?;
 
@@ -764,8 +758,6 @@ async fn process_details<S: Store>(
     let identifier = repo
         .variant_identifier(hash, thumbnail_string)
         .await?
-        .map(S::Identifier::from_arc)
-        .transpose()?
         .ok_or(UploadError::MissingAlias)?;
 
     let details = repo.details(&identifier).await?;
@@ -856,11 +848,7 @@ async fn process<S: Store + 'static>(
             .await?;
     }
 
-    let identifier_opt = repo
-        .variant_identifier(hash.clone(), path_string)
-        .await?
-        .map(S::Identifier::from_arc)
-        .transpose()?;
+    let identifier_opt = repo.variant_identifier(hash.clone(), path_string).await?;
 
     if let Some(identifier) = identifier_opt {
         let details = repo.details(&identifier).await?;
@@ -980,11 +968,7 @@ async fn process_head<S: Store + 'static>(
             .await?;
     }
 
-    let identifier_opt = repo
-        .variant_identifier(hash.clone(), path_string)
-        .await?
-        .map(S::Identifier::from_arc)
-        .transpose()?;
+    let identifier_opt = repo.variant_identifier(hash.clone(), path_string).await?;
 
     if let Some(identifier) = identifier_opt {
         let details = repo.details(&identifier).await?;
@@ -1047,11 +1031,7 @@ async fn process_backgrounded<S: Store>(
         return Ok(HttpResponse::BadRequest().finish());
     };
 
-    let identifier_opt = repo
-        .variant_identifier(hash.clone(), path_string)
-        .await?
-        .map(S::Identifier::from_arc)
-        .transpose()?;
+    let identifier_opt = repo.variant_identifier(hash.clone(), path_string).await?;
 
     if identifier_opt.is_some() {
         return Ok(HttpResponse::Accepted().finish());
@@ -1185,7 +1165,7 @@ async fn do_serve<S: Store + 'static>(
         (hash, alias, true)
     };
 
-    let Some(identifier) = repo.identifier(hash.clone()).await?.map(Identifier::from_arc).transpose()? else {
+    let Some(identifier) = repo.identifier(hash.clone()).await? else {
         tracing::warn!(
             "Original File identifier for hash {hash:?} is missing, queue cleanup task",
         );
@@ -1250,7 +1230,7 @@ async fn do_serve_head<S: Store + 'static>(
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let Some(identifier) = repo.identifier_from_alias(&alias).await?.map(S::Identifier::from_arc).transpose()? else {
+    let Some(identifier) = repo.identifier_from_alias(&alias).await? else {
         // Invalid alias
         return Ok(HttpResponse::NotFound().finish());
     };
@@ -1268,7 +1248,7 @@ async fn do_serve_head<S: Store + 'static>(
 
 async fn ranged_file_head_resp<S: Store + 'static>(
     store: &S,
-    identifier: S::Identifier,
+    identifier: Arc<str>,
     range: Option<web::Header<Range>>,
     details: Details,
 ) -> Result<HttpResponse, Error> {
@@ -1303,7 +1283,7 @@ async fn ranged_file_head_resp<S: Store + 'static>(
 
 async fn ranged_file_resp<S: Store + 'static>(
     store: &S,
-    identifier: S::Identifier,
+    identifier: Arc<str>,
     range: Option<web::Header<Range>>,
     details: Details,
     not_found: bool,
@@ -1555,7 +1535,7 @@ async fn identifier<S: Store>(
         }
     };
 
-    let Some(identifier) = repo.identifier_from_alias(&alias).await?.map(S::Identifier::from_arc).transpose()? else {
+    let Some(identifier) = repo.identifier_from_alias(&alias).await? else {
         // Invalid alias
         return Ok(HttpResponse::NotFound().json(serde_json::json!({
             "msg": "No identifiers associated with provided alias"
@@ -1564,7 +1544,7 @@ async fn identifier<S: Store>(
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",
-        "identifier": identifier.string_repr(),
+        "identifier": identifier.as_ref(),
     })))
 }
 

@@ -2,7 +2,6 @@ use crate::{
     config,
     details::Details,
     error_code::{ErrorCode, OwnedErrorCode},
-    store::{Identifier, StoreError},
     stream::LocalBoxStream,
 };
 use base64::Engine;
@@ -86,6 +85,7 @@ impl RepoError {
     pub(crate) const fn error_code(&self) -> ErrorCode {
         match self {
             Self::SledError(e) => e.error_code(),
+            Self::PostgresError(e) => e.error_code(),
             Self::AlreadyClaimed => ErrorCode::ALREADY_CLAIMED,
             Self::Canceled => ErrorCode::PANIC,
         }
@@ -111,7 +111,7 @@ pub(crate) trait FullRepo:
     async fn health_check(&self) -> Result<(), RepoError>;
 
     #[tracing::instrument(skip(self))]
-    async fn identifier_from_alias(&self, alias: &Alias) -> Result<Option<Arc<[u8]>>, RepoError> {
+    async fn identifier_from_alias(&self, alias: &Alias) -> Result<Option<Arc<str>>, RepoError> {
         let Some(hash) = self.hash(alias).await? else {
             return Ok(None);
         };
@@ -132,7 +132,7 @@ pub(crate) trait FullRepo:
     async fn still_identifier_from_alias(
         &self,
         alias: &Alias,
-    ) -> Result<Option<Arc<[u8]>>, StoreError> {
+    ) -> Result<Option<Arc<str>>, RepoError> {
         let Some(hash) = self.hash(alias).await? else {
             return Ok(None);
         };
@@ -372,13 +372,13 @@ impl JobId {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn push(&self, queue: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError>;
+    async fn push(&self, queue: &'static str, job: Arc<str>) -> Result<JobId, RepoError>;
 
     async fn pop(
         &self,
         queue: &'static str,
         worker_id: Uuid,
-    ) -> Result<(JobId, Arc<[u8]>), RepoError>;
+    ) -> Result<(JobId, Arc<str>), RepoError>;
 
     async fn heartbeat(
         &self,
@@ -400,7 +400,7 @@ impl<T> QueueRepo for Arc<T>
 where
     T: QueueRepo,
 {
-    async fn push(&self, queue: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError> {
+    async fn push(&self, queue: &'static str, job: Arc<str>) -> Result<JobId, RepoError> {
         T::push(self, queue, job).await
     }
 
@@ -408,7 +408,7 @@ where
         &self,
         queue: &'static str,
         worker_id: Uuid,
-    ) -> Result<(JobId, Arc<[u8]>), RepoError> {
+    ) -> Result<(JobId, Arc<str>), RepoError> {
         T::pop(self, queue, worker_id).await
     }
 
@@ -460,12 +460,12 @@ where
 pub(crate) trait DetailsRepo: BaseRepo {
     async fn relate_details(
         &self,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         details: &Details,
-    ) -> Result<(), StoreError>;
-    async fn details(&self, identifier: &dyn Identifier) -> Result<Option<Details>, StoreError>;
+    ) -> Result<(), RepoError>;
+    async fn details(&self, identifier: &Arc<str>) -> Result<Option<Details>, RepoError>;
 
-    async fn cleanup_details(&self, identifier: &dyn Identifier) -> Result<(), StoreError>;
+    async fn cleanup_details(&self, identifier: &Arc<str>) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -475,17 +475,17 @@ where
 {
     async fn relate_details(
         &self,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         details: &Details,
-    ) -> Result<(), StoreError> {
+    ) -> Result<(), RepoError> {
         T::relate_details(self, identifier, details).await
     }
 
-    async fn details(&self, identifier: &dyn Identifier) -> Result<Option<Details>, StoreError> {
+    async fn details(&self, identifier: &Arc<str>) -> Result<Option<Details>, RepoError> {
         T::details(self, identifier).await
     }
 
-    async fn cleanup_details(&self, identifier: &dyn Identifier) -> Result<(), StoreError> {
+    async fn cleanup_details(&self, identifier: &Arc<str>) -> Result<(), RepoError> {
         T::cleanup_details(self, identifier).await
     }
 }
@@ -496,11 +496,11 @@ pub(crate) trait StoreMigrationRepo: BaseRepo {
 
     async fn mark_migrated(
         &self,
-        old_identifier: &dyn Identifier,
-        new_identifier: &dyn Identifier,
-    ) -> Result<(), StoreError>;
+        old_identifier: &Arc<str>,
+        new_identifier: &Arc<str>,
+    ) -> Result<(), RepoError>;
 
-    async fn is_migrated(&self, identifier: &dyn Identifier) -> Result<bool, StoreError>;
+    async fn is_migrated(&self, identifier: &Arc<str>) -> Result<bool, RepoError>;
 
     async fn clear(&self) -> Result<(), RepoError>;
 }
@@ -516,13 +516,13 @@ where
 
     async fn mark_migrated(
         &self,
-        old_identifier: &dyn Identifier,
-        new_identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
+        old_identifier: &Arc<str>,
+        new_identifier: &Arc<str>,
+    ) -> Result<(), RepoError> {
         T::mark_migrated(self, old_identifier, new_identifier).await
     }
 
-    async fn is_migrated(&self, identifier: &dyn Identifier) -> Result<bool, StoreError> {
+    async fn is_migrated(&self, identifier: &Arc<str>) -> Result<bool, RepoError> {
         T::is_migrated(self, identifier).await
     }
 
@@ -569,11 +569,86 @@ impl HashPage {
     }
 }
 
+pub(crate) struct HashStream {
+    repo: Option<ArcRepo>,
+    page_future:
+        Option<std::pin::Pin<Box<dyn std::future::Future<Output = Result<HashPage, RepoError>>>>>,
+    page: Option<HashPage>,
+}
+
+impl futures_core::Stream for HashStream {
+    type Item = Result<Hash, RepoError>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        loop {
+            let Some(repo) = &this.repo else {
+                return std::task::Poll::Ready(None);
+            };
+
+            let slug = if let Some(page) = &mut this.page {
+                // popping last in page is fine - we reversed them
+                if let Some(hash) = page.hashes.pop() {
+                    return std::task::Poll::Ready(Some(Ok(hash)));
+                }
+
+                let slug = page.next();
+                this.page.take();
+
+                if let Some(slug) = slug {
+                    Some(slug)
+                } else {
+                    this.repo.take();
+                    return std::task::Poll::Ready(None);
+                }
+            } else {
+                None
+            };
+
+            if let Some(page_future) = &mut this.page_future {
+                let res = std::task::ready!(page_future.as_mut().poll(cx));
+
+                this.page_future.take();
+
+                match res {
+                    Ok(mut page) => {
+                        // reverse because we use `pop` to fetch next
+                        page.hashes.reverse();
+
+                        this.page = Some(page);
+                    }
+                    Err(e) => {
+                        this.repo.take();
+
+                        return std::task::Poll::Ready(Some(Err(e)));
+                    }
+                }
+            } else {
+                let repo = repo.clone();
+
+                this.page_future = Some(Box::pin(async move { repo.hash_page(slug, 100).await }));
+            }
+        }
+    }
+}
+
+impl dyn FullRepo {
+    pub(crate) fn hashes(self: &Arc<Self>) -> HashStream {
+        HashStream {
+            repo: Some(self.clone()),
+            page_future: None,
+            page: None,
+        }
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 pub(crate) trait HashRepo: BaseRepo {
     async fn size(&self) -> Result<u64, RepoError>;
-
-    async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>>;
 
     async fn hash_page(&self, slug: Option<String>, limit: usize) -> Result<HashPage, RepoError> {
         let hash = slug.as_deref().and_then(hash_from_slug);
@@ -604,8 +679,8 @@ pub(crate) trait HashRepo: BaseRepo {
     async fn create_hash(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
+        identifier: &Arc<str>,
+    ) -> Result<Result<(), HashAlreadyExists>, RepoError> {
         self.create_hash_with_timestamp(hash, identifier, time::OffsetDateTime::now_utc())
             .await
     }
@@ -613,38 +688,34 @@ pub(crate) trait HashRepo: BaseRepo {
     async fn create_hash_with_timestamp(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Result<(), HashAlreadyExists>, StoreError>;
+    ) -> Result<Result<(), HashAlreadyExists>, RepoError>;
 
-    async fn update_identifier(
-        &self,
-        hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError>;
+    async fn update_identifier(&self, hash: Hash, identifier: &Arc<str>) -> Result<(), RepoError>;
 
-    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError>;
+    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError>;
 
     async fn relate_variant_identifier(
         &self,
         hash: Hash,
         variant: String,
-        identifier: &dyn Identifier,
-    ) -> Result<Result<(), VariantAlreadyExists>, StoreError>;
+        identifier: &Arc<str>,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError>;
     async fn variant_identifier(
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Option<Arc<[u8]>>, RepoError>;
-    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<[u8]>)>, RepoError>;
+    ) -> Result<Option<Arc<str>>, RepoError>;
+    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError>;
     async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
     async fn relate_motion_identifier(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError>;
-    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError>;
+        identifier: &Arc<str>,
+    ) -> Result<(), RepoError>;
+    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError>;
 
     async fn cleanup_hash(&self, hash: Hash) -> Result<(), RepoError>;
 }
@@ -656,10 +727,6 @@ where
 {
     async fn size(&self) -> Result<u64, RepoError> {
         T::size(self).await
-    }
-
-    async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>> {
-        T::hashes(self).await
     }
 
     async fn bound(&self, hash: Hash) -> Result<Option<OrderedHash>, RepoError> {
@@ -685,21 +752,17 @@ where
     async fn create_hash_with_timestamp(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
+    ) -> Result<Result<(), HashAlreadyExists>, RepoError> {
         T::create_hash_with_timestamp(self, hash, identifier, timestamp).await
     }
 
-    async fn update_identifier(
-        &self,
-        hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
+    async fn update_identifier(&self, hash: Hash, identifier: &Arc<str>) -> Result<(), RepoError> {
         T::update_identifier(self, hash, identifier).await
     }
 
-    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError> {
+    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         T::identifier(self, hash).await
     }
 
@@ -707,8 +770,8 @@ where
         &self,
         hash: Hash,
         variant: String,
-        identifier: &dyn Identifier,
-    ) -> Result<Result<(), VariantAlreadyExists>, StoreError> {
+        identifier: &Arc<str>,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
         T::relate_variant_identifier(self, hash, variant, identifier).await
     }
 
@@ -716,11 +779,11 @@ where
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Option<Arc<[u8]>>, RepoError> {
+    ) -> Result<Option<Arc<str>>, RepoError> {
         T::variant_identifier(self, hash, variant).await
     }
 
-    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<[u8]>)>, RepoError> {
+    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
         T::variants(self, hash).await
     }
 
@@ -731,12 +794,12 @@ where
     async fn relate_motion_identifier(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
+        identifier: &Arc<str>,
+    ) -> Result<(), RepoError> {
         T::relate_motion_identifier(self, hash, identifier).await
     }
 
-    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError> {
+    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         T::motion_identifier(self, hash).await
     }
 

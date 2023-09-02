@@ -14,7 +14,7 @@ pub(crate) fn migration() -> String {
                 .unique(true)
                 .nullable(false),
         );
-        t.add_column("hash", types::binary().nullable(false));
+        t.add_column("hash", types::text().nullable(false));
         t.add_column("token", types::text().size(60).nullable(false));
 
         t.add_foreign_key(&["hash"], "hashes", &["hash"]);

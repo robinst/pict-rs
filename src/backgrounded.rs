@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     error::Error,
     repo::{ArcRepo, UploadId},
@@ -9,19 +11,13 @@ use futures_core::Stream;
 use mime::APPLICATION_OCTET_STREAM;
 use tracing::{Instrument, Span};
 
-pub(crate) struct Backgrounded<S>
-where
-    S: Store,
-{
+pub(crate) struct Backgrounded {
     repo: ArcRepo,
-    identifier: Option<S::Identifier>,
+    identifier: Option<Arc<str>>,
     upload_id: Option<UploadId>,
 }
 
-impl<S> Backgrounded<S>
-where
-    S: Store,
-{
+impl Backgrounded {
     pub(crate) fn disarm(mut self) {
         let _ = self.identifier.take();
         let _ = self.upload_id.take();
@@ -31,12 +27,13 @@ where
         self.upload_id
     }
 
-    pub(crate) fn identifier(&self) -> Option<&S::Identifier> {
+    pub(crate) fn identifier(&self) -> Option<&Arc<str>> {
         self.identifier.as_ref()
     }
 
-    pub(crate) async fn proxy<P>(repo: ArcRepo, store: S, stream: P) -> Result<Self, Error>
+    pub(crate) async fn proxy<S, P>(repo: ArcRepo, store: S, stream: P) -> Result<Self, Error>
     where
+        S: Store,
         P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     {
         let mut this = Self {
@@ -50,8 +47,9 @@ where
         Ok(this)
     }
 
-    async fn do_proxy<P>(&mut self, store: S, stream: P) -> Result<(), Error>
+    async fn do_proxy<S, P>(&mut self, store: S, stream: P) -> Result<(), Error>
     where
+        S: Store,
         P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     {
         self.upload_id = Some(self.repo.create_upload().await?);
@@ -68,10 +66,7 @@ where
     }
 }
 
-impl<S> Drop for Backgrounded<S>
-where
-    S: Store,
-{
+impl Drop for Backgrounded {
     fn drop(&mut self) {
         let any_items = self.identifier.is_some() || self.upload_id.is_some();
 
@@ -90,7 +85,7 @@ where
                 tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
                     actix_rt::spawn(
                         async move {
-                            let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
+                            let _ = crate::queue::cleanup_identifier(&repo, &identifier).await;
                         }
                         .instrument(cleanup_span),
                     )

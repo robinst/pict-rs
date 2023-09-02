@@ -10,7 +10,7 @@ pub(crate) fn migration() -> String {
             "identifier",
             types::text().primary(true).unique(true).nullable(false),
         );
-        t.add_column("details", types::custom("jsonb").nullable(false));
+        t.add_column("json", types::custom("jsonb").nullable(false));
     });
 
     m.make::<Pg>().to_string()

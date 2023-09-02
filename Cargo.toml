@@ -28,7 +28,7 @@ config = "0.13.0"
 console-subscriber = "0.1"
 dashmap = "5.1.0"
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
-diesel = "2.1.1"
+diesel = { version = "2.1.1", features = ["postgres_backend", "serde_json", "time", "uuid"] }
 diesel-async = { version = "0.4.1", features = ["postgres", "deadpool"] }
 flume = "0.11.0"
 futures-core = "0.3"

@@ -8,7 +8,7 @@ pub(crate) fn migration() -> String {
     m.create_table("hashes", |t| {
         t.add_column(
             "hash",
-            types::binary()
+            types::text()
                 .primary(true)
                 .unique(true)
                 .nullable(false)

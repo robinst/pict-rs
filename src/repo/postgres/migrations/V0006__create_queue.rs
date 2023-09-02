@@ -7,7 +7,7 @@ pub(crate) fn migration() -> String {
 
     m.inject_custom("CREATE TYPE job_status AS ENUM ('new', 'running');");
 
-    m.create_table("queue", |t| {
+    m.create_table("job_queue", |t| {
         t.inject_custom(r#""id" UUID PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL UNIQUE"#);
         t.add_column("queue", types::text().size(50).nullable(false));
         t.add_column("job", types::custom("jsonb").nullable(false));
@@ -42,7 +42,7 @@ $$ LANGUAGE plpgsql;
         r#"
 CREATE TRIGGER queue_status
 	AFTER INSERT OR UPDATE OF status
-	ON queue
+	ON job_queue
 	FOR EACH ROW
 EXECUTE PROCEDURE queue_status_notify();
     "#

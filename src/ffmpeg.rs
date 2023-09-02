@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     error_code::ErrorCode,
     formats::InternalVideoFormat,
@@ -132,7 +134,7 @@ impl ThumbnailFormat {
 #[tracing::instrument(skip(store))]
 pub(crate) async fn thumbnail<S: Store>(
     store: S,
-    from: S::Identifier,
+    from: Arc<str>,
     input_format: InternalVideoFormat,
     format: ThumbnailFormat,
     timeout: u64,

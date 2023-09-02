@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     error_code::ErrorCode,
     formats::ProcessableFormat,
@@ -140,7 +142,7 @@ where
 
 pub(crate) async fn process_image_store_read<S: Store + 'static>(
     store: &S,
-    identifier: &S::Identifier,
+    identifier: &Arc<str>,
     args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,

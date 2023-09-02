@@ -9,7 +9,7 @@ pub mod sql_types {
 diesel::table! {
     aliases (alias) {
         alias -> Text,
-        hash -> Bytea,
+        hash -> Text,
         token -> Text,
     }
 }
@@ -17,17 +17,30 @@ diesel::table! {
 diesel::table! {
     details (identifier) {
         identifier -> Text,
-        #[sql_name = "details"]
-        details_json -> Jsonb,
+        json -> Jsonb,
     }
 }
 
 diesel::table! {
     hashes (hash) {
-        hash -> Bytea,
+        hash -> Text,
         identifier -> Text,
         motion_identifier -> Nullable<Text>,
         created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::JobStatus;
+
+    job_queue (id) {
+        id -> Uuid,
+        queue -> Text,
+        job -> Jsonb,
+        status -> JobStatus,
+        queue_time -> Timestamp,
+        heartbeat -> Timestamp,
     }
 }
 
@@ -36,21 +49,6 @@ diesel::table! {
         url -> Text,
         alias -> Text,
         accessed -> Timestamp,
-    }
-}
-
-diesel::table! {
-    use diesel::sql_types::*;
-    use super::sql_types::JobStatus;
-
-    queue (id) {
-        id -> Uuid,
-        #[sql_name = "queue"]
-        queue_name -> Text,
-        job -> Jsonb,
-        status -> JobStatus,
-        queue_time -> Timestamp,
-        heartbeat -> Timestamp,
     }
 }
 
@@ -89,7 +87,7 @@ diesel::table! {
 diesel::table! {
     variants (id) {
         id -> Uuid,
-        hash -> Bytea,
+        hash -> Text,
         variant -> Text,
         identifier -> Text,
         accessed -> Timestamp,
@@ -104,8 +102,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     aliases,
     details,
     hashes,
+    job_queue,
     proxies,
-    queue,
     refinery_schema_history,
     settings,
     store_migrations,
