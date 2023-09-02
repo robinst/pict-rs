@@ -88,13 +88,13 @@ methods:
 
 ```sql
 CREATE TABLE aliases (
-    alias VARCHAR(30) PRIMARY KEY,
+    alias VARCHAR(50) PRIMARY KEY,
     hash BYTEA NOT NULL REFERENCES hashes(hash) ON DELETE CASCADE,
     delete_token VARCHAR(30) NOT NULL
 );
 
 
-CREATE INDEX alias_hashes_index ON aliases (hash);
+CREATE INDEX aliases_hash_index ON aliases (hash);
 ```
 
 

@@ -59,10 +59,8 @@ crf_2160 = 15
 crf_max = 12
 
 [repo]
-type = 'sled'
-path = 'data/sled-repo-local'
-cache_capacity = 67108864
-export_path = "data/exports-local"
+type = 'postgres'
+url = 'postgres://postgres:1234@localhost:5432/postgres'
 
 [store]
 type = 'filesystem'
