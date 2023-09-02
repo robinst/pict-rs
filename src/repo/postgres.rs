@@ -3,6 +3,7 @@ mod embedded {
 
     embed_migrations!("./src/repo/postgres/migrations");
 }
+mod schema;
 
 use diesel_async::{
     pooled_connection::{

@@ -25,6 +25,8 @@ pub(crate) fn migration() -> String {
                 .nullable(false)
                 .default(AutogenFunction::CurrentTimestamp),
         );
+
+        t.add_index("ordered_hash_index", types::index(["created_at", "hash"]));
     });
 
     m.make::<Pg>().to_string()
