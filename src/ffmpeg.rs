@@ -1,4 +1,5 @@
 use crate::{
+    error_code::ErrorCode,
     formats::InternalVideoFormat,
     process::{Process, ProcessError},
     store::{Store, StoreError},
@@ -63,6 +64,24 @@ impl From<ProcessError> for FfMpegError {
 }
 
 impl FfMpegError {
+    pub(crate) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::CommandFailed(_) => ErrorCode::COMMAND_FAILURE,
+            Self::Store(s) => s.error_code(),
+            Self::Process(e) => e.error_code(),
+            Self::Read(_)
+            | Self::Write(_)
+            | Self::Json(_)
+            | Self::CreateDir(_)
+            | Self::ReadFile(_)
+            | Self::OpenFile(_)
+            | Self::CreateFile(_)
+            | Self::CloseFile(_)
+            | Self::RemoveFile(_)
+            | Self::Path => ErrorCode::COMMAND_ERROR,
+        }
+    }
+
     pub(crate) fn is_client_error(&self) -> bool {
         // Failing validation or ffmpeg bailing probably means bad input
         matches!(

@@ -6,6 +6,7 @@ use crate::{
     discover::Discovery,
     either::Either,
     error::Error,
+    error_code::ErrorCode,
     formats::{
         AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InputVideoFormat,
         InternalFormat, Validations,
@@ -36,6 +37,20 @@ pub(crate) enum ValidationError {
 
     #[error("Video is disabled")]
     VideoDisabled,
+}
+
+impl ValidationError {
+    pub(crate) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::Width => ErrorCode::VALIDATE_WIDTH,
+            Self::Height => ErrorCode::VALIDATE_HEIGHT,
+            Self::Area => ErrorCode::VALIDATE_AREA,
+            Self::Frames => ErrorCode::VALIDATE_FRAMES,
+            Self::Empty => ErrorCode::VALIDATE_FILE_EMPTY,
+            Self::Filesize => ErrorCode::VALIDATE_FILE_SIZE,
+            Self::VideoDisabled => ErrorCode::VIDEO_DISABLED,
+        }
+    }
 }
 
 const MEGABYTES: usize = 1024 * 1024;

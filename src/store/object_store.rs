@@ -1,5 +1,6 @@
 use crate::{
     bytes_stream::BytesStream,
+    error_code::ErrorCode,
     repo::{Repo, SettingsRepo},
     store::Store,
     stream::{IntoStreamer, StreamMap},
@@ -67,21 +68,39 @@ pub(crate) enum ObjectError {
     Etag,
 
     #[error("Task cancelled")]
-    Cancelled,
+    Canceled,
 
     #[error("Invalid status: {0}\n{1}")]
     Status(StatusCode, String),
 }
 
+impl ObjectError {
+    pub(super) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::PathGenerator(_) => ErrorCode::PARSE_PATH_ERROR,
+            Self::S3(_)
+            | Self::RequestMiddleware(_)
+            | Self::Request(_)
+            | Self::Xml(_)
+            | Self::Length
+            | Self::Etag
+            | Self::Status(_, _) => ErrorCode::OBJECT_REQUEST_ERROR,
+            Self::IO(_) => ErrorCode::OBJECT_IO_ERROR,
+            Self::Utf8(_) => ErrorCode::PARSE_OBJECT_ID_ERROR,
+            Self::Canceled => ErrorCode::PANIC,
+        }
+    }
+}
+
 impl From<JoinError> for ObjectError {
     fn from(_: JoinError) -> Self {
-        Self::Cancelled
+        Self::Canceled
     }
 }
 
 impl From<BlockingError> for ObjectError {
     fn from(_: BlockingError) -> Self {
-        Self::Cancelled
+        Self::Canceled
     }
 }
 

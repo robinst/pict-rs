@@ -1,4 +1,5 @@
 use crate::{
+    error_code::ErrorCode,
     formats::ProcessableFormat,
     process::{Process, ProcessError},
     store::Store,
@@ -57,6 +58,24 @@ impl From<ProcessError> for MagickError {
 }
 
 impl MagickError {
+    pub(crate) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::CommandFailed(_) => ErrorCode::COMMAND_FAILURE,
+            Self::Store(e) => e.error_code(),
+            Self::Process(e) => e.error_code(),
+            Self::Json(_)
+            | Self::Read(_)
+            | Self::Write(_)
+            | Self::CreateFile(_)
+            | Self::CreateDir(_)
+            | Self::CloseFile(_)
+            | Self::RemoveFile(_)
+            | Self::Discover(_)
+            | Self::Empty
+            | Self::Path => ErrorCode::COMMAND_ERROR,
+        }
+    }
+
     pub(crate) fn is_client_error(&self) -> bool {
         // Failing validation or imagemagick bailing probably means bad input
         matches!(

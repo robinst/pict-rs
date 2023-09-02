@@ -1,4 +1,7 @@
-use crate::process::{Process, ProcessError};
+use crate::{
+    error_code::ErrorCode,
+    process::{Process, ProcessError},
+};
 use actix_web::web::Bytes;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -24,6 +27,13 @@ impl From<ProcessError> for ExifError {
 }
 
 impl ExifError {
+    pub(crate) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::Process(e) => e.error_code(),
+            Self::Read(_) => ErrorCode::COMMAND_ERROR,
+            Self::CommandFailed(_) => ErrorCode::COMMAND_FAILURE,
+        }
+    }
     pub(crate) fn is_client_error(&self) -> bool {
         // if exiftool bails we probably have bad input
         matches!(

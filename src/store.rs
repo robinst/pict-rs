@@ -4,6 +4,8 @@ use futures_core::Stream;
 use std::{fmt::Debug, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::error_code::ErrorCode;
+
 pub(crate) mod file_store;
 pub(crate) mod object_store;
 
@@ -29,6 +31,15 @@ pub(crate) enum StoreError {
 }
 
 impl StoreError {
+    pub(crate) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::FileStore(e) => e.error_code(),
+            Self::ObjectStore(e) => e.error_code(),
+            Self::Repo(e) => e.error_code(),
+            Self::Repo04(_) => ErrorCode::OLD_REPO_ERROR,
+            Self::FileNotFound(_) | Self::ObjectNotFound(_) => ErrorCode::NOT_FOUND,
+        }
+    }
     pub(crate) const fn is_not_found(&self) -> bool {
         matches!(self, Self::FileNotFound(_)) || matches!(self, Self::ObjectNotFound(_))
     }

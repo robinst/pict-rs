@@ -6,6 +6,7 @@ mod details;
 mod discover;
 mod either;
 mod error;
+mod error_code;
 mod exiftool;
 mod ffmpeg;
 mod file;
@@ -450,11 +451,11 @@ async fn claim_upload<S: Store + 'static>(
                         }]
                     })))
                 }
-                UploadResult::Failure { message } => Ok(HttpResponse::UnprocessableEntity().json(
-                    &serde_json::json!({
+                UploadResult::Failure { message, code } => Ok(HttpResponse::UnprocessableEntity()
+                    .json(&serde_json::json!({
                         "msg": message,
-                    }),
-                )),
+                        "code": code,
+                    }))),
             }
         }
         Err(_) => Ok(HttpResponse::NoContent().finish()),

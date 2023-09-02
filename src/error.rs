@@ -1,6 +1,8 @@
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 use color_eyre::Report;
 
+use crate::error_code::ErrorCode;
+
 pub(crate) struct Error {
     inner: color_eyre::Report,
 }
@@ -12,6 +14,12 @@ impl Error {
 
     pub(crate) fn root_cause(&self) -> &(dyn std::error::Error + 'static) {
         self.inner.root_cause()
+    }
+
+    pub(crate) fn error_code(&self) -> ErrorCode {
+        self.kind()
+            .map(|e| e.error_code())
+            .unwrap_or(ErrorCode::UNKNOWN_ERROR)
     }
 }
 
@@ -55,20 +63,11 @@ pub(crate) enum UploadError {
     #[error("Error in old repo")]
     OldRepo(#[from] crate::repo_04::RepoError),
 
-    #[error("Error parsing string")]
-    ParseString(#[from] std::string::FromUtf8Error),
-
     #[error("Error interacting with filesystem")]
     Io(#[from] std::io::Error),
 
     #[error("Error validating upload")]
     Validation(#[from] crate::validate::ValidationError),
-
-    #[error("Error generating path")]
-    PathGenerator(#[from] storage_path_generator::PathError),
-
-    #[error("Error stripping prefix")]
-    StripPrefix(#[from] std::path::StripPrefixError),
 
     #[error("Error in store")]
     Store(#[source] crate::store::StoreError),
@@ -127,11 +126,8 @@ pub(crate) enum UploadError {
     #[error("Tried to save an image with an already-taken name")]
     DuplicateAlias,
 
-    #[error("Error in json")]
-    Json(#[from] serde_json::Error),
-
-    #[error("Error in cbor")]
-    Cbor(#[from] serde_cbor::Error),
+    #[error("Failed to serialize job")]
+    PushJob(#[source] serde_json::Error),
 
     #[error("Range header not satisfiable")]
     Range,
@@ -141,6 +137,41 @@ pub(crate) enum UploadError {
 
     #[error("Response timeout")]
     Timeout(#[from] crate::stream::TimeoutError),
+}
+
+impl UploadError {
+    const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::Upload(_) => ErrorCode::FILE_UPLOAD_ERROR,
+            Self::Repo(e) => e.error_code(),
+            Self::OldRepo(_) => ErrorCode::OLD_REPO_ERROR,
+            Self::Io(_) => ErrorCode::IO_ERROR,
+            Self::Validation(e) => e.error_code(),
+            Self::Store(e) => e.error_code(),
+            Self::Ffmpeg(e) => e.error_code(),
+            Self::Magick(e) => e.error_code(),
+            Self::Exiftool(e) => e.error_code(),
+            Self::BuildClient(_) | Self::RequestMiddleware(_) | Self::Request(_) => {
+                ErrorCode::HTTP_CLIENT_ERROR
+            }
+            Self::Download(_) => ErrorCode::DOWNLOAD_FILE_ERROR,
+            Self::ReadOnly => ErrorCode::READ_ONLY,
+            Self::InvalidProcessExtension => ErrorCode::INVALID_FILE_EXTENSION,
+            Self::ParsePath => ErrorCode::INVALID_PROCESS_PATH,
+            Self::Semaphore => ErrorCode::PROCESS_SEMAPHORE_CLOSED,
+            Self::Canceled => ErrorCode::PANIC,
+            Self::NoFiles => ErrorCode::VALIDATE_NO_FILES,
+            Self::MissingAlias => ErrorCode::ALIAS_NOT_FOUND,
+            Self::MissingIdentifier => ErrorCode::LOST_FILE,
+            Self::InvalidToken => ErrorCode::INVALID_DELETE_TOKEN,
+            Self::UnsupportedProcessExtension => ErrorCode::INVALID_FILE_EXTENSION,
+            Self::DuplicateAlias => ErrorCode::DUPLICATE_ALIAS,
+            Self::PushJob(_) => todo!(),
+            Self::Range => ErrorCode::RANGE_NOT_SATISFIABLE,
+            Self::Limit(_) => ErrorCode::VALIDATE_FILE_SIZE,
+            Self::Timeout(_) => ErrorCode::STREAM_TOO_SLOW,
+        }
+    }
 }
 
 impl From<actix_web::error::BlockingError> for UploadError {
@@ -196,8 +227,13 @@ impl ResponseError for Error {
         HttpResponse::build(self.status_code())
             .content_type("application/json")
             .body(
-                serde_json::to_string(&serde_json::json!({ "msg": self.root_cause().to_string() }))
-                    .unwrap_or_else(|_| r#"{"msg":"Request failed"}"#.to_string()),
+                serde_json::to_string(&serde_json::json!({
+                    "msg": self.root_cause().to_string(),
+                    "code": self.error_code()
+                }))
+                .unwrap_or_else(|_| {
+                    r#"{"msg":"Request failed","code":"unknown-error"}"#.to_string()
+                }),
             )
     }
 }

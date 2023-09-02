@@ -1,7 +1,7 @@
 use crate::{
     concurrent_processor::ProcessMap,
     config::Configuration,
-    error::Error,
+    error::{Error, UploadError},
     formats::InputProcessableFormat,
     repo::{Alias, DeleteToken, FullRepo, Hash, JobId, UploadId},
     serde_str::Serde,
@@ -94,13 +94,14 @@ pub(crate) async fn cleanup_alias(
     let job = serde_json::to_vec(&Cleanup::Alias {
         alias: Serde::new(alias),
         token: Serde::new(token),
-    })?;
+    })
+    .map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_hash(repo: &Arc<dyn FullRepo>, hash: Hash) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::Hash { hash })?;
+    let job = serde_json::to_vec(&Cleanup::Hash { hash }).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
@@ -111,7 +112,8 @@ pub(crate) async fn cleanup_identifier<I: Identifier>(
 ) -> Result<(), Error> {
     let job = serde_json::to_vec(&Cleanup::Identifier {
         identifier: Base64Bytes(identifier.to_bytes()?),
-    })?;
+    })
+    .map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
@@ -121,25 +123,26 @@ async fn cleanup_variants(
     hash: Hash,
     variant: Option<String>,
 ) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::Variant { hash, variant })?;
+    let job =
+        serde_json::to_vec(&Cleanup::Variant { hash, variant }).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_outdated_proxies(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::OutdatedProxies)?;
+    let job = serde_json::to_vec(&Cleanup::OutdatedProxies).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_outdated_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::OutdatedVariants)?;
+    let job = serde_json::to_vec(&Cleanup::OutdatedVariants).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_all_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
-    let job = serde_json::to_vec(&Cleanup::AllVariants)?;
+    let job = serde_json::to_vec(&Cleanup::AllVariants).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job.into()).await?;
     Ok(())
 }
@@ -154,7 +157,8 @@ pub(crate) async fn queue_ingest(
         identifier: Base64Bytes(identifier),
         declared_alias: declared_alias.map(Serde::new),
         upload_id: Serde::new(upload_id),
-    })?;
+    })
+    .map_err(UploadError::PushJob)?;
     repo.push(PROCESS_QUEUE, job.into()).await?;
     Ok(())
 }
@@ -171,7 +175,8 @@ pub(crate) async fn queue_generate(
         source: Serde::new(source),
         process_path,
         process_args,
-    })?;
+    })
+    .map_err(UploadError::PushJob)?;
     repo.push(PROCESS_QUEUE, job.into()).await?;
     Ok(())
 }

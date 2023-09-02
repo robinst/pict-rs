@@ -117,6 +117,7 @@ where
 
             UploadResult::Failure {
                 message: e.root_cause().to_string(),
+                code: e.error_code().into_owned(),
             }
         }
     };

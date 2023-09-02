@@ -1,5 +1,6 @@
 use crate::{
     details::HumanDate,
+    error_code::{ErrorCode, OwnedErrorCode},
     serde_str::Serde,
     store::StoreError,
     stream::{from_iterator, LocalBoxStream},
@@ -46,7 +47,10 @@ pub(crate) enum SledError {
     Sled(#[from] sled::Error),
 
     #[error("Invalid details json")]
-    Details(#[from] serde_json::Error),
+    Details(serde_json::Error),
+
+    #[error("Invalid upload result json")]
+    UploadResult(serde_json::Error),
 
     #[error("Error parsing variant key")]
     VariantKey(#[from] VariantKeyError),
@@ -56,6 +60,18 @@ pub(crate) enum SledError {
 
     #[error("Another process updated this value before us")]
     Conflict,
+}
+
+impl SledError {
+    pub(super) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::Sled(_) | Self::VariantKey(_) => ErrorCode::SLED_ERROR,
+            Self::Details(_) => ErrorCode::EXTRACT_DETAILS,
+            Self::UploadResult(_) => ErrorCode::EXTRACT_UPLOAD_RESULT,
+            Self::Panic => ErrorCode::PANIC,
+            Self::Conflict => ErrorCode::CONFLICTED_RECORD,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -442,6 +458,7 @@ enum InnerUploadResult {
     },
     Failure {
         message: String,
+        code: OwnedErrorCode,
     },
 }
 
@@ -452,7 +469,7 @@ impl From<UploadResult> for InnerUploadResult {
                 alias: Serde::new(alias),
                 token: Serde::new(token),
             },
-            UploadResult::Failure { message } => InnerUploadResult::Failure { message },
+            UploadResult::Failure { message, code } => InnerUploadResult::Failure { message, code },
         }
     }
 }
@@ -464,7 +481,7 @@ impl From<InnerUploadResult> for UploadResult {
                 alias: Serde::into_inner(alias),
                 token: Serde::into_inner(token),
             },
-            InnerUploadResult::Failure { message } => UploadResult::Failure { message },
+            InnerUploadResult::Failure { message, code } => UploadResult::Failure { message, code },
         }
     }
 }
@@ -538,7 +555,7 @@ impl UploadRepo for SledRepo {
         if let Some(bytes) = opt {
             if bytes != b"1" {
                 let result: InnerUploadResult =
-                    serde_json::from_slice(&bytes).map_err(SledError::from)?;
+                    serde_json::from_slice(&bytes).map_err(SledError::UploadResult)?;
                 return Ok(result.into());
             }
         } else {
@@ -553,7 +570,7 @@ impl UploadRepo for SledRepo {
                 sled::Event::Insert { value, .. } => {
                     if value != b"1" {
                         let result: InnerUploadResult =
-                            serde_json::from_slice(&value).map_err(SledError::from)?;
+                            serde_json::from_slice(&value).map_err(SledError::UploadResult)?;
                         return Ok(result.into());
                     }
                 }
@@ -576,7 +593,7 @@ impl UploadRepo for SledRepo {
         result: UploadResult,
     ) -> Result<(), RepoError> {
         let result: InnerUploadResult = result.into();
-        let result = serde_json::to_vec(&result).map_err(SledError::from)?;
+        let result = serde_json::to_vec(&result).map_err(SledError::UploadResult)?;
 
         b!(self.uploads, uploads.insert(upload_id.as_bytes(), result));
 
@@ -940,7 +957,7 @@ impl DetailsRepo for SledRepo {
     ) -> Result<(), StoreError> {
         let key = identifier.to_bytes()?;
         let details = serde_json::to_vec(&details.inner)
-            .map_err(SledError::from)
+            .map_err(SledError::Details)
             .map_err(RepoError::from)?;
 
         b!(
@@ -959,7 +976,7 @@ impl DetailsRepo for SledRepo {
 
         opt.map(|ivec| serde_json::from_slice(&ivec).map(|inner| Details { inner }))
             .transpose()
-            .map_err(SledError::from)
+            .map_err(SledError::Details)
             .map_err(RepoError::from)
             .map_err(StoreError::from)
     }

@@ -1,4 +1,5 @@
 use crate::{
+    error_code::ErrorCode,
     file::File,
     repo::{Repo, SettingsRepo},
     store::Store,
@@ -32,14 +33,25 @@ pub(crate) enum FileError {
     #[error("Failed to generate path")]
     PathGenerator(#[from] storage_path_generator::PathError),
 
-    #[error("Error formatting file store identifier")]
+    #[error("Error formatting file store ID")]
     IdError,
 
-    #[error("Mailformed file store identifier")]
+    #[error("Malformed file store ID")]
     PrefixError,
 
     #[error("Tried to save over existing file")]
     FileExists,
+}
+
+impl FileError {
+    pub(super) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::Io(_) => ErrorCode::FILE_IO_ERROR,
+            Self::PathGenerator(_) => ErrorCode::PARSE_PATH_ERROR,
+            Self::FileExists => ErrorCode::FILE_EXISTS,
+            Self::IdError | Self::PrefixError => ErrorCode::FORMAT_FILE_ID_ERROR,
+        }
+    }
 }
 
 #[derive(Clone)]

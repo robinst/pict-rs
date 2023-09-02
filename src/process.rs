@@ -14,6 +14,8 @@ use tokio::{
 };
 use tracing::{Instrument, Span};
 
+use crate::error_code::ErrorCode;
+
 struct MetricsGuard {
     start: Instant,
     armed: bool,
@@ -98,6 +100,18 @@ pub(crate) enum ProcessError {
 
     #[error("Unknown process error")]
     Other(#[source] std::io::Error),
+}
+
+impl ProcessError {
+    pub(crate) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::NotFound(_) => ErrorCode::COMMAND_NOT_FOUND,
+            Self::PermissionDenied(_) => ErrorCode::COMMAND_PERMISSION_DENIED,
+            Self::LimitReached | Self::Other(_) => ErrorCode::COMMAND_ERROR,
+            Self::Timeout(_) => ErrorCode::COMMAND_TIMEOUT,
+            Self::Status(_, _) => ErrorCode::COMMAND_FAILURE,
+        }
+    }
 }
 
 impl Process {

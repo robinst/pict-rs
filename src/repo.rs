@@ -1,6 +1,7 @@
 use crate::{
     config,
     details::Details,
+    error_code::{ErrorCode, OwnedErrorCode},
     store::{Identifier, StoreError},
     stream::LocalBoxStream,
 };
@@ -52,9 +53,16 @@ pub(crate) struct UploadId {
     id: Uuid,
 }
 
+#[derive(Debug)]
 pub(crate) enum UploadResult {
-    Success { alias: Alias, token: DeleteToken },
-    Failure { message: String },
+    Success {
+        alias: Alias,
+        token: DeleteToken,
+    },
+    Failure {
+        message: String,
+        code: OwnedErrorCode,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +75,16 @@ pub(crate) enum RepoError {
 
     #[error("Panic in blocking operation")]
     Canceled,
+}
+
+impl RepoError {
+    pub(crate) const fn error_code(&self) -> ErrorCode {
+        match self {
+            Self::SledError(e) => e.error_code(),
+            Self::AlreadyClaimed => ErrorCode::ALREADY_CLAIMED,
+            Self::Canceled => ErrorCode::PANIC,
+        }
+    }
 }
 
 #[async_trait::async_trait(?Send)]
