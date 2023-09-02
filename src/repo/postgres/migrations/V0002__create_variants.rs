@@ -24,7 +24,5 @@ pub(crate) fn migration() -> String {
         );
     });
 
-    let s = m.make::<Pg>().to_string();
-    println!("{s}");
-    s
+    m.make::<Pg>().to_string()
 }

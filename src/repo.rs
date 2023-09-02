@@ -72,6 +72,9 @@ pub(crate) enum RepoError {
     #[error("Error in sled")]
     SledError(#[from] crate::repo::sled::SledError),
 
+    #[error("Error in postgres")]
+    PostgresError(#[from] crate::repo::postgres::PostgresError),
+
     #[error("Upload was already claimed")]
     AlreadyClaimed,
 

@@ -1,20 +1,17 @@
-mod embedded {
-    use refinery::embed_migrations;
-
-    embed_migrations!("./src/repo/postgres/migrations");
-}
+mod embedded;
 mod schema;
 
+use diesel::prelude::*;
 use diesel_async::{
     pooled_connection::{
-        deadpool::{BuildError, Pool},
+        deadpool::{BuildError, Pool, PoolError},
         AsyncDieselConnectionManager,
     },
-    AsyncPgConnection,
+    AsyncPgConnection, RunQueryDsl,
 };
 use url::Url;
 
-use super::{BaseRepo, HashRepo};
+use super::{BaseRepo, HashRepo, RepoError};
 
 #[derive(Clone)]
 pub(crate) struct PostgresRepo {
@@ -34,7 +31,13 @@ pub(crate) enum ConnectPostgresError {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum PostgresError {}
+pub(crate) enum PostgresError {
+    #[error("Error in db pool")]
+    Pool(#[source] PoolError),
+
+    #[error("Error in database")]
+    Diesel(#[source] diesel::result::Error),
+}
 
 impl PostgresRepo {
     pub(crate) async fn connect(postgres_url: Url) -> Result<Self, ConnectPostgresError> {
@@ -64,14 +67,22 @@ impl PostgresRepo {
 
 impl BaseRepo for PostgresRepo {}
 
-/*
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl HashRepo for PostgresRepo {
     async fn size(&self) -> Result<u64, RepoError> {
-        let conn = self.pool.get().await.map_err(PostgresError::from)?;
+        use schema::hashes::dsl::*;
+
+        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let count = hashes
+            .count()
+            .get_result::<i64>(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(count.try_into().expect("non-negative count"))
     }
 }
-*/
 
 impl std::fmt::Debug for PostgresRepo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
