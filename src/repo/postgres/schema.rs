@@ -83,6 +83,7 @@ diesel::table! {
     uploads (id) {
         id -> Uuid,
         result -> Nullable<Jsonb>,
+        created_at -> Timestamp,
     }
 }
 

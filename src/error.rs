@@ -166,7 +166,7 @@ impl UploadError {
             Self::InvalidToken => ErrorCode::INVALID_DELETE_TOKEN,
             Self::UnsupportedProcessExtension => ErrorCode::INVALID_FILE_EXTENSION,
             Self::DuplicateAlias => ErrorCode::DUPLICATE_ALIAS,
-            Self::PushJob(_) => todo!(),
+            Self::PushJob(_) => ErrorCode::PUSH_JOB,
             Self::Range => ErrorCode::RANGE_NOT_SATISFIABLE,
             Self::Limit(_) => ErrorCode::VALIDATE_FILE_SIZE,
             Self::Timeout(_) => ErrorCode::STREAM_TOO_SLOW,

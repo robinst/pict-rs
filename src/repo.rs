@@ -877,7 +877,7 @@ impl Repo {
     pub(crate) fn to_arc(&self) -> ArcRepo {
         match self {
             Self::Sled(sled_repo) => Arc::new(sled_repo.clone()),
-            Self::Postgres(_) => todo!(),
+            Self::Postgres(postgres_repo) => Arc::new(postgres_repo.clone()),
         }
     }
 }

@@ -2038,16 +2038,14 @@ impl PictRsConfiguration {
 
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        launch_file_store(
-                            Arc::new(sled_repo.clone()),
-                            store,
-                            client,
-                            config,
-                            move |sc| sled_extra_config(sc, sled_repo.clone()),
-                        )
+                        launch_file_store(arc_repo, store, client, config, move |sc| {
+                            sled_extra_config(sc, sled_repo.clone())
+                        })
                         .await?;
                     }
-                    Repo::Postgres(_) => todo!(),
+                    Repo::Postgres(_) => {
+                        launch_file_store(arc_repo, store, client, config, |_| {}).await?;
+                    }
                 }
             }
             config::Store::ObjectStorage(config::ObjectStorage {
@@ -2101,7 +2099,9 @@ impl PictRsConfiguration {
                         })
                         .await?;
                     }
-                    Repo::Postgres(_) => todo!(),
+                    Repo::Postgres(_) => {
+                        launch_object_store(arc_repo, store, client, config, |_| {}).await?;
+                    }
                 }
             }
         }

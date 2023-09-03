@@ -120,7 +120,15 @@ pub(crate) enum PostgresError {
 
 impl PostgresError {
     pub(super) const fn error_code(&self) -> ErrorCode {
-        todo!()
+        match self {
+            Self::Pool(_)
+            | Self::Diesel(_)
+            | Self::SerializeDetails(_)
+            | Self::SerializeUploadResult(_)
+            | Self::Hex(_) => ErrorCode::POSTGRES_ERROR,
+            Self::DeserializeDetails(_) => ErrorCode::EXTRACT_DETAILS,
+            Self::DeserializeUploadResult(_) => ErrorCode::EXTRACT_UPLOAD_RESULT,
+        }
     }
 }
 
