@@ -165,8 +165,8 @@ CREATE TABLE queue (
 );
 
 
-CREATE INDEX queue_status_index ON queue INCLUDE status;
-CREATE INDEX heartbeat_index ON queue
+CREATE INDEX queue_status_index ON queue INCLUDE queue, status;
+CREATE INDEX heartbeat_index ON queue INCLUDE heartbeat;
 ```
 
 claiming a job can be
