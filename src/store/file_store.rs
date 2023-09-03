@@ -27,6 +27,9 @@ pub(crate) enum FileError {
     #[error("Failed to generate path")]
     PathGenerator(#[from] storage_path_generator::PathError),
 
+    #[error("Couldn't strip root dir")]
+    PrefixError,
+
     #[error("Couldn't convert Path to String")]
     StringError,
 
@@ -40,7 +43,7 @@ impl FileError {
             Self::Io(_) => ErrorCode::FILE_IO_ERROR,
             Self::PathGenerator(_) => ErrorCode::PARSE_PATH_ERROR,
             Self::FileExists => ErrorCode::FILE_EXISTS,
-            Self::StringError => ErrorCode::FORMAT_FILE_ID_ERROR,
+            Self::StringError | Self::PrefixError => ErrorCode::FORMAT_FILE_ID_ERROR,
         }
     }
 }
@@ -54,6 +57,7 @@ pub(crate) struct FileStore {
 
 #[async_trait::async_trait(?Send)]
 impl Store for FileStore {
+    #[tracing::instrument(level = "DEBUG", skip(self))]
     async fn health_check(&self) -> Result<(), StoreError> {
         tokio::fs::metadata(&self.root_dir)
             .await
@@ -62,7 +66,7 @@ impl Store for FileStore {
         Ok(())
     }
 
-    #[tracing::instrument(skip(reader))]
+    #[tracing::instrument(skip(self, reader))]
     async fn save_async_read<Reader>(
         &self,
         mut reader: Reader,
@@ -93,7 +97,7 @@ impl Store for FileStore {
             .await
     }
 
-    #[tracing::instrument(skip(bytes))]
+    #[tracing::instrument(skip(self, bytes))]
     async fn save_bytes(
         &self,
         bytes: Bytes,
@@ -113,7 +117,7 @@ impl Store for FileStore {
         None
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn to_stream(
         &self,
         identifier: &Arc<str>,
@@ -137,7 +141,7 @@ impl Store for FileStore {
         Ok(Box::pin(stream))
     }
 
-    #[tracing::instrument(skip(writer))]
+    #[tracing::instrument(skip(self, writer))]
     async fn read_into<Writer>(
         &self,
         identifier: &Arc<str>,
@@ -153,7 +157,7 @@ impl Store for FileStore {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
         let path = self.path_from_file_id(identifier);
 
@@ -165,7 +169,7 @@ impl Store for FileStore {
         Ok(len)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError> {
         let path = self.path_from_file_id(identifier);
 
@@ -190,7 +194,11 @@ impl FileStore {
     }
 
     fn file_id_from_path(&self, path: PathBuf) -> Result<Arc<str>, FileError> {
-        path.to_str().ok_or(FileError::StringError).map(Into::into)
+        path.strip_prefix(&self.root_dir)
+            .map_err(|_| FileError::PrefixError)?
+            .to_str()
+            .ok_or(FileError::StringError)
+            .map(Into::into)
     }
 
     fn path_from_file_id(&self, file_id: &Arc<str>) -> PathBuf {
@@ -219,6 +227,7 @@ impl FileStore {
         Ok(target_path.join(filename))
     }
 
+    #[tracing::instrument(level = "DEBUG", skip(self, path), fields(path = ?path.as_ref()))]
     async fn safe_remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), FileError> {
         tokio::fs::remove_file(&path).await?;
         self.try_remove_parents(path.as_ref()).await;

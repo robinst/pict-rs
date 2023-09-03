@@ -62,6 +62,10 @@ crf_max = 12
 type = 'postgres'
 url = 'postgres://postgres:1234@localhost:5432/postgres'
 
+# [repo]
+# type = 'sled'
+# path = 'data/sled-repo-local'
+
 [store]
 type = 'filesystem'
 path = 'data/files-local'

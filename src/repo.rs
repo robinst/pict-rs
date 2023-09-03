@@ -524,7 +524,7 @@ where
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct OrderedHash {
     timestamp: time::OffsetDateTime,
     hash: Hash,

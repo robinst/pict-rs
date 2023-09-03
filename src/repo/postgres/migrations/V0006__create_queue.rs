@@ -12,7 +12,10 @@ pub(crate) fn migration() -> String {
         t.add_column("queue", types::text().size(50).nullable(false));
         t.add_column("job", types::custom("jsonb").nullable(false));
         t.add_column("worker", types::uuid().nullable(true));
-        t.add_column("status", types::custom("job_status").nullable(false));
+        t.add_column(
+            "status",
+            types::custom("job_status").nullable(false).default("new"),
+        );
         t.add_column(
             "queue_time",
             types::datetime()

@@ -68,7 +68,7 @@ where
     })
 }
 
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip(repo, store, media))]
 async fn process_ingest<S>(
     repo: &ArcRepo,
     store: &S,
@@ -126,7 +126,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip(repo, store, process_map, process_path, process_args, config))]
 async fn generate<S: Store + 'static>(
     repo: &ArcRepo,
     store: &S,
