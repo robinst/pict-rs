@@ -9,11 +9,15 @@ use std::{fmt::Debug, sync::Arc};
 use url::Url;
 use uuid::Uuid;
 
+mod alias;
+mod delete_token;
 mod hash;
 mod migrate;
 pub(crate) mod postgres;
 pub(crate) mod sled;
 
+pub(crate) use alias::Alias;
+pub(crate) use delete_token::DeleteToken;
 pub(crate) use hash::Hash;
 pub(crate) use migrate::{migrate_04, migrate_repo};
 
@@ -29,17 +33,6 @@ pub(crate) enum Repo {
 enum MaybeUuid {
     Uuid(Uuid),
     Name(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct Alias {
-    id: MaybeUuid,
-    extension: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct DeleteToken {
-    id: MaybeUuid,
 }
 
 #[derive(Debug)]
@@ -372,13 +365,13 @@ impl JobId {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn push(&self, queue: &'static str, job: Arc<str>) -> Result<JobId, RepoError>;
+    async fn push(&self, queue: &'static str, job: serde_json::Value) -> Result<JobId, RepoError>;
 
     async fn pop(
         &self,
         queue: &'static str,
         worker_id: Uuid,
-    ) -> Result<(JobId, Arc<str>), RepoError>;
+    ) -> Result<(JobId, serde_json::Value), RepoError>;
 
     async fn heartbeat(
         &self,
@@ -400,7 +393,7 @@ impl<T> QueueRepo for Arc<T>
 where
     T: QueueRepo,
 {
-    async fn push(&self, queue: &'static str, job: Arc<str>) -> Result<JobId, RepoError> {
+    async fn push(&self, queue: &'static str, job: serde_json::Value) -> Result<JobId, RepoError> {
         T::push(self, queue, job).await
     }
 
@@ -408,7 +401,7 @@ where
         &self,
         queue: &'static str,
         worker_id: Uuid,
-    ) -> Result<(JobId, Arc<str>), RepoError> {
+    ) -> Result<(JobId, serde_json::Value), RepoError> {
         T::pop(self, queue, worker_id).await
     }
 
@@ -903,106 +896,6 @@ impl MaybeUuid {
     }
 }
 
-fn split_at_dot(s: &str) -> Option<(&str, &str)> {
-    let index = s.find('.')?;
-
-    Some(s.split_at(index))
-}
-
-impl Alias {
-    pub(crate) fn generate(extension: String) -> Self {
-        Alias {
-            id: MaybeUuid::Uuid(Uuid::new_v4()),
-            extension: Some(extension),
-        }
-    }
-
-    pub(crate) fn from_existing(alias: &str) -> Self {
-        if let Some((start, end)) = split_at_dot(alias) {
-            Alias {
-                id: MaybeUuid::from_str(start),
-                extension: Some(end.into()),
-            }
-        } else {
-            Alias {
-                id: MaybeUuid::from_str(alias),
-                extension: None,
-            }
-        }
-    }
-
-    pub(crate) fn extension(&self) -> Option<&str> {
-        self.extension.as_deref()
-    }
-
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        let mut v = self.id.as_bytes().to_vec();
-
-        if let Some(ext) = self.extension() {
-            v.extend_from_slice(ext.as_bytes());
-        }
-
-        v
-    }
-
-    pub(crate) fn from_slice(bytes: &[u8]) -> Option<Self> {
-        if let Ok(s) = std::str::from_utf8(bytes) {
-            Some(Self::from_existing(s))
-        } else if bytes.len() >= 16 {
-            let id = Uuid::from_slice(&bytes[0..16]).expect("Already checked length");
-
-            let extension = if bytes.len() > 16 {
-                Some(String::from_utf8_lossy(&bytes[16..]).to_string())
-            } else {
-                None
-            };
-
-            Some(Self {
-                id: MaybeUuid::Uuid(id),
-                extension,
-            })
-        } else {
-            None
-        }
-    }
-}
-
-impl DeleteToken {
-    pub(crate) fn from_existing(existing: &str) -> Self {
-        if let Ok(uuid) = Uuid::parse_str(existing) {
-            DeleteToken {
-                id: MaybeUuid::Uuid(uuid),
-            }
-        } else {
-            DeleteToken {
-                id: MaybeUuid::Name(existing.into()),
-            }
-        }
-    }
-
-    pub(crate) fn generate() -> Self {
-        Self {
-            id: MaybeUuid::Uuid(Uuid::new_v4()),
-        }
-    }
-
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        self.id.as_bytes().to_vec()
-    }
-
-    pub(crate) fn from_slice(bytes: &[u8]) -> Option<Self> {
-        if let Ok(s) = std::str::from_utf8(bytes) {
-            Some(DeleteToken::from_existing(s))
-        } else if bytes.len() == 16 {
-            Some(DeleteToken {
-                id: MaybeUuid::Uuid(Uuid::from_slice(bytes).ok()?),
-            })
-        } else {
-            None
-        }
-    }
-}
-
 impl UploadId {
     pub(crate) fn generate() -> Self {
         Self { id: Uuid::new_v4() }
@@ -1032,38 +925,6 @@ impl std::fmt::Display for MaybeUuid {
         match self {
             Self::Uuid(id) => write!(f, "{id}"),
             Self::Name(name) => write!(f, "{name}"),
-        }
-    }
-}
-
-impl std::str::FromStr for DeleteToken {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(DeleteToken::from_existing(s))
-    }
-}
-
-impl std::fmt::Display for DeleteToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.id)
-    }
-}
-
-impl std::str::FromStr for Alias {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Alias::from_existing(s))
-    }
-}
-
-impl std::fmt::Display for Alias {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(ext) = self.extension() {
-            write!(f, "{}{ext}", self.id)
-        } else {
-            write!(f, "{}", self.id)
         }
     }
 }

@@ -1,8 +1,10 @@
 mod embedded;
+mod job_status;
 mod schema;
 
 use std::sync::Arc;
 
+use dashmap::{DashMap, DashSet};
 use diesel::prelude::*;
 use diesel_async::{
     pooled_connection::{
@@ -11,20 +13,58 @@ use diesel_async::{
     },
     AsyncConnection, AsyncPgConnection, RunQueryDsl,
 };
+use tokio::sync::Notify;
 use tokio_postgres::{AsyncMessage, Notification};
 use url::Url;
+use uuid::Uuid;
 
-use crate::error_code::ErrorCode;
+use crate::{details::Details, error_code::ErrorCode};
+
+use self::job_status::JobStatus;
 
 use super::{
-    BaseRepo, Hash, HashAlreadyExists, HashPage, HashRepo, OrderedHash, RepoError,
-    VariantAlreadyExists,
+    Alias, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, DetailsRepo, Hash,
+    HashAlreadyExists, HashPage, HashRepo, JobId, OrderedHash, QueueRepo, RepoError, SettingsRepo,
+    StoreMigrationRepo, UploadId, VariantAlreadyExists,
 };
 
 #[derive(Clone)]
 pub(crate) struct PostgresRepo {
+    inner: Arc<Inner>,
+    notifications: Arc<actix_rt::task::JoinHandle<()>>,
+}
+
+struct Inner {
     pool: Pool<AsyncPgConnection>,
-    notifications: flume::Receiver<Notification>,
+    queue_notifications: DashMap<String, Arc<Notify>>,
+    completed_uploads: DashSet<UploadId>,
+    upload_notifier: Notify,
+}
+
+async fn delegate_notifications(receiver: flume::Receiver<Notification>, inner: Arc<Inner>) {
+    while let Ok(notification) = receiver.recv_async().await {
+        match notification.channel() {
+            "queue_status_channel" => {
+                // new job inserted for queue
+                let queue_name = notification.payload().to_string();
+
+                inner
+                    .queue_notifications
+                    .entry(queue_name)
+                    .or_insert_with(|| Arc::new(Notify::new()))
+                    .notify_waiters();
+            }
+            channel => {
+                tracing::info!(
+                    "Unhandled postgres notification: {channel}: {}",
+                    notification.payload()
+                );
+            }
+        }
+        todo!()
+    }
+
+    tracing::warn!("Notification delegator shutting down");
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -46,6 +86,15 @@ pub(crate) enum PostgresError {
 
     #[error("Error in database")]
     Diesel(#[source] diesel::result::Error),
+
+    #[error("Error deserializing hex value")]
+    Hex(#[source] hex::FromHexError),
+
+    #[error("Error serializing details")]
+    SerializeDetails(#[source] serde_json::Error),
+
+    #[error("Error deserializing details")]
+    DeserializeDetails(#[source] serde_json::Error),
 }
 
 impl PostgresError {
@@ -71,7 +120,7 @@ impl PostgresRepo {
         handle.abort();
         let _ = handle.await;
 
-        let (tx, notifications) = flume::bounded(10);
+        let (tx, rx) = flume::bounded(10);
 
         let mut config = ManagerConfig::default();
         config.custom_setup = build_handler(tx);
@@ -84,8 +133,17 @@ impl PostgresRepo {
             .build()
             .map_err(ConnectPostgresError::BuildPool)?;
 
-        Ok(PostgresRepo {
+        let inner = Arc::new(Inner {
             pool,
+            queue_notifications: DashMap::new(),
+            completed_uploads: DashSet::new(),
+            upload_notifier: Notify::new(),
+        });
+
+        let notifications = Arc::new(actix_rt::spawn(delegate_notifications(rx, inner.clone())));
+
+        Ok(PostgresRepo {
+            inner,
             notifications,
         })
     }
@@ -147,7 +205,7 @@ impl HashRepo for PostgresRepo {
     async fn size(&self) -> Result<u64, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let count = hashes
             .count()
@@ -161,7 +219,7 @@ impl HashRepo for PostgresRepo {
     async fn bound(&self, input_hash: Hash) -> Result<Option<OrderedHash>, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let timestamp = hashes
             .select(created_at)
@@ -185,7 +243,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<HashPage, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let timestamp = to_primitive(date);
 
@@ -212,7 +270,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<HashPage, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let (mut page, prev) = if let Some(OrderedHash {
             timestamp,
@@ -276,7 +334,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<Result<(), HashAlreadyExists>, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let timestamp = to_primitive(timestamp);
 
@@ -306,7 +364,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         diesel::update(hashes)
             .filter(hash.eq(&input_hash))
@@ -321,7 +379,7 @@ impl HashRepo for PostgresRepo {
     async fn identifier(&self, input_hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let opt = hashes
             .select(identifier)
@@ -342,7 +400,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let res = diesel::insert_into(variants)
             .values((
@@ -370,7 +428,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<Option<Arc<str>>, RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let opt = variants
             .select(identifier)
@@ -388,7 +446,7 @@ impl HashRepo for PostgresRepo {
     async fn variants(&self, input_hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let vec = variants
             .select((variant, identifier))
@@ -410,7 +468,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         diesel::delete(variants)
             .filter(hash.eq(&input_hash))
@@ -429,7 +487,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         diesel::update(hashes)
             .filter(hash.eq(&input_hash))
@@ -444,7 +502,7 @@ impl HashRepo for PostgresRepo {
     async fn motion_identifier(&self, input_hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         let opt = hashes
             .select(motion_identifier)
@@ -460,7 +518,7 @@ impl HashRepo for PostgresRepo {
     }
 
     async fn cleanup_hash(&self, input_hash: Hash) -> Result<(), RepoError> {
-        let mut conn = self.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
 
         conn.transaction(|conn| {
             Box::pin(async move {
@@ -477,6 +535,425 @@ impl HashRepo for PostgresRepo {
         })
         .await
         .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl AliasRepo for PostgresRepo {
+    async fn create_alias(
+        &self,
+        input_alias: &Alias,
+        delete_token: &DeleteToken,
+        input_hash: Hash,
+    ) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
+        use schema::aliases::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let res = diesel::insert_into(aliases)
+            .values((
+                alias.eq(input_alias),
+                hash.eq(&input_hash),
+                token.eq(delete_token),
+            ))
+            .execute(&mut conn)
+            .await;
+
+        match res {
+            Ok(_) => Ok(Ok(())),
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => Ok(Err(AliasAlreadyExists)),
+            Err(e) => Err(PostgresError::Diesel(e).into()),
+        }
+    }
+
+    async fn delete_token(&self, input_alias: &Alias) -> Result<Option<DeleteToken>, RepoError> {
+        use schema::aliases::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let opt = aliases
+            .select(token)
+            .filter(alias.eq(input_alias))
+            .get_result(&mut conn)
+            .await
+            .optional()
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(opt)
+    }
+
+    async fn hash(&self, input_alias: &Alias) -> Result<Option<Hash>, RepoError> {
+        use schema::aliases::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let opt = aliases
+            .select(hash)
+            .filter(alias.eq(input_alias))
+            .get_result(&mut conn)
+            .await
+            .optional()
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(opt)
+    }
+
+    async fn aliases_for_hash(&self, input_hash: Hash) -> Result<Vec<Alias>, RepoError> {
+        use schema::aliases::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let vec = aliases
+            .select(alias)
+            .filter(hash.eq(&input_hash))
+            .get_results(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(vec)
+    }
+
+    async fn cleanup_alias(&self, input_alias: &Alias) -> Result<(), RepoError> {
+        use schema::aliases::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        diesel::delete(aliases)
+            .filter(alias.eq(input_alias))
+            .execute(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl SettingsRepo for PostgresRepo {
+    async fn set(&self, input_key: &'static str, input_value: Arc<[u8]>) -> Result<(), RepoError> {
+        use schema::settings::dsl::*;
+
+        let input_value = hex::encode(input_value);
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        diesel::insert_into(settings)
+            .values((key.eq(input_key), value.eq(input_value)))
+            .execute(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+
+    async fn get(&self, input_key: &'static str) -> Result<Option<Arc<[u8]>>, RepoError> {
+        use schema::settings::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let opt = settings
+            .select(value)
+            .filter(key.eq(input_key))
+            .get_result::<String>(&mut conn)
+            .await
+            .optional()
+            .map_err(PostgresError::Diesel)?
+            .map(hex::decode)
+            .transpose()
+            .map_err(PostgresError::Hex)?
+            .map(Arc::from);
+
+        Ok(opt)
+    }
+
+    async fn remove(&self, input_key: &'static str) -> Result<(), RepoError> {
+        use schema::settings::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        diesel::delete(settings)
+            .filter(key.eq(input_key))
+            .execute(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl DetailsRepo for PostgresRepo {
+    async fn relate_details(
+        &self,
+        input_identifier: &Arc<str>,
+        input_details: &Details,
+    ) -> Result<(), RepoError> {
+        use schema::details::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let value =
+            serde_json::to_value(&input_details.inner).map_err(PostgresError::SerializeDetails)?;
+
+        diesel::insert_into(details)
+            .values((identifier.eq(input_identifier.as_ref()), json.eq(&value)))
+            .execute(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+
+    async fn details(&self, input_identifier: &Arc<str>) -> Result<Option<Details>, RepoError> {
+        use schema::details::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let opt = details
+            .select(json)
+            .filter(identifier.eq(input_identifier.as_ref()))
+            .get_result::<serde_json::Value>(&mut conn)
+            .await
+            .optional()
+            .map_err(PostgresError::Diesel)?
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(PostgresError::DeserializeDetails)?
+            .map(|inner| Details { inner });
+
+        Ok(opt)
+    }
+
+    async fn cleanup_details(&self, input_identifier: &Arc<str>) -> Result<(), RepoError> {
+        use schema::details::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        diesel::delete(details)
+            .filter(identifier.eq(input_identifier.as_ref()))
+            .execute(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl QueueRepo for PostgresRepo {
+    async fn push(
+        &self,
+        queue_name: &'static str,
+        job_json: serde_json::Value,
+    ) -> Result<JobId, RepoError> {
+        use schema::job_queue::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let job_id = diesel::insert_into(job_queue)
+            .values((queue.eq(queue_name), job.eq(job_json)))
+            .returning(id)
+            .get_result::<Uuid>(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(JobId(job_id))
+    }
+
+    async fn pop(
+        &self,
+        queue_name: &'static str,
+        worker_id: Uuid,
+    ) -> Result<(JobId, serde_json::Value), RepoError> {
+        use schema::job_queue::dsl::*;
+
+        loop {
+            let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+            let notifier: Arc<Notify> = self
+                .inner
+                .queue_notifications
+                .entry(String::from(queue_name))
+                .or_insert_with(|| Arc::new(Notify::new()))
+                .clone();
+
+            diesel::sql_query("LISTEN queue_status_channel;")
+                .execute(&mut conn)
+                .await
+                .map_err(PostgresError::Diesel)?;
+
+            let timestamp = to_primitive(time::OffsetDateTime::now_utc());
+
+            diesel::update(job_queue)
+                .filter(heartbeat.le(timestamp.saturating_sub(time::Duration::minutes(2))))
+                .set((
+                    heartbeat.eq(Option::<time::PrimitiveDateTime>::None),
+                    status.eq(JobStatus::New),
+                ))
+                .execute(&mut conn)
+                .await
+                .map_err(PostgresError::Diesel)?;
+
+            // TODO: for_update().skip_locked()
+            let id_query = job_queue
+                .select(id)
+                .filter(status.eq(JobStatus::New).and(queue.eq(queue_name)))
+                .order(queue_time)
+                .into_boxed()
+                .single_value();
+
+            let opt = diesel::update(job_queue)
+                .filter(id.nullable().eq(id_query))
+                .set((
+                    heartbeat.eq(timestamp),
+                    status.eq(JobStatus::Running),
+                    worker.eq(worker_id),
+                ))
+                .returning((id, job))
+                .get_result(&mut conn)
+                .await
+                .optional()
+                .map_err(PostgresError::Diesel)?;
+
+            if let Some((job_id, job_json)) = opt {
+                diesel::sql_query("UNLISTEN queue_status_channel;")
+                    .execute(&mut conn)
+                    .await
+                    .map_err(PostgresError::Diesel)?;
+
+                return Ok((JobId(job_id), job_json));
+            }
+
+            let _ = actix_rt::time::timeout(std::time::Duration::from_secs(5), notifier.notified())
+                .await;
+
+            diesel::sql_query("UNLISTEN queue_status_channel;")
+                .execute(&mut conn)
+                .await
+                .map_err(PostgresError::Diesel)?;
+
+            drop(conn);
+        }
+    }
+
+    async fn heartbeat(
+        &self,
+        queue_name: &'static str,
+        worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError> {
+        use schema::job_queue::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let timestamp = to_primitive(time::OffsetDateTime::now_utc());
+
+        diesel::update(job_queue)
+            .filter(
+                id.eq(job_id.0)
+                    .and(queue.eq(queue_name))
+                    .and(worker.eq(worker_id)),
+            )
+            .set(heartbeat.eq(timestamp))
+            .execute(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+
+    async fn complete_job(
+        &self,
+        queue_name: &'static str,
+        worker_id: Uuid,
+        job_id: JobId,
+    ) -> Result<(), RepoError> {
+        use schema::job_queue::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        diesel::delete(job_queue)
+            .filter(
+                id.eq(job_id.0)
+                    .and(queue.eq(queue_name))
+                    .and(worker.eq(worker_id)),
+            )
+            .execute(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl StoreMigrationRepo for PostgresRepo {
+    async fn is_continuing_migration(&self) -> Result<bool, RepoError> {
+        use schema::store_migrations::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let count = store_migrations
+            .count()
+            .get_result::<i64>(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(count > 0)
+    }
+
+    async fn mark_migrated(
+        &self,
+        input_old_identifier: &Arc<str>,
+        input_new_identifier: &Arc<str>,
+    ) -> Result<(), RepoError> {
+        use schema::store_migrations::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        diesel::insert_into(store_migrations)
+            .values((
+                old_identifier.eq(input_old_identifier.as_ref()),
+                new_identifier.eq(input_new_identifier.as_ref()),
+            ))
+            .on_conflict((old_identifier, new_identifier))
+            .do_nothing()
+            .execute(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+
+    async fn is_migrated(&self, input_old_identifier: &Arc<str>) -> Result<bool, RepoError> {
+        use schema::store_migrations::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        let b = diesel::select(diesel::dsl::exists(
+            store_migrations.filter(old_identifier.eq(input_old_identifier.as_ref())),
+        ))
+        .get_result(&mut conn)
+        .await
+        .map_err(PostgresError::Diesel)?;
+
+        Ok(b)
+    }
+
+    async fn clear(&self) -> Result<(), RepoError> {
+        use schema::store_migrations::dsl::*;
+
+        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+
+        diesel::delete(store_migrations)
+            .execute(&mut conn)
+            .await
+            .map_err(PostgresError::Diesel)?;
 
         Ok(())
     }

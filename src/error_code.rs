@@ -62,6 +62,9 @@ impl ErrorCode {
     pub(crate) const EXTRACT_UPLOAD_RESULT: ErrorCode = ErrorCode {
         code: "extract-upload-result",
     };
+    pub(crate) const EXTRACT_JOB: ErrorCode = ErrorCode {
+        code: "extract-job",
+    };
     pub(crate) const CONFLICTED_RECORD: ErrorCode = ErrorCode {
         code: "conflicted-record",
     };

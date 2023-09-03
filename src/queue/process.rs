@@ -17,13 +17,13 @@ pub(super) fn perform<'a, S>(
     store: &'a S,
     process_map: &'a ProcessMap,
     config: &'a Configuration,
-    job: &'a str,
+    job: serde_json::Value,
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
     S: Store + 'static,
 {
     Box::pin(async move {
-        match serde_json::from_str(job) {
+        match serde_json::from_value(job) {
             Ok(job) => match job {
                 Process::Ingest {
                     identifier,

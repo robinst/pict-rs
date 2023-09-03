@@ -46,16 +46,19 @@ pub(crate) enum SledError {
     Sled(#[from] sled::Error),
 
     #[error("Invalid details json")]
-    Details(serde_json::Error),
+    Details(#[source] serde_json::Error),
 
     #[error("Invalid upload result json")]
-    UploadResult(serde_json::Error),
+    UploadResult(#[source] serde_json::Error),
 
     #[error("Error parsing variant key")]
     VariantKey(#[from] VariantKeyError),
 
     #[error("Invalid string data in db")]
     Utf8(#[source] std::str::Utf8Error),
+
+    #[error("Invalid job json")]
+    Job(#[source] serde_json::Error),
 
     #[error("Operation panicked")]
     Panic,
@@ -70,6 +73,7 @@ impl SledError {
             Self::Sled(_) | Self::VariantKey(_) | Self::Utf8(_) => ErrorCode::SLED_ERROR,
             Self::Details(_) => ErrorCode::EXTRACT_DETAILS,
             Self::UploadResult(_) => ErrorCode::EXTRACT_UPLOAD_RESULT,
+            Self::Job(_) => ErrorCode::EXTRACT_JOB,
             Self::Panic => ErrorCode::PANIC,
             Self::Conflict => ErrorCode::CONFLICTED_RECORD,
         }
@@ -660,11 +664,16 @@ fn try_into_arc_str(ivec: IVec) -> Result<Arc<str>, SledError> {
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for SledRepo {
     #[tracing::instrument(skip(self))]
-    async fn push(&self, queue_name: &'static str, job: Arc<str>) -> Result<JobId, RepoError> {
+    async fn push(
+        &self,
+        queue_name: &'static str,
+        job: serde_json::Value,
+    ) -> Result<JobId, RepoError> {
         let metrics_guard = PushMetricsGuard::guard(queue_name);
 
         let id = JobId::gen();
         let key = job_key(queue_name, id);
+        let job = serde_json::to_vec(&job).map_err(SledError::Job)?;
 
         let queue = self.queue.clone();
         let job_state = self.job_state.clone();
@@ -709,7 +718,7 @@ impl QueueRepo for SledRepo {
         &self,
         queue_name: &'static str,
         worker_id: Uuid,
-    ) -> Result<(JobId, Arc<str>), RepoError> {
+    ) -> Result<(JobId, serde_json::Value), RepoError> {
         let metrics_guard = PopMetricsGuard::guard(queue_name);
 
         let now = time::OffsetDateTime::now_utc();
@@ -762,10 +771,14 @@ impl QueueRepo for SledRepo {
 
                     tracing::Span::current().record("job_id", &format!("{job_id:?}"));
 
-                    let opt = queue.get(&key)?.map(try_into_arc_str).transpose()?;
+                    let opt = queue
+                        .get(&key)?
+                        .map(|ivec| serde_json::from_slice(&ivec[..]))
+                        .transpose()
+                        .map_err(SledError::Job)?;
 
                     return Ok(opt.map(|job| (job_id, job)))
-                        as Result<Option<(JobId, Arc<str>)>, SledError>;
+                        as Result<Option<(JobId, serde_json::Value)>, SledError>;
                 }
 
                 Ok(None)

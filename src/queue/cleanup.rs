@@ -14,13 +14,13 @@ pub(super) fn perform<'a, S>(
     repo: &'a ArcRepo,
     store: &'a S,
     configuration: &'a Configuration,
-    job: &'a str,
+    job: serde_json::Value,
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
     S: Store,
 {
     Box::pin(async move {
-        match serde_json::from_str(job) {
+        match serde_json::from_value(job) {
             Ok(job) => match job {
                 Cleanup::Hash { hash: in_hash } => hash(repo, in_hash).await?,
                 Cleanup::Identifier {

@@ -7,7 +7,6 @@ use crate::{
     serde_str::Serde,
     store::Store,
 };
-use base64::{prelude::BASE64_STANDARD, Engine};
 use std::{
     future::Future,
     path::PathBuf,
@@ -19,32 +18,6 @@ use tracing::Instrument;
 
 mod cleanup;
 mod process;
-
-#[derive(Debug)]
-struct Base64Bytes(Vec<u8>);
-
-impl serde::Serialize for Base64Bytes {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let s = BASE64_STANDARD.encode(&self.0);
-        s.serialize(serializer)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Base64Bytes {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s: String = serde::Deserialize::deserialize(deserializer)?;
-        BASE64_STANDARD
-            .decode(s)
-            .map(Base64Bytes)
-            .map_err(|e| serde::de::Error::custom(e.to_string()))
-    }
-}
 
 const CLEANUP_QUEUE: &str = "cleanup";
 const PROCESS_QUEUE: &str = "process";
@@ -91,18 +64,18 @@ pub(crate) async fn cleanup_alias(
     alias: Alias,
     token: DeleteToken,
 ) -> Result<(), Error> {
-    let job = serde_json::to_string(&Cleanup::Alias {
+    let job = serde_json::to_value(&Cleanup::Alias {
         alias: Serde::new(alias),
         token: Serde::new(token),
     })
     .map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_hash(repo: &Arc<dyn FullRepo>, hash: Hash) -> Result<(), Error> {
-    let job = serde_json::to_string(&Cleanup::Hash { hash }).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    let job = serde_json::to_value(&Cleanup::Hash { hash }).map_err(UploadError::PushJob)?;
+    repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
@@ -110,11 +83,11 @@ pub(crate) async fn cleanup_identifier(
     repo: &Arc<dyn FullRepo>,
     identifier: &Arc<str>,
 ) -> Result<(), Error> {
-    let job = serde_json::to_string(&Cleanup::Identifier {
+    let job = serde_json::to_value(&Cleanup::Identifier {
         identifier: identifier.to_string(),
     })
     .map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
@@ -124,26 +97,26 @@ async fn cleanup_variants(
     variant: Option<String>,
 ) -> Result<(), Error> {
     let job =
-        serde_json::to_string(&Cleanup::Variant { hash, variant }).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job.into()).await?;
+        serde_json::to_value(&Cleanup::Variant { hash, variant }).map_err(UploadError::PushJob)?;
+    repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_outdated_proxies(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
-    let job = serde_json::to_string(&Cleanup::OutdatedProxies).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    let job = serde_json::to_value(&Cleanup::OutdatedProxies).map_err(UploadError::PushJob)?;
+    repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_outdated_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
-    let job = serde_json::to_string(&Cleanup::OutdatedVariants).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    let job = serde_json::to_value(&Cleanup::OutdatedVariants).map_err(UploadError::PushJob)?;
+    repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_all_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
-    let job = serde_json::to_string(&Cleanup::AllVariants).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job.into()).await?;
+    let job = serde_json::to_value(&Cleanup::AllVariants).map_err(UploadError::PushJob)?;
+    repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
@@ -153,13 +126,13 @@ pub(crate) async fn queue_ingest(
     upload_id: UploadId,
     declared_alias: Option<Alias>,
 ) -> Result<(), Error> {
-    let job = serde_json::to_string(&Process::Ingest {
+    let job = serde_json::to_value(&Process::Ingest {
         identifier: identifier.to_string(),
         declared_alias: declared_alias.map(Serde::new),
         upload_id: Serde::new(upload_id),
     })
     .map_err(UploadError::PushJob)?;
-    repo.push(PROCESS_QUEUE, job.into()).await?;
+    repo.push(PROCESS_QUEUE, job).await?;
     Ok(())
 }
 
@@ -170,14 +143,14 @@ pub(crate) async fn queue_generate(
     process_path: PathBuf,
     process_args: Vec<String>,
 ) -> Result<(), Error> {
-    let job = serde_json::to_string(&Process::Generate {
+    let job = serde_json::to_value(&Process::Generate {
         target_format,
         source: Serde::new(source),
         process_path,
         process_args,
     })
     .map_err(UploadError::PushJob)?;
-    repo.push(PROCESS_QUEUE, job.into()).await?;
+    repo.push(PROCESS_QUEUE, job).await?;
     Ok(())
 }
 
@@ -220,7 +193,7 @@ async fn process_jobs<S, F>(
             &'a Arc<dyn FullRepo>,
             &'a S,
             &'a Configuration,
-            &'a str,
+            serde_json::Value,
         ) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
@@ -284,13 +257,13 @@ where
             &'a Arc<dyn FullRepo>,
             &'a S,
             &'a Configuration,
-            &'a str,
+            serde_json::Value,
         ) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
     loop {
         let fut = async {
-            let (job_id, string) = repo.pop(queue, worker_id).await?;
+            let (job_id, job) = repo.pop(queue, worker_id).await?;
 
             let span = tracing::info_span!("Running Job");
 
@@ -303,7 +276,7 @@ where
                         queue,
                         worker_id,
                         job_id,
-                        (callback)(repo, store, config, string.as_ref()),
+                        (callback)(repo, store, config, job),
                     )
                 })
                 .instrument(span)
@@ -337,7 +310,7 @@ async fn process_image_jobs<S, F>(
             &'a S,
             &'a ProcessMap,
             &'a Configuration,
-            &'a str,
+            serde_json::Value,
         ) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
@@ -373,13 +346,13 @@ where
             &'a S,
             &'a ProcessMap,
             &'a Configuration,
-            &'a str,
+            serde_json::Value,
         ) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
     loop {
         let fut = async {
-            let (job_id, string) = repo.pop(queue, worker_id).await?;
+            let (job_id, job) = repo.pop(queue, worker_id).await?;
 
             let span = tracing::info_span!("Running Job");
 
@@ -392,7 +365,7 @@ where
                         queue,
                         worker_id,
                         job_id,
-                        (callback)(repo, store, process_map, config, string.as_ref()),
+                        (callback)(repo, store, process_map, config, job),
                     )
                 })
                 .instrument(span)

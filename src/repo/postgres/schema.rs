@@ -38,9 +38,10 @@ diesel::table! {
         id -> Uuid,
         queue -> Text,
         job -> Jsonb,
+        worker -> Nullable<Uuid>,
         status -> JobStatus,
         queue_time -> Timestamp,
-        heartbeat -> Timestamp,
+        heartbeat -> Nullable<Timestamp>,
     }
 }
 
@@ -72,8 +73,9 @@ diesel::table! {
 }
 
 diesel::table! {
-    store_migrations (identifier) {
-        identifier -> Text,
+    store_migrations (old_identifier) {
+        old_identifier -> Text,
+        new_identifier -> Text,
     }
 }
 

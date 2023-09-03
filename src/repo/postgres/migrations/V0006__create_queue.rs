@@ -11,6 +11,7 @@ pub(crate) fn migration() -> String {
         t.inject_custom(r#""id" UUID PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL UNIQUE"#);
         t.add_column("queue", types::text().size(50).nullable(false));
         t.add_column("job", types::custom("jsonb").nullable(false));
+        t.add_column("worker", types::uuid().nullable(true));
         t.add_column("status", types::custom("job_status").nullable(false));
         t.add_column(
             "queue_time",
@@ -18,7 +19,7 @@ pub(crate) fn migration() -> String {
                 .nullable(false)
                 .default(AutogenFunction::CurrentTimestamp),
         );
-        t.add_column("heartbeat", types::datetime());
+        t.add_column("heartbeat", types::datetime().nullable(true));
 
         t.add_index("queue_status_index", types::index(["queue", "status"]));
         t.add_index("heartbeat_index", types::index(["heartbeat"]));
@@ -30,7 +31,7 @@ CREATE OR REPLACE FUNCTION queue_status_notify()
 	RETURNS trigger AS
 $$
 BEGIN
-	PERFORM pg_notify('queue_status_channel', NEW.id::text);
+	PERFORM pg_notify('queue_status_channel', NEW.queue::text);
 	RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
