@@ -33,7 +33,7 @@ where
     fn from_sql(bytes: <B as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         let s = String::from_sql(bytes)?;
 
-        Self::from_base64(s).ok_or_else(|| format!("Invalid base64 hash").into())
+        Self::from_base64(s).ok_or_else(|| "Invalid base64 hash".to_string().into())
     }
 }
 

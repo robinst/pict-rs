@@ -64,7 +64,7 @@ pub(crate) async fn cleanup_alias(
     alias: Alias,
     token: DeleteToken,
 ) -> Result<(), Error> {
-    let job = serde_json::to_value(&Cleanup::Alias {
+    let job = serde_json::to_value(Cleanup::Alias {
         alias: Serde::new(alias),
         token: Serde::new(token),
     })
@@ -74,7 +74,7 @@ pub(crate) async fn cleanup_alias(
 }
 
 pub(crate) async fn cleanup_hash(repo: &Arc<dyn FullRepo>, hash: Hash) -> Result<(), Error> {
-    let job = serde_json::to_value(&Cleanup::Hash { hash }).map_err(UploadError::PushJob)?;
+    let job = serde_json::to_value(Cleanup::Hash { hash }).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
@@ -83,7 +83,7 @@ pub(crate) async fn cleanup_identifier(
     repo: &Arc<dyn FullRepo>,
     identifier: &Arc<str>,
 ) -> Result<(), Error> {
-    let job = serde_json::to_value(&Cleanup::Identifier {
+    let job = serde_json::to_value(Cleanup::Identifier {
         identifier: identifier.to_string(),
     })
     .map_err(UploadError::PushJob)?;
@@ -97,25 +97,25 @@ async fn cleanup_variants(
     variant: Option<String>,
 ) -> Result<(), Error> {
     let job =
-        serde_json::to_value(&Cleanup::Variant { hash, variant }).map_err(UploadError::PushJob)?;
+        serde_json::to_value(Cleanup::Variant { hash, variant }).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_outdated_proxies(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
-    let job = serde_json::to_value(&Cleanup::OutdatedProxies).map_err(UploadError::PushJob)?;
+    let job = serde_json::to_value(Cleanup::OutdatedProxies).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_outdated_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
-    let job = serde_json::to_value(&Cleanup::OutdatedVariants).map_err(UploadError::PushJob)?;
+    let job = serde_json::to_value(Cleanup::OutdatedVariants).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_all_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
-    let job = serde_json::to_value(&Cleanup::AllVariants).map_err(UploadError::PushJob)?;
+    let job = serde_json::to_value(Cleanup::AllVariants).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
@@ -126,7 +126,7 @@ pub(crate) async fn queue_ingest(
     upload_id: UploadId,
     declared_alias: Option<Alias>,
 ) -> Result<(), Error> {
-    let job = serde_json::to_value(&Process::Ingest {
+    let job = serde_json::to_value(Process::Ingest {
         identifier: identifier.to_string(),
         declared_alias: declared_alias.map(Serde::new),
         upload_id: Serde::new(upload_id),
@@ -143,7 +143,7 @@ pub(crate) async fn queue_generate(
     process_path: PathBuf,
     process_args: Vec<String>,
 ) -> Result<(), Error> {
-    let job = serde_json::to_value(&Process::Generate {
+    let job = serde_json::to_value(Process::Generate {
         target_format,
         source: Serde::new(source),
         process_path,

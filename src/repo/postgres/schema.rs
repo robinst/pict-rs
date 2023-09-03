@@ -82,7 +82,7 @@ diesel::table! {
 diesel::table! {
     uploads (id) {
         id -> Uuid,
-        result -> Jsonb,
+        result -> Nullable<Jsonb>,
     }
 }
 

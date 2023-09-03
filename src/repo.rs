@@ -562,10 +562,13 @@ impl HashPage {
     }
 }
 
+type LocalBoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
+
+type PageFuture = LocalBoxFuture<'static, Result<HashPage, RepoError>>;
+
 pub(crate) struct HashStream {
     repo: Option<ArcRepo>,
-    page_future:
-        Option<std::pin::Pin<Box<dyn std::future::Future<Output = Result<HashPage, RepoError>>>>>,
+    page_future: Option<PageFuture>,
     page: Option<HashPage>,
 }
 

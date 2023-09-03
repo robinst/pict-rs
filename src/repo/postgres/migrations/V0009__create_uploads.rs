@@ -7,7 +7,13 @@ pub(crate) fn migration() -> String {
 
     m.create_table("uploads", |t| {
         t.inject_custom(r#""id" UUID PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL UNIQUE"#);
-        t.add_column("result", types::custom("jsonb"));
+        t.add_column("result", types::custom("jsonb").nullable(true));
+        t.add_column(
+            "created_at",
+            types::datetime()
+                .nullable(false)
+                .default(AutogenFunction::CurrentTimestamp),
+        );
     });
 
     m.inject_custom(
