@@ -7,10 +7,11 @@ use diesel::prelude::*;
 use diesel_async::{
     pooled_connection::{
         deadpool::{BuildError, Pool, PoolError},
-        AsyncDieselConnectionManager,
+        AsyncDieselConnectionManager, ManagerConfig,
     },
     AsyncConnection, AsyncPgConnection, RunQueryDsl,
 };
+use tokio_postgres::{AsyncMessage, Notification};
 use url::Url;
 
 use crate::error_code::ErrorCode;
@@ -23,6 +24,7 @@ use super::{
 #[derive(Clone)]
 pub(crate) struct PostgresRepo {
     pool: Pool<AsyncPgConnection>,
+    notifications: flume::Receiver<Notification>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -69,13 +71,68 @@ impl PostgresRepo {
         handle.abort();
         let _ = handle.await;
 
-        let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(postgres_url);
-        let pool = Pool::builder(config)
+        let (tx, notifications) = flume::bounded(10);
+
+        let mut config = ManagerConfig::default();
+        config.custom_setup = build_handler(tx);
+
+        let mgr = AsyncDieselConnectionManager::<AsyncPgConnection>::new_with_config(
+            postgres_url,
+            config,
+        );
+        let pool = Pool::builder(mgr)
             .build()
             .map_err(ConnectPostgresError::BuildPool)?;
 
-        Ok(PostgresRepo { pool })
+        Ok(PostgresRepo {
+            pool,
+            notifications,
+        })
     }
+}
+
+type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+type ConfigFn =
+    Box<dyn Fn(&str) -> BoxFuture<'_, ConnectionResult<AsyncPgConnection>> + Send + Sync + 'static>;
+
+fn build_handler(sender: flume::Sender<Notification>) -> ConfigFn {
+    Box::new(
+        move |config: &str| -> BoxFuture<'_, ConnectionResult<AsyncPgConnection>> {
+            let sender = sender.clone();
+
+            Box::pin(async move {
+                let (client, mut conn) =
+                    tokio_postgres::connect(config, tokio_postgres::tls::NoTls)
+                        .await
+                        .map_err(|e| ConnectionError::BadConnection(e.to_string()))?;
+
+                // not very cash money (structured concurrency) of me
+                actix_rt::spawn(async move {
+                    while let Some(res) = std::future::poll_fn(|cx| conn.poll_message(cx)).await {
+                        match res {
+                            Err(e) => {
+                                tracing::error!("Database Connection {e:?}");
+                                return;
+                            }
+                            Ok(AsyncMessage::Notice(e)) => {
+                                tracing::warn!("Database Notice {e:?}");
+                            }
+                            Ok(AsyncMessage::Notification(notification)) => {
+                                if sender.send_async(notification).await.is_err() {
+                                    tracing::warn!("Missed notification. Are we shutting down?");
+                                }
+                            }
+                            Ok(_) => {
+                                tracing::warn!("Unhandled AsyncMessage!!! Please contact the developer of this application");
+                            }
+                        }
+                    }
+                });
+
+                AsyncPgConnection::try_from(client).await
+            })
+        },
+    )
 }
 
 fn to_primitive(timestamp: time::OffsetDateTime) -> time::PrimitiveDateTime {
