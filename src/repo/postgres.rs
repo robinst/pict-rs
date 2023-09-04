@@ -354,11 +354,11 @@ impl HashRepo for PostgresRepo {
                 .or_filter(created_at.eq(timestamp).and(hash.gt(&bound_hash)))
                 .order(created_at)
                 .then_order_by(hash)
-                .offset(limit.saturating_sub(1) as i64)
-                .first::<Hash>(&mut conn)
+                .limit(limit as i64)
+                .get_results::<Hash>(&mut conn)
                 .await
-                .optional()
-                .map_err(PostgresError::Diesel)?;
+                .map_err(PostgresError::Diesel)?
+                .pop();
 
             (page, prev)
         } else {
