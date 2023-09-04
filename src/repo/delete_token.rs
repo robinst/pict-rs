@@ -86,3 +86,75 @@ impl std::fmt::Display for DeleteToken {
         write!(f, "{}", self.id)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{DeleteToken, MaybeUuid};
+    use uuid::Uuid;
+
+    #[test]
+    fn string_delete_token() {
+        let delete_token = DeleteToken::from_existing("blah");
+
+        assert_eq!(
+            delete_token,
+            DeleteToken {
+                id: MaybeUuid::Name(String::from("blah"))
+            }
+        )
+    }
+
+    #[test]
+    fn uuid_string_delete_token() {
+        let uuid = Uuid::new_v4();
+
+        let delete_token = DeleteToken::from_existing(&uuid.to_string());
+
+        assert_eq!(
+            delete_token,
+            DeleteToken {
+                id: MaybeUuid::Uuid(uuid),
+            }
+        )
+    }
+
+    #[test]
+    fn bytes_delete_token() {
+        let delete_token = DeleteToken::from_slice(b"blah").unwrap();
+
+        assert_eq!(
+            delete_token,
+            DeleteToken {
+                id: MaybeUuid::Name(String::from("blah"))
+            }
+        )
+    }
+
+    #[test]
+    fn uuid_bytes_delete_token() {
+        let uuid = Uuid::new_v4();
+
+        let delete_token = DeleteToken::from_slice(&uuid.as_bytes()[..]).unwrap();
+
+        assert_eq!(
+            delete_token,
+            DeleteToken {
+                id: MaybeUuid::Uuid(uuid),
+            }
+        )
+    }
+
+    #[test]
+    fn uuid_bytes_string_delete_token() {
+        let uuid = Uuid::new_v4();
+
+        let delete_token = DeleteToken::from_slice(uuid.to_string().as_bytes()).unwrap();
+
+        assert_eq!(
+            delete_token,
+            DeleteToken {
+                id: MaybeUuid::Uuid(uuid),
+            }
+        )
+    }
+}

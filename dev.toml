@@ -11,6 +11,7 @@ targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
 buffer_capacity = 102400
 
 [tracing.opentelemetry]
+url = 'http://127.0.0.1:4317'
 service_name = 'pict-rs'
 targets = 'info'
 
@@ -60,7 +61,7 @@ crf_max = 12
 
 [repo]
 type = 'postgres'
-url = 'postgres://postgres:1234@localhost:5432/postgres'
+url = 'postgres://pictrs:1234@localhost:5432/pictrs'
 
 # [repo]
 # type = 'sled'

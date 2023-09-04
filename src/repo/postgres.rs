@@ -14,7 +14,7 @@ use dashmap::DashMap;
 use diesel::prelude::*;
 use diesel_async::{
     pooled_connection::{
-        deadpool::{BuildError, Pool, PoolError},
+        deadpool::{BuildError, Object, Pool, PoolError},
         AsyncDieselConnectionManager, ManagerConfig,
     },
     AsyncConnection, AsyncPgConnection, RunQueryDsl,
@@ -176,6 +176,17 @@ impl PostgresRepo {
             notifications,
         })
     }
+
+    async fn get_connection(&self) -> Result<Object<AsyncPgConnection>, PostgresError> {
+        self.inner.get_connection().await
+    }
+}
+
+impl Inner {
+    #[tracing::instrument(level = "DEBUG", skip(self))]
+    async fn get_connection(&self) -> Result<Object<AsyncPgConnection>, PostgresError> {
+        self.pool.get().await.map_err(PostgresError::Pool)
+    }
 }
 
 type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
@@ -235,7 +246,7 @@ impl HashRepo for PostgresRepo {
     async fn size(&self) -> Result<u64, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let count = hashes
             .count()
@@ -250,7 +261,7 @@ impl HashRepo for PostgresRepo {
     async fn bound(&self, input_hash: Hash) -> Result<Option<OrderedHash>, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let timestamp = hashes
             .select(created_at)
@@ -275,7 +286,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<HashPage, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let timestamp = to_primitive(date);
 
@@ -303,7 +314,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<HashPage, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let (mut page, prev) = if let Some(OrderedHash {
             timestamp,
@@ -368,7 +379,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<Result<(), HashAlreadyExists>, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let timestamp = to_primitive(timestamp);
 
@@ -399,7 +410,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::update(hashes)
             .filter(hash.eq(&input_hash))
@@ -415,7 +426,7 @@ impl HashRepo for PostgresRepo {
     async fn identifier(&self, input_hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = hashes
             .select(identifier)
@@ -437,7 +448,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let res = diesel::insert_into(variants)
             .values((
@@ -466,7 +477,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<Option<Arc<str>>, RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = variants
             .select(identifier)
@@ -485,7 +496,7 @@ impl HashRepo for PostgresRepo {
     async fn variants(&self, input_hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let vec = variants
             .select((variant, identifier))
@@ -508,7 +519,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::delete(variants)
             .filter(hash.eq(&input_hash))
@@ -528,7 +539,7 @@ impl HashRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::update(hashes)
             .filter(hash.eq(&input_hash))
@@ -544,7 +555,7 @@ impl HashRepo for PostgresRepo {
     async fn motion_identifier(&self, input_hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         use schema::hashes::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = hashes
             .select(motion_identifier)
@@ -561,7 +572,7 @@ impl HashRepo for PostgresRepo {
 
     #[tracing::instrument(level = "DEBUG", skip(self))]
     async fn cleanup_hash(&self, input_hash: Hash) -> Result<(), RepoError> {
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         conn.transaction(|conn| {
             Box::pin(async move {
@@ -594,7 +605,7 @@ impl AliasRepo for PostgresRepo {
     ) -> Result<Result<(), AliasAlreadyExists>, RepoError> {
         use schema::aliases::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let res = diesel::insert_into(aliases)
             .values((
@@ -619,7 +630,7 @@ impl AliasRepo for PostgresRepo {
     async fn delete_token(&self, input_alias: &Alias) -> Result<Option<DeleteToken>, RepoError> {
         use schema::aliases::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = aliases
             .select(token)
@@ -636,7 +647,7 @@ impl AliasRepo for PostgresRepo {
     async fn hash(&self, input_alias: &Alias) -> Result<Option<Hash>, RepoError> {
         use schema::aliases::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = aliases
             .select(hash)
@@ -653,7 +664,7 @@ impl AliasRepo for PostgresRepo {
     async fn aliases_for_hash(&self, input_hash: Hash) -> Result<Vec<Alias>, RepoError> {
         use schema::aliases::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let vec = aliases
             .select(alias)
@@ -669,7 +680,7 @@ impl AliasRepo for PostgresRepo {
     async fn cleanup_alias(&self, input_alias: &Alias) -> Result<(), RepoError> {
         use schema::aliases::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::delete(aliases)
             .filter(alias.eq(input_alias))
@@ -689,7 +700,7 @@ impl SettingsRepo for PostgresRepo {
 
         let input_value = hex::encode(input_value);
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::insert_into(settings)
             .values((key.eq(input_key), value.eq(&input_value)))
@@ -707,7 +718,7 @@ impl SettingsRepo for PostgresRepo {
     async fn get(&self, input_key: &'static str) -> Result<Option<Arc<[u8]>>, RepoError> {
         use schema::settings::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = settings
             .select(value)
@@ -728,7 +739,7 @@ impl SettingsRepo for PostgresRepo {
     async fn remove(&self, input_key: &'static str) -> Result<(), RepoError> {
         use schema::settings::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::delete(settings)
             .filter(key.eq(input_key))
@@ -750,7 +761,7 @@ impl DetailsRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::details::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let value =
             serde_json::to_value(&input_details.inner).map_err(PostgresError::SerializeDetails)?;
@@ -768,7 +779,7 @@ impl DetailsRepo for PostgresRepo {
     async fn details(&self, input_identifier: &Arc<str>) -> Result<Option<Details>, RepoError> {
         use schema::details::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = details
             .select(json)
@@ -789,7 +800,7 @@ impl DetailsRepo for PostgresRepo {
     async fn cleanup_details(&self, input_identifier: &Arc<str>) -> Result<(), RepoError> {
         use schema::details::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::delete(details)
             .filter(identifier.eq(input_identifier.as_ref()))
@@ -811,7 +822,7 @@ impl QueueRepo for PostgresRepo {
     ) -> Result<JobId, RepoError> {
         use schema::job_queue::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let job_id = diesel::insert_into(job_queue)
             .values((queue.eq(queue_name), job.eq(job_json)))
@@ -832,7 +843,7 @@ impl QueueRepo for PostgresRepo {
         use schema::job_queue::dsl::*;
 
         loop {
-            let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+            let mut conn = self.get_connection().await?;
 
             let notifier: Arc<Notify> = self
                 .inner
@@ -848,7 +859,7 @@ impl QueueRepo for PostgresRepo {
 
             let timestamp = to_primitive(time::OffsetDateTime::now_utc());
 
-            diesel::update(job_queue)
+            let count = diesel::update(job_queue)
                 .filter(heartbeat.le(timestamp.saturating_sub(time::Duration::minutes(2))))
                 .set((
                     heartbeat.eq(Option::<time::PrimitiveDateTime>::None),
@@ -858,44 +869,58 @@ impl QueueRepo for PostgresRepo {
                 .await
                 .map_err(PostgresError::Diesel)?;
 
-            // TODO: for_update().skip_locked()
-            let id_query = job_queue
-                .select(id)
-                .filter(status.eq(JobStatus::New).and(queue.eq(queue_name)))
-                .order(queue_time)
-                .into_boxed()
-                .single_value();
+            if count > 0 {
+                tracing::info!("Reset {count} jobs");
+            }
 
-            let opt = diesel::update(job_queue)
-                .filter(id.nullable().eq(id_query))
-                .set((
-                    heartbeat.eq(timestamp),
-                    status.eq(JobStatus::Running),
-                    worker.eq(worker_id),
-                ))
-                .returning((id, job))
-                .get_result(&mut conn)
-                .await
-                .optional()
-                .map_err(PostgresError::Diesel)?;
-
-            if let Some((job_id, job_json)) = opt {
-                diesel::sql_query("UNLISTEN queue_status_channel;")
-                    .execute(&mut conn)
+            // TODO: combine into 1 query
+            let opt = loop {
+                let id_opt = job_queue
+                    .select(id)
+                    .filter(status.eq(JobStatus::New).and(queue.eq(queue_name)))
+                    .order(queue_time)
+                    .limit(1)
+                    .get_result::<Uuid>(&mut conn)
                     .await
+                    .optional()
                     .map_err(PostgresError::Diesel)?;
 
+                let Some(id_val) = id_opt else {
+                    break None;
+                };
+
+                let opt = diesel::update(job_queue)
+                    .filter(id.eq(id_val))
+                    .filter(status.eq(JobStatus::New))
+                    .set((
+                        heartbeat.eq(timestamp),
+                        status.eq(JobStatus::Running),
+                        worker.eq(worker_id),
+                    ))
+                    .returning((id, job))
+                    .get_result(&mut conn)
+                    .await
+                    .optional()
+                    .map_err(PostgresError::Diesel)?;
+
+                if let Some(tup) = opt {
+                    break Some(tup);
+                }
+            };
+
+            if let Some((job_id, job_json)) = opt {
                 return Ok((JobId(job_id), job_json));
             }
 
-            let _ = actix_rt::time::timeout(Duration::from_secs(5), notifier.notified()).await;
-
-            diesel::sql_query("UNLISTEN queue_status_channel;")
-                .execute(&mut conn)
-                .await
-                .map_err(PostgresError::Diesel)?;
-
             drop(conn);
+            if actix_rt::time::timeout(Duration::from_secs(5), notifier.notified())
+                .await
+                .is_ok()
+            {
+                tracing::debug!("Notified");
+            } else {
+                tracing::debug!("Timed out");
+            }
         }
     }
 
@@ -908,7 +933,7 @@ impl QueueRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::job_queue::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let timestamp = to_primitive(time::OffsetDateTime::now_utc());
 
@@ -935,7 +960,7 @@ impl QueueRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::job_queue::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::delete(job_queue)
             .filter(
@@ -957,7 +982,7 @@ impl StoreMigrationRepo for PostgresRepo {
     async fn is_continuing_migration(&self) -> Result<bool, RepoError> {
         use schema::store_migrations::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let count = store_migrations
             .count()
@@ -976,7 +1001,7 @@ impl StoreMigrationRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::store_migrations::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::insert_into(store_migrations)
             .values((
@@ -996,7 +1021,7 @@ impl StoreMigrationRepo for PostgresRepo {
     async fn is_migrated(&self, input_old_identifier: &Arc<str>) -> Result<bool, RepoError> {
         use schema::store_migrations::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let b = diesel::select(diesel::dsl::exists(
             store_migrations.filter(old_identifier.eq(input_old_identifier.as_ref())),
@@ -1012,7 +1037,7 @@ impl StoreMigrationRepo for PostgresRepo {
     async fn clear(&self) -> Result<(), RepoError> {
         use schema::store_migrations::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::delete(store_migrations)
             .execute(&mut conn)
@@ -1029,7 +1054,7 @@ impl ProxyRepo for PostgresRepo {
     async fn relate_url(&self, input_url: Url, input_alias: Alias) -> Result<(), RepoError> {
         use schema::proxies::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::insert_into(proxies)
             .values((url.eq(input_url.as_str()), alias.eq(&input_alias)))
@@ -1044,7 +1069,7 @@ impl ProxyRepo for PostgresRepo {
     async fn related(&self, input_url: Url) -> Result<Option<Alias>, RepoError> {
         use schema::proxies::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = proxies
             .select(alias)
@@ -1061,7 +1086,7 @@ impl ProxyRepo for PostgresRepo {
     async fn remove_relation(&self, input_alias: Alias) -> Result<(), RepoError> {
         use schema::proxies::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::delete(proxies)
             .filter(alias.eq(&input_alias))
@@ -1083,7 +1108,7 @@ impl AliasAccessRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::proxies::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let timestamp = to_primitive(timestamp);
 
@@ -1104,7 +1129,7 @@ impl AliasAccessRepo for PostgresRepo {
     ) -> Result<Option<time::OffsetDateTime>, RepoError> {
         use schema::proxies::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = proxies
             .select(accessed)
@@ -1132,7 +1157,7 @@ impl AliasAccessRepo for PostgresRepo {
                 Box::pin(async move {
                     use schema::proxies::dsl::*;
 
-                    let mut conn = inner.pool.get().await.map_err(PostgresError::Pool)?;
+                    let mut conn = inner.get_connection().await?;
 
                     let vec = proxies
                         .select((accessed, alias))
@@ -1166,7 +1191,7 @@ impl VariantAccessRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let timestamp = to_primitive(input_accessed);
 
@@ -1188,7 +1213,7 @@ impl VariantAccessRepo for PostgresRepo {
     ) -> Result<Option<time::OffsetDateTime>, RepoError> {
         use schema::variants::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let opt = variants
             .select(accessed)
@@ -1216,7 +1241,7 @@ impl VariantAccessRepo for PostgresRepo {
                 Box::pin(async move {
                     use schema::variants::dsl::*;
 
-                    let mut conn = inner.pool.get().await.map_err(PostgresError::Pool)?;
+                    let mut conn = inner.get_connection().await?;
 
                     let vec = variants
                         .select((accessed, (hash, variant)))
@@ -1281,7 +1306,7 @@ impl UploadRepo for PostgresRepo {
     async fn create_upload(&self) -> Result<UploadId, RepoError> {
         use schema::uploads::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let uuid = diesel::insert_into(uploads)
             .default_values()
@@ -1298,7 +1323,7 @@ impl UploadRepo for PostgresRepo {
         use schema::uploads::dsl::*;
 
         loop {
-            let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+            let mut conn = self.get_connection().await?;
 
             diesel::sql_query("LISTEN upload_completion_channel;")
                 .execute(&mut conn)
@@ -1315,28 +1340,25 @@ impl UploadRepo for PostgresRepo {
                 .flatten();
 
             if let Some(upload_result) = opt {
-                diesel::sql_query("UNLISTEN upload_completion_channel;")
-                    .execute(&mut conn)
-                    .await
-                    .map_err(PostgresError::Diesel)?;
-
                 let upload_result: InnerUploadResult = serde_json::from_value(upload_result)
                     .map_err(PostgresError::DeserializeUploadResult)?;
 
                 return Ok(upload_result.into());
             }
 
-            let _ = actix_rt::time::timeout(
-                Duration::from_secs(2),
+            drop(conn);
+
+            if actix_rt::time::timeout(
+                Duration::from_secs(5),
                 self.inner.upload_notifier.notified(),
             )
-            .await;
-
-            diesel::sql_query("UNLISTEN upload_completion_channel;")
-                .execute(&mut conn)
-                .await
-                .map_err(PostgresError::Diesel)?;
-            drop(conn);
+            .await
+            .is_ok()
+            {
+                tracing::debug!("Notified");
+            } else {
+                tracing::debug!("Timed out");
+            }
         }
     }
 
@@ -1344,7 +1366,7 @@ impl UploadRepo for PostgresRepo {
     async fn claim(&self, upload_id: UploadId) -> Result<(), RepoError> {
         use schema::uploads::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         diesel::delete(uploads)
             .filter(id.eq(upload_id.id))
@@ -1363,7 +1385,7 @@ impl UploadRepo for PostgresRepo {
     ) -> Result<(), RepoError> {
         use schema::uploads::dsl::*;
 
-        let mut conn = self.inner.pool.get().await.map_err(PostgresError::Pool)?;
+        let mut conn = self.get_connection().await?;
 
         let upload_result: InnerUploadResult = upload_result.into();
         let upload_result =

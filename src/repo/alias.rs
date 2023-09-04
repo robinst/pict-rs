@@ -119,3 +119,156 @@ impl std::fmt::Display for Alias {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Alias, MaybeUuid};
+    use uuid::Uuid;
+
+    #[test]
+    fn string_alias() {
+        let alias = Alias::from_existing("blah");
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Name(String::from("blah")),
+                extension: None
+            }
+        );
+    }
+
+    #[test]
+    fn string_alias_ext() {
+        let alias = Alias::from_existing("blah.mp4");
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Name(String::from("blah")),
+                extension: Some(String::from(".mp4")),
+            }
+        );
+    }
+
+    #[test]
+    fn uuid_string_alias() {
+        let uuid = Uuid::new_v4();
+
+        let alias = Alias::from_existing(&uuid.to_string());
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Uuid(uuid),
+                extension: None,
+            }
+        )
+    }
+
+    #[test]
+    fn uuid_string_alias_ext() {
+        let uuid = Uuid::new_v4();
+
+        let alias_str = format!("{uuid}.mp4");
+        let alias = Alias::from_existing(&alias_str);
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Uuid(uuid),
+                extension: Some(String::from(".mp4")),
+            }
+        )
+    }
+
+    #[test]
+    fn bytes_alias() {
+        let alias = Alias::from_slice(b"blah").unwrap();
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Name(String::from("blah")),
+                extension: None
+            }
+        );
+    }
+
+    #[test]
+    fn bytes_alias_ext() {
+        let alias = Alias::from_slice(b"blah.mp4").unwrap();
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Name(String::from("blah")),
+                extension: Some(String::from(".mp4")),
+            }
+        );
+    }
+
+    #[test]
+    fn uuid_bytes_alias() {
+        let uuid = Uuid::new_v4();
+
+        let alias = Alias::from_slice(&uuid.as_bytes()[..]).unwrap();
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Uuid(uuid),
+                extension: None,
+            }
+        )
+    }
+
+    #[test]
+    fn uuid_bytes_string_alias() {
+        let uuid = Uuid::new_v4();
+
+        let alias = Alias::from_slice(uuid.to_string().as_bytes()).unwrap();
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Uuid(uuid),
+                extension: None,
+            }
+        )
+    }
+
+    #[test]
+    fn uuid_bytes_alias_ext() {
+        let uuid = Uuid::new_v4();
+
+        let mut alias_bytes = uuid.as_bytes().to_vec();
+        alias_bytes.extend_from_slice(b".mp4");
+
+        let alias = Alias::from_slice(&alias_bytes).unwrap();
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Uuid(uuid),
+                extension: Some(String::from(".mp4")),
+            }
+        )
+    }
+
+    #[test]
+    fn uuid_bytes_string_alias_ext() {
+        let uuid = Uuid::new_v4();
+
+        let alias_str = format!("{uuid}.mp4");
+        let alias = Alias::from_slice(alias_str.as_bytes()).unwrap();
+
+        assert_eq!(
+            alias,
+            Alias {
+                id: MaybeUuid::Uuid(uuid),
+                extension: Some(String::from(".mp4")),
+            }
+        )
+    }
+}
