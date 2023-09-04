@@ -34,9 +34,7 @@ macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
         let $ident = $self.$ident.clone();
 
-        let span = tracing::Span::current();
-
-        actix_rt::task::spawn_blocking(move || span.in_scope(|| $expr))
+        crate::sync::spawn_blocking(move || $expr)
             .await
             .map_err(SledError::from)
             .map_err(RepoError::from)?

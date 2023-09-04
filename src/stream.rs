@@ -1,5 +1,6 @@
 use actix_rt::{task::JoinHandle, time::Sleep};
 use actix_web::web::Bytes;
+use flume::r#async::RecvStream;
 use futures_core::Stream;
 use std::{
     future::Future,
@@ -174,19 +175,25 @@ pin_project_lite::pin_project! {
     }
 }
 
-enum IterStreamState<I, T> {
+enum IterStreamState<I, T>
+where
+    T: 'static,
+{
     New {
         iterator: I,
         buffer: usize,
     },
     Running {
         handle: JoinHandle<()>,
-        receiver: tokio::sync::mpsc::Receiver<T>,
+        receiver: RecvStream<'static, T>,
     },
     Pending,
 }
 
-pub(crate) struct IterStream<I, T> {
+pub(crate) struct IterStream<I, T>
+where
+    T: 'static,
+{
     state: IterStreamState<I, T>,
 }
 
@@ -287,14 +294,13 @@ where
 
         match std::mem::replace(&mut this.state, IterStreamState::Pending) {
             IterStreamState::New { iterator, buffer } => {
-                let (sender, receiver) = tracing::trace_span!(parent: None, "Create channel")
-                    .in_scope(|| tokio::sync::mpsc::channel(buffer));
+                let (sender, receiver) = crate::sync::channel(buffer);
 
-                let mut handle = actix_rt::task::spawn_blocking(move || {
+                let mut handle = crate::sync::spawn_blocking(move || {
                     let iterator = iterator.into_iter();
 
                     for item in iterator {
-                        if sender.blocking_send(item).is_err() {
+                        if sender.send(item).is_err() {
                             break;
                         }
                     }
@@ -304,14 +310,17 @@ where
                     return Poll::Ready(None);
                 }
 
-                this.state = IterStreamState::Running { handle, receiver };
+                this.state = IterStreamState::Running {
+                    handle,
+                    receiver: receiver.into_stream(),
+                };
 
                 self.poll_next(cx)
             }
             IterStreamState::Running {
                 mut handle,
                 mut receiver,
-            } => match Pin::new(&mut receiver).poll_recv(cx) {
+            } => match Pin::new(&mut receiver).poll_next(cx) {
                 Poll::Ready(Some(item)) => {
                     this.state = IterStreamState::Running { handle, receiver };
 

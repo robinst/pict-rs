@@ -446,15 +446,15 @@ mod io_uring {
                 actix_rt::System::new().block_on(async move {
                     let arbiter = actix_rt::Arbiter::new();
 
-                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let (tx, rx) = crate::sync::channel(1);
 
                     arbiter.spawn(async move {
-                        let handle = actix_rt::spawn($fut);
+                        let handle = crate::sync::spawn($fut);
 
                         let _ = tx.send(handle.await.unwrap());
                     });
 
-                    rx.await.unwrap()
+                    rx.into_recv_async().await.unwrap()
                 })
             };
         }

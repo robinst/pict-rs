@@ -26,6 +26,7 @@ mod repo_04;
 mod serde_str;
 mod store;
 mod stream;
+mod sync;
 mod tmp_file;
 mod validate;
 
@@ -84,8 +85,9 @@ const DAYS: u32 = 24 * HOURS;
 const NOT_FOUND_KEY: &str = "404-alias";
 
 static PROCESS_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
-    tracing::trace_span!(parent: None, "Initialize semaphore")
-        .in_scope(|| Semaphore::new(num_cpus::get().saturating_sub(1).max(1)))
+    let permits = num_cpus::get().saturating_sub(1).max(1);
+
+    crate::sync::bare_semaphore(permits)
 });
 
 async fn ensure_details<S: Store + 'static>(
@@ -1671,44 +1673,39 @@ fn spawn_cleanup(repo: ArcRepo, config: &Configuration) {
         return;
     }
 
-    tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-        actix_rt::spawn(async move {
-            let mut interval = actix_rt::time::interval(Duration::from_secs(30));
+    crate::sync::spawn(async move {
+        let mut interval = actix_rt::time::interval(Duration::from_secs(30));
 
-            loop {
-                interval.tick().await;
+        loop {
+            interval.tick().await;
 
-                if let Err(e) = queue::cleanup_outdated_variants(&repo).await {
-                    tracing::warn!(
-                        "Failed to spawn cleanup for outdated variants:{}",
-                        format!("\n{e}\n{e:?}")
-                    );
-                }
-
-                if let Err(e) = queue::cleanup_outdated_proxies(&repo).await {
-                    tracing::warn!(
-                        "Failed to spawn cleanup for outdated proxies:{}",
-                        format!("\n{e}\n{e:?}")
-                    );
-                }
+            if let Err(e) = queue::cleanup_outdated_variants(&repo).await {
+                tracing::warn!(
+                    "Failed to spawn cleanup for outdated variants:{}",
+                    format!("\n{e}\n{e:?}")
+                );
             }
-        });
-    })
+
+            if let Err(e) = queue::cleanup_outdated_proxies(&repo).await {
+                tracing::warn!(
+                    "Failed to spawn cleanup for outdated proxies:{}",
+                    format!("\n{e}\n{e:?}")
+                );
+            }
+        }
+    });
 }
 
 fn spawn_workers<S>(repo: ArcRepo, store: S, config: Configuration, process_map: ProcessMap)
 where
     S: Store + 'static,
 {
-    tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-        actix_rt::spawn(queue::process_cleanup(
-            repo.clone(),
-            store.clone(),
-            config.clone(),
-        ))
-    });
-    tracing::trace_span!(parent: None, "Spawn task")
-        .in_scope(|| actix_rt::spawn(queue::process_images(repo, store, process_map, config)));
+    crate::sync::spawn(queue::process_cleanup(
+        repo.clone(),
+        store.clone(),
+        config.clone(),
+    ));
+    crate::sync::spawn(queue::process_images(repo, store, process_map, config));
 }
 
 async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(

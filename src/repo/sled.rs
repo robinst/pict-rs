@@ -29,9 +29,7 @@ macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
         let $ident = $self.$ident.clone();
 
-        let span = tracing::Span::current();
-
-        actix_rt::task::spawn_blocking(move || span.in_scope(|| $expr))
+        crate::sync::spawn_blocking(move || $expr)
             .await
             .map_err(SledError::from)
             .map_err(RepoError::from)?
@@ -175,7 +173,7 @@ impl SledRepo {
 
         let this = self.db.clone();
 
-        actix_rt::task::spawn_blocking(move || {
+        crate::sync::spawn_blocking(move || {
             let export = this.export();
             export_db.import(export);
         })
@@ -258,7 +256,7 @@ impl AliasAccessRepo for SledRepo {
         let alias_access = self.alias_access.clone();
         let inverse_alias_access = self.inverse_alias_access.clone();
 
-        let res = actix_rt::task::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking(move || {
             (&alias_access, &inverse_alias_access).transaction(
                 |(alias_access, inverse_alias_access)| {
                     if let Some(old) = alias_access.insert(alias.to_bytes(), &value_bytes)? {
@@ -324,7 +322,7 @@ impl AliasAccessRepo for SledRepo {
         let alias_access = self.alias_access.clone();
         let inverse_alias_access = self.inverse_alias_access.clone();
 
-        let res = actix_rt::task::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking(move || {
             (&alias_access, &inverse_alias_access).transaction(
                 |(alias_access, inverse_alias_access)| {
                     if let Some(old) = alias_access.remove(alias.to_bytes())? {
@@ -364,7 +362,7 @@ impl VariantAccessRepo for SledRepo {
         let variant_access = self.variant_access.clone();
         let inverse_variant_access = self.inverse_variant_access.clone();
 
-        let res = actix_rt::task::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking(move || {
             (&variant_access, &inverse_variant_access).transaction(
                 |(variant_access, inverse_variant_access)| {
                     if let Some(old) = variant_access.insert(&key, &value_bytes)? {
@@ -434,7 +432,7 @@ impl VariantAccessRepo for SledRepo {
         let variant_access = self.variant_access.clone();
         let inverse_variant_access = self.inverse_variant_access.clone();
 
-        let res = actix_rt::task::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking(move || {
             (&variant_access, &inverse_variant_access).transaction(
                 |(variant_access, inverse_variant_access)| {
                     if let Some(old) = variant_access.remove(&key)? {
@@ -678,7 +676,7 @@ impl QueueRepo for SledRepo {
         let queue = self.queue.clone();
         let job_state = self.job_state.clone();
 
-        let res = actix_rt::task::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking(move || {
             (&queue, &job_state).transaction(|(queue, job_state)| {
                 let state = JobState::pending();
 
@@ -705,7 +703,7 @@ impl QueueRepo for SledRepo {
             .write()
             .unwrap()
             .entry(queue_name)
-            .or_insert_with(|| Arc::new(Notify::new()))
+            .or_insert_with(crate::sync::notify)
             .notify_one();
 
         metrics_guard.disarm();
@@ -728,7 +726,7 @@ impl QueueRepo for SledRepo {
             let job_state = self.job_state.clone();
 
             let span = tracing::Span::current();
-            let opt = actix_rt::task::spawn_blocking(move || {
+            let opt = crate::sync::spawn_blocking(move || {
                 let _guard = span.enter();
                 // Job IDs are generated with Uuid version 7 - defining their first bits as a
                 // timestamp. Scanning a prefix should give us jobs in the order they were queued.
@@ -802,9 +800,7 @@ impl QueueRepo for SledRepo {
                 notify
             } else {
                 let mut guard = self.queue_notifier.write().unwrap();
-                let entry = guard
-                    .entry(queue_name)
-                    .or_insert_with(|| Arc::new(Notify::new()));
+                let entry = guard.entry(queue_name).or_insert_with(crate::sync::notify);
                 Arc::clone(entry)
             };
 
@@ -823,7 +819,7 @@ impl QueueRepo for SledRepo {
 
         let job_state = self.job_state.clone();
 
-        actix_rt::task::spawn_blocking(move || {
+        crate::sync::spawn_blocking(move || {
             if let Some(state) = job_state.get(&key)? {
                 let new_state = JobState::running(worker_id);
 
@@ -853,7 +849,7 @@ impl QueueRepo for SledRepo {
         let queue = self.queue.clone();
         let job_state = self.job_state.clone();
 
-        let res = actix_rt::task::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking(move || {
             (&queue, &job_state).transaction(|(queue, job_state)| {
                 queue.remove(&key[..])?;
                 job_state.remove(&key[..])?;
@@ -1112,7 +1108,7 @@ impl HashRepo for SledRepo {
             None => (self.hashes_inverse.iter(), None),
         };
 
-        actix_rt::task::spawn_blocking(move || {
+        crate::sync::spawn_blocking(move || {
             let page_iter = page_iter
                 .keys()
                 .rev()
@@ -1164,7 +1160,7 @@ impl HashRepo for SledRepo {
         let page_iter = self.hashes_inverse.range(..=date_nanos);
         let prev_iter = Some(self.hashes_inverse.range(date_nanos..));
 
-        actix_rt::task::spawn_blocking(move || {
+        crate::sync::spawn_blocking(move || {
             let page_iter = page_iter
                 .keys()
                 .rev()
@@ -1292,7 +1288,7 @@ impl HashRepo for SledRepo {
 
         let hash_variant_identifiers = self.hash_variant_identifiers.clone();
 
-        actix_rt::task::spawn_blocking(move || {
+        crate::sync::spawn_blocking(move || {
             hash_variant_identifiers
                 .compare_and_swap(key, Option::<&[u8]>::None, Some(value.as_bytes()))
                 .map(|res| res.map_err(|_| VariantAlreadyExists))

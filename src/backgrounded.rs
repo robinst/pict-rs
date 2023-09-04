@@ -82,14 +82,12 @@ impl Drop for Backgrounded {
 
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Backgrounded cleanup Identifier", identifier = ?identifier);
 
-                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                    actix_rt::spawn(
-                        async move {
-                            let _ = crate::queue::cleanup_identifier(&repo, &identifier).await;
-                        }
-                        .instrument(cleanup_span),
-                    )
-                });
+                crate::sync::spawn(
+                    async move {
+                        let _ = crate::queue::cleanup_identifier(&repo, &identifier).await;
+                    }
+                    .instrument(cleanup_span),
+                );
             }
 
             if let Some(upload_id) = self.upload_id {
@@ -97,14 +95,12 @@ impl Drop for Backgrounded {
 
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Backgrounded cleanup Upload ID", upload_id = ?upload_id);
 
-                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                    actix_rt::spawn(
-                        async move {
-                            let _ = repo.claim(upload_id).await;
-                        }
-                        .instrument(cleanup_span),
-                    )
-                });
+                crate::sync::spawn(
+                    async move {
+                        let _ = repo.claim(upload_id).await;
+                    }
+                    .instrument(cleanup_span),
+                );
             }
         }
     }

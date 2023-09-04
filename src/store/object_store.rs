@@ -277,7 +277,7 @@ impl Store for ObjectStore {
 
                 let object_id2 = object_id.clone();
                 let upload_id2 = upload_id.clone();
-                let handle = actix_rt::spawn(
+                let handle = crate::sync::spawn(
                     async move {
                         let response = this
                             .create_upload_part_request(

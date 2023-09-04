@@ -217,14 +217,12 @@ impl Drop for Session {
 
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup hash", hash = ?hash);
 
-                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                    actix_rt::spawn(
-                        async move {
-                            let _ = crate::queue::cleanup_hash(&repo, hash).await;
-                        }
-                        .instrument(cleanup_span),
-                    )
-                });
+                crate::sync::spawn(
+                    async move {
+                        let _ = crate::queue::cleanup_hash(&repo, hash).await;
+                    }
+                    .instrument(cleanup_span),
+                );
             }
 
             if let Some(alias) = self.alias.take() {
@@ -233,14 +231,12 @@ impl Drop for Session {
 
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup alias", alias = ?alias);
 
-                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                    actix_rt::spawn(
-                        async move {
-                            let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
-                        }
-                        .instrument(cleanup_span),
-                    )
-                });
+                crate::sync::spawn(
+                    async move {
+                        let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
+                    }
+                    .instrument(cleanup_span),
+                );
             }
 
             if let Some(identifier) = self.identifier.take() {
@@ -248,14 +244,12 @@ impl Drop for Session {
 
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup identifier", identifier = ?identifier);
 
-                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                    actix_rt::spawn(
-                        async move {
-                            let _ = crate::queue::cleanup_identifier(&repo, &identifier).await;
-                        }
-                        .instrument(cleanup_span),
-                    )
-                });
+                crate::sync::spawn(
+                    async move {
+                        let _ = crate::queue::cleanup_identifier(&repo, &identifier).await;
+                    }
+                    .instrument(cleanup_span),
+                );
             }
         }
     }

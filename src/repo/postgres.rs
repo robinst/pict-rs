@@ -20,7 +20,8 @@ use diesel_async::{
     AsyncConnection, AsyncPgConnection, RunQueryDsl,
 };
 use tokio::sync::Notify;
-use tokio_postgres::{AsyncMessage, Notification};
+use tokio_postgres::{tls::NoTlsStream, AsyncMessage, Connection, NoTls, Notification, Socket};
+use tracing::Instrument;
 use url::Url;
 use uuid::Uuid;
 
@@ -64,7 +65,7 @@ async fn delegate_notifications(receiver: flume::Receiver<Notification>, inner: 
                 inner
                     .queue_notifications
                     .entry(queue_name)
-                    .or_insert_with(|| Arc::new(Notify::new()))
+                    .or_insert_with(crate::sync::notify)
                     .notify_waiters();
             }
             "upload_completion_channel" => {
@@ -134,12 +135,11 @@ impl PostgresError {
 
 impl PostgresRepo {
     pub(crate) async fn connect(postgres_url: Url) -> Result<Self, ConnectPostgresError> {
-        let (mut client, conn) =
-            tokio_postgres::connect(postgres_url.as_str(), tokio_postgres::tls::NoTls)
-                .await
-                .map_err(ConnectPostgresError::ConnectForMigration)?;
+        let (mut client, conn) = tokio_postgres::connect(postgres_url.as_str(), NoTls)
+            .await
+            .map_err(ConnectPostgresError::ConnectForMigration)?;
 
-        let handle = actix_rt::spawn(conn);
+        let handle = crate::sync::spawn(conn);
 
         embedded::migrations::runner()
             .run_async(&mut client)
@@ -166,10 +166,12 @@ impl PostgresRepo {
             health_count: AtomicU64::new(0),
             pool,
             queue_notifications: DashMap::new(),
-            upload_notifier: Notify::new(),
+            upload_notifier: crate::sync::bare_notify(),
         });
 
-        let notifications = Arc::new(actix_rt::spawn(delegate_notifications(rx, inner.clone())));
+        let handle = crate::sync::spawn(delegate_notifications(rx, inner.clone()));
+
+        let notifications = Arc::new(handle);
 
         Ok(PostgresRepo {
             inner,
@@ -198,39 +200,51 @@ fn build_handler(sender: flume::Sender<Notification>) -> ConfigFn {
         move |config: &str| -> BoxFuture<'_, ConnectionResult<AsyncPgConnection>> {
             let sender = sender.clone();
 
-            Box::pin(async move {
-                let (client, mut conn) =
-                    tokio_postgres::connect(config, tokio_postgres::tls::NoTls)
-                        .await
-                        .map_err(|e| ConnectionError::BadConnection(e.to_string()))?;
+            let connect_span = tracing::trace_span!(parent: None, "connect future");
 
-                // not very cash money (structured concurrency) of me
-                actix_rt::spawn(async move {
-                    while let Some(res) = std::future::poll_fn(|cx| conn.poll_message(cx)).await {
-                        match res {
-                            Err(e) => {
-                                tracing::error!("Database Connection {e:?}");
-                                return;
-                            }
-                            Ok(AsyncMessage::Notice(e)) => {
-                                tracing::warn!("Database Notice {e:?}");
-                            }
-                            Ok(AsyncMessage::Notification(notification)) => {
-                                if sender.send_async(notification).await.is_err() {
-                                    tracing::warn!("Missed notification. Are we shutting down?");
-                                }
-                            }
-                            Ok(_) => {
-                                tracing::warn!("Unhandled AsyncMessage!!! Please contact the developer of this application");
-                            }
-                        }
-                    }
-                });
+            Box::pin(
+                async move {
+                    let (client, conn) =
+                        tokio_postgres::connect(config, tokio_postgres::tls::NoTls)
+                            .await
+                            .map_err(|e| ConnectionError::BadConnection(e.to_string()))?;
 
-                AsyncPgConnection::try_from(client).await
-            })
+                    // not very cash money (structured concurrency) of me
+                    spawn_db_notification_task(sender, conn);
+
+                    AsyncPgConnection::try_from(client).await
+                }
+                .instrument(connect_span),
+            )
         },
     )
+}
+
+fn spawn_db_notification_task(
+    sender: flume::Sender<Notification>,
+    mut conn: Connection<Socket, NoTlsStream>,
+) {
+    crate::sync::spawn(async move {
+        while let Some(res) = std::future::poll_fn(|cx| conn.poll_message(cx)).await {
+            match res {
+                Err(e) => {
+                    tracing::error!("Database Connection {e:?}");
+                    return;
+                }
+                Ok(AsyncMessage::Notice(e)) => {
+                    tracing::warn!("Database Notice {e:?}");
+                }
+                Ok(AsyncMessage::Notification(notification)) => {
+                    if sender.send_async(notification).await.is_err() {
+                        tracing::warn!("Missed notification. Are we shutting down?");
+                    }
+                }
+                Ok(_) => {
+                    tracing::warn!("Unhandled AsyncMessage!!! Please contact the developer of this application");
+                }
+            }
+        }
+    });
 }
 
 fn to_primitive(timestamp: time::OffsetDateTime) -> time::PrimitiveDateTime {
@@ -849,7 +863,7 @@ impl QueueRepo for PostgresRepo {
                 .inner
                 .queue_notifications
                 .entry(String::from(queue_name))
-                .or_insert_with(|| Arc::new(Notify::new()))
+                .or_insert_with(crate::sync::notify)
                 .clone();
 
             diesel::sql_query("LISTEN queue_status_channel;")
@@ -1330,20 +1344,27 @@ impl UploadRepo for PostgresRepo {
                 .await
                 .map_err(PostgresError::Diesel)?;
 
-            let opt = uploads
+            let nested_opt = uploads
                 .select(result)
                 .filter(id.eq(upload_id.id))
                 .get_result(&mut conn)
                 .await
                 .optional()
-                .map_err(PostgresError::Diesel)?
-                .flatten();
+                .map_err(PostgresError::Diesel)?;
 
-            if let Some(upload_result) = opt {
-                let upload_result: InnerUploadResult = serde_json::from_value(upload_result)
-                    .map_err(PostgresError::DeserializeUploadResult)?;
+            match nested_opt {
+                Some(opt) => {
+                    if let Some(upload_result) = opt {
+                        let upload_result: InnerUploadResult =
+                            serde_json::from_value(upload_result)
+                                .map_err(PostgresError::DeserializeUploadResult)?;
 
-                return Ok(upload_result.into());
+                        return Ok(upload_result.into());
+                    }
+                }
+                None => {
+                    return Err(RepoError::AlreadyClaimed);
+                }
             }
 
             drop(conn);

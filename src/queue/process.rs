@@ -86,7 +86,7 @@ where
         let repo = repo.clone();
 
         let media = media.clone();
-        let error_boundary = actix_rt::spawn(async move {
+        let error_boundary = crate::sync::spawn(async move {
             let stream = store2
                 .to_stream(&ident, None, None)
                 .await?
