@@ -1,3 +1,9 @@
+mod alias;
+mod delete_token;
+mod hash;
+mod metrics;
+mod migrate;
+
 use crate::{
     config,
     details::Details,
@@ -9,10 +15,6 @@ use std::{fmt::Debug, sync::Arc};
 use url::Url;
 use uuid::Uuid;
 
-mod alias;
-mod delete_token;
-mod hash;
-mod migrate;
 pub(crate) mod postgres;
 pub(crate) mod sled;
 

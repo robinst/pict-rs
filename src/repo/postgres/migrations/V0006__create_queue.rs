@@ -34,7 +34,7 @@ CREATE OR REPLACE FUNCTION queue_status_notify()
 	RETURNS trigger AS
 $$
 BEGIN
-	PERFORM pg_notify('queue_status_channel', NEW.queue::text);
+	PERFORM pg_notify('queue_status_channel', NEW.id::text || ' ' || NEW.queue::text);
 	RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

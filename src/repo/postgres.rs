@@ -3,11 +3,12 @@ mod job_status;
 mod schema;
 
 use std::{
+    collections::{BTreeSet, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Weak,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use dashmap::DashMap;
@@ -35,6 +36,7 @@ use crate::{
 use self::job_status::JobStatus;
 
 use super::{
+    metrics::{PopMetricsGuard, PushMetricsGuard, WaitMetricsGuard},
     Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, DetailsRepo,
     FullRepo, Hash, HashAlreadyExists, HashPage, HashRepo, JobId, OrderedHash, ProxyRepo,
     QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo, UploadResult,
@@ -52,35 +54,24 @@ struct Inner {
     health_count: AtomicU64,
     pool: Pool<AsyncPgConnection>,
     queue_notifications: DashMap<String, Arc<Notify>>,
-    upload_notifier: Notify,
+    upload_notifications: DashMap<UploadId, Weak<Notify>>,
 }
 
-async fn delegate_notifications(receiver: flume::Receiver<Notification>, inner: Arc<Inner>) {
-    while let Ok(notification) = receiver.recv_async().await {
-        match notification.channel() {
-            "queue_status_channel" => {
-                // new job inserted for queue
-                let queue_name = notification.payload().to_string();
+struct UploadInterest {
+    inner: Arc<Inner>,
+    interest: Option<Arc<Notify>>,
+    upload_id: UploadId,
+}
 
-                inner
-                    .queue_notifications
-                    .entry(queue_name)
-                    .or_insert_with(crate::sync::notify)
-                    .notify_waiters();
-            }
-            "upload_completion_channel" => {
-                inner.upload_notifier.notify_waiters();
-            }
-            channel => {
-                tracing::info!(
-                    "Unhandled postgres notification: {channel}: {}",
-                    notification.payload()
-                );
-            }
-        }
-    }
+struct JobNotifierState<'a> {
+    inner: &'a Inner,
+    capacity: usize,
+    jobs: BTreeSet<JobId>,
+    jobs_ordered: VecDeque<JobId>,
+}
 
-    tracing::warn!("Notification delegator shutting down");
+struct UploadNotifierState<'a> {
+    inner: &'a Inner,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -166,7 +157,7 @@ impl PostgresRepo {
             health_count: AtomicU64::new(0),
             pool,
             queue_notifications: DashMap::new(),
-            upload_notifier: crate::sync::bare_notify(),
+            upload_notifications: DashMap::new(),
         });
 
         let handle = crate::sync::spawn(delegate_notifications(rx, inner.clone()));
@@ -184,16 +175,169 @@ impl PostgresRepo {
     }
 }
 
+struct GetConnectionMetricsGuard {
+    start: Instant,
+    armed: bool,
+}
+
+impl GetConnectionMetricsGuard {
+    fn guard() -> Self {
+        GetConnectionMetricsGuard {
+            start: Instant::now(),
+            armed: true,
+        }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for GetConnectionMetricsGuard {
+    fn drop(&mut self) {
+        metrics::increment_counter!("pict-rs.postgres.pool.get.end", "completed" => (!self.armed).to_string());
+        metrics::histogram!("pict-rs.postgres.pool.get.duration", self.start.elapsed().as_secs_f64(), "completed" => (!self.armed).to_string());
+    }
+}
+
 impl Inner {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "TRACE", skip(self))]
     async fn get_connection(&self) -> Result<Object<AsyncPgConnection>, PostgresError> {
-        self.pool.get().await.map_err(PostgresError::Pool)
+        let guard = GetConnectionMetricsGuard::guard();
+        let res = self.pool.get().await.map_err(PostgresError::Pool);
+        guard.disarm();
+        res
+    }
+
+    fn interest(self: &Arc<Self>, upload_id: UploadId) -> UploadInterest {
+        let notify = crate::sync::notify();
+
+        self.upload_notifications
+            .insert(upload_id, Arc::downgrade(&notify));
+
+        UploadInterest {
+            inner: self.clone(),
+            interest: Some(notify),
+            upload_id,
+        }
+    }
+}
+
+impl UploadInterest {
+    async fn notified_timeout(&self, timeout: Duration) -> Result<(), tokio::time::error::Elapsed> {
+        actix_rt::time::timeout(
+            timeout,
+            self.interest.as_ref().expect("interest exists").notified(),
+        )
+        .await
+    }
+}
+
+impl Drop for UploadInterest {
+    fn drop(&mut self) {
+        if let Some(interest) = self.interest.take() {
+            if Arc::into_inner(interest).is_some() {
+                self.inner.upload_notifications.remove(&self.upload_id);
+            }
+        }
+    }
+}
+
+impl<'a> JobNotifierState<'a> {
+    fn handle(&mut self, payload: &str) {
+        let Some((job_id, queue_name)) = payload.split_once(' ') else {
+            tracing::warn!("Invalid queue payload {payload}");
+            return;
+        };
+
+        let Ok(job_id) = job_id.parse::<Uuid>().map(JobId) else {
+            tracing::warn!("Invalid job ID {job_id}");
+            return;
+        };
+
+        if !self.jobs.insert(job_id) {
+            // duplicate job
+            return;
+        }
+
+        self.jobs_ordered.push_back(job_id);
+
+        if self.jobs_ordered.len() > self.capacity {
+            if let Some(job_id) = self.jobs_ordered.pop_front() {
+                self.jobs.remove(&job_id);
+            }
+        }
+
+        self.inner
+            .queue_notifications
+            .entry(queue_name.to_string())
+            .or_insert_with(crate::sync::notify)
+            .notify_one();
+
+        metrics::increment_counter!("pict-rs.postgres.job-notifier.notified", "queue" => queue_name.to_string());
+    }
+}
+
+impl<'a> UploadNotifierState<'a> {
+    fn handle(&self, payload: &str) {
+        let Ok(upload_id) = payload.parse::<UploadId>() else {
+            tracing::warn!("Invalid upload id {payload}");
+            return;
+        };
+
+        if let Some(notifier) = self
+            .inner
+            .upload_notifications
+            .get(&upload_id)
+            .and_then(|weak| weak.upgrade())
+        {
+            notifier.notify_waiters();
+            metrics::increment_counter!("pict-rs.postgres.upload-notifier.notified");
+        }
     }
 }
 
 type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 type ConfigFn =
     Box<dyn Fn(&str) -> BoxFuture<'_, ConnectionResult<AsyncPgConnection>> + Send + Sync + 'static>;
+
+async fn delegate_notifications(receiver: flume::Receiver<Notification>, inner: Arc<Inner>) {
+    let parallelism = std::thread::available_parallelism()
+        .map(|u| u.into())
+        .unwrap_or(1_usize);
+
+    let mut job_notifier_state = JobNotifierState {
+        inner: &inner,
+        capacity: parallelism * 8,
+        jobs: BTreeSet::new(),
+        jobs_ordered: VecDeque::new(),
+    };
+
+    let upload_notifier_state = UploadNotifierState { inner: &inner };
+
+    while let Ok(notification) = receiver.recv_async().await {
+        metrics::increment_counter!("pict-rs.postgres.notification");
+
+        match notification.channel() {
+            "queue_status_channel" => {
+                // new job inserted for queue
+                job_notifier_state.handle(notification.payload());
+            }
+            "upload_completion_channel" => {
+                // new upload finished
+                upload_notifier_state.handle(notification.payload());
+            }
+            channel => {
+                tracing::info!(
+                    "Unhandled postgres notification: {channel}: {}",
+                    notification.payload()
+                );
+            }
+        }
+    }
+
+    tracing::warn!("Notification delegator shutting down");
+}
 
 fn build_handler(sender: flume::Sender<Notification>) -> ConfigFn {
     Box::new(
@@ -834,6 +978,8 @@ impl QueueRepo for PostgresRepo {
         queue_name: &'static str,
         job_json: serde_json::Value,
     ) -> Result<JobId, RepoError> {
+        let guard = PushMetricsGuard::guard(queue_name);
+
         use schema::job_queue::dsl::*;
 
         let mut conn = self.get_connection().await?;
@@ -845,6 +991,8 @@ impl QueueRepo for PostgresRepo {
             .await
             .map_err(PostgresError::Diesel)?;
 
+        guard.disarm();
+
         Ok(JobId(job_id))
     }
 
@@ -854,6 +1002,8 @@ impl QueueRepo for PostgresRepo {
         queue_name: &'static str,
         worker_id: Uuid,
     ) -> Result<(JobId, serde_json::Value), RepoError> {
+        let guard = PopMetricsGuard::guard(queue_name);
+
         use schema::job_queue::dsl::*;
 
         loop {
@@ -923,6 +1073,7 @@ impl QueueRepo for PostgresRepo {
             };
 
             if let Some((job_id, job_json)) = opt {
+                guard.disarm();
                 return Ok((JobId(job_id), job_json));
             }
 
@@ -1334,9 +1485,14 @@ impl UploadRepo for PostgresRepo {
 
     #[tracing::instrument(level = "DEBUG", skip(self))]
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, RepoError> {
+        let guard = WaitMetricsGuard::guard();
         use schema::uploads::dsl::*;
 
+        let interest = self.inner.interest(upload_id);
+
         loop {
+            let interest_future = interest.notified_timeout(Duration::from_secs(5));
+
             let mut conn = self.get_connection().await?;
 
             diesel::sql_query("LISTEN upload_completion_channel;")
@@ -1359,6 +1515,7 @@ impl UploadRepo for PostgresRepo {
                             serde_json::from_value(upload_result)
                                 .map_err(PostgresError::DeserializeUploadResult)?;
 
+                        guard.disarm();
                         return Ok(upload_result.into());
                     }
                 }
@@ -1369,13 +1526,7 @@ impl UploadRepo for PostgresRepo {
 
             drop(conn);
 
-            if actix_rt::time::timeout(
-                Duration::from_secs(5),
-                self.inner.upload_notifier.notified(),
-            )
-            .await
-            .is_ok()
-            {
+            if interest_future.await.is_ok() {
                 tracing::debug!("Notified");
             } else {
                 tracing::debug!("Timed out");

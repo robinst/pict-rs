@@ -103,6 +103,7 @@ impl Details {
         ))
     }
 
+    #[tracing::instrument(level = "DEBUG")]
     pub(crate) async fn from_store<S: Store>(
         store: &S,
         identifier: &Arc<str>,

@@ -9,6 +9,7 @@ use crate::{
 
 use super::Discovery;
 
+#[tracing::instrument(level = "DEBUG", skip_all)]
 pub(super) async fn check_reorient(
     Discovery {
         input,

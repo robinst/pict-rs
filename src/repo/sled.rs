@@ -12,17 +12,18 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, RwLock,
     },
-    time::Instant,
 };
 use tokio::sync::Notify;
 use url::Url;
 use uuid::Uuid;
 
 use super::{
-    hash::Hash, Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken,
-    Details, DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, JobId, OrderedHash,
-    ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
-    UploadResult, VariantAccessRepo, VariantAlreadyExists,
+    hash::Hash,
+    metrics::{PopMetricsGuard, PushMetricsGuard, WaitMetricsGuard},
+    Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, Details,
+    DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, JobId, OrderedHash, ProxyRepo,
+    QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo, UploadResult,
+    VariantAccessRepo, VariantAlreadyExists,
 };
 
 macro_rules! b {
@@ -490,54 +491,6 @@ impl From<InnerUploadResult> for UploadResult {
     }
 }
 
-struct PushMetricsGuard {
-    queue: &'static str,
-    armed: bool,
-}
-
-struct PopMetricsGuard {
-    queue: &'static str,
-    start: Instant,
-    armed: bool,
-}
-
-impl PushMetricsGuard {
-    fn guard(queue: &'static str) -> Self {
-        Self { queue, armed: true }
-    }
-
-    fn disarm(mut self) {
-        self.armed = false;
-    }
-}
-
-impl PopMetricsGuard {
-    fn guard(queue: &'static str) -> Self {
-        Self {
-            queue,
-            start: Instant::now(),
-            armed: true,
-        }
-    }
-
-    fn disarm(mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for PushMetricsGuard {
-    fn drop(&mut self) {
-        metrics::increment_counter!("pict-rs.queue.push", "completed" => (!self.armed).to_string(), "queue" => self.queue);
-    }
-}
-
-impl Drop for PopMetricsGuard {
-    fn drop(&mut self) {
-        metrics::histogram!("pict-rs.queue.pop.duration", self.start.elapsed().as_secs_f64(), "completed" => (!self.armed).to_string(), "queue" => self.queue);
-        metrics::increment_counter!("pict-rs.queue.pop", "completed" => (!self.armed).to_string(), "queue" => self.queue);
-    }
-}
-
 #[async_trait::async_trait(?Send)]
 impl UploadRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self))]
@@ -551,6 +504,7 @@ impl UploadRepo for SledRepo {
 
     #[tracing::instrument(skip(self))]
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, RepoError> {
+        let guard = WaitMetricsGuard::guard();
         let mut subscriber = self.uploads.watch_prefix(upload_id.as_bytes());
 
         let bytes = upload_id.as_bytes().to_vec();
@@ -560,6 +514,7 @@ impl UploadRepo for SledRepo {
             if bytes != b"1" {
                 let result: InnerUploadResult =
                     serde_json::from_slice(&bytes).map_err(SledError::UploadResult)?;
+                guard.disarm();
                 return Ok(result.into());
             }
         } else {
@@ -575,6 +530,8 @@ impl UploadRepo for SledRepo {
                     if value != b"1" {
                         let result: InnerUploadResult =
                             serde_json::from_slice(&value).map_err(SledError::UploadResult)?;
+
+                        guard.disarm();
                         return Ok(result.into());
                     }
                 }
