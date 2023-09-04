@@ -71,7 +71,7 @@ tracing = "0.1.15"
 tracing-error = "0.2.0"
 tracing-futures = "0.2.4"
 tracing-log = "0.1.2"
-tracing-opentelemetry = "0.20"
+tracing-opentelemetry = "0.21"
 tracing-subscriber = { version = "0.3.0", features = [
   "ansi",
   "env-filter",
@@ -87,3 +87,5 @@ uuid = { version = "1", features = ["serde", "std", "v4", "v7"] }
 version = "0.7.5"
 default-features = false
 features = ["opentelemetry_0_20"]
+git = "https://github.com/asonix/tracing-actix-web"
+branch = "asonix/tracing-opentelemetry-021"
