@@ -15,6 +15,9 @@ url = 'http://127.0.0.1:4317'
 service_name = 'pict-rs'
 targets = 'info,pict_rs=debug'
 
+[metrics]
+prometheus_address = "127.0.0.1:8070"
+
 [old_repo]
 path = 'data/sled-repo-local'
 cache_capacity = 67108864
