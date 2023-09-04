@@ -13,7 +13,7 @@ buffer_capacity = 102400
 [tracing.opentelemetry]
 url = 'http://127.0.0.1:4317'
 service_name = 'pict-rs'
-targets = 'info'
+targets = 'info,pict_rs=debug'
 
 [old_repo]
 path = 'data/sled-repo-local'
