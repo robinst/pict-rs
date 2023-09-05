@@ -3,37 +3,38 @@ use crate::{
     config::Configuration,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
+    future::LocalBoxFuture,
     ingest::Session,
-    queue::{Base64Bytes, LocalBoxFuture, Process},
+    queue::Process,
     repo::{Alias, ArcRepo, UploadId, UploadResult},
     serde_str::Serde,
-    store::{Identifier, Store},
+    store::Store,
     stream::StreamMap,
 };
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 pub(super) fn perform<'a, S>(
     repo: &'a ArcRepo,
     store: &'a S,
     process_map: &'a ProcessMap,
     config: &'a Configuration,
-    job: &'a [u8],
+    job: serde_json::Value,
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
     S: Store + 'static,
 {
     Box::pin(async move {
-        match serde_json::from_slice(job) {
+        match serde_json::from_value(job) {
             Ok(job) => match job {
                 Process::Ingest {
-                    identifier: Base64Bytes(identifier),
+                    identifier,
                     upload_id,
                     declared_alias,
                 } => {
                     process_ingest(
                         repo,
                         store,
-                        identifier,
+                        Arc::from(identifier),
                         Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
                         &config.media,
@@ -68,11 +69,11 @@ where
     })
 }
 
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip(repo, store, media))]
 async fn process_ingest<S>(
     repo: &ArcRepo,
     store: &S,
-    unprocessed_identifier: Vec<u8>,
+    unprocessed_identifier: Arc<str>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
     media: &crate::config::Media,
@@ -81,14 +82,12 @@ where
     S: Store + 'static,
 {
     let fut = async {
-        let unprocessed_identifier = S::Identifier::from_bytes(unprocessed_identifier)?;
-
         let ident = unprocessed_identifier.clone();
         let store2 = store.clone();
         let repo = repo.clone();
 
         let media = media.clone();
-        let error_boundary = actix_rt::spawn(async move {
+        let error_boundary = crate::sync::spawn(async move {
             let stream = store2
                 .to_stream(&ident, None, None)
                 .await?
@@ -97,7 +96,7 @@ where
             let session =
                 crate::ingest::ingest(&repo, &store2, stream, declared_alias, &media).await?;
 
-            Ok(session) as Result<Session<S>, Error>
+            Ok(session) as Result<Session, Error>
         })
         .await;
 
@@ -128,7 +127,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip(repo, store, process_map, process_path, process_args, config))]
 async fn generate<S: Store + 'static>(
     repo: &ArcRepo,
     store: &S,

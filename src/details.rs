@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     bytes_stream::BytesStream,
     discover::Discovery,
@@ -101,9 +103,10 @@ impl Details {
         ))
     }
 
+    #[tracing::instrument(level = "DEBUG")]
     pub(crate) async fn from_store<S: Store>(
         store: &S,
-        identifier: &S::Identifier,
+        identifier: &Arc<str>,
         timeout: u64,
     ) -> Result<Self, Error> {
         let mut buf = BytesStream::new();

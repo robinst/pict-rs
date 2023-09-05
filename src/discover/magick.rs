@@ -97,6 +97,7 @@ pub(super) async fn confirm_bytes(
     .await
 }
 
+#[tracing::instrument(level = "DEBUG", skip(f))]
 async fn count_avif_frames<F, Fut>(f: F, timeout: u64) -> Result<u32, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
@@ -147,6 +148,7 @@ where
     Ok(lines)
 }
 
+#[tracing::instrument(level = "DEBUG", skip(f))]
 async fn discover_file<F, Fut>(f: F, timeout: u64) -> Result<Discovery, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,

@@ -1,10 +1,9 @@
 use crate::{
     details::HumanDate,
     repo_04::{
-        Alias, AliasRepo, BaseRepo, DeleteToken, Details, HashRepo, Identifier, IdentifierRepo,
-        RepoError, SettingsRepo,
+        Alias, AliasRepo, BaseRepo, DeleteToken, Details, HashRepo, IdentifierRepo, RepoError,
+        SettingsRepo,
     },
-    store::StoreError,
     stream::{from_iterator, LocalBoxStream},
 };
 use sled::{Db, IVec, Tree};
@@ -35,9 +34,7 @@ macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
         let $ident = $self.$ident.clone();
 
-        let span = tracing::Span::current();
-
-        actix_rt::task::spawn_blocking(move || span.in_scope(|| $expr))
+        crate::sync::spawn_blocking(move || $expr)
             .await
             .map_err(SledError::from)
             .map_err(RepoError::from)?
@@ -56,6 +53,9 @@ pub(crate) enum SledError {
 
     #[error("Operation panicked")]
     Panic,
+
+    #[error("Error reading string")]
+    Utf8(#[from] std::str::Utf8Error),
 }
 
 #[derive(Clone)]
@@ -179,17 +179,17 @@ fn variant_from_key(hash: &[u8], key: &[u8]) -> Option<String> {
 
 #[async_trait::async_trait(?Send)]
 impl IdentifierRepo for SledRepo {
-    #[tracing::instrument(level = "trace", skip(self, identifier), fields(identifier = identifier.string_repr()))]
-    async fn details<I: Identifier>(&self, identifier: &I) -> Result<Option<Details>, StoreError> {
-        let key = identifier.to_bytes()?;
-
-        let opt = b!(self.identifier_details, identifier_details.get(key));
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn details(&self, key: Arc<str>) -> Result<Option<Details>, RepoError> {
+        let opt = b!(
+            self.identifier_details,
+            identifier_details.get(key.as_bytes())
+        );
 
         opt.map(|ivec| serde_json::from_slice::<OldDetails>(&ivec))
             .transpose()
             .map_err(SledError::from)
             .map_err(RepoError::from)
-            .map_err(StoreError::from)
             .map(|opt| opt.and_then(OldDetails::into_details))
     }
 }
@@ -219,29 +219,27 @@ impl HashRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn identifier<I: Identifier + 'static>(
-        &self,
-        hash: Self::Bytes,
-    ) -> Result<Option<I>, StoreError> {
+    async fn identifier(&self, hash: Self::Bytes) -> Result<Option<Arc<str>>, RepoError> {
         let Some(ivec) = b!(self.hash_identifiers, hash_identifiers.get(hash)) else {
             return Ok(None);
         };
 
-        Ok(Some(I::from_bytes(ivec.to_vec())?))
+        Ok(Some(Arc::from(
+            std::str::from_utf8(&ivec[..])
+                .map_err(SledError::from)?
+                .to_string(),
+        )))
     }
 
     #[tracing::instrument(level = "debug", skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn variants<I: Identifier + 'static>(
-        &self,
-        hash: Self::Bytes,
-    ) -> Result<Vec<(String, I)>, StoreError> {
+    async fn variants(&self, hash: Self::Bytes) -> Result<Vec<(String, Arc<str>)>, RepoError> {
         let vec = b!(
             self.hash_variant_identifiers,
             Ok(hash_variant_identifiers
                 .scan_prefix(&hash)
                 .filter_map(|res| res.ok())
                 .filter_map(|(key, ivec)| {
-                    let identifier = I::from_bytes(ivec.to_vec()).ok();
+                    let identifier = String::from_utf8(ivec.to_vec()).ok();
                     if identifier.is_none() {
                         tracing::warn!(
                             "Skipping an identifier: {}",
@@ -254,7 +252,7 @@ impl HashRepo for SledRepo {
                         tracing::warn!("Skipping a variant: {}", String::from_utf8_lossy(&key));
                     }
 
-                    Some((variant?, identifier?))
+                    Some((variant?, Arc::from(identifier?)))
                 })
                 .collect::<Vec<_>>()) as Result<Vec<_>, SledError>
         );
@@ -263,16 +261,20 @@ impl HashRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self, hash), fields(hash = hex::encode(&hash)))]
-    async fn motion_identifier<I: Identifier + 'static>(
-        &self,
-        hash: Self::Bytes,
-    ) -> Result<Option<I>, StoreError> {
+    async fn motion_identifier(&self, hash: Self::Bytes) -> Result<Option<Arc<str>>, RepoError> {
         let opt = b!(
             self.hash_motion_identifiers,
             hash_motion_identifiers.get(hash)
         );
 
-        opt.map(|ivec| I::from_bytes(ivec.to_vec())).transpose()
+        opt.map(|ivec| {
+            Ok(Arc::from(
+                std::str::from_utf8(&ivec[..])
+                    .map_err(SledError::from)?
+                    .to_string(),
+            ))
+        })
+        .transpose()
     }
 }
 

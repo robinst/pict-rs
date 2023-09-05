@@ -369,8 +369,64 @@ impl Args {
                                 from: from.into(),
                                 to: to.into(),
                             },
-                            config_file,
                             save_to,
+                            config_file,
+                        },
+                        MigrateRepoTo::Postgres(MigratePostgresInner { to }) => Output {
+                            config_format: ConfigFormat {
+                                server,
+                                client,
+                                old_repo,
+                                tracing,
+                                metrics,
+                                media,
+                                repo: None,
+                                store: None,
+                            },
+                            operation: Operation::MigrateRepo {
+                                from: from.into(),
+                                to: to.into(),
+                            },
+                            save_to,
+                            config_file,
+                        },
+                    },
+                    MigrateRepoFrom::Postgres(MigratePostgresRepo { from, to }) => match to {
+                        MigrateRepoTo::Sled(MigrateSledInner { to }) => Output {
+                            config_format: ConfigFormat {
+                                server,
+                                client,
+                                old_repo,
+                                tracing,
+                                metrics,
+                                media,
+                                repo: None,
+                                store: None,
+                            },
+                            operation: Operation::MigrateRepo {
+                                from: from.into(),
+                                to: to.into(),
+                            },
+                            save_to,
+                            config_file,
+                        },
+                        MigrateRepoTo::Postgres(MigratePostgresInner { to }) => Output {
+                            config_format: ConfigFormat {
+                                server,
+                                client,
+                                old_repo,
+                                tracing,
+                                metrics,
+                                media,
+                                repo: None,
+                                store: None,
+                            },
+                            operation: Operation::MigrateRepo {
+                                from: from.into(),
+                                to: to.into(),
+                            },
+                            save_to,
+                            config_file,
                         },
                     },
                 }
@@ -1058,6 +1114,7 @@ enum MigrateStoreFrom {
 #[derive(Debug, Subcommand)]
 enum MigrateRepoFrom {
     Sled(MigrateSledRepo),
+    Postgres(MigratePostgresRepo),
 }
 
 /// Configure the destination storage for pict-rs storage migration
@@ -1075,8 +1132,10 @@ enum MigrateStoreTo {
 /// Configure the destination repo for pict-rs repo migration
 #[derive(Debug, Subcommand)]
 enum MigrateRepoTo {
-    /// Migrate to the provided sled storage
+    /// Migrate to the provided sled repo
     Sled(MigrateSledInner),
+    /// Migrate to the provided postgres repo
+    Postgres(MigratePostgresInner),
 }
 
 /// Migrate pict-rs' storage from the provided filesystem storage
@@ -1099,6 +1158,16 @@ struct MigrateSledRepo {
     to: MigrateRepoTo,
 }
 
+/// Migrate pict-rs' repo from the provided postgres repo
+#[derive(Debug, Parser)]
+struct MigratePostgresRepo {
+    #[command(flatten)]
+    from: Postgres,
+
+    #[command(subcommand)]
+    to: MigrateRepoTo,
+}
+
 /// Migrate pict-rs' storage to the provided filesystem storage
 #[derive(Debug, Parser)]
 struct MigrateFilesystemInner {
@@ -1114,6 +1183,13 @@ struct MigrateFilesystemInner {
 struct MigrateSledInner {
     #[command(flatten)]
     to: Sled,
+}
+
+/// Migrate pict-rs' repo to the provided postgres repo
+#[derive(Debug, Parser)]
+struct MigratePostgresInner {
+    #[command(flatten)]
+    to: Postgres,
 }
 
 /// Migrate pict-rs' storage from the provided object storage
@@ -1163,6 +1239,8 @@ struct RunObjectStorage {
 enum Repo {
     /// Run pict-rs with the provided sled-backed data repository
     Sled(Sled),
+    /// Run pict-rs with the provided postgres-backed data repository
+    Postgres(Postgres),
 }
 
 /// Configuration for filesystem media storage
@@ -1252,6 +1330,15 @@ pub(super) struct Sled {
     #[arg(short, long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) export_path: Option<PathBuf>,
+}
+
+/// Configuration for the postgres-backed data repository
+#[derive(Debug, Parser, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) struct Postgres {
+    /// The URL of the postgres database
+    #[arg(short, long)]
+    pub(super) url: Url,
 }
 
 #[derive(Debug, Parser, serde::Serialize)]

@@ -1,8 +1,14 @@
+mod alias;
+mod delete_token;
+mod hash;
+mod metrics;
+mod migrate;
+
 use crate::{
     config,
     details::Details,
     error_code::{ErrorCode, OwnedErrorCode},
-    store::{Identifier, StoreError},
+    future::LocalBoxFuture,
     stream::LocalBoxStream,
 };
 use base64::Engine;
@@ -10,10 +16,11 @@ use std::{fmt::Debug, sync::Arc};
 use url::Url;
 use uuid::Uuid;
 
-mod hash;
-mod migrate;
+pub(crate) mod postgres;
 pub(crate) mod sled;
 
+pub(crate) use alias::Alias;
+pub(crate) use delete_token::DeleteToken;
 pub(crate) use hash::Hash;
 pub(crate) use migrate::{migrate_04, migrate_repo};
 
@@ -22,23 +29,13 @@ pub(crate) type ArcRepo = Arc<dyn FullRepo>;
 #[derive(Clone, Debug)]
 pub(crate) enum Repo {
     Sled(self::sled::SledRepo),
+    Postgres(self::postgres::PostgresRepo),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum MaybeUuid {
     Uuid(Uuid),
     Name(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct Alias {
-    id: MaybeUuid,
-    extension: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct DeleteToken {
-    id: MaybeUuid,
 }
 
 #[derive(Debug)]
@@ -70,6 +67,9 @@ pub(crate) enum RepoError {
     #[error("Error in sled")]
     SledError(#[from] crate::repo::sled::SledError),
 
+    #[error("Error in postgres")]
+    PostgresError(#[from] crate::repo::postgres::PostgresError),
+
     #[error("Upload was already claimed")]
     AlreadyClaimed,
 
@@ -81,8 +81,16 @@ impl RepoError {
     pub(crate) const fn error_code(&self) -> ErrorCode {
         match self {
             Self::SledError(e) => e.error_code(),
+            Self::PostgresError(e) => e.error_code(),
             Self::AlreadyClaimed => ErrorCode::ALREADY_CLAIMED,
             Self::Canceled => ErrorCode::PANIC,
+        }
+    }
+
+    pub(crate) const fn is_disconnected(&self) -> bool {
+        match self {
+            Self::PostgresError(e) => e.is_disconnected(),
+            _ => false,
         }
     }
 }
@@ -106,7 +114,7 @@ pub(crate) trait FullRepo:
     async fn health_check(&self) -> Result<(), RepoError>;
 
     #[tracing::instrument(skip(self))]
-    async fn identifier_from_alias(&self, alias: &Alias) -> Result<Option<Arc<[u8]>>, RepoError> {
+    async fn identifier_from_alias(&self, alias: &Alias) -> Result<Option<Arc<str>>, RepoError> {
         let Some(hash) = self.hash(alias).await? else {
             return Ok(None);
         };
@@ -127,7 +135,7 @@ pub(crate) trait FullRepo:
     async fn still_identifier_from_alias(
         &self,
         alias: &Alias,
-    ) -> Result<Option<Arc<[u8]>>, StoreError> {
+    ) -> Result<Option<Arc<str>>, RepoError> {
         let Some(hash) = self.hash(alias).await? else {
             return Ok(None);
         };
@@ -367,13 +375,13 @@ impl JobId {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn push(&self, queue: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError>;
+    async fn push(&self, queue: &'static str, job: serde_json::Value) -> Result<JobId, RepoError>;
 
     async fn pop(
         &self,
         queue: &'static str,
         worker_id: Uuid,
-    ) -> Result<(JobId, Arc<[u8]>), RepoError>;
+    ) -> Result<(JobId, serde_json::Value), RepoError>;
 
     async fn heartbeat(
         &self,
@@ -395,7 +403,7 @@ impl<T> QueueRepo for Arc<T>
 where
     T: QueueRepo,
 {
-    async fn push(&self, queue: &'static str, job: Arc<[u8]>) -> Result<JobId, RepoError> {
+    async fn push(&self, queue: &'static str, job: serde_json::Value) -> Result<JobId, RepoError> {
         T::push(self, queue, job).await
     }
 
@@ -403,7 +411,7 @@ where
         &self,
         queue: &'static str,
         worker_id: Uuid,
-    ) -> Result<(JobId, Arc<[u8]>), RepoError> {
+    ) -> Result<(JobId, serde_json::Value), RepoError> {
         T::pop(self, queue, worker_id).await
     }
 
@@ -455,12 +463,12 @@ where
 pub(crate) trait DetailsRepo: BaseRepo {
     async fn relate_details(
         &self,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         details: &Details,
-    ) -> Result<(), StoreError>;
-    async fn details(&self, identifier: &dyn Identifier) -> Result<Option<Details>, StoreError>;
+    ) -> Result<(), RepoError>;
+    async fn details(&self, identifier: &Arc<str>) -> Result<Option<Details>, RepoError>;
 
-    async fn cleanup_details(&self, identifier: &dyn Identifier) -> Result<(), StoreError>;
+    async fn cleanup_details(&self, identifier: &Arc<str>) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -470,17 +478,17 @@ where
 {
     async fn relate_details(
         &self,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         details: &Details,
-    ) -> Result<(), StoreError> {
+    ) -> Result<(), RepoError> {
         T::relate_details(self, identifier, details).await
     }
 
-    async fn details(&self, identifier: &dyn Identifier) -> Result<Option<Details>, StoreError> {
+    async fn details(&self, identifier: &Arc<str>) -> Result<Option<Details>, RepoError> {
         T::details(self, identifier).await
     }
 
-    async fn cleanup_details(&self, identifier: &dyn Identifier) -> Result<(), StoreError> {
+    async fn cleanup_details(&self, identifier: &Arc<str>) -> Result<(), RepoError> {
         T::cleanup_details(self, identifier).await
     }
 }
@@ -491,11 +499,11 @@ pub(crate) trait StoreMigrationRepo: BaseRepo {
 
     async fn mark_migrated(
         &self,
-        old_identifier: &dyn Identifier,
-        new_identifier: &dyn Identifier,
-    ) -> Result<(), StoreError>;
+        old_identifier: &Arc<str>,
+        new_identifier: &Arc<str>,
+    ) -> Result<(), RepoError>;
 
-    async fn is_migrated(&self, identifier: &dyn Identifier) -> Result<bool, StoreError>;
+    async fn is_migrated(&self, identifier: &Arc<str>) -> Result<bool, RepoError>;
 
     async fn clear(&self) -> Result<(), RepoError>;
 }
@@ -511,13 +519,13 @@ where
 
     async fn mark_migrated(
         &self,
-        old_identifier: &dyn Identifier,
-        new_identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
+        old_identifier: &Arc<str>,
+        new_identifier: &Arc<str>,
+    ) -> Result<(), RepoError> {
         T::mark_migrated(self, old_identifier, new_identifier).await
     }
 
-    async fn is_migrated(&self, identifier: &dyn Identifier) -> Result<bool, StoreError> {
+    async fn is_migrated(&self, identifier: &Arc<str>) -> Result<bool, RepoError> {
         T::is_migrated(self, identifier).await
     }
 
@@ -526,7 +534,7 @@ where
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct OrderedHash {
     timestamp: time::OffsetDateTime,
     hash: Hash,
@@ -564,11 +572,87 @@ impl HashPage {
     }
 }
 
+type PageFuture = LocalBoxFuture<'static, Result<HashPage, RepoError>>;
+
+pub(crate) struct HashStream {
+    repo: Option<ArcRepo>,
+    page_future: Option<PageFuture>,
+    page: Option<HashPage>,
+}
+
+impl futures_core::Stream for HashStream {
+    type Item = Result<Hash, RepoError>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        loop {
+            let Some(repo) = &this.repo else {
+                return std::task::Poll::Ready(None);
+            };
+
+            let slug = if let Some(page) = &mut this.page {
+                // popping last in page is fine - we reversed them
+                if let Some(hash) = page.hashes.pop() {
+                    return std::task::Poll::Ready(Some(Ok(hash)));
+                }
+
+                let slug = page.next();
+                this.page.take();
+
+                if let Some(slug) = slug {
+                    Some(slug)
+                } else {
+                    this.repo.take();
+                    return std::task::Poll::Ready(None);
+                }
+            } else {
+                None
+            };
+
+            if let Some(page_future) = &mut this.page_future {
+                let res = std::task::ready!(page_future.as_mut().poll(cx));
+
+                this.page_future.take();
+
+                match res {
+                    Ok(mut page) => {
+                        // reverse because we use `pop` to fetch next
+                        page.hashes.reverse();
+
+                        this.page = Some(page);
+                    }
+                    Err(e) => {
+                        this.repo.take();
+
+                        return std::task::Poll::Ready(Some(Err(e)));
+                    }
+                }
+            } else {
+                let repo = repo.clone();
+
+                this.page_future = Some(Box::pin(async move { repo.hash_page(slug, 100).await }));
+            }
+        }
+    }
+}
+
+impl dyn FullRepo {
+    pub(crate) fn hashes(self: &Arc<Self>) -> HashStream {
+        HashStream {
+            repo: Some(self.clone()),
+            page_future: None,
+            page: None,
+        }
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 pub(crate) trait HashRepo: BaseRepo {
     async fn size(&self) -> Result<u64, RepoError>;
-
-    async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>>;
 
     async fn hash_page(&self, slug: Option<String>, limit: usize) -> Result<HashPage, RepoError> {
         let hash = slug.as_deref().and_then(hash_from_slug);
@@ -599,8 +683,8 @@ pub(crate) trait HashRepo: BaseRepo {
     async fn create_hash(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
+        identifier: &Arc<str>,
+    ) -> Result<Result<(), HashAlreadyExists>, RepoError> {
         self.create_hash_with_timestamp(hash, identifier, time::OffsetDateTime::now_utc())
             .await
     }
@@ -608,38 +692,34 @@ pub(crate) trait HashRepo: BaseRepo {
     async fn create_hash_with_timestamp(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Result<(), HashAlreadyExists>, StoreError>;
+    ) -> Result<Result<(), HashAlreadyExists>, RepoError>;
 
-    async fn update_identifier(
-        &self,
-        hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError>;
+    async fn update_identifier(&self, hash: Hash, identifier: &Arc<str>) -> Result<(), RepoError>;
 
-    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError>;
+    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError>;
 
     async fn relate_variant_identifier(
         &self,
         hash: Hash,
         variant: String,
-        identifier: &dyn Identifier,
-    ) -> Result<Result<(), VariantAlreadyExists>, StoreError>;
+        identifier: &Arc<str>,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError>;
     async fn variant_identifier(
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Option<Arc<[u8]>>, RepoError>;
-    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<[u8]>)>, RepoError>;
+    ) -> Result<Option<Arc<str>>, RepoError>;
+    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError>;
     async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
     async fn relate_motion_identifier(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError>;
-    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError>;
+        identifier: &Arc<str>,
+    ) -> Result<(), RepoError>;
+    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError>;
 
     async fn cleanup_hash(&self, hash: Hash) -> Result<(), RepoError>;
 }
@@ -651,10 +731,6 @@ where
 {
     async fn size(&self) -> Result<u64, RepoError> {
         T::size(self).await
-    }
-
-    async fn hashes(&self) -> LocalBoxStream<'static, Result<Hash, RepoError>> {
-        T::hashes(self).await
     }
 
     async fn bound(&self, hash: Hash) -> Result<Option<OrderedHash>, RepoError> {
@@ -680,21 +756,17 @@ where
     async fn create_hash_with_timestamp(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
+        identifier: &Arc<str>,
         timestamp: time::OffsetDateTime,
-    ) -> Result<Result<(), HashAlreadyExists>, StoreError> {
+    ) -> Result<Result<(), HashAlreadyExists>, RepoError> {
         T::create_hash_with_timestamp(self, hash, identifier, timestamp).await
     }
 
-    async fn update_identifier(
-        &self,
-        hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
+    async fn update_identifier(&self, hash: Hash, identifier: &Arc<str>) -> Result<(), RepoError> {
         T::update_identifier(self, hash, identifier).await
     }
 
-    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError> {
+    async fn identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         T::identifier(self, hash).await
     }
 
@@ -702,8 +774,8 @@ where
         &self,
         hash: Hash,
         variant: String,
-        identifier: &dyn Identifier,
-    ) -> Result<Result<(), VariantAlreadyExists>, StoreError> {
+        identifier: &Arc<str>,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
         T::relate_variant_identifier(self, hash, variant, identifier).await
     }
 
@@ -711,11 +783,11 @@ where
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Option<Arc<[u8]>>, RepoError> {
+    ) -> Result<Option<Arc<str>>, RepoError> {
         T::variant_identifier(self, hash, variant).await
     }
 
-    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<[u8]>)>, RepoError> {
+    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
         T::variants(self, hash).await
     }
 
@@ -726,12 +798,12 @@ where
     async fn relate_motion_identifier(
         &self,
         hash: Hash,
-        identifier: &dyn Identifier,
-    ) -> Result<(), StoreError> {
+        identifier: &Arc<str>,
+    ) -> Result<(), RepoError> {
         T::relate_motion_identifier(self, hash, identifier).await
     }
 
-    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<[u8]>>, RepoError> {
+    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         T::motion_identifier(self, hash).await
     }
 
@@ -791,7 +863,7 @@ where
 
 impl Repo {
     #[tracing::instrument]
-    pub(crate) fn open(config: config::Repo) -> color_eyre::Result<Self> {
+    pub(crate) async fn open(config: config::Repo) -> color_eyre::Result<Self> {
         match config {
             config::Repo::Sled(config::Sled {
                 path,
@@ -802,12 +874,18 @@ impl Repo {
 
                 Ok(Self::Sled(repo))
             }
+            config::Repo::Postgres(config::Postgres { url }) => {
+                let repo = self::postgres::PostgresRepo::connect(url).await?;
+
+                Ok(Self::Postgres(repo))
+            }
         }
     }
 
     pub(crate) fn to_arc(&self) -> ArcRepo {
         match self {
             Self::Sled(sled_repo) => Arc::new(sled_repo.clone()),
+            Self::Postgres(postgres_repo) => Arc::new(postgres_repo.clone()),
         }
     }
 }
@@ -825,106 +903,6 @@ impl MaybeUuid {
         match self {
             Self::Uuid(uuid) => &uuid.as_bytes()[..],
             Self::Name(name) => name.as_bytes(),
-        }
-    }
-}
-
-fn split_at_dot(s: &str) -> Option<(&str, &str)> {
-    let index = s.find('.')?;
-
-    Some(s.split_at(index))
-}
-
-impl Alias {
-    pub(crate) fn generate(extension: String) -> Self {
-        Alias {
-            id: MaybeUuid::Uuid(Uuid::new_v4()),
-            extension: Some(extension),
-        }
-    }
-
-    pub(crate) fn from_existing(alias: &str) -> Self {
-        if let Some((start, end)) = split_at_dot(alias) {
-            Alias {
-                id: MaybeUuid::from_str(start),
-                extension: Some(end.into()),
-            }
-        } else {
-            Alias {
-                id: MaybeUuid::from_str(alias),
-                extension: None,
-            }
-        }
-    }
-
-    pub(crate) fn extension(&self) -> Option<&str> {
-        self.extension.as_deref()
-    }
-
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        let mut v = self.id.as_bytes().to_vec();
-
-        if let Some(ext) = self.extension() {
-            v.extend_from_slice(ext.as_bytes());
-        }
-
-        v
-    }
-
-    pub(crate) fn from_slice(bytes: &[u8]) -> Option<Self> {
-        if let Ok(s) = std::str::from_utf8(bytes) {
-            Some(Self::from_existing(s))
-        } else if bytes.len() >= 16 {
-            let id = Uuid::from_slice(&bytes[0..16]).expect("Already checked length");
-
-            let extension = if bytes.len() > 16 {
-                Some(String::from_utf8_lossy(&bytes[16..]).to_string())
-            } else {
-                None
-            };
-
-            Some(Self {
-                id: MaybeUuid::Uuid(id),
-                extension,
-            })
-        } else {
-            None
-        }
-    }
-}
-
-impl DeleteToken {
-    pub(crate) fn from_existing(existing: &str) -> Self {
-        if let Ok(uuid) = Uuid::parse_str(existing) {
-            DeleteToken {
-                id: MaybeUuid::Uuid(uuid),
-            }
-        } else {
-            DeleteToken {
-                id: MaybeUuid::Name(existing.into()),
-            }
-        }
-    }
-
-    pub(crate) fn generate() -> Self {
-        Self {
-            id: MaybeUuid::Uuid(Uuid::new_v4()),
-        }
-    }
-
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        self.id.as_bytes().to_vec()
-    }
-
-    pub(crate) fn from_slice(bytes: &[u8]) -> Option<Self> {
-        if let Ok(s) = std::str::from_utf8(bytes) {
-            Some(DeleteToken::from_existing(s))
-        } else if bytes.len() == 16 {
-            Some(DeleteToken {
-                id: MaybeUuid::Uuid(Uuid::from_slice(bytes).ok()?),
-            })
-        } else {
-            None
         }
     }
 }
@@ -959,255 +937,5 @@ impl std::fmt::Display for MaybeUuid {
             Self::Uuid(id) => write!(f, "{id}"),
             Self::Name(name) => write!(f, "{name}"),
         }
-    }
-}
-
-impl std::str::FromStr for DeleteToken {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(DeleteToken::from_existing(s))
-    }
-}
-
-impl std::fmt::Display for DeleteToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.id)
-    }
-}
-
-impl std::str::FromStr for Alias {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Alias::from_existing(s))
-    }
-}
-
-impl std::fmt::Display for Alias {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(ext) = self.extension() {
-            write!(f, "{}{ext}", self.id)
-        } else {
-            write!(f, "{}", self.id)
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Alias, DeleteToken, MaybeUuid, Uuid};
-
-    #[test]
-    fn string_delete_token() {
-        let delete_token = DeleteToken::from_existing("blah");
-
-        assert_eq!(
-            delete_token,
-            DeleteToken {
-                id: MaybeUuid::Name(String::from("blah"))
-            }
-        )
-    }
-
-    #[test]
-    fn uuid_string_delete_token() {
-        let uuid = Uuid::new_v4();
-
-        let delete_token = DeleteToken::from_existing(&uuid.to_string());
-
-        assert_eq!(
-            delete_token,
-            DeleteToken {
-                id: MaybeUuid::Uuid(uuid),
-            }
-        )
-    }
-
-    #[test]
-    fn bytes_delete_token() {
-        let delete_token = DeleteToken::from_slice(b"blah").unwrap();
-
-        assert_eq!(
-            delete_token,
-            DeleteToken {
-                id: MaybeUuid::Name(String::from("blah"))
-            }
-        )
-    }
-
-    #[test]
-    fn uuid_bytes_delete_token() {
-        let uuid = Uuid::new_v4();
-
-        let delete_token = DeleteToken::from_slice(&uuid.as_bytes()[..]).unwrap();
-
-        assert_eq!(
-            delete_token,
-            DeleteToken {
-                id: MaybeUuid::Uuid(uuid),
-            }
-        )
-    }
-
-    #[test]
-    fn uuid_bytes_string_delete_token() {
-        let uuid = Uuid::new_v4();
-
-        let delete_token = DeleteToken::from_slice(uuid.to_string().as_bytes()).unwrap();
-
-        assert_eq!(
-            delete_token,
-            DeleteToken {
-                id: MaybeUuid::Uuid(uuid),
-            }
-        )
-    }
-
-    #[test]
-    fn string_alias() {
-        let alias = Alias::from_existing("blah");
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Name(String::from("blah")),
-                extension: None
-            }
-        );
-    }
-
-    #[test]
-    fn string_alias_ext() {
-        let alias = Alias::from_existing("blah.mp4");
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Name(String::from("blah")),
-                extension: Some(String::from(".mp4")),
-            }
-        );
-    }
-
-    #[test]
-    fn uuid_string_alias() {
-        let uuid = Uuid::new_v4();
-
-        let alias = Alias::from_existing(&uuid.to_string());
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Uuid(uuid),
-                extension: None,
-            }
-        )
-    }
-
-    #[test]
-    fn uuid_string_alias_ext() {
-        let uuid = Uuid::new_v4();
-
-        let alias_str = format!("{uuid}.mp4");
-        let alias = Alias::from_existing(&alias_str);
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Uuid(uuid),
-                extension: Some(String::from(".mp4")),
-            }
-        )
-    }
-
-    #[test]
-    fn bytes_alias() {
-        let alias = Alias::from_slice(b"blah").unwrap();
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Name(String::from("blah")),
-                extension: None
-            }
-        );
-    }
-
-    #[test]
-    fn bytes_alias_ext() {
-        let alias = Alias::from_slice(b"blah.mp4").unwrap();
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Name(String::from("blah")),
-                extension: Some(String::from(".mp4")),
-            }
-        );
-    }
-
-    #[test]
-    fn uuid_bytes_alias() {
-        let uuid = Uuid::new_v4();
-
-        let alias = Alias::from_slice(&uuid.as_bytes()[..]).unwrap();
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Uuid(uuid),
-                extension: None,
-            }
-        )
-    }
-
-    #[test]
-    fn uuid_bytes_string_alias() {
-        let uuid = Uuid::new_v4();
-
-        let alias = Alias::from_slice(uuid.to_string().as_bytes()).unwrap();
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Uuid(uuid),
-                extension: None,
-            }
-        )
-    }
-
-    #[test]
-    fn uuid_bytes_alias_ext() {
-        let uuid = Uuid::new_v4();
-
-        let mut alias_bytes = uuid.as_bytes().to_vec();
-        alias_bytes.extend_from_slice(b".mp4");
-
-        let alias = Alias::from_slice(&alias_bytes).unwrap();
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Uuid(uuid),
-                extension: Some(String::from(".mp4")),
-            }
-        )
-    }
-
-    #[test]
-    fn uuid_bytes_string_alias_ext() {
-        let uuid = Uuid::new_v4();
-
-        let alias_str = format!("{uuid}.mp4");
-        let alias = Alias::from_slice(alias_str.as_bytes()).unwrap();
-
-        assert_eq!(
-            alias,
-            Alias {
-                id: MaybeUuid::Uuid(uuid),
-                extension: Some(String::from(".mp4")),
-            }
-        )
     }
 }

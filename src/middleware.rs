@@ -12,6 +12,8 @@ use std::{
     task::{Context, Poll},
 };
 
+use crate::future::WithTimeout;
+
 pub(crate) use self::metrics::Metrics;
 
 pub(crate) struct Deadline;
@@ -149,8 +151,12 @@ impl actix_web::error::ResponseError for DeadlineExceeded {
         HttpResponse::build(self.status_code())
             .content_type("application/json")
             .body(
-                serde_json::to_string(&serde_json::json!({ "msg": self.to_string() }))
-                    .unwrap_or_else(|_| r#"{"msg":"request timeout"}"#.to_string()),
+                serde_json::to_string(
+                    &serde_json::json!({ "msg": self.to_string(), "code": "request-timeout" }),
+                )
+                .unwrap_or_else(|_| {
+                    r#"{"msg":"request timeout","code":"request-timeout"}"#.to_string()
+                }),
             )
     }
 }
@@ -163,7 +169,7 @@ where
         DeadlineFuture {
             inner: match timeout {
                 Some(duration) => DeadlineFutureInner::Timed {
-                    timeout: actix_rt::time::timeout(duration, future),
+                    timeout: future.with_timeout(duration),
                 },
                 None => DeadlineFutureInner::Untimed { future },
             },

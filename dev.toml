@@ -11,8 +11,12 @@ targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
 buffer_capacity = 102400
 
 [tracing.opentelemetry]
+url = 'http://127.0.0.1:4317'
 service_name = 'pict-rs'
-targets = 'info'
+targets = 'info,pict_rs=debug'
+
+[metrics]
+prometheus_address = "127.0.0.1:8070"
 
 [old_repo]
 path = 'data/sled-repo-local'
@@ -59,10 +63,12 @@ crf_2160 = 15
 crf_max = 12
 
 [repo]
-type = 'sled'
-path = 'data/sled-repo-local'
-cache_capacity = 67108864
-export_path = "data/exports-local"
+type = 'postgres'
+url = 'postgres://pictrs:1234@localhost:5432/pictrs'
+
+# [repo]
+# type = 'sled'
+# path = 'data/sled-repo-local'
 
 [store]
 type = 'filesystem'

@@ -8,9 +8,7 @@ use opentelemetry_otlp::WithExportConfig;
 use tracing::subscriber::set_global_default;
 use tracing_error::ErrorLayer;
 use tracing_log::LogTracer;
-use tracing_subscriber::{
-    fmt::format::FmtSpan, layer::SubscriberExt, registry::LookupSpan, Layer, Registry,
-};
+use tracing_subscriber::{layer::SubscriberExt, registry::LookupSpan, Layer, Registry};
 
 pub(super) fn init_tracing(tracing: &Tracing) -> color_eyre::Result<()> {
     color_eyre::install()?;
@@ -19,8 +17,7 @@ pub(super) fn init_tracing(tracing: &Tracing) -> color_eyre::Result<()> {
 
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let format_layer =
-        tracing_subscriber::fmt::layer().with_span_events(FmtSpan::NEW | FmtSpan::CLOSE);
+    let format_layer = tracing_subscriber::fmt::layer();
 
     match tracing.logging.format {
         LogFormat::Compact => with_format(format_layer.compact(), tracing),

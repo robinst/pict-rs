@@ -13,7 +13,7 @@ services:
   #      - "6669:6669"
   #    environment:
   #      - PICTRS__TRACING__CONSOLE__ADDRESS=0.0.0.0:6669
-  #      - PICTRS__TRACING__OPENTELEMETRY__URL=http://otel:4137
+  #      - PICTRS__TRACING__OPENTELEMETRY__URL=http://jaeger:4317
   #      - RUST_BACKTRACE=1
   #    stdin_open: true
   #    tty: true
@@ -27,7 +27,7 @@ services:
   #     - "8081:8081"
   #   environment:
   #     - PICTRS_PROXY_UPSTREAM=http://pictrs:8080
-  #     - PICTRS_PROXY_OPENTELEMETRY_URL=http://otel:4137
+  #     - PICTRS_PROXY_OPENTELEMETRY_URL=http://jaeger:4317
 
   minio:
     image: quay.io/minio/minio
@@ -39,7 +39,7 @@ services:
       - ./storage/minio:/mnt
 
   garage:
-    image: dxflrs/garage:v0.8.1
+    image: dxflrs/garage:v0.8.3
     ports:
       - "3900:3900"
       - "3901:3901"
@@ -47,26 +47,35 @@ services:
       - "3903:3903"
       - "3904:3904"
     environment:
-      - RUST_LOG=debug
+      - RUST_LOG=info
     volumes:
       - ./storage/garage:/mnt
       - ./garage.toml:/etc/garage.toml
 
-  otel:
-    image: otel/opentelemetry-collector:latest
-    command: --config otel-local-config.yaml
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - PGDATA=/var/lib/postgresql/data
+      - POSTGRES_DB=pictrs
+      - POSTGRES_USER=pictrs
+      - POSTGRES_PASSWORD=1234
     volumes:
-      - type: bind
-        source: ./otel.yml
-        target: /otel-local-config.yaml
-    restart: always
-    depends_on:
-      - jaeger
+      - ./storage/postgres:/var/lib/postgresql/data
 
   jaeger:
-    image: jaegertracing/all-in-one:1
+    image: jaegertracing/all-in-one:1.48
     ports:
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "4317:4317"
+      - "4138:4138"
       - "14250:14250"
+      - "14268:14268"
+      - "14269:14269"
+      - "9411:9411"
       # To view traces, visit http://localhost:16686
       - "16686:16686"
     restart: always

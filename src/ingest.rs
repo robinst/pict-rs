@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     bytes_stream::BytesStream,
     either::Either,
@@ -15,15 +17,12 @@ mod hasher;
 use hasher::Hasher;
 
 #[derive(Debug)]
-pub(crate) struct Session<S>
-where
-    S: Store,
-{
+pub(crate) struct Session {
     repo: ArcRepo,
     delete_token: DeleteToken,
     hash: Option<Hash>,
     alias: Option<Alias>,
-    identifier: Option<S::Identifier>,
+    identifier: Option<Arc<str>>,
 }
 
 #[tracing::instrument(skip(stream))]
@@ -49,7 +48,7 @@ pub(crate) async fn ingest<S>(
     stream: impl Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     declared_alias: Option<Alias>,
     media: &crate::config::Media,
-) -> Result<Session<S>, Error>
+) -> Result<Session, Error>
 where
     S: Store,
 {
@@ -131,11 +130,11 @@ where
 
 #[tracing::instrument(level = "trace", skip_all)]
 async fn save_upload<S>(
-    session: &mut Session<S>,
+    session: &mut Session,
     repo: &ArcRepo,
     store: &S,
     hash: Hash,
-    identifier: &S::Identifier,
+    identifier: &Arc<str>,
 ) -> Result<(), Error>
 where
     S: Store,
@@ -153,10 +152,7 @@ where
     Ok(())
 }
 
-impl<S> Session<S>
-where
-    S: Store,
-{
+impl Session {
     pub(crate) fn disarm(mut self) -> DeleteToken {
         let _ = self.hash.take();
         let _ = self.alias.take();
@@ -206,10 +202,7 @@ where
     }
 }
 
-impl<S> Drop for Session<S>
-where
-    S: Store,
-{
+impl Drop for Session {
     fn drop(&mut self) {
         let any_items = self.hash.is_some() || self.alias.is_some() || self.identifier.is_some();
 
@@ -224,14 +217,12 @@ where
 
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup hash", hash = ?hash);
 
-                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                    actix_rt::spawn(
-                        async move {
-                            let _ = crate::queue::cleanup_hash(&repo, hash).await;
-                        }
-                        .instrument(cleanup_span),
-                    )
-                });
+                crate::sync::spawn(
+                    async move {
+                        let _ = crate::queue::cleanup_hash(&repo, hash).await;
+                    }
+                    .instrument(cleanup_span),
+                );
             }
 
             if let Some(alias) = self.alias.take() {
@@ -240,14 +231,12 @@ where
 
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup alias", alias = ?alias);
 
-                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                    actix_rt::spawn(
-                        async move {
-                            let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
-                        }
-                        .instrument(cleanup_span),
-                    )
-                });
+                crate::sync::spawn(
+                    async move {
+                        let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
+                    }
+                    .instrument(cleanup_span),
+                );
             }
 
             if let Some(identifier) = self.identifier.take() {
@@ -255,14 +244,12 @@ where
 
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup identifier", identifier = ?identifier);
 
-                tracing::trace_span!(parent: None, "Spawn task").in_scope(|| {
-                    actix_rt::spawn(
-                        async move {
-                            let _ = crate::queue::cleanup_identifier(&repo, identifier).await;
-                        }
-                        .instrument(cleanup_span),
-                    )
-                });
+                crate::sync::spawn(
+                    async move {
+                        let _ = crate::queue::cleanup_identifier(&repo, &identifier).await;
+                    }
+                    .instrument(cleanup_span),
+                );
             }
         }
     }

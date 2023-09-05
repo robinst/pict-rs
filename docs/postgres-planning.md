@@ -88,13 +88,13 @@ methods:
 
 ```sql
 CREATE TABLE aliases (
-    alias VARCHAR(30) PRIMARY KEY,
+    alias VARCHAR(50) PRIMARY KEY,
     hash BYTEA NOT NULL REFERENCES hashes(hash) ON DELETE CASCADE,
     delete_token VARCHAR(30) NOT NULL
 );
 
 
-CREATE INDEX alias_hashes_index ON aliases (hash);
+CREATE INDEX aliases_hash_index ON aliases (hash);
 ```
 
 
@@ -155,7 +155,7 @@ methods:
 CREATE TYPE job_status AS ENUM ('new', 'running');
 
 
-CREATE TABLE queue (
+CREATE TABLE job_queue (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     queue VARCHAR(30) NOT NULL,
     job JSONB NOT NULL,
@@ -165,20 +165,20 @@ CREATE TABLE queue (
 );
 
 
-CREATE INDEX queue_status_index ON queue INCLUDE status;
-CREATE INDEX heartbeat_index ON queue
+CREATE INDEX queue_status_index ON queue INCLUDE queue, status;
+CREATE INDEX heartbeat_index ON queue INCLUDE heartbeat;
 ```
 
 claiming a job can be
 ```sql
-UPDATE queue SET status = 'new', heartbeat = NULL
+UPDATE job_queue SET status = 'new', heartbeat = NULL
 WHERE
     heartbeat IS NOT NULL AND heartbeat < NOW - INTERVAL '2 MINUTES';
 
-UPDATE queue SET status = 'running', heartbeat = CURRENT_TIMESTAMP
+UPDATE job_queue SET status = 'running', heartbeat = CURRENT_TIMESTAMP
 WHERE id = (
     SELECT id
-    FROM queue
+    FROM job_queue
     WHERE status = 'new' AND queue = '$QUEUE'
     ORDER BY queue_time ASC
     FOR UPDATE SKIP LOCKED

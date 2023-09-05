@@ -32,6 +32,7 @@
             cargo
             cargo-outdated
             clippy
+            diesel-cli
             exiftool
             ffmpeg_6-full
             garage

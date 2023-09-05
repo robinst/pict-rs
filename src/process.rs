@@ -1,5 +1,6 @@
 use actix_rt::task::JoinHandle;
 use actix_web::web::Bytes;
+use flume::r#async::RecvFut;
 use std::{
     future::Future,
     pin::Pin,
@@ -10,11 +11,10 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncWriteExt, ReadBuf},
     process::{Child, ChildStdin, ChildStdout, Command},
-    sync::oneshot::{channel, Receiver},
 };
 use tracing::{Instrument, Span};
 
-use crate::error_code::ErrorCode;
+use crate::{error_code::ErrorCode, future::WithTimeout};
 
 struct MetricsGuard {
     start: Instant,
@@ -73,7 +73,7 @@ struct DropHandle {
 
 pub(crate) struct ProcessRead<I> {
     inner: I,
-    err_recv: Receiver<std::io::Error>,
+    err_recv: RecvFut<'static, std::io::Error>,
     err_closed: bool,
     #[allow(dead_code)]
     handle: DropHandle,
@@ -159,7 +159,7 @@ impl Process {
             timeout,
         } = self;
 
-        let res = actix_rt::time::timeout(timeout, child.wait()).await;
+        let res = child.wait().with_timeout(timeout).await;
 
         match res {
             Ok(Ok(status)) if status.success() => {
@@ -206,39 +206,37 @@ impl Process {
         let stdin = child.stdin.take().expect("stdin exists");
         let stdout = child.stdout.take().expect("stdout exists");
 
-        let (tx, rx) = tracing::trace_span!(parent: None, "Create channel", %command)
-            .in_scope(channel::<std::io::Error>);
+        let (tx, rx) = crate::sync::channel::<std::io::Error>(1);
+        let rx = rx.into_recv_async();
 
         let span = tracing::info_span!(parent: None, "Background process task", %command);
         span.follows_from(Span::current());
 
-        let handle = tracing::trace_span!(parent: None, "Spawn task", %command).in_scope(|| {
-            actix_rt::spawn(
-                async move {
-                    let child_fut = async {
-                        (f)(stdin).await?;
+        let handle = crate::sync::spawn(
+            async move {
+                let child_fut = async {
+                    (f)(stdin).await?;
 
-                        child.wait().await
-                    };
+                    child.wait().await
+                };
 
-                    let error = match actix_rt::time::timeout(timeout, child_fut).await {
-                        Ok(Ok(status)) if status.success() => {
-                            guard.disarm();
-                            return;
-                        }
-                        Ok(Ok(status)) => {
-                            std::io::Error::new(std::io::ErrorKind::Other, StatusError(status))
-                        }
-                        Ok(Err(e)) => e,
-                        Err(_) => std::io::ErrorKind::TimedOut.into(),
-                    };
+                let error = match child_fut.with_timeout(timeout).await {
+                    Ok(Ok(status)) if status.success() => {
+                        guard.disarm();
+                        return;
+                    }
+                    Ok(Ok(status)) => {
+                        std::io::Error::new(std::io::ErrorKind::Other, StatusError(status))
+                    }
+                    Ok(Err(e)) => e,
+                    Err(_) => std::io::ErrorKind::TimedOut.into(),
+                };
 
-                    let _ = tx.send(error);
-                    let _ = child.kill().await;
-                }
-                .instrument(span),
-            )
-        });
+                let _ = tx.send(error);
+                let _ = child.kill().await;
+            }
+            .instrument(span),
+        );
 
         let sleep = actix_rt::time::sleep(timeout);
 

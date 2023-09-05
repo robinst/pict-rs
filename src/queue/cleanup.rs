@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
 use crate::{
     config::Configuration,
     error::{Error, UploadError},
-    queue::{Base64Bytes, Cleanup, LocalBoxFuture},
+    future::LocalBoxFuture,
+    queue::Cleanup,
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     serde_str::Serde,
-    store::{Identifier, Store},
+    store::Store,
     stream::IntoStreamer,
 };
 
@@ -12,18 +15,18 @@ pub(super) fn perform<'a, S>(
     repo: &'a ArcRepo,
     store: &'a S,
     configuration: &'a Configuration,
-    job: &'a [u8],
+    job: serde_json::Value,
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
     S: Store,
 {
     Box::pin(async move {
-        match serde_json::from_slice(job) {
+        match serde_json::from_value(job) {
             Ok(job) => match job {
                 Cleanup::Hash { hash: in_hash } => hash(repo, in_hash).await?,
                 Cleanup::Identifier {
-                    identifier: Base64Bytes(in_identifier),
-                } => identifier(repo, store, in_identifier).await?,
+                    identifier: in_identifier,
+                } => identifier(repo, store, Arc::from(in_identifier)).await?,
                 Cleanup::Alias {
                     alias: stored_alias,
                     token,
@@ -50,20 +53,18 @@ where
 }
 
 #[tracing::instrument(skip_all)]
-async fn identifier<S>(repo: &ArcRepo, store: &S, identifier: Vec<u8>) -> Result<(), Error>
+async fn identifier<S>(repo: &ArcRepo, store: &S, identifier: Arc<str>) -> Result<(), Error>
 where
     S: Store,
 {
-    let identifier = S::Identifier::from_bytes(identifier)?;
-
     let mut errors = Vec::new();
 
     if let Err(e) = store.remove(&identifier).await {
-        errors.push(e);
+        errors.push(UploadError::from(e));
     }
 
     if let Err(e) = repo.cleanup_details(&identifier).await {
-        errors.push(e);
+        errors.push(UploadError::from(e));
     }
 
     for error in errors {
@@ -100,7 +101,7 @@ async fn hash(repo: &ArcRepo, hash: Hash) -> Result<(), Error> {
     idents.extend(repo.motion_identifier(hash.clone()).await?);
 
     for identifier in idents {
-        let _ = super::cleanup_identifier(repo, identifier).await;
+        let _ = super::cleanup_identifier(repo, &identifier).await;
     }
 
     repo.cleanup_hash(hash).await?;
@@ -136,7 +137,7 @@ async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> Result<(), E
 
 #[tracing::instrument(skip_all)]
 async fn all_variants(repo: &ArcRepo) -> Result<(), Error> {
-    let mut hash_stream = repo.hashes().await.into_streamer();
+    let mut hash_stream = repo.hashes().into_streamer();
 
     while let Some(res) = hash_stream.next().await {
         let hash = res?;
@@ -193,7 +194,7 @@ async fn hash_variant(
             .variant_identifier(hash.clone(), target_variant.clone())
             .await?
         {
-            super::cleanup_identifier(repo, identifier).await?;
+            super::cleanup_identifier(repo, &identifier).await?;
         }
 
         repo.remove_variant(hash.clone(), target_variant.clone())
@@ -203,7 +204,7 @@ async fn hash_variant(
         for (variant, identifier) in repo.variants(hash.clone()).await? {
             repo.remove_variant(hash.clone(), variant.clone()).await?;
             repo.remove_variant_access(hash.clone(), variant).await?;
-            super::cleanup_identifier(repo, identifier).await?;
+            super::cleanup_identifier(repo, &identifier).await?;
         }
     }
 

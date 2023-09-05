@@ -1,6 +1,9 @@
 use std::{
     rc::Rc,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -8,7 +11,7 @@ use crate::{
     details::Details,
     error::{Error, UploadError},
     repo::{ArcRepo, Hash},
-    store::{Identifier, Store},
+    store::Store,
     stream::IntoStreamer,
 };
 
@@ -58,7 +61,7 @@ where
             tracing::warn!("Retrying migration +{failure_count}");
         }
 
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        actix_rt::time::sleep(Duration::from_secs(3)).await;
     }
 
     Ok(())
@@ -103,7 +106,7 @@ where
     }
 
     // Hashes are read in a consistent order
-    let mut stream = repo.hashes().await.into_streamer();
+    let mut stream = repo.hashes().into_streamer();
 
     let state = Rc::new(MigrateState {
         repo: repo.clone(),
@@ -169,7 +172,7 @@ where
     let current_index = index.fetch_add(1, Ordering::Relaxed);
 
     let original_identifier = match repo.identifier(hash.clone()).await {
-        Ok(Some(identifier)) => S1::Identifier::from_arc(identifier)?,
+        Ok(Some(identifier)) => identifier,
         Ok(None) => {
             tracing::warn!(
                 "Original File identifier for hash {hash:?} is missing, queue cleanup task",
@@ -214,8 +217,6 @@ where
     }
 
     if let Some(identifier) = repo.motion_identifier(hash.clone()).await? {
-        let identifier = S1::Identifier::from_arc(identifier)?;
-
         if !repo.is_migrated(&identifier).await? {
             match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
                 Ok(new_identifier) => {
@@ -245,8 +246,6 @@ where
     }
 
     for (variant, identifier) in repo.variants(hash.clone()).await? {
-        let identifier = S1::Identifier::from_arc(identifier)?;
-
         if !repo.is_migrated(&identifier).await? {
             match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
                 Ok(new_identifier) => {
@@ -339,10 +338,10 @@ async fn migrate_file<S1, S2>(
     repo: &ArcRepo,
     from: &S1,
     to: &S2,
-    identifier: &S1::Identifier,
+    identifier: &Arc<str>,
     skip_missing_files: bool,
     timeout: u64,
-) -> Result<S2::Identifier, MigrateError>
+) -> Result<Arc<str>, MigrateError>
 where
     S1: Store,
     S2: Store,
@@ -365,7 +364,7 @@ where
                     tracing::warn!("Failed moving file. Retrying +{failure_count}");
                 }
 
-                tokio::time::sleep(Duration::from_secs(3)).await;
+                actix_rt::time::sleep(Duration::from_secs(3)).await;
             }
         }
     }
@@ -382,9 +381,9 @@ async fn do_migrate_file<S1, S2>(
     repo: &ArcRepo,
     from: &S1,
     to: &S2,
-    identifier: &S1::Identifier,
+    identifier: &Arc<str>,
     timeout: u64,
-) -> Result<S2::Identifier, MigrateError>
+) -> Result<Arc<str>, MigrateError>
 where
     S1: Store,
     S2: Store,
@@ -421,11 +420,7 @@ where
     Ok(new_identifier)
 }
 
-async fn migrate_details<I1, I2>(repo: &ArcRepo, from: &I1, to: &I2) -> Result<(), Error>
-where
-    I1: Identifier,
-    I2: Identifier,
-{
+async fn migrate_details(repo: &ArcRepo, from: &Arc<str>, to: &Arc<str>) -> Result<(), Error> {
     if let Some(details) = repo.details(from).await? {
         repo.relate_details(to, &details).await?;
         repo.cleanup_details(from).await?;

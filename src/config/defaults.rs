@@ -363,8 +363,20 @@ impl From<crate::config::commandline::Sled> for crate::config::file::Sled {
     }
 }
 
+impl From<crate::config::commandline::Postgres> for crate::config::file::Postgres {
+    fn from(value: crate::config::commandline::Postgres) -> Self {
+        crate::config::file::Postgres { url: value.url }
+    }
+}
+
 impl From<crate::config::commandline::Sled> for crate::config::file::Repo {
     fn from(value: crate::config::commandline::Sled) -> Self {
         crate::config::file::Repo::Sled(value.into())
+    }
+}
+
+impl From<crate::config::commandline::Postgres> for crate::config::file::Repo {
+    fn from(value: crate::config::commandline::Postgres) -> Self {
+        crate::config::file::Repo::Postgres(value.into())
     }
 }

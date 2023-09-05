@@ -1,22 +1,16 @@
 use crate::{
-    error_code::ErrorCode,
-    file::File,
-    repo::{Repo, SettingsRepo},
-    store::Store,
+    error_code::ErrorCode, file::File, repo::ArcRepo, store::Store, stream::LocalBoxStream,
 };
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{
     path::{Path, PathBuf},
-    pin::Pin,
+    sync::Arc,
 };
 use storage_path_generator::Generator;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::io::StreamReader;
 use tracing::Instrument;
-
-mod file_id;
-pub(crate) use file_id::FileId;
 
 use super::StoreError;
 
@@ -33,11 +27,11 @@ pub(crate) enum FileError {
     #[error("Failed to generate path")]
     PathGenerator(#[from] storage_path_generator::PathError),
 
-    #[error("Error formatting file store ID")]
-    IdError,
-
-    #[error("Malformed file store ID")]
+    #[error("Couldn't strip root dir")]
     PrefixError,
+
+    #[error("Couldn't convert Path to String")]
+    StringError,
 
     #[error("Tried to save over existing file")]
     FileExists,
@@ -49,7 +43,7 @@ impl FileError {
             Self::Io(_) => ErrorCode::FILE_IO_ERROR,
             Self::PathGenerator(_) => ErrorCode::PARSE_PATH_ERROR,
             Self::FileExists => ErrorCode::FILE_EXISTS,
-            Self::IdError | Self::PrefixError => ErrorCode::FORMAT_FILE_ID_ERROR,
+            Self::StringError | Self::PrefixError => ErrorCode::FORMAT_FILE_ID_ERROR,
         }
     }
 }
@@ -58,14 +52,12 @@ impl FileError {
 pub(crate) struct FileStore {
     path_gen: Generator,
     root_dir: PathBuf,
-    repo: Repo,
+    repo: ArcRepo,
 }
 
 #[async_trait::async_trait(?Send)]
 impl Store for FileStore {
-    type Identifier = FileId;
-    type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
-
+    #[tracing::instrument(level = "DEBUG", skip(self))]
     async fn health_check(&self) -> Result<(), StoreError> {
         tokio::fs::metadata(&self.root_dir)
             .await
@@ -74,12 +66,12 @@ impl Store for FileStore {
         Ok(())
     }
 
-    #[tracing::instrument(skip(reader))]
+    #[tracing::instrument(skip(self, reader))]
     async fn save_async_read<Reader>(
         &self,
         mut reader: Reader,
         _content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
@@ -97,7 +89,7 @@ impl Store for FileStore {
         &self,
         stream: S,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
@@ -105,12 +97,12 @@ impl Store for FileStore {
             .await
     }
 
-    #[tracing::instrument(skip(bytes))]
+    #[tracing::instrument(skip(self, bytes))]
     async fn save_bytes(
         &self,
         bytes: Bytes,
         _content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError> {
+    ) -> Result<Arc<str>, StoreError> {
         let path = self.next_file().await?;
 
         if let Err(e) = self.safe_save_bytes(&path, bytes).await {
@@ -121,17 +113,17 @@ impl Store for FileStore {
         Ok(self.file_id_from_path(path)?)
     }
 
-    fn public_url(&self, _identifier: &Self::Identifier) -> Option<url::Url> {
+    fn public_url(&self, _identifier: &Arc<str>) -> Option<url::Url> {
         None
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn to_stream(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, StoreError> {
+    ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError> {
         let path = self.path_from_file_id(identifier);
 
         let file_span = tracing::trace_span!(parent: None, "File Stream");
@@ -149,10 +141,10 @@ impl Store for FileStore {
         Ok(Box::pin(stream))
     }
 
-    #[tracing::instrument(skip(writer))]
+    #[tracing::instrument(skip(self, writer))]
     async fn read_into<Writer>(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
@@ -165,8 +157,8 @@ impl Store for FileStore {
         Ok(())
     }
 
-    #[tracing::instrument]
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, StoreError> {
+    #[tracing::instrument(skip(self))]
+    async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
         let path = self.path_from_file_id(identifier);
 
         let len = tokio::fs::metadata(path)
@@ -177,8 +169,8 @@ impl Store for FileStore {
         Ok(len)
     }
 
-    #[tracing::instrument]
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), StoreError> {
+    #[tracing::instrument(skip(self))]
+    async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError> {
         let path = self.path_from_file_id(identifier);
 
         self.safe_remove_file(path).await?;
@@ -189,7 +181,7 @@ impl Store for FileStore {
 
 impl FileStore {
     #[tracing::instrument(skip(repo))]
-    pub(crate) async fn build(root_dir: PathBuf, repo: Repo) -> color_eyre::Result<Self> {
+    pub(crate) async fn build(root_dir: PathBuf, repo: ArcRepo) -> color_eyre::Result<Self> {
         let path_gen = init_generator(&repo).await?;
 
         tokio::fs::create_dir_all(&root_dir).await?;
@@ -201,16 +193,24 @@ impl FileStore {
         })
     }
 
+    fn file_id_from_path(&self, path: PathBuf) -> Result<Arc<str>, FileError> {
+        path.strip_prefix(&self.root_dir)
+            .map_err(|_| FileError::PrefixError)?
+            .to_str()
+            .ok_or(FileError::StringError)
+            .map(Into::into)
+    }
+
+    fn path_from_file_id(&self, file_id: &Arc<str>) -> PathBuf {
+        self.root_dir.join(file_id.as_ref())
+    }
+
     async fn next_directory(&self) -> Result<PathBuf, StoreError> {
         let path = self.path_gen.next();
 
-        match self.repo {
-            Repo::Sled(ref sled_repo) => {
-                sled_repo
-                    .set(GENERATOR_KEY, path.to_be_bytes().into())
-                    .await?;
-            }
-        }
+        self.repo
+            .set(GENERATOR_KEY, path.to_be_bytes().into())
+            .await?;
 
         let mut target_path = self.root_dir.clone();
         for dir in path.to_strings() {
@@ -227,6 +227,7 @@ impl FileStore {
         Ok(target_path.join(filename))
     }
 
+    #[tracing::instrument(level = "DEBUG", skip(self, path), fields(path = ?path.as_ref()))]
     async fn safe_remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), FileError> {
         tokio::fs::remove_file(&path).await?;
         self.try_remove_parents(path.as_ref()).await;
@@ -308,18 +309,13 @@ pub(crate) async fn safe_create_parent<P: AsRef<Path>>(path: P) -> Result<(), Fi
     Ok(())
 }
 
-async fn init_generator(repo: &Repo) -> Result<Generator, StoreError> {
-    match repo {
-        Repo::Sled(sled_repo) => {
-            if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {
-                Ok(Generator::from_existing(
-                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())
-                        .map_err(FileError::from)?,
-                ))
-            } else {
-                Ok(Generator::new())
-            }
-        }
+async fn init_generator(repo: &ArcRepo) -> Result<Generator, StoreError> {
+    if let Some(ivec) = repo.get(GENERATOR_KEY).await? {
+        Ok(Generator::from_existing(
+            storage_path_generator::Path::from_be_bytes(ivec.to_vec()).map_err(FileError::from)?,
+        ))
+    } else {
+        Ok(Generator::new())
     }
 }
 

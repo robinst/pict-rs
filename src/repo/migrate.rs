@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tokio::task::JoinSet;
 
 use crate::{
@@ -33,7 +35,7 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
     tracing::warn!("Checks complete, migrating repo");
     tracing::warn!("{total_size} hashes will be migrated");
 
-    let mut hash_stream = old_repo.hashes().await.into_streamer();
+    let mut hash_stream = old_repo.hashes().into_streamer();
 
     let mut index = 0;
     while let Some(res) = hash_stream.next().await {
@@ -204,10 +206,14 @@ async fn do_migrate_hash(old_repo: &ArcRepo, new_repo: &ArcRepo, hash: Hash) -> 
         return Ok(());
     };
 
-    let _ = new_repo.create_hash(hash.clone(), &identifier).await?;
-
     if let Some(details) = old_repo.details(&identifier).await? {
+        let _ = new_repo
+            .create_hash_with_timestamp(hash.clone(), &identifier, details.created_at())
+            .await?;
+
         new_repo.relate_details(&identifier, &details).await?;
+    } else {
+        let _ = new_repo.create_hash(hash.clone(), &identifier).await?;
     }
 
     if let Some(identifier) = old_repo.motion_identifier(hash.clone()).await? {
@@ -266,7 +272,7 @@ async fn do_migrate_hash_04<S: Store>(
     config: &Configuration,
     old_hash: sled::IVec,
 ) -> Result<(), Error> {
-    let Some(identifier) = old_repo.identifier::<S::Identifier>(old_hash.clone()).await? else {
+    let Some(identifier) = old_repo.identifier(old_hash.clone()).await? else {
         tracing::warn!("Skipping hash {}, no identifier", hex::encode(&old_hash));
         return Ok(());
     };
@@ -276,10 +282,8 @@ async fn do_migrate_hash_04<S: Store>(
     let hash_details = set_details(old_repo, new_repo, store, config, &identifier).await?;
 
     let aliases = old_repo.aliases_for_hash(old_hash.clone()).await?;
-    let variants = old_repo.variants::<S::Identifier>(old_hash.clone()).await?;
-    let motion_identifier = old_repo
-        .motion_identifier::<S::Identifier>(old_hash.clone())
-        .await?;
+    let variants = old_repo.variants(old_hash.clone()).await?;
+    let motion_identifier = old_repo.motion_identifier(old_hash.clone()).await?;
 
     let hash = old_hash[..].try_into().expect("Invalid hash size");
 
@@ -326,7 +330,7 @@ async fn set_details<S: Store>(
     new_repo: &ArcRepo,
     store: &S,
     config: &Configuration,
-    identifier: &S::Identifier,
+    identifier: &Arc<str>,
 ) -> Result<Details, Error> {
     if let Some(details) = new_repo.details(identifier).await? {
         Ok(details)
@@ -342,9 +346,9 @@ async fn fetch_or_generate_details<S: Store>(
     old_repo: &OldSledRepo,
     store: &S,
     config: &Configuration,
-    identifier: &S::Identifier,
+    identifier: &Arc<str>,
 ) -> Result<Details, Error> {
-    let details_opt = old_repo.details(identifier).await?;
+    let details_opt = old_repo.details(identifier.clone()).await?;
 
     if let Some(details) = details_opt {
         Ok(details)

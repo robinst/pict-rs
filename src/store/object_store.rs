@@ -1,9 +1,9 @@
 use crate::{
     bytes_stream::BytesStream,
     error_code::ErrorCode,
-    repo::{Repo, SettingsRepo},
+    repo::ArcRepo,
     store::Store,
-    stream::{IntoStreamer, StreamMap},
+    stream::{IntoStreamer, LocalBoxStream, StreamMap},
 };
 use actix_rt::task::JoinError;
 use actix_web::{
@@ -19,15 +19,12 @@ use futures_core::Stream;
 use reqwest::{header::RANGE, Body, Response};
 use reqwest_middleware::{ClientWithMiddleware, RequestBuilder};
 use rusty_s3::{actions::S3Action, Bucket, BucketError, Credentials, UrlStyle};
-use std::{pin::Pin, string::FromUtf8Error, time::Duration};
+use std::{string::FromUtf8Error, sync::Arc, time::Duration};
 use storage_path_generator::{Generator, Path};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 use tracing::Instrument;
 use url::Url;
-
-mod object_id;
-pub(crate) use object_id::ObjectId;
 
 use super::StoreError;
 
@@ -107,7 +104,7 @@ impl From<BlockingError> for ObjectError {
 #[derive(Clone)]
 pub(crate) struct ObjectStore {
     path_gen: Generator,
-    repo: Repo,
+    repo: ArcRepo,
     bucket: Bucket,
     credentials: Credentials,
     client: ClientWithMiddleware,
@@ -119,7 +116,7 @@ pub(crate) struct ObjectStore {
 #[derive(Clone)]
 pub(crate) struct ObjectStoreConfig {
     path_gen: Generator,
-    repo: Repo,
+    repo: ArcRepo,
     bucket: Bucket,
     credentials: Credentials,
     signature_expiration: u64,
@@ -189,9 +186,6 @@ async fn status_error(response: Response) -> StoreError {
 
 #[async_trait::async_trait(?Send)]
 impl Store for ObjectStore {
-    type Identifier = ObjectId;
-    type Stream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>>>>;
-
     async fn health_check(&self) -> Result<(), StoreError> {
         let response = self
             .head_bucket_request()
@@ -211,7 +205,7 @@ impl Store for ObjectStore {
         &self,
         reader: Reader,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead + Unpin + 'static,
     {
@@ -224,7 +218,7 @@ impl Store for ObjectStore {
         &self,
         mut stream: S,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError>
+    ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
     {
@@ -283,7 +277,7 @@ impl Store for ObjectStore {
 
                 let object_id2 = object_id.clone();
                 let upload_id2 = upload_id.clone();
-                let handle = actix_rt::spawn(
+                let handle = crate::sync::spawn(
                     async move {
                         let response = this
                             .create_upload_part_request(
@@ -363,7 +357,7 @@ impl Store for ObjectStore {
         &self,
         bytes: Bytes,
         content_type: mime::Mime,
-    ) -> Result<Self::Identifier, StoreError> {
+    ) -> Result<Arc<str>, StoreError> {
         let (req, object_id) = self.put_object_request(bytes.len(), content_type).await?;
 
         let response = req.body(bytes).send().await.map_err(ObjectError::from)?;
@@ -375,9 +369,9 @@ impl Store for ObjectStore {
         Ok(object_id)
     }
 
-    fn public_url(&self, identifier: &Self::Identifier) -> Option<url::Url> {
+    fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
         self.public_endpoint.clone().map(|mut endpoint| {
-            endpoint.set_path(identifier.as_str());
+            endpoint.set_path(identifier.as_ref());
             endpoint
         })
     }
@@ -385,10 +379,10 @@ impl Store for ObjectStore {
     #[tracing::instrument(skip(self))]
     async fn to_stream(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         from_start: Option<u64>,
         len: Option<u64>,
-    ) -> Result<Self::Stream, StoreError> {
+    ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError> {
         let response = self
             .get_object_request(identifier, from_start, len)
             .send()
@@ -409,7 +403,7 @@ impl Store for ObjectStore {
     #[tracing::instrument(skip(self, writer))]
     async fn read_into<Writer>(
         &self,
-        identifier: &Self::Identifier,
+        identifier: &Arc<str>,
         writer: &mut Writer,
     ) -> Result<(), std::io::Error>
     where
@@ -440,7 +434,7 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn len(&self, identifier: &Self::Identifier) -> Result<u64, StoreError> {
+    async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
         let response = self
             .head_object_request(identifier)
             .send()
@@ -464,7 +458,7 @@ impl Store for ObjectStore {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn remove(&self, identifier: &Self::Identifier) -> Result<(), StoreError> {
+    async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError> {
         let response = self
             .delete_object_request(identifier)
             .send()
@@ -493,7 +487,7 @@ impl ObjectStore {
         signature_expiration: u64,
         client_timeout: u64,
         public_endpoint: Option<Url>,
-        repo: Repo,
+        repo: ArcRepo,
     ) -> Result<ObjectStoreConfig, StoreError> {
         let path_gen = init_generator(&repo).await?;
 
@@ -523,7 +517,7 @@ impl ObjectStore {
         &self,
         length: usize,
         content_type: mime::Mime,
-    ) -> Result<(RequestBuilder, ObjectId), StoreError> {
+    ) -> Result<(RequestBuilder, Arc<str>), StoreError> {
         let path = self.next_file().await?;
 
         let mut action = self.bucket.put_object(Some(&self.credentials), &path);
@@ -535,13 +529,13 @@ impl ObjectStore {
             .headers_mut()
             .insert("content-length", length.to_string());
 
-        Ok((self.build_request(action), ObjectId::from_string(path)))
+        Ok((self.build_request(action), Arc::from(path)))
     }
 
     async fn create_multipart_request(
         &self,
         content_type: mime::Mime,
-    ) -> Result<(RequestBuilder, ObjectId), StoreError> {
+    ) -> Result<(RequestBuilder, Arc<str>), StoreError> {
         let path = self.next_file().await?;
 
         let mut action = self
@@ -552,13 +546,13 @@ impl ObjectStore {
             .headers_mut()
             .insert("content-type", content_type.as_ref());
 
-        Ok((self.build_request(action), ObjectId::from_string(path)))
+        Ok((self.build_request(action), Arc::from(path)))
     }
 
     async fn create_upload_part_request(
         &self,
         buf: BytesStream,
-        object_id: &ObjectId,
+        object_id: &Arc<str>,
         part_number: u16,
         upload_id: &str,
     ) -> Result<RequestBuilder, ObjectError> {
@@ -566,7 +560,7 @@ impl ObjectStore {
 
         let mut action = self.bucket.upload_part(
             Some(&self.credentials),
-            object_id.as_str(),
+            object_id.as_ref(),
             part_number,
             upload_id,
         );
@@ -601,13 +595,13 @@ impl ObjectStore {
 
     async fn send_complete_multipart_request<'a, I: Iterator<Item = &'a str>>(
         &'a self,
-        object_id: &'a ObjectId,
+        object_id: &'a Arc<str>,
         upload_id: &'a str,
         etags: I,
     ) -> Result<Response, reqwest_middleware::Error> {
         let mut action = self.bucket.complete_multipart_upload(
             Some(&self.credentials),
-            object_id.as_str(),
+            object_id.as_ref(),
             upload_id,
             etags,
         );
@@ -628,12 +622,12 @@ impl ObjectStore {
 
     fn create_abort_multipart_request(
         &self,
-        object_id: &ObjectId,
+        object_id: &Arc<str>,
         upload_id: &str,
     ) -> RequestBuilder {
         let action = self.bucket.abort_multipart_upload(
             Some(&self.credentials),
-            object_id.as_str(),
+            object_id.as_ref(),
             upload_id,
         );
 
@@ -671,13 +665,13 @@ impl ObjectStore {
 
     fn get_object_request(
         &self,
-        identifier: &ObjectId,
+        identifier: &Arc<str>,
         from_start: Option<u64>,
         len: Option<u64>,
     ) -> RequestBuilder {
         let action = self
             .bucket
-            .get_object(Some(&self.credentials), identifier.as_str());
+            .get_object(Some(&self.credentials), identifier.as_ref());
 
         let req = self.build_request(action);
 
@@ -695,18 +689,18 @@ impl ObjectStore {
         )
     }
 
-    fn head_object_request(&self, identifier: &ObjectId) -> RequestBuilder {
+    fn head_object_request(&self, identifier: &Arc<str>) -> RequestBuilder {
         let action = self
             .bucket
-            .head_object(Some(&self.credentials), identifier.as_str());
+            .head_object(Some(&self.credentials), identifier.as_ref());
 
         self.build_request(action)
     }
 
-    fn delete_object_request(&self, identifier: &ObjectId) -> RequestBuilder {
+    fn delete_object_request(&self, identifier: &Arc<str>) -> RequestBuilder {
         let action = self
             .bucket
-            .delete_object(Some(&self.credentials), identifier.as_str());
+            .delete_object(Some(&self.credentials), identifier.as_ref());
 
         self.build_request(action)
     }
@@ -714,13 +708,9 @@ impl ObjectStore {
     async fn next_directory(&self) -> Result<Path, StoreError> {
         let path = self.path_gen.next();
 
-        match self.repo {
-            Repo::Sled(ref sled_repo) => {
-                sled_repo
-                    .set(GENERATOR_KEY, path.to_be_bytes().into())
-                    .await?;
-            }
-        }
+        self.repo
+            .set(GENERATOR_KEY, path.to_be_bytes().into())
+            .await?;
 
         Ok(path)
     }
@@ -733,18 +723,14 @@ impl ObjectStore {
     }
 }
 
-async fn init_generator(repo: &Repo) -> Result<Generator, StoreError> {
-    match repo {
-        Repo::Sled(sled_repo) => {
-            if let Some(ivec) = sled_repo.get(GENERATOR_KEY).await? {
-                Ok(Generator::from_existing(
-                    storage_path_generator::Path::from_be_bytes(ivec.to_vec())
-                        .map_err(ObjectError::from)?,
-                ))
-            } else {
-                Ok(Generator::new())
-            }
-        }
+async fn init_generator(repo: &ArcRepo) -> Result<Generator, StoreError> {
+    if let Some(ivec) = repo.get(GENERATOR_KEY).await? {
+        Ok(Generator::from_existing(
+            storage_path_generator::Path::from_be_bytes(ivec.to_vec())
+                .map_err(ObjectError::from)?,
+        ))
+    } else {
+        Ok(Generator::new())
     }
 }
 
