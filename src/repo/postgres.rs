@@ -266,11 +266,12 @@ impl Inner {
 
 impl UploadInterest {
     async fn notified_timeout(&self, timeout: Duration) -> Result<(), tokio::time::error::Elapsed> {
-        actix_rt::time::timeout(
-            timeout,
-            self.interest.as_ref().expect("interest exists").notified(),
-        )
-        .await
+        self.interest
+            .as_ref()
+            .expect("interest exists")
+            .notified()
+            .with_timeout(timeout)
+            .await
     }
 }
 
@@ -1214,7 +1215,9 @@ impl QueueRepo for PostgresRepo {
             }
 
             drop(conn);
-            if actix_rt::time::timeout(Duration::from_secs(5), notifier.notified())
+            if notifier
+                .notified()
+                .with_timeout(Duration::from_secs(5))
                 .await
                 .is_ok()
             {

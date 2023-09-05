@@ -38,6 +38,7 @@ use actix_web::{
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use details::{ApiDetails, HumanDate};
+use future::WithTimeout;
 use futures_core::Stream;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::Metrics;
@@ -432,7 +433,11 @@ async fn claim_upload<S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let upload_id = Serde::into_inner(query.into_inner().upload_id);
 
-    match actix_rt::time::timeout(Duration::from_secs(10), repo.wait(upload_id)).await {
+    match repo
+        .wait(upload_id)
+        .with_timeout(Duration::from_secs(10))
+        .await
+    {
         Ok(wait_res) => {
             let upload_result = wait_res?;
             repo.claim(upload_id).await?;

@@ -14,7 +14,7 @@ use tokio::{
 };
 use tracing::{Instrument, Span};
 
-use crate::error_code::ErrorCode;
+use crate::{error_code::ErrorCode, future::WithTimeout};
 
 struct MetricsGuard {
     start: Instant,
@@ -159,7 +159,7 @@ impl Process {
             timeout,
         } = self;
 
-        let res = actix_rt::time::timeout(timeout, child.wait()).await;
+        let res = child.wait().with_timeout(timeout).await;
 
         match res {
             Ok(Ok(status)) if status.success() => {
@@ -220,7 +220,7 @@ impl Process {
                     child.wait().await
                 };
 
-                let error = match actix_rt::time::timeout(timeout, child_fut).await {
+                let error = match child_fut.with_timeout(timeout).await {
                     Ok(Ok(status)) if status.success() => {
                         guard.disarm();
                         return;
