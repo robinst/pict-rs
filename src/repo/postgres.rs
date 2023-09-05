@@ -130,17 +130,18 @@ impl PostgresError {
     }
 
     pub(super) const fn is_disconnected(&self) -> bool {
-        match self {
+        matches!(
+            self,
             Self::Pool(
                 PoolError::Closed
-                | PoolError::Backend(diesel_async::pooled_connection::PoolError::ConnectionError(_)),
-            )
-            | Self::Diesel(diesel::result::Error::DatabaseError(
+                    | PoolError::Backend(
+                        diesel_async::pooled_connection::PoolError::ConnectionError(_)
+                    ),
+            ) | Self::Diesel(diesel::result::Error::DatabaseError(
                 diesel::result::DatabaseErrorKind::ClosedConnection,
                 _,
-            )) => true,
-            _ => false,
-        }
+            ))
+        )
     }
 }
 
