@@ -206,10 +206,14 @@ async fn do_migrate_hash(old_repo: &ArcRepo, new_repo: &ArcRepo, hash: Hash) -> 
         return Ok(());
     };
 
-    let _ = new_repo.create_hash(hash.clone(), &identifier).await?;
-
     if let Some(details) = old_repo.details(&identifier).await? {
+        let _ = new_repo
+            .create_hash_with_timestamp(hash.clone(), &identifier, details.created_at())
+            .await?;
+
         new_repo.relate_details(&identifier, &details).await?;
+    } else {
+        let _ = new_repo.create_hash(hash.clone(), &identifier).await?;
     }
 
     if let Some(identifier) = old_repo.motion_identifier(hash.clone()).await? {
