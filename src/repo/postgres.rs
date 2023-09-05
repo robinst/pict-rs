@@ -451,8 +451,8 @@ impl HashRepo for PostgresRepo {
         let count = hashes
             .count()
             .get_result::<i64>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.hashes.count")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -470,8 +470,8 @@ impl HashRepo for PostgresRepo {
             .select(created_at)
             .filter(hash.eq(&input_hash))
             .get_result(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.hashes.bound")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map(time::PrimitiveDateTime::assume_utc)
@@ -501,8 +501,8 @@ impl HashRepo for PostgresRepo {
             .filter(created_at.lt(timestamp))
             .order(created_at.desc())
             .get_result::<(time::PrimitiveDateTime, Hash)>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.hashes.ordered-hash")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -540,8 +540,8 @@ impl HashRepo for PostgresRepo {
                 .then_order_by(hash.desc())
                 .limit(limit as i64 + 1)
                 .get_results::<Hash>(&mut conn)
-                .with_timeout(Duration::from_secs(5))
                 .with_metrics("pict-rs.postgres.hashes.next-hashes")
+                .with_timeout(Duration::from_secs(5))
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .map_err(PostgresError::Diesel)?;
@@ -554,8 +554,8 @@ impl HashRepo for PostgresRepo {
                 .then_order_by(hash)
                 .limit(limit as i64)
                 .get_results::<Hash>(&mut conn)
-                .with_timeout(Duration::from_secs(5))
                 .with_metrics("pict-rs.postgres.hashes.prev-hashes")
+                .with_timeout(Duration::from_secs(5))
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .map_err(PostgresError::Diesel)?
@@ -569,8 +569,8 @@ impl HashRepo for PostgresRepo {
                 .then_order_by(hash.desc())
                 .limit(limit as i64 + 1)
                 .get_results::<Hash>(&mut conn)
-                .with_timeout(Duration::from_secs(5))
                 .with_metrics("pict-rs.postgres.hashes.first-hashes")
+                .with_timeout(Duration::from_secs(5))
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .map_err(PostgresError::Diesel)?;
@@ -608,8 +608,8 @@ impl HashRepo for PostgresRepo {
                 created_at.eq(&timestamp),
             ))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.hashes.create-hash")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?;
 
@@ -637,8 +637,8 @@ impl HashRepo for PostgresRepo {
             .filter(hash.eq(&input_hash))
             .set(identifier.eq(input_identifier.as_ref()))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.hashes.update-identifier")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -656,8 +656,8 @@ impl HashRepo for PostgresRepo {
             .select(identifier)
             .filter(hash.eq(&input_hash))
             .get_result::<String>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.hashes.identifier")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -684,8 +684,8 @@ impl HashRepo for PostgresRepo {
                 identifier.eq(input_identifier.as_ref()),
             ))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.variants.relate-variant-identifier")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?;
 
@@ -714,8 +714,8 @@ impl HashRepo for PostgresRepo {
             .filter(hash.eq(&input_hash))
             .filter(variant.eq(&input_variant))
             .get_result::<String>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.variants.identifier")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -735,8 +735,8 @@ impl HashRepo for PostgresRepo {
             .select((variant, identifier))
             .filter(hash.eq(&input_hash))
             .get_results::<(String, String)>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.variants.for-hash")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?
@@ -761,8 +761,8 @@ impl HashRepo for PostgresRepo {
             .filter(hash.eq(&input_hash))
             .filter(variant.eq(&input_variant))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.variants.remove")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -784,8 +784,8 @@ impl HashRepo for PostgresRepo {
             .filter(hash.eq(&input_hash))
             .set(motion_identifier.eq(input_identifier.as_ref()))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.hashes.relate-motion-identifier")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -803,8 +803,8 @@ impl HashRepo for PostgresRepo {
             .select(motion_identifier)
             .filter(hash.eq(&input_hash))
             .get_result::<Option<String>>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.hashes.motion-identifier")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -861,8 +861,8 @@ impl AliasRepo for PostgresRepo {
                 token.eq(delete_token),
             ))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.aliases.create")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?;
 
@@ -886,8 +886,8 @@ impl AliasRepo for PostgresRepo {
             .select(token)
             .filter(alias.eq(input_alias))
             .get_result(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.aliases.delete-token")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -906,8 +906,8 @@ impl AliasRepo for PostgresRepo {
             .select(hash)
             .filter(alias.eq(input_alias))
             .get_result(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.aliases.hash")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -926,8 +926,8 @@ impl AliasRepo for PostgresRepo {
             .select(alias)
             .filter(hash.eq(&input_hash))
             .get_results(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.aliases.for-hash")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -944,8 +944,8 @@ impl AliasRepo for PostgresRepo {
         diesel::delete(aliases)
             .filter(alias.eq(input_alias))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.aliases.cleanup")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -970,8 +970,8 @@ impl SettingsRepo for PostgresRepo {
             .do_update()
             .set(value.eq(&input_value))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.settings.set")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -989,8 +989,8 @@ impl SettingsRepo for PostgresRepo {
             .select(value)
             .filter(key.eq(input_key))
             .get_result::<String>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.settings.get")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -1012,8 +1012,8 @@ impl SettingsRepo for PostgresRepo {
         diesel::delete(settings)
             .filter(key.eq(input_key))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.settings.remove")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1040,8 +1040,8 @@ impl DetailsRepo for PostgresRepo {
         diesel::insert_into(details)
             .values((identifier.eq(input_identifier.as_ref()), json.eq(&value)))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.details.relate")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1059,8 +1059,8 @@ impl DetailsRepo for PostgresRepo {
             .select(json)
             .filter(identifier.eq(input_identifier.as_ref()))
             .get_result::<serde_json::Value>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.details.get")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -1082,8 +1082,8 @@ impl DetailsRepo for PostgresRepo {
         diesel::delete(details)
             .filter(identifier.eq(input_identifier.as_ref()))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.details.cleanup")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1110,8 +1110,8 @@ impl QueueRepo for PostgresRepo {
             .values((queue.eq(queue_name), job.eq(job_json)))
             .returning(id)
             .get_result::<Uuid>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.queue.push")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1143,8 +1143,8 @@ impl QueueRepo for PostgresRepo {
 
             diesel::sql_query("LISTEN queue_status_channel;")
                 .execute(&mut conn)
-                .with_timeout(Duration::from_secs(5))
                 .with_metrics("pict-rs.postgres.queue.listen")
+                .with_timeout(Duration::from_secs(5))
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .map_err(PostgresError::Diesel)?;
@@ -1158,8 +1158,8 @@ impl QueueRepo for PostgresRepo {
                     status.eq(JobStatus::New),
                 ))
                 .execute(&mut conn)
-                .with_timeout(Duration::from_secs(5))
                 .with_metrics("pict-rs.postgres.queue.requeue")
+                .with_timeout(Duration::from_secs(5))
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .map_err(PostgresError::Diesel)?;
@@ -1176,8 +1176,8 @@ impl QueueRepo for PostgresRepo {
                     .order(queue_time)
                     .limit(1)
                     .get_result::<Uuid>(&mut conn)
-                    .with_timeout(Duration::from_secs(5))
                     .with_metrics("pict-rs.postgres.queue.select")
+                    .with_timeout(Duration::from_secs(5))
                     .await
                     .map_err(|_| PostgresError::DbTimeout)?
                     .optional()
@@ -1197,8 +1197,8 @@ impl QueueRepo for PostgresRepo {
                     ))
                     .returning((id, job))
                     .get_result(&mut conn)
-                    .with_timeout(Duration::from_secs(5))
                     .with_metrics("pict-rs.postgres.queue.claim")
+                    .with_timeout(Duration::from_secs(5))
                     .await
                     .map_err(|_| PostgresError::DbTimeout)?
                     .optional()
@@ -1249,8 +1249,8 @@ impl QueueRepo for PostgresRepo {
             )
             .set(heartbeat.eq(timestamp))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.queue.heartbeat")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1276,8 +1276,8 @@ impl QueueRepo for PostgresRepo {
                     .and(worker.eq(worker_id)),
             )
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.queue.complete")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1297,8 +1297,8 @@ impl StoreMigrationRepo for PostgresRepo {
         let count = store_migrations
             .count()
             .get_result::<i64>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.store-migration.count")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1324,8 +1324,8 @@ impl StoreMigrationRepo for PostgresRepo {
             .on_conflict((old_identifier, new_identifier))
             .do_nothing()
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.store-migration.mark-migrated")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1343,8 +1343,8 @@ impl StoreMigrationRepo for PostgresRepo {
             store_migrations.filter(old_identifier.eq(input_old_identifier.as_ref())),
         ))
         .get_result(&mut conn)
-        .with_timeout(Duration::from_secs(5))
         .with_metrics("pict-rs.postgres.store-migration.is-migrated")
+        .with_timeout(Duration::from_secs(5))
         .await
         .map_err(|_| PostgresError::DbTimeout)?
         .map_err(PostgresError::Diesel)?;
@@ -1360,8 +1360,8 @@ impl StoreMigrationRepo for PostgresRepo {
 
         diesel::delete(store_migrations)
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(20))
             .with_metrics("pict-rs.postgres.store-migration.clear")
+            .with_timeout(Duration::from_secs(20))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1381,8 +1381,8 @@ impl ProxyRepo for PostgresRepo {
         diesel::insert_into(proxies)
             .values((url.eq(input_url.as_str()), alias.eq(&input_alias)))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.proxy.relate-url")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1400,8 +1400,8 @@ impl ProxyRepo for PostgresRepo {
             .select(alias)
             .filter(url.eq(input_url.as_str()))
             .get_result(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.proxy.related")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -1419,8 +1419,8 @@ impl ProxyRepo for PostgresRepo {
         diesel::delete(proxies)
             .filter(alias.eq(&input_alias))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.proxy.remove-relation")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1447,8 +1447,8 @@ impl AliasAccessRepo for PostgresRepo {
             .filter(alias.eq(&input_alias))
             .set(accessed.eq(timestamp))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.alias-access.set-accessed")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1469,8 +1469,8 @@ impl AliasAccessRepo for PostgresRepo {
             .select(accessed)
             .filter(alias.eq(&input_alias))
             .get_result::<time::PrimitiveDateTime>(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.alias-access.accessed-at")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -1502,8 +1502,8 @@ impl AliasAccessRepo for PostgresRepo {
                         .order(accessed.desc())
                         .limit(100)
                         .get_results(&mut conn)
-                        .with_timeout(Duration::from_secs(5))
                         .with_metrics("pict-rs.postgres.alias-access.older-aliases")
+                        .with_timeout(Duration::from_secs(5))
                         .await
                         .map_err(|_| PostgresError::DbTimeout)?
                         .map_err(PostgresError::Diesel)?;
@@ -1539,8 +1539,8 @@ impl VariantAccessRepo for PostgresRepo {
             .filter(hash.eq(&input_hash).and(variant.eq(&input_variant)))
             .set(accessed.eq(timestamp))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.variant-access.set-accessed")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1562,8 +1562,8 @@ impl VariantAccessRepo for PostgresRepo {
             .select(accessed)
             .filter(hash.eq(&input_hash).and(variant.eq(&input_variant)))
             .get_result(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.variant-access.accessed-at")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .optional()
@@ -1595,8 +1595,8 @@ impl VariantAccessRepo for PostgresRepo {
                         .order(accessed.desc())
                         .limit(100)
                         .get_results(&mut conn)
-                        .with_timeout(Duration::from_secs(5))
                         .with_metrics("pict-rs.postgres.variant-access.older-variants")
+                        .with_timeout(Duration::from_secs(5))
                         .await
                         .map_err(|_| PostgresError::DbTimeout)?
                         .map_err(PostgresError::Diesel)?;
@@ -1661,8 +1661,8 @@ impl UploadRepo for PostgresRepo {
             .default_values()
             .returning(id)
             .get_result(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.uploads.create")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1684,8 +1684,8 @@ impl UploadRepo for PostgresRepo {
 
             diesel::sql_query("LISTEN upload_completion_channel;")
                 .execute(&mut conn)
-                .with_timeout(Duration::from_secs(5))
                 .with_metrics("pict-rs.postgres.uploads.listen")
+                .with_timeout(Duration::from_secs(5))
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .map_err(PostgresError::Diesel)?;
@@ -1694,8 +1694,8 @@ impl UploadRepo for PostgresRepo {
                 .select(result)
                 .filter(id.eq(upload_id.id))
                 .get_result(&mut conn)
-                .with_timeout(Duration::from_secs(5))
                 .with_metrics("pict-rs.postgres.uploads.wait")
+                .with_timeout(Duration::from_secs(5))
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .optional()
@@ -1736,8 +1736,8 @@ impl UploadRepo for PostgresRepo {
         diesel::delete(uploads)
             .filter(id.eq(upload_id.id))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.uploads.claim")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
@@ -1763,8 +1763,8 @@ impl UploadRepo for PostgresRepo {
             .filter(id.eq(upload_id.id))
             .set(result.eq(upload_result))
             .execute(&mut conn)
-            .with_timeout(Duration::from_secs(5))
             .with_metrics("pict-rs.postgres.uploads.complete")
+            .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
             .map_err(PostgresError::Diesel)?;
