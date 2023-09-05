@@ -204,7 +204,7 @@ async fn process_jobs<S, F>(
             tracing::warn!("{}", format!("{e:?}"));
 
             if e.is_disconnected() {
-                actix_rt::time::sleep(Duration::from_secs(3)).await;
+                actix_rt::time::sleep(Duration::from_secs(10)).await;
             }
 
             continue;
