@@ -3,7 +3,8 @@ use std::sync::Arc;
 use crate::{
     config::Configuration,
     error::{Error, UploadError},
-    queue::{Cleanup, LocalBoxFuture},
+    future::LocalBoxFuture,
+    queue::Cleanup,
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     serde_str::Serde,
     store::Store,

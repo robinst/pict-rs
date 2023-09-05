@@ -11,6 +11,7 @@ mod exiftool;
 mod ffmpeg;
 mod file;
 mod formats;
+mod future;
 mod generate;
 mod ingest;
 mod init_tracing;
@@ -53,8 +54,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::sync::Semaphore;
+use tracing::Instrument;
 use tracing_actix_web::TracingLogger;
-use tracing_futures::Instrument;
 
 use self::{
     backgrounded::Backgrounded,
@@ -1550,6 +1551,7 @@ async fn identifier<S: Store>(
     })))
 }
 
+#[tracing::instrument(skip(repo, store))]
 async fn healthz<S: Store>(
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,

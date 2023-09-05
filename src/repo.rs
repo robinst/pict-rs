@@ -8,6 +8,7 @@ use crate::{
     config,
     details::Details,
     error_code::{ErrorCode, OwnedErrorCode},
+    future::LocalBoxFuture,
     stream::LocalBoxStream,
 };
 use base64::Engine;
@@ -83,6 +84,13 @@ impl RepoError {
             Self::PostgresError(e) => e.error_code(),
             Self::AlreadyClaimed => ErrorCode::ALREADY_CLAIMED,
             Self::Canceled => ErrorCode::PANIC,
+        }
+    }
+
+    pub(crate) const fn is_disconnected(&self) -> bool {
+        match self {
+            Self::PostgresError(e) => e.is_disconnected(),
+            _ => false,
         }
     }
 }
@@ -563,8 +571,6 @@ impl HashPage {
         self.prev.as_ref().map(hash_to_slug)
     }
 }
-
-type LocalBoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
 
 type PageFuture = LocalBoxFuture<'static, Result<HashPage, RepoError>>;
 

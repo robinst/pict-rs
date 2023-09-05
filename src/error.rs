@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 use color_eyre::Report;
 
@@ -5,6 +7,8 @@ use crate::error_code::ErrorCode;
 
 pub(crate) struct Error {
     inner: color_eyre::Report,
+    debug: Arc<str>,
+    display: Arc<str>,
 }
 
 impl Error {
@@ -21,17 +25,21 @@ impl Error {
             .map(|e| e.error_code())
             .unwrap_or(ErrorCode::UNKNOWN_ERROR)
     }
+
+    pub(crate) fn is_disconnected(&self) -> bool {
+        self.kind().map(|e| e.is_disconnected()).unwrap_or(false)
+    }
 }
 
 impl std::fmt::Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self.inner, f)
+        f.write_str(&self.debug)
     }
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.inner, f)
+        f.write_str(&self.display)
     }
 }
 
@@ -46,8 +54,14 @@ where
     UploadError: From<T>,
 {
     fn from(error: T) -> Self {
+        let inner = Report::from(UploadError::from(error));
+        let debug = Arc::from(format!("{inner:?}"));
+        let display = Arc::from(format!("{inner}"));
+
         Error {
-            inner: Report::from(UploadError::from(error)),
+            inner,
+            debug,
+            display,
         }
     }
 }
@@ -170,6 +184,14 @@ impl UploadError {
             Self::Range => ErrorCode::RANGE_NOT_SATISFIABLE,
             Self::Limit(_) => ErrorCode::VALIDATE_FILE_SIZE,
             Self::Timeout(_) => ErrorCode::STREAM_TOO_SLOW,
+        }
+    }
+
+    const fn is_disconnected(&self) -> bool {
+        match self {
+            Self::Repo(e) => e.is_disconnected(),
+            Self::Store(s) => s.is_disconnected(),
+            _ => false,
         }
     }
 }

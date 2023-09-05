@@ -3,14 +3,13 @@ use crate::{
     config::Configuration,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
+    future::LocalBoxFuture,
     repo::{Alias, DeleteToken, FullRepo, Hash, JobId, UploadId},
     serde_str::Serde,
     store::Store,
 };
 use std::{
-    future::Future,
     path::PathBuf,
-    pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -179,8 +178,6 @@ pub(crate) async fn process_images<S: Store + 'static>(
     .await
 }
 
-type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
-
 async fn process_jobs<S, F>(
     repo: &Arc<dyn FullRepo>,
     store: &S,
@@ -205,6 +202,11 @@ async fn process_jobs<S, F>(
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
             tracing::warn!("{}", format!("{e:?}"));
+
+            if e.is_disconnected() {
+                actix_rt::time::sleep(Duration::from_secs(3)).await;
+            }
+
             continue;
         }
 
@@ -323,6 +325,11 @@ async fn process_image_jobs<S, F>(
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
             tracing::warn!("{}", format!("{e:?}"));
+
+            if e.is_disconnected() {
+                actix_rt::time::sleep(Duration::from_secs(3)).await;
+            }
+
             continue;
         }
 

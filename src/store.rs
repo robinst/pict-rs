@@ -39,8 +39,16 @@ impl StoreError {
             Self::FileNotFound(_) | Self::ObjectNotFound(_) => ErrorCode::NOT_FOUND,
         }
     }
+
     pub(crate) const fn is_not_found(&self) -> bool {
         matches!(self, Self::FileNotFound(_)) || matches!(self, Self::ObjectNotFound(_))
+    }
+
+    pub(crate) const fn is_disconnected(&self) -> bool {
+        match self {
+            Self::Repo(e) => e.is_disconnected(),
+            _ => false,
+        }
     }
 }
 
