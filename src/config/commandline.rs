@@ -56,6 +56,7 @@ impl Args {
                 client_timeout,
                 metrics_prometheus_address,
                 media_preprocess_steps,
+                media_external_validation,
                 media_max_file_size,
                 media_process_timeout,
                 media_retention_variants,
@@ -183,6 +184,7 @@ impl Args {
                     max_file_size: media_max_file_size,
                     process_timeout: media_process_timeout,
                     preprocess_steps: media_preprocess_steps,
+                    external_validation: media_external_validation,
                     filters: media_filters,
                     retention: retention.set(),
                     image: image.set(),
@@ -549,6 +551,8 @@ struct Media {
     #[serde(skip_serializing_if = "Option::is_none")]
     preprocess_steps: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    external_validation: Option<Url>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     filters: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     retention: Option<Retention>,
@@ -883,6 +887,10 @@ struct Run {
     /// All still images will be put through these steps before saving
     #[arg(long)]
     media_preprocess_steps: Option<String>,
+
+    /// Optional endpoint to submit uploaded media to for validation
+    #[arg(long)]
+    media_external_validation: Option<Url>,
 
     /// Which media filters should be enabled on the `process` endpoint
     #[arg(long)]

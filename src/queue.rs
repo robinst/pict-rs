@@ -8,6 +8,7 @@ use crate::{
     serde_str::Serde,
     store::Store,
 };
+use reqwest_middleware::ClientWithMiddleware;
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -164,12 +165,14 @@ pub(crate) async fn process_cleanup<S: Store>(
 pub(crate) async fn process_images<S: Store + 'static>(
     repo: Arc<dyn FullRepo>,
     store: S,
+    client: ClientWithMiddleware,
     process_map: ProcessMap,
     config: Configuration,
 ) {
     process_image_jobs(
         &repo,
         &store,
+        &client,
         &process_map,
         &config,
         PROCESS_QUEUE,
@@ -301,6 +304,7 @@ where
 async fn process_image_jobs<S, F>(
     repo: &Arc<dyn FullRepo>,
     store: &S,
+    client: &ClientWithMiddleware,
     process_map: &ProcessMap,
     config: &Configuration,
     queue: &'static str,
@@ -310,6 +314,7 @@ async fn process_image_jobs<S, F>(
     for<'a> F: Fn(
             &'a Arc<dyn FullRepo>,
             &'a S,
+            &'a ClientWithMiddleware,
             &'a ProcessMap,
             &'a Configuration,
             serde_json::Value,
@@ -319,8 +324,17 @@ async fn process_image_jobs<S, F>(
     let worker_id = uuid::Uuid::new_v4();
 
     loop {
-        let res =
-            image_job_loop(repo, store, process_map, config, worker_id, queue, callback).await;
+        let res = image_job_loop(
+            repo,
+            store,
+            client,
+            process_map,
+            config,
+            worker_id,
+            queue,
+            callback,
+        )
+        .await;
 
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
@@ -340,6 +354,7 @@ async fn process_image_jobs<S, F>(
 async fn image_job_loop<S, F>(
     repo: &Arc<dyn FullRepo>,
     store: &S,
+    client: &ClientWithMiddleware,
     process_map: &ProcessMap,
     config: &Configuration,
     worker_id: uuid::Uuid,
@@ -351,6 +366,7 @@ where
     for<'a> F: Fn(
             &'a Arc<dyn FullRepo>,
             &'a S,
+            &'a ClientWithMiddleware,
             &'a ProcessMap,
             &'a Configuration,
             serde_json::Value,
@@ -372,7 +388,7 @@ where
                         queue,
                         worker_id,
                         job_id,
-                        (callback)(repo, store, process_map, config, job),
+                        (callback)(repo, store, client, process_map, config, job),
                     )
                 })
                 .instrument(span)

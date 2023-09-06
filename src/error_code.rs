@@ -141,4 +141,7 @@ impl ErrorCode {
     pub(crate) const UNKNOWN_ERROR: ErrorCode = ErrorCode {
         code: "unknown-error",
     };
+    pub(crate) const FAILED_EXTERNAL_VALIDATION: ErrorCode = ErrorCode {
+        code: "failed-external-validation",
+    };
 }

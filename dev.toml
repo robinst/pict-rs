@@ -23,6 +23,7 @@ path = 'data/sled-repo-local'
 cache_capacity = 67108864
 
 [media]
+# external_validation = 'http://localhost:8076'
 max_file_size = 40
 filters = ['blur', 'crop', 'identity', 'resize', 'thumbnail']
 

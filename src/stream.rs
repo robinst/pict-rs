@@ -14,6 +14,68 @@ use std::{
     time::Duration,
 };
 
+pub(crate) trait MakeSend<T>: Stream<Item = std::io::Result<T>>
+where
+    T: 'static,
+{
+    fn make_send(self) -> MakeSendStream<T>
+    where
+        Self: Sized + 'static,
+    {
+        let (tx, rx) = crate::sync::channel(4);
+
+        MakeSendStream {
+            handle: crate::sync::spawn(async move {
+                let this = std::pin::pin!(self);
+
+                let mut stream = this.into_streamer();
+
+                while let Some(res) = stream.next().await {
+                    if tx.send_async(res).await.is_err() {
+                        return;
+                    }
+                }
+            }),
+            rx: rx.into_stream(),
+        }
+    }
+}
+
+impl<S, T> MakeSend<T> for S
+where
+    S: Stream<Item = std::io::Result<T>>,
+    T: 'static,
+{
+}
+
+pub(crate) struct MakeSendStream<T>
+where
+    T: 'static,
+{
+    handle: actix_rt::task::JoinHandle<()>,
+    rx: flume::r#async::RecvStream<'static, std::io::Result<T>>,
+}
+
+impl<T> Stream for MakeSendStream<T>
+where
+    T: 'static,
+{
+    type Item = std::io::Result<T>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.rx).poll_next(cx) {
+            Poll::Ready(opt) => Poll::Ready(opt),
+            Poll::Pending if std::task::ready!(Pin::new(&mut self.handle).poll(cx)).is_err() => {
+                Poll::Ready(Some(Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "Stream panicked",
+                ))))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 pin_project_lite::pin_project! {
     pub(crate) struct Map<S, F> {
         #[pin]

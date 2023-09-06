@@ -165,6 +165,8 @@ pub(crate) struct OldDb {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Media {
+    pub(crate) external_validation: Option<Url>,
+
     pub(crate) max_file_size: usize,
 
     pub(crate) process_timeout: u64,

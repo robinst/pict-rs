@@ -143,6 +143,15 @@ cache_capacity = 67108864
 
 ## Media Processing Configuration
 [media]
+## Optional: URL for external validation of media
+# environment variable: PICTRS__MEDIA__EXTERNAL_VALIDATION
+# default: empty
+#
+# The expected API for external validators is to accept a POST with the media as the request body,
+# and a valid `Content-Type` header. The validator should return a 2XX response when the media
+# passes validation. Any other status code is considered a validation failure.
+external_validation = 'http://localhost:8076'
+
 ## Optional: max file size (in Megabytes)
 # environment variable: PICTRS__MEDIA__MAX_FILE_SIZE
 # default: 40
@@ -499,13 +508,15 @@ crf_1440 = 24
 crf_2160 = 15
 
 
-## Database configuration
+### Database configuration
+
+## Sled repo configuration example
 [repo]
 ## Optional: database backend to use
 # environment variable: PICTRS__REPO__TYPE
 # default: sled
 #
-# available options: sled
+# available options: sled, postgres
 type = 'sled'
 
 ## Optional: path to sled repository
@@ -527,7 +538,39 @@ cache_capacity = 67108864
 export_path = "/mnt/exports"
 
 
-## Media storage configuration
+## Postgres repo configuration example
+[repo]
+## Optional: database backend to use
+# environment variable: PICTRS__REPO__TYPE
+# default: sled
+#
+# available options: sled, postgres
+type = 'postgres'
+
+## Required: URL to postgres database
+# environment variable: PICTRS__REPO__URL
+# default: empty
+url = 'postgres://user:password@host:5432/db'
+
+
+### Media storage configuration
+
+## Filesystem media storage example
+[store]
+## Optional: type of media storage to use
+# environment variable: PICTRS__STORE__TYPE
+# default: filesystem
+#
+# available options: filesystem, object_storage
+type = 'filesystem'
+
+## Optional: path to uploaded media
+# environment variable: PICTRS__STORE__PATH
+# default: /mnt/files
+path = '/mnt/files'
+
+
+## Object media storage example
 [store]
 ## Optional: type of media storage to use
 # environment variable: PICTRS__STORE__TYPE
@@ -597,18 +640,3 @@ signature_expiration = 15
 # This value is the total wait time, and not additional wait time on top of the
 # signature_expiration.
 client_timeout = 30
-
-## Filesystem media storage example
-# ## Media storage configuration
-# [store]
-# ## Optional: type of media storage to use
-# # environment variable: PICTRS__STORE__TYPE
-# # default: filesystem
-# #
-# # available options: filesystem, object_storage
-# type = 'filesystem'
-#
-# ## Optional: path to uploaded media
-# # environment variable: PICTRS__STORE__PATH
-# # default: /mnt/files
-# path = '/mnt/files'

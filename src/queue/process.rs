@@ -1,3 +1,5 @@
+use reqwest_middleware::ClientWithMiddleware;
+
 use crate::{
     concurrent_processor::ProcessMap,
     config::Configuration,
@@ -16,6 +18,7 @@ use std::{path::PathBuf, sync::Arc};
 pub(super) fn perform<'a, S>(
     repo: &'a ArcRepo,
     store: &'a S,
+    client: &'a ClientWithMiddleware,
     process_map: &'a ProcessMap,
     config: &'a Configuration,
     job: serde_json::Value,
@@ -34,6 +37,7 @@ where
                     process_ingest(
                         repo,
                         store,
+                        client,
                         Arc::from(identifier),
                         Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
@@ -69,10 +73,11 @@ where
     })
 }
 
-#[tracing::instrument(skip(repo, store, media))]
+#[tracing::instrument(skip(repo, store, client, media))]
 async fn process_ingest<S>(
     repo: &ArcRepo,
     store: &S,
+    client: &ClientWithMiddleware,
     unprocessed_identifier: Arc<str>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
@@ -85,6 +90,7 @@ where
         let ident = unprocessed_identifier.clone();
         let store2 = store.clone();
         let repo = repo.clone();
+        let client = client.clone();
 
         let media = media.clone();
         let error_boundary = crate::sync::spawn(async move {
@@ -94,7 +100,8 @@ where
                 .map(|res| res.map_err(Error::from));
 
             let session =
-                crate::ingest::ingest(&repo, &store2, stream, declared_alias, &media).await?;
+                crate::ingest::ingest(&repo, &store2, &client, stream, declared_alias, &media)
+                    .await?;
 
             Ok(session) as Result<Session, Error>
         })

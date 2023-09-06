@@ -7,10 +7,12 @@ use crate::{
     formats::{InternalFormat, Validations},
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     store::Store,
-    stream::IntoStreamer,
+    stream::{IntoStreamer, MakeSend},
 };
 use actix_web::web::Bytes;
 use futures_core::Stream;
+use reqwest::Body;
+use reqwest_middleware::ClientWithMiddleware;
 use tracing::{Instrument, Span};
 
 mod hasher;
@@ -41,10 +43,11 @@ where
     Ok(buf.into_bytes())
 }
 
-#[tracing::instrument(skip(repo, store, stream, media))]
+#[tracing::instrument(skip(repo, store, client, stream, media))]
 pub(crate) async fn ingest<S>(
     repo: &ArcRepo,
     store: &S,
+    client: &ClientWithMiddleware,
     stream: impl Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
     declared_alias: Option<Alias>,
     media: &crate::config::Media,
@@ -112,6 +115,22 @@ where
         alias: None,
         identifier: Some(identifier.clone()),
     };
+
+    if let Some(endpoint) = &media.external_validation {
+        let stream = store.to_stream(&identifier, None, None).await?.make_send();
+
+        let response = client
+            .post(endpoint.as_str())
+            .header("Content-Type", input_type.media_type().as_ref())
+            .body(Body::wrap_stream(stream))
+            .send()
+            .instrument(tracing::info_span!("external-validation"))
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(UploadError::FailedExternalValidation.into());
+        }
+    }
 
     let (hash, size) = state.borrow_mut().finalize_reset();
 
