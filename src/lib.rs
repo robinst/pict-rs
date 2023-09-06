@@ -560,7 +560,7 @@ async fn do_download_inline<S: Store + 'static>(
     metrics::increment_counter!("pict-rs.files", "download" => "inline");
 
     let (alias, delete_token, details) =
-        ingest_inline(stream, &repo, &store, &client, &config).await?;
+        ingest_inline(stream, &repo, &store, client, &config).await?;
 
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
