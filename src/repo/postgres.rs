@@ -1322,7 +1322,7 @@ impl StoreMigrationRepo for PostgresRepo {
                 old_identifier.eq(input_old_identifier.as_ref()),
                 new_identifier.eq(input_new_identifier.as_ref()),
             ))
-            .on_conflict((old_identifier, new_identifier))
+            .on_conflict(old_identifier)
             .do_nothing()
             .execute(&mut conn)
             .with_metrics("pict-rs.postgres.store-migration.mark-migrated")
