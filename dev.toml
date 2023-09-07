@@ -71,15 +71,15 @@ url = 'postgres://pictrs:1234@localhost:5432/pictrs'
 # type = 'sled'
 # path = 'data/sled-repo-local'
 
-[store]
-type = 'filesystem'
-path = 'data/files-local'
-
 # [store]
-# type = 'object_storage'
-# endpoint = 'http://localhost:3900'
-# use_path_style = true
-# bucket_name = 'pict-rs'
-# region = 'garage'
-# access_key = 'GK75d220d95cac26da41a574c6'
-# secret_key = '96fa2dc421aaa0026a7e651764958be111fdfdf5260c405b38d85a85f5cd9ea0'
+# type = 'filesystem'
+# path = 'data/files-local'
+
+[store]
+type = 'object_storage'
+endpoint = 'http://localhost:3900'
+use_path_style = true
+bucket_name = 'pict-rs'
+region = 'garage'
+access_key = 'GK052c0e31975c2f14bd841c6f'
+secret_key = 'f7a12660c7b242ec70b8341283f3642d46b56bbcf1aa312d5fd8a1aa89d981db'
