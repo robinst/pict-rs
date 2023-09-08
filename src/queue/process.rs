@@ -1,4 +1,5 @@
 use reqwest_middleware::ClientWithMiddleware;
+use time::Instant;
 
 use crate::{
     concurrent_processor::ProcessMap,
@@ -73,6 +74,40 @@ where
     })
 }
 
+struct UploadGuard {
+    armed: bool,
+    start: Instant,
+    upload_id: UploadId,
+}
+
+impl UploadGuard {
+    fn guard(upload_id: UploadId) -> Self {
+        Self {
+            armed: true,
+            start: Instant::now(),
+            upload_id,
+        }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for UploadGuard {
+    fn drop(&mut self) {
+        metrics::increment_counter!("pict-rs.background.upload.ingest", "completed" => (!self.armed).to_string());
+        metrics::histogram!("pict-rs.background.upload.ingest.duration", self.start.elapsed().as_seconds_f64(), "completed" => (!self.armed).to_string());
+
+        if self.armed {
+            tracing::warn!(
+                "Upload future for {} dropped before completion! This can cause clients to wait forever",
+                self.upload_id,
+            );
+        }
+    }
+}
+
 #[tracing::instrument(skip(repo, store, client, media))]
 async fn process_ingest<S>(
     repo: &ArcRepo,
@@ -86,6 +121,8 @@ async fn process_ingest<S>(
 where
     S: Store + 'static,
 {
+    let guard = UploadGuard::guard(upload_id);
+
     let fut = async {
         let ident = unprocessed_identifier.clone();
         let store2 = store.clone();
@@ -129,6 +166,8 @@ where
     };
 
     repo.complete_upload(upload_id, result).await?;
+
+    guard.disarm();
 
     Ok(())
 }

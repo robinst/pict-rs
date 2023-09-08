@@ -1169,46 +1169,37 @@ impl QueueRepo for PostgresRepo {
                 tracing::info!("Reset {count} jobs");
             }
 
-            // TODO: combine into 1 query
-            let opt = loop {
-                let id_opt = job_queue
-                    .select(id)
-                    .filter(status.eq(JobStatus::New).and(queue.eq(queue_name)))
-                    .order(queue_time)
-                    .limit(1)
-                    .get_result::<Uuid>(&mut conn)
-                    .with_metrics("pict-rs.postgres.queue.select")
-                    .with_timeout(Duration::from_secs(5))
-                    .await
-                    .map_err(|_| PostgresError::DbTimeout)?
-                    .optional()
-                    .map_err(PostgresError::Diesel)?;
+            let queue_alias = diesel::alias!(schema::job_queue as queue_alias);
 
-                let Some(id_val) = id_opt else {
-                    break None;
-                };
+            let id_query = queue_alias
+                .select(queue_alias.field(id))
+                .filter(
+                    queue_alias
+                        .field(status)
+                        .eq(JobStatus::New)
+                        .and(queue_alias.field(queue).eq(queue_name)),
+                )
+                .order(queue_alias.field(queue_time))
+                .for_update()
+                .skip_locked()
+                .single_value();
 
-                let opt = diesel::update(job_queue)
-                    .filter(id.eq(id_val))
-                    .filter(status.eq(JobStatus::New))
-                    .set((
-                        heartbeat.eq(timestamp),
-                        status.eq(JobStatus::Running),
-                        worker.eq(worker_id),
-                    ))
-                    .returning((id, job))
-                    .get_result(&mut conn)
-                    .with_metrics("pict-rs.postgres.queue.claim")
-                    .with_timeout(Duration::from_secs(5))
-                    .await
-                    .map_err(|_| PostgresError::DbTimeout)?
-                    .optional()
-                    .map_err(PostgresError::Diesel)?;
-
-                if let Some(tup) = opt {
-                    break Some(tup);
-                }
-            };
+            let opt = diesel::update(job_queue)
+                .filter(id.nullable().eq(id_query))
+                .filter(status.eq(JobStatus::New))
+                .set((
+                    heartbeat.eq(timestamp),
+                    status.eq(JobStatus::Running),
+                    worker.eq(worker_id),
+                ))
+                .returning((id, job))
+                .get_result(&mut conn)
+                .with_metrics("pict-rs.postgres.queue.claim")
+                .with_timeout(Duration::from_secs(5))
+                .await
+                .map_err(|_| PostgresError::DbTimeout)?
+                .optional()
+                .map_err(PostgresError::Diesel)?;
 
             if let Some((job_id, job_json)) = opt {
                 guard.disarm();
