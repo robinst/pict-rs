@@ -54,6 +54,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
+use streem::IntoStreamer;
 use tokio::sync::Semaphore;
 use tracing::Instrument;
 use tracing_actix_web::TracingLogger;
@@ -74,7 +75,7 @@ use self::{
     repo::{sled::SledRepo, Alias, DeleteToken, Hash, Repo, UploadId, UploadResult},
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Store},
-    stream::{empty, once, StreamLimit, StreamMap, StreamTimeout},
+    stream::{empty, once},
 };
 
 pub use self::config::{ConfigSource, PictRsConfiguration};
@@ -165,13 +166,13 @@ impl<S: Store + 'static> FormData for Upload<S> {
 
                     let span = tracing::info_span!("file-upload", ?filename);
 
-                    let stream = stream.map(|res| res.map_err(Error::from));
-
                     Box::pin(
                         async move {
                             if config.server.read_only {
                                 return Err(UploadError::ReadOnly.into());
                             }
+
+                            let stream = crate::stream::from_err(stream);
 
                             ingest::ingest(&repo, &**store, &client, stream, None, &config.media)
                                 .await
@@ -230,13 +231,13 @@ impl<S: Store + 'static> FormData for Import<S> {
 
                     let span = tracing::info_span!("file-import", ?filename);
 
-                    let stream = stream.map(|res| res.map_err(Error::from));
-
                     Box::pin(
                         async move {
                             if config.server.read_only {
                                 return Err(UploadError::ReadOnly.into());
                             }
+
+                            let stream = crate::stream::from_err(stream);
 
                             ingest::ingest(
                                 &repo,
@@ -368,13 +369,13 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
 
                     let span = tracing::info_span!("file-proxy", ?filename);
 
-                    let stream = stream.map(|res| res.map_err(Error::from));
-
                     Box::pin(
                         async move {
                             if read_only {
                                 return Err(UploadError::ReadOnly.into());
                             }
+
+                            let stream = crate::stream::from_err(stream);
 
                             Backgrounded::proxy(repo, store, stream).await
                         }
@@ -488,7 +489,7 @@ struct UrlQuery {
 }
 
 async fn ingest_inline<S: Store + 'static>(
-    stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
+    stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
     repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
@@ -527,7 +528,7 @@ async fn download_stream(
     client: &ClientWithMiddleware,
     url: &str,
     config: &Configuration,
-) -> Result<impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static, Error> {
+) -> Result<impl Stream<Item = Result<web::Bytes, Error>> + 'static, Error> {
     if config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
@@ -538,10 +539,10 @@ async fn download_stream(
         return Err(UploadError::Download(res.status()).into());
     }
 
-    let stream = res
-        .bytes_stream()
-        .map(|res| res.map_err(Error::from))
-        .limit((config.media.max_file_size * MEGABYTES) as u64);
+    let stream = crate::stream::limit(
+        config.media.max_file_size * MEGABYTES,
+        crate::stream::from_err(res.bytes_stream()),
+    );
 
     Ok(stream)
 }
@@ -551,7 +552,7 @@ async fn download_stream(
     skip(stream, repo, store, client, config)
 )]
 async fn do_download_inline<S: Store + 'static>(
-    stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
+    stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     client: &ClientWithMiddleware,
@@ -574,7 +575,7 @@ async fn do_download_inline<S: Store + 'static>(
 
 #[tracing::instrument(name = "Downloading file in background", skip(stream, repo, store))]
 async fn do_download_backgrounded<S: Store + 'static>(
-    stream: impl Stream<Item = Result<web::Bytes, Error>> + Unpin + 'static,
+    stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
@@ -1325,9 +1326,7 @@ async fn ranged_file_resp<S: Store + 'static>(
                 (
                     builder,
                     Either::left(Either::left(
-                        range::chop_store(range, store, &identifier, len)
-                            .await?
-                            .map(|res| res.map_err(Error::from)),
+                        range::chop_store(range, store, &identifier, len).await?,
                     )),
                 )
             } else {
@@ -1341,10 +1340,7 @@ async fn ranged_file_resp<S: Store + 'static>(
         }
     } else {
         //No Range header in the request - return the entire document
-        let stream = store
-            .to_stream(&identifier, None, None)
-            .await?
-            .map(|res| res.map_err(Error::from));
+        let stream = crate::stream::from_err(store.to_stream(&identifier, None, None).await?);
 
         if not_found {
             (HttpResponse::NotFound(), Either::right(stream))
@@ -1375,10 +1371,18 @@ where
     E: std::error::Error + 'static,
     actix_web::Error: From<E>,
 {
-    let stream = stream.timeout(Duration::from_secs(5)).map(|res| match res {
-        Ok(Ok(item)) => Ok(item),
-        Ok(Err(e)) => Err(actix_web::Error::from(e)),
-        Err(e) => Err(Error::from(e).into()),
+    let stream = crate::stream::timeout(Duration::from_secs(5), stream);
+
+    let stream = streem::try_from_fn(|yielder| async move {
+        let stream = std::pin::pin!(stream);
+        let mut streamer = stream.into_streamer();
+
+        while let Some(res) = streamer.next().await {
+            let item = res.map_err(Error::from)??;
+            yielder.yield_ok(item).await;
+        }
+
+        Ok(()) as Result<(), actix_web::Error>
     });
 
     srv_head(builder, ext, expires, modified).streaming(stream)

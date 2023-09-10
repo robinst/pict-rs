@@ -4,7 +4,6 @@ use crate::{
     error::Error,
     repo::{ArcRepo, UploadId},
     store::Store,
-    stream::StreamMap,
 };
 use actix_web::web::Bytes;
 use futures_core::Stream;
@@ -34,7 +33,7 @@ impl Backgrounded {
     pub(crate) async fn proxy<S, P>(repo: ArcRepo, store: S, stream: P) -> Result<Self, Error>
     where
         S: Store,
-        P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
+        P: Stream<Item = Result<Bytes, Error>> + 'static,
     {
         let mut this = Self {
             repo,
@@ -50,12 +49,13 @@ impl Backgrounded {
     async fn do_proxy<S, P>(&mut self, store: S, stream: P) -> Result<(), Error>
     where
         S: Store,
-        P: Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
+        P: Stream<Item = Result<Bytes, Error>> + 'static,
     {
         self.upload_id = Some(self.repo.create_upload().await?);
 
-        let stream =
-            stream.map(|res| res.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+        let stream = Box::pin(crate::stream::map_err(stream, |e| {
+            std::io::Error::new(std::io::ErrorKind::Other, e)
+        }));
 
         // use octet-stream, we don't know the upload's real type yet
         let identifier = store.save_stream(stream, APPLICATION_OCTET_STREAM).await?;

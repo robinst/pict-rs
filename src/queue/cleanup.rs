@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use streem::IntoStreamer;
+
 use crate::{
     config::Configuration,
     error::{Error, UploadError},
@@ -8,7 +10,6 @@ use crate::{
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     serde_str::Serde,
     store::Store,
-    stream::IntoStreamer,
 };
 
 pub(super) fn perform<'a, S>(

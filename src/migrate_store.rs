@@ -7,12 +7,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use streem::IntoStreamer;
+
 use crate::{
     details::Details,
     error::{Error, UploadError},
     repo::{ArcRepo, Hash},
     store::Store,
-    stream::IntoStreamer,
 };
 
 pub(super) async fn migrate_store<S1, S2>(

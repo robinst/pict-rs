@@ -6,14 +6,11 @@ pub(crate) use tokio_file::File;
 
 #[cfg(not(feature = "io-uring"))]
 mod tokio_file {
-    use crate::{
-        store::file_store::FileError,
-        stream::{IntoStreamer, StreamMap},
-        Either,
-    };
+    use crate::{store::file_store::FileError, Either};
     use actix_web::web::{Bytes, BytesMut};
     use futures_core::Stream;
     use std::{io::SeekFrom, path::Path};
+    use streem::IntoStreamer;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
     use tokio_util::codec::{BytesCodec, FramedRead};
 
@@ -100,14 +97,17 @@ mod tokio_file {
                 (None, None) => Either::right(self.inner),
             };
 
-            Ok(FramedRead::new(obj, BytesCodec::new()).map(|res| res.map(BytesMut::freeze)))
+            Ok(crate::stream::map_ok(
+                FramedRead::new(obj, BytesCodec::new()),
+                BytesMut::freeze,
+            ))
         }
     }
 }
 
 #[cfg(feature = "io-uring")]
 mod io_uring {
-    use crate::{store::file_store::FileError, stream::IntoStreamer};
+    use crate::store::file_store::FileError;
     use actix_web::web::{Bytes, BytesMut};
     use futures_core::Stream;
     use std::{
@@ -118,6 +118,7 @@ mod io_uring {
         pin::Pin,
         task::{Context, Poll},
     };
+    use streem::IntoStreamer;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
     use tokio_uring::{
         buf::{IoBuf, IoBufMut},

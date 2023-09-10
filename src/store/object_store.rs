@@ -1,9 +1,6 @@
 use crate::{
-    bytes_stream::BytesStream,
-    error_code::ErrorCode,
-    repo::ArcRepo,
-    store::Store,
-    stream::{IntoStreamer, LocalBoxStream, StreamMap},
+    bytes_stream::BytesStream, error_code::ErrorCode, repo::ArcRepo, store::Store,
+    stream::LocalBoxStream,
 };
 use actix_rt::task::JoinError;
 use actix_web::{
@@ -21,6 +18,7 @@ use reqwest_middleware::{ClientWithMiddleware, RequestBuilder};
 use rusty_s3::{actions::S3Action, Bucket, BucketError, Credentials, UrlStyle};
 use std::{string::FromUtf8Error, sync::Arc, time::Duration};
 use storage_path_generator::{Generator, Path};
+use streem::IntoStreamer;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 use tracing::Instrument;
@@ -393,11 +391,10 @@ impl Store for ObjectStore {
             return Err(status_error(response).await);
         }
 
-        Ok(Box::pin(
-            response
-                .bytes_stream()
-                .map(|res| res.map_err(payload_to_io_error)),
-        ))
+        Ok(Box::pin(crate::stream::map_err(
+            response.bytes_stream(),
+            payload_to_io_error,
+        )))
     }
 
     #[tracing::instrument(skip(self, writer))]

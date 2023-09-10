@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use streem::IntoStreamer;
 use tokio::task::JoinSet;
 
 use crate::{
@@ -12,7 +13,6 @@ use crate::{
         SledRepo as OldSledRepo,
     },
     store::Store,
-    stream::IntoStreamer,
 };
 
 const MIGRATE_CONCURRENCY: usize = 32;
