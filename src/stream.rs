@@ -58,6 +58,22 @@ where
     })
 }
 
+pub(crate) fn map<S, I1, I2, F>(stream: S, f: F) -> impl Stream<Item = I2>
+where
+    S: Stream<Item = I1>,
+    I2: 'static,
+    F: Fn(I1) -> I2 + Copy,
+{
+    streem::from_fn(|yielder| async move {
+        let stream = std::pin::pin!(stream);
+        let mut streamer = stream.into_streamer();
+
+        while let Some(res) = streamer.next().await {
+            yielder.yield_((f)(res)).await;
+        }
+    })
+}
+
 #[cfg(not(feature = "io-uring"))]
 pub(crate) fn map_ok<S, T1, T2, E, F>(stream: S, f: F) -> impl Stream<Item = Result<T2, E>>
 where
@@ -66,14 +82,7 @@ where
     E: 'static,
     F: Fn(T1) -> T2 + Copy,
 {
-    streem::from_fn(|yielder| async move {
-        let stream = std::pin::pin!(stream);
-        let mut streamer = stream.into_streamer();
-
-        while let Some(res) = streamer.next().await {
-            yielder.yield_(res.map(f)).await;
-        }
-    })
+    map(stream, move |res| res.map(f))
 }
 
 pub(crate) fn map_err<S, T, E1, E2, F>(stream: S, f: F) -> impl Stream<Item = Result<T, E2>>
@@ -83,14 +92,7 @@ where
     E2: 'static,
     F: Fn(E1) -> E2 + Copy,
 {
-    streem::from_fn(|yielder| async move {
-        let stream = std::pin::pin!(stream);
-        let mut streamer = stream.into_streamer();
-
-        while let Some(res) = streamer.next().await {
-            yielder.yield_(res.map_err(f)).await;
-        }
-    })
+    map(stream, move |res| res.map_err(f))
 }
 
 pub(crate) fn from_err<S, T, E1, E2>(stream: S) -> impl Stream<Item = Result<T, E2>>
