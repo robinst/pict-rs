@@ -58,6 +58,7 @@ where
     })
 }
 
+#[cfg(not(feature = "io-uring"))]
 pub(crate) fn map_ok<S, T1, T2, E, F>(stream: S, f: F) -> impl Stream<Item = Result<T2, E>>
 where
     S: Stream<Item = Result<T1, E>>,
