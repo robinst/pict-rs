@@ -21,6 +21,7 @@ use diesel_async::{
     },
     AsyncConnection, AsyncPgConnection, RunQueryDsl,
 };
+use futures_core::Stream;
 use tokio::sync::Notify;
 use tokio_postgres::{tls::NoTlsStream, AsyncMessage, Connection, NoTls, Notification, Socket};
 use tracing::Instrument;
@@ -30,7 +31,7 @@ use uuid::Uuid;
 use crate::{
     details::Details,
     error_code::{ErrorCode, OwnedErrorCode},
-    future::{LocalBoxFuture, WithMetrics, WithTimeout},
+    future::{WithMetrics, WithTimeout},
     serde_str::Serde,
     stream::LocalBoxStream,
 };
@@ -1477,33 +1478,29 @@ impl AliasAccessRepo for PostgresRepo {
         &self,
         timestamp: time::OffsetDateTime,
     ) -> Result<LocalBoxStream<'static, Result<Alias, RepoError>>, RepoError> {
-        Ok(Box::pin(PageStream {
-            inner: self.inner.clone(),
-            future: None,
-            current: Vec::new(),
-            older_than: to_primitive(timestamp),
-            next: Box::new(|inner, older_than| {
-                Box::pin(async move {
-                    use schema::proxies::dsl::*;
+        Ok(Box::pin(page_stream(
+            self.inner.clone(),
+            to_primitive(timestamp),
+            |inner, older_than| async move {
+                use schema::proxies::dsl::*;
 
-                    let mut conn = inner.get_connection().await?;
+                let mut conn = inner.get_connection().await?;
 
-                    let vec = proxies
-                        .select((accessed, alias))
-                        .filter(accessed.lt(older_than))
-                        .order(accessed.desc())
-                        .limit(100)
-                        .get_results(&mut conn)
-                        .with_metrics("pict-rs.postgres.alias-access.older-aliases")
-                        .with_timeout(Duration::from_secs(5))
-                        .await
-                        .map_err(|_| PostgresError::DbTimeout)?
-                        .map_err(PostgresError::Diesel)?;
+                let vec = proxies
+                    .select((accessed, alias))
+                    .filter(accessed.lt(older_than))
+                    .order(accessed.desc())
+                    .limit(100)
+                    .get_results(&mut conn)
+                    .with_metrics("pict-rs.postgres.alias-access.older-aliases")
+                    .with_timeout(Duration::from_secs(5))
+                    .await
+                    .map_err(|_| PostgresError::DbTimeout)?
+                    .map_err(PostgresError::Diesel)?;
 
-                    Ok(vec)
-                })
-            }),
-        }))
+                Ok(vec)
+            },
+        )))
     }
 
     async fn remove_alias_access(&self, _: Alias) -> Result<(), RepoError> {
@@ -1570,33 +1567,29 @@ impl VariantAccessRepo for PostgresRepo {
         &self,
         timestamp: time::OffsetDateTime,
     ) -> Result<LocalBoxStream<'static, Result<(Hash, String), RepoError>>, RepoError> {
-        Ok(Box::pin(PageStream {
-            inner: self.inner.clone(),
-            future: None,
-            current: Vec::new(),
-            older_than: to_primitive(timestamp),
-            next: Box::new(|inner, older_than| {
-                Box::pin(async move {
-                    use schema::variants::dsl::*;
+        Ok(Box::pin(page_stream(
+            self.inner.clone(),
+            to_primitive(timestamp),
+            |inner, older_than| async move {
+                use schema::variants::dsl::*;
 
-                    let mut conn = inner.get_connection().await?;
+                let mut conn = inner.get_connection().await?;
 
-                    let vec = variants
-                        .select((accessed, (hash, variant)))
-                        .filter(accessed.lt(older_than))
-                        .order(accessed.desc())
-                        .limit(100)
-                        .get_results(&mut conn)
-                        .with_metrics("pict-rs.postgres.variant-access.older-variants")
-                        .with_timeout(Duration::from_secs(5))
-                        .await
-                        .map_err(|_| PostgresError::DbTimeout)?
-                        .map_err(PostgresError::Diesel)?;
+                let vec = variants
+                    .select((accessed, (hash, variant)))
+                    .filter(accessed.lt(older_than))
+                    .order(accessed.desc())
+                    .limit(100)
+                    .get_results(&mut conn)
+                    .with_metrics("pict-rs.postgres.variant-access.older-variants")
+                    .with_timeout(Duration::from_secs(5))
+                    .await
+                    .map_err(|_| PostgresError::DbTimeout)?
+                    .map_err(PostgresError::Diesel)?;
 
-                    Ok(vec)
-                })
-            }),
-        }))
+                Ok(vec)
+            },
+        )))
     }
 
     async fn remove_variant_access(&self, _: Hash, _: String) -> Result<(), RepoError> {
@@ -1778,62 +1771,36 @@ impl FullRepo for PostgresRepo {
     }
 }
 
-type NextFuture<I> = LocalBoxFuture<'static, Result<Vec<(time::PrimitiveDateTime, I)>, RepoError>>;
-
-struct PageStream<I> {
+fn page_stream<I, F, Fut>(
     inner: Arc<Inner>,
-    future: Option<NextFuture<I>>,
-    current: Vec<I>,
-    older_than: time::PrimitiveDateTime,
-    next: Box<dyn Fn(Arc<Inner>, time::PrimitiveDateTime) -> NextFuture<I>>,
-}
-
-impl<I> futures_core::Stream for PageStream<I>
+    mut older_than: time::PrimitiveDateTime,
+    next: F,
+) -> impl Stream<Item = Result<I, RepoError>>
 where
-    I: Unpin,
+    F: Fn(Arc<Inner>, time::PrimitiveDateTime) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<(time::PrimitiveDateTime, I)>, RepoError>>
+        + 'static,
+    I: 'static,
 {
-    type Item = Result<I, RepoError>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-
+    streem::try_from_fn(|yielder| async move {
         loop {
-            // Pop because we reversed the list
-            if let Some(alias) = this.current.pop() {
-                return std::task::Poll::Ready(Some(Ok(alias)));
-            }
+            let mut page = (next)(inner.clone(), older_than).await?;
 
-            if let Some(future) = this.future.as_mut() {
-                let res = std::task::ready!(future.as_mut().poll(cx));
-
-                this.future.take();
-
-                match res {
-                    Ok(page) if page.is_empty() => {
-                        return std::task::Poll::Ready(None);
-                    }
-                    Ok(page) => {
-                        let (mut timestamps, mut aliases): (Vec<_>, Vec<_>) =
-                            page.into_iter().unzip();
-                        // reverse because we use .pop() to get next
-                        aliases.reverse();
-
-                        this.current = aliases;
-                        this.older_than = timestamps.pop().expect("Verified nonempty");
-                    }
-                    Err(e) => return std::task::Poll::Ready(Some(Err(e))),
+            if let Some((last_time, last_item)) = page.pop() {
+                for (_, item) in page {
+                    yielder.yield_ok(item).await;
                 }
-            } else {
-                let inner = this.inner.clone();
-                let older_than = this.older_than;
 
-                this.future = Some((this.next)(inner, older_than));
+                yielder.yield_ok(last_item).await;
+
+                older_than = last_time;
+            } else {
+                break;
             }
         }
-    }
+
+        Ok(())
+    })
 }
 
 impl std::fmt::Debug for PostgresRepo {

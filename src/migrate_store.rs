@@ -107,7 +107,8 @@ where
     }
 
     // Hashes are read in a consistent order
-    let mut stream = repo.hashes().into_streamer();
+    let stream = std::pin::pin!(repo.hashes());
+    let mut stream = stream.into_streamer();
 
     let state = Rc::new(MigrateState {
         repo: repo.clone(),
