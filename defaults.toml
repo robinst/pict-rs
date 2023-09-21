@@ -26,6 +26,7 @@ cache_capacity = 67108864
 export_path = "/mnt/exports"
 
 [media]
+external_validation_timeout = 30
 max_file_size = 40
 process_timeout = 30
 filters = [

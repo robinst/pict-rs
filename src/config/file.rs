@@ -167,6 +167,8 @@ pub(crate) struct OldDb {
 pub(crate) struct Media {
     pub(crate) external_validation: Option<Url>,
 
+    pub(crate) external_validation_timeout: u64,
+
     pub(crate) max_file_size: usize,
 
     pub(crate) process_timeout: u64,

@@ -64,6 +64,7 @@ struct OpenTelemetryDefaults {
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 struct MediaDefaults {
+    external_validation_timeout: u64,
     max_file_size: usize,
     process_timeout: u64,
     filters: Vec<String>,
@@ -220,6 +221,7 @@ impl Default for OpenTelemetryDefaults {
 impl Default for MediaDefaults {
     fn default() -> Self {
         MediaDefaults {
+            external_validation_timeout: 30,
             max_file_size: 40,
             process_timeout: 30,
             filters: vec![
