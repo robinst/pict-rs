@@ -7,9 +7,9 @@ use crate::{
     formats::{InternalFormat, InternalVideoFormat},
     serde_str::Serde,
     store::Store,
-    stream::IntoStreamer,
 };
 use actix_web::web;
+use streem::IntoStreamer;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]

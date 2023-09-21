@@ -7,12 +7,12 @@ use crate::{
     formats::{InternalFormat, Validations},
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     store::Store,
-    stream::{IntoStreamer, MakeSend},
 };
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use reqwest::Body;
 use reqwest_middleware::ClientWithMiddleware;
+use streem::IntoStreamer;
 use tracing::{Instrument, Span};
 
 mod hasher;
@@ -30,10 +30,11 @@ pub(crate) struct Session {
 #[tracing::instrument(skip(stream))]
 async fn aggregate<S>(stream: S) -> Result<Bytes, Error>
 where
-    S: Stream<Item = Result<Bytes, Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, Error>>,
 {
     let mut buf = BytesStream::new();
 
+    let stream = std::pin::pin!(stream);
     let mut stream = stream.into_streamer();
 
     while let Some(res) = stream.next().await {
@@ -48,7 +49,7 @@ pub(crate) async fn ingest<S>(
     repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
-    stream: impl Stream<Item = Result<Bytes, Error>> + Unpin + 'static,
+    stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
     declared_alias: Option<Alias>,
     media: &crate::config::Media,
 ) -> Result<Session, Error>
@@ -117,12 +118,12 @@ where
     };
 
     if let Some(endpoint) = &media.external_validation {
-        let stream = store.to_stream(&identifier, None, None).await?.make_send();
+        let stream = store.to_stream(&identifier, None, None).await?;
 
         let response = client
             .post(endpoint.as_str())
             .header("Content-Type", input_type.media_type().as_ref())
-            .body(Body::wrap_stream(stream))
+            .body(Body::wrap_stream(crate::stream::make_send(stream)))
             .send()
             .instrument(tracing::info_span!("external-validation"))
             .await?;

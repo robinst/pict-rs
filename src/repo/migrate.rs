@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use streem::IntoStreamer;
 use tokio::task::JoinSet;
 
 use crate::{
@@ -12,7 +13,6 @@ use crate::{
         SledRepo as OldSledRepo,
     },
     store::Store,
-    stream::IntoStreamer,
 };
 
 const MIGRATE_CONCURRENCY: usize = 32;
@@ -35,7 +35,8 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
     tracing::warn!("Checks complete, migrating repo");
     tracing::warn!("{total_size} hashes will be migrated");
 
-    let mut hash_stream = old_repo.hashes().into_streamer();
+    let hash_stream = std::pin::pin!(old_repo.hashes());
+    let mut hash_stream = hash_stream.into_streamer();
 
     let mut index = 0;
     while let Some(res) = hash_stream.next().await {

@@ -1852,6 +1852,7 @@ dependencies = [
  "sha2",
  "sled",
  "storage-path-generator",
+ "streem",
  "thiserror",
  "time",
  "tokio",
@@ -2645,6 +2646,16 @@ name = "storage-path-generator"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f11d35dae9818c4313649da4a97c8329e29357a7fe584526c1d78f5b63ef836"
+
+[[package]]
+name = "streem"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c8b0c8184b0fe05b37dd75d66205195cd57563c6c87cb92134a025a34a6ab34"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+]
 
 [[package]]
 name = "stringprep"

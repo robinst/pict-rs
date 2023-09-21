@@ -7,12 +7,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use streem::IntoStreamer;
+
 use crate::{
     details::Details,
     error::{Error, UploadError},
     repo::{ArcRepo, Hash},
     store::Store,
-    stream::IntoStreamer,
 };
 
 pub(super) async fn migrate_store<S1, S2>(
@@ -106,7 +107,8 @@ where
     }
 
     // Hashes are read in a consistent order
-    let mut stream = repo.hashes().into_streamer();
+    let stream = std::pin::pin!(repo.hashes());
+    let mut stream = stream.into_streamer();
 
     let state = Rc::new(MigrateState {
         repo: repo.clone(),

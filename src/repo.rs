@@ -8,10 +8,10 @@ use crate::{
     config,
     details::Details,
     error_code::{ErrorCode, OwnedErrorCode},
-    future::LocalBoxFuture,
     stream::LocalBoxStream,
 };
 use base64::Engine;
+use futures_core::Stream;
 use std::{fmt::Debug, sync::Arc};
 use url::Url;
 use uuid::Uuid;
@@ -572,81 +572,29 @@ impl HashPage {
     }
 }
 
-type PageFuture = LocalBoxFuture<'static, Result<HashPage, RepoError>>;
-
-pub(crate) struct HashStream {
-    repo: Option<ArcRepo>,
-    page_future: Option<PageFuture>,
-    page: Option<HashPage>,
-}
-
-impl futures_core::Stream for HashStream {
-    type Item = Result<Hash, RepoError>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-
-        loop {
-            let Some(repo) = &this.repo else {
-                return std::task::Poll::Ready(None);
-            };
-
-            let slug = if let Some(page) = &mut this.page {
-                // popping last in page is fine - we reversed them
-                if let Some(hash) = page.hashes.pop() {
-                    return std::task::Poll::Ready(Some(Ok(hash)));
-                }
-
-                let slug = page.next();
-                this.page.take();
-
-                if let Some(slug) = slug {
-                    Some(slug)
-                } else {
-                    this.repo.take();
-                    return std::task::Poll::Ready(None);
-                }
-            } else {
-                None
-            };
-
-            if let Some(page_future) = &mut this.page_future {
-                let res = std::task::ready!(page_future.as_mut().poll(cx));
-
-                this.page_future.take();
-
-                match res {
-                    Ok(mut page) => {
-                        // reverse because we use `pop` to fetch next
-                        page.hashes.reverse();
-
-                        this.page = Some(page);
-                    }
-                    Err(e) => {
-                        this.repo.take();
-
-                        return std::task::Poll::Ready(Some(Err(e)));
-                    }
-                }
-            } else {
-                let repo = repo.clone();
-
-                this.page_future = Some(Box::pin(async move { repo.hash_page(slug, 100).await }));
-            }
-        }
-    }
-}
-
 impl dyn FullRepo {
-    pub(crate) fn hashes(self: &Arc<Self>) -> HashStream {
-        HashStream {
-            repo: Some(self.clone()),
-            page_future: None,
-            page: None,
-        }
+    pub(crate) fn hashes(self: &Arc<Self>) -> impl Stream<Item = Result<Hash, RepoError>> {
+        let repo = self.clone();
+
+        streem::try_from_fn(|yielder| async move {
+            let mut slug = None;
+
+            loop {
+                let page = repo.hash_page(slug, 100).await?;
+
+                slug = page.next();
+
+                for hash in page.hashes {
+                    yielder.yield_ok(hash).await;
+                }
+
+                if slug.is_none() {
+                    break;
+                }
+            }
+
+            Ok(())
+        })
     }
 }
 

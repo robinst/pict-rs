@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use streem::IntoStreamer;
+
 use crate::{
     config::Configuration,
     error::{Error, UploadError},
@@ -8,7 +10,6 @@ use crate::{
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     serde_str::Serde,
     store::Store,
-    stream::IntoStreamer,
 };
 
 pub(super) fn perform<'a, S>(
@@ -137,7 +138,8 @@ async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> Result<(), E
 
 #[tracing::instrument(skip_all)]
 async fn all_variants(repo: &ArcRepo) -> Result<(), Error> {
-    let mut hash_stream = repo.hashes().into_streamer();
+    let hash_stream = std::pin::pin!(repo.hashes());
+    let mut hash_stream = hash_stream.into_streamer();
 
     while let Some(res) = hash_stream.next().await {
         let hash = res?;

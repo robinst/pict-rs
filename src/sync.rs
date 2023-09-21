@@ -2,22 +2,27 @@ use std::sync::Arc;
 
 use tokio::sync::{Notify, Semaphore};
 
+#[track_caller]
 pub(crate) fn channel<T>(bound: usize) -> (flume::Sender<T>, flume::Receiver<T>) {
     tracing::trace_span!(parent: None, "make channel").in_scope(|| flume::bounded(bound))
 }
 
+#[track_caller]
 pub(crate) fn notify() -> Arc<Notify> {
     Arc::new(bare_notify())
 }
 
+#[track_caller]
 pub(crate) fn bare_notify() -> Notify {
     tracing::trace_span!(parent: None, "make notifier").in_scope(Notify::new)
 }
 
+#[track_caller]
 pub(crate) fn bare_semaphore(permits: usize) -> Semaphore {
     tracing::trace_span!(parent: None, "make semaphore").in_scope(|| Semaphore::new(permits))
 }
 
+#[track_caller]
 pub(crate) fn spawn<F>(future: F) -> actix_rt::task::JoinHandle<F::Output>
 where
     F: std::future::Future + 'static,
@@ -26,6 +31,7 @@ where
     tracing::trace_span!(parent: None, "spawn task").in_scope(|| actix_rt::spawn(future))
 }
 
+#[track_caller]
 pub(crate) fn spawn_blocking<F, Out>(function: F) -> actix_rt::task::JoinHandle<Out>
 where
     F: FnOnce() -> Out + Send + 'static,

@@ -12,7 +12,6 @@ use crate::{
     repo::{Alias, ArcRepo, UploadId, UploadResult},
     serde_str::Serde,
     store::Store,
-    stream::StreamMap,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -131,10 +130,7 @@ where
 
         let media = media.clone();
         let error_boundary = crate::sync::spawn(async move {
-            let stream = store2
-                .to_stream(&ident, None, None)
-                .await?
-                .map(|res| res.map_err(Error::from));
+            let stream = crate::stream::from_err(store2.to_stream(&ident, None, None).await?);
 
             let session =
                 crate::ingest::ingest(&repo, &store2, &client, stream, declared_alias, &media)
