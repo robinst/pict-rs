@@ -1,6 +1,6 @@
 use crate::{
-    bytes_stream::BytesStream, error_code::ErrorCode, repo::ArcRepo, store::Store,
-    stream::LocalBoxStream,
+    bytes_stream::BytesStream, error_code::ErrorCode, future::WithMetrics, repo::ArcRepo,
+    store::Store, stream::LocalBoxStream,
 };
 use actix_rt::task::JoinError;
 use actix_web::{
@@ -189,6 +189,7 @@ impl Store for ObjectStore {
             .head_bucket_request()
             .await?
             .send()
+            .with_metrics("pict-rs.object-storage.head-bucket-request")
             .await
             .map_err(ObjectError::from)?;
 
@@ -230,6 +231,7 @@ impl Store for ObjectStore {
             let response = req
                 .body(Body::wrap_stream(first_chunk))
                 .send()
+                .with_metrics("pict-rs.object-store.put-object-request")
                 .await
                 .map_err(ObjectError::from)?;
 
@@ -243,7 +245,11 @@ impl Store for ObjectStore {
         let mut first_chunk = Some(first_chunk);
 
         let (req, object_id) = self.create_multipart_request(content_type).await?;
-        let response = req.send().await.map_err(ObjectError::from)?;
+        let response = req
+            .send()
+            .with_metrics("pict-rs.object-store.create-multipart-request")
+            .await
+            .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
             return Err(status_error(response).await);
@@ -287,6 +293,7 @@ impl Store for ObjectStore {
                             .await?
                             .body(Body::wrap_stream(buf))
                             .send()
+                            .with_metrics("pict-rs.object-storage.create-upload-part-request")
                             .await
                             .map_err(ObjectError::from)?;
 
@@ -342,6 +349,7 @@ impl Store for ObjectStore {
         if let Err(e) = res {
             self.create_abort_multipart_request(&object_id, upload_id)
                 .send()
+                .with_metrics("pict-rs.object-storage.abort-multipart-request")
                 .await
                 .map_err(ObjectError::from)?;
             return Err(e);
@@ -358,7 +366,12 @@ impl Store for ObjectStore {
     ) -> Result<Arc<str>, StoreError> {
         let (req, object_id) = self.put_object_request(bytes.len(), content_type).await?;
 
-        let response = req.body(bytes).send().await.map_err(ObjectError::from)?;
+        let response = req
+            .body(bytes)
+            .send()
+            .with_metrics("pict-rs.object-storage.put-object-request")
+            .await
+            .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
             return Err(status_error(response).await);
@@ -384,6 +397,7 @@ impl Store for ObjectStore {
         let response = self
             .get_object_request(identifier, from_start, len)
             .send()
+            .with_metrics("pict-rs.object-storage.get-object-request")
             .await
             .map_err(ObjectError::from)?;
 
@@ -409,6 +423,7 @@ impl Store for ObjectStore {
         let response = self
             .get_object_request(identifier, None, None)
             .send()
+            .with_metrics("pict-rs.object-storage.get-object-request")
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, ObjectError::from(e)))?;
 
@@ -435,6 +450,7 @@ impl Store for ObjectStore {
         let response = self
             .head_object_request(identifier)
             .send()
+            .with_metrics("pict-rs.object-storage.head-object-request")
             .await
             .map_err(ObjectError::from)?;
 
@@ -459,6 +475,7 @@ impl Store for ObjectStore {
         let response = self
             .delete_object_request(identifier)
             .send()
+            .with_metrics("pict-rs.object-storage.delete-object-request")
             .await
             .map_err(ObjectError::from)?;
 
@@ -614,6 +631,7 @@ impl ObjectStore {
         req.header(CONTENT_LENGTH, body.len())
             .body(body)
             .send()
+            .with_metrics("pict-rs.object-storage.complete-multipart-request")
             .await
     }
 
