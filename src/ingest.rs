@@ -1,10 +1,11 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     bytes_stream::BytesStream,
     either::Either,
     error::{Error, UploadError},
     formats::{InternalFormat, Validations},
+    future::WithMetrics,
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     store::Store,
 };
@@ -122,10 +123,12 @@ where
 
         let response = client
             .post(endpoint.as_str())
+            .timeout(Duration::from_secs(media.external_validation_timeout))
             .header("Content-Type", input_type.media_type().as_ref())
             .body(Body::wrap_stream(crate::stream::make_send(stream)))
             .send()
             .instrument(tracing::info_span!("external-validation"))
+            .with_metrics("pict-rs.ingest.external-validation")
             .await?;
 
         if !response.status().is_success() {
