@@ -405,9 +405,9 @@ impl Store for ObjectStore {
             return Err(status_error(response).await);
         }
 
-        Ok(Box::pin(crate::stream::map_err(
-            response.bytes_stream(),
-            payload_to_io_error,
+        Ok(Box::pin(crate::stream::metrics(
+            "pict-rs.object-storage.get-object-request.stream",
+            crate::stream::map_err(response.bytes_stream(), payload_to_io_error),
         )))
     }
 
@@ -434,7 +434,11 @@ impl Store for ObjectStore {
             ));
         }
 
-        let mut stream = response.bytes_stream().into_streamer();
+        let stream = std::pin::pin!(crate::stream::metrics(
+            "pict-rs.object-storage.get-object-request.stream",
+            response.bytes_stream()
+        ));
+        let mut stream = stream.into_streamer();
 
         while let Some(res) = stream.next().await {
             let mut bytes = res.map_err(payload_to_io_error)?;

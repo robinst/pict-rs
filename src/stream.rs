@@ -3,6 +3,26 @@ use futures_core::Stream;
 use std::{pin::Pin, time::Duration};
 use streem::IntoStreamer;
 
+use crate::future::WithMetrics;
+
+pub(crate) fn metrics<S>(name: &'static str, stream: S) -> impl Stream<Item = S::Item>
+where
+    S: Stream,
+    S::Item: 'static,
+{
+    streem::from_fn(|yielder| {
+        async move {
+            let stream = std::pin::pin!(stream);
+            let mut streamer = stream.into_streamer();
+
+            while let Some(item) = streamer.next().await {
+                yielder.yield_(item).await;
+            }
+        }
+        .with_metrics(name)
+    })
+}
+
 pub(crate) fn make_send<S>(stream: S) -> impl Stream<Item = S::Item> + Send
 where
     S: Stream + 'static,
