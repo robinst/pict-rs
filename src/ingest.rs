@@ -82,7 +82,7 @@ where
                 }
             };
 
-            let processed_reader = crate::magick::process_image_async_read(
+            crate::magick::process_image_async_read(
                 validated_reader,
                 magick_args,
                 format,
@@ -90,9 +90,7 @@ where
                 quality,
                 media.process_timeout,
             )
-            .await?;
-
-            processed_reader
+            .await?
         } else {
             validated_reader
         }

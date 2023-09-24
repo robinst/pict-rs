@@ -117,8 +117,9 @@ where
     let output_arg = format!("{}:-", format.magick_format());
     let quality = quality.map(|q| q.to_string());
 
-    let len = format.coalesce().then(|| 4).unwrap_or(3)
-        + quality.is_some().then(|| 1).unwrap_or(0)
+    let len = 3
+        + if format.coalesce() { 1 } else { 0 }
+        + if quality.is_some() { 1 } else { 0 }
         + process_args.len();
 
     let mut args: Vec<&str> = Vec::with_capacity(len);
