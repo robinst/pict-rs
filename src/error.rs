@@ -107,9 +107,6 @@ pub(crate) enum UploadError {
     #[error("pict-rs is in read-only mode")]
     ReadOnly,
 
-    #[error("Requested file extension cannot be served by source file")]
-    InvalidProcessExtension,
-
     #[error("Provided process path is invalid")]
     ParsePath,
 
@@ -173,7 +170,6 @@ impl UploadError {
             }
             Self::Download(_) => ErrorCode::DOWNLOAD_FILE_ERROR,
             Self::ReadOnly => ErrorCode::READ_ONLY,
-            Self::InvalidProcessExtension => ErrorCode::INVALID_FILE_EXTENSION,
             Self::ParsePath => ErrorCode::INVALID_PROCESS_PATH,
             Self::Semaphore => ErrorCode::PROCESS_SEMAPHORE_CLOSED,
             Self::Canceled => ErrorCode::PANIC,
@@ -235,7 +231,6 @@ impl ResponseError for Error {
                 | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
                 | UploadError::Validation(_)
                 | UploadError::UnsupportedProcessExtension
-                | UploadError::InvalidProcessExtension
                 | UploadError::ReadOnly
                 | UploadError::FailedExternalValidation,
             ) => StatusCode::BAD_REQUEST,

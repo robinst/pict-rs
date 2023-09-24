@@ -111,9 +111,7 @@ async fn process<S: Store + 'static>(
         .processable_format()
         .expect("Already verified format is processable");
 
-    let format = input_format
-        .process_to(output_format)
-        .ok_or(UploadError::InvalidProcessExtension)?;
+    let format = input_format.process_to(output_format);
 
     let quality = match format {
         ProcessableFormat::Image(format) => media.image.quality_for(format),
@@ -178,9 +176,7 @@ where
 {
     let should_thumbnail =
         if let Some(input_format) = original_details.internal_format().processable_format() {
-            let output_format = input_format
-                .process_to(output_format)
-                .ok_or(UploadError::InvalidProcessExtension)?;
+            let output_format = input_format.process_to(output_format);
 
             input_format.should_thumbnail(output_format)
         } else {

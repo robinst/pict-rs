@@ -118,14 +118,14 @@ where
     let quality = quality.map(|q| q.to_string());
 
     let len = 3
-        + if format.coalesce() { 1 } else { 0 }
+        + if input_format.coalesce() { 1 } else { 0 }
         + if quality.is_some() { 1 } else { 0 }
         + process_args.len();
 
     let mut args: Vec<&str> = Vec::with_capacity(len);
     args.push("convert");
     args.push(&input_arg);
-    if format.coalesce() {
+    if input_format.coalesce() {
         args.push("-coalesce");
     }
     args.extend(process_args.iter().map(|s| s.as_str()));

@@ -166,33 +166,31 @@ impl ProcessableFormat {
         }
     }
 
-    pub(crate) const fn process_to(self, output: InputProcessableFormat) -> Option<Self> {
+    pub(crate) const fn process_to(self, output: InputProcessableFormat) -> Self {
         match (self, output) {
-            (Self::Image(_), InputProcessableFormat::Avif) => Some(Self::Image(ImageFormat::Avif)),
+            (Self::Image(_), InputProcessableFormat::Avif) => Self::Image(ImageFormat::Avif),
             (Self::Image(_) | Self::Animation(_), InputProcessableFormat::Jpeg) => {
-                Some(Self::Image(ImageFormat::Jpeg))
+                Self::Image(ImageFormat::Jpeg)
             }
             (Self::Image(_) | Self::Animation(_), InputProcessableFormat::Jxl) => {
-                Some(Self::Image(ImageFormat::Jxl))
+                Self::Image(ImageFormat::Jxl)
             }
             (Self::Image(_) | Self::Animation(_), InputProcessableFormat::Png) => {
-                Some(Self::Image(ImageFormat::Png))
+                Self::Image(ImageFormat::Png)
             }
-            (Self::Image(_), InputProcessableFormat::Webp) => Some(Self::Image(ImageFormat::Webp)),
-            (Self::Animation(_), InputProcessableFormat::Apng) => {
-                Some(Self::Animation(AnimationFormat::Apng))
+            (Self::Image(_), InputProcessableFormat::Webp) => Self::Image(ImageFormat::Webp),
+            (Self::Animation(_) | Self::Image(_), InputProcessableFormat::Apng) => {
+                Self::Animation(AnimationFormat::Apng)
             }
             (Self::Animation(_), InputProcessableFormat::Avif) => {
-                Some(Self::Animation(AnimationFormat::Avif))
+                Self::Animation(AnimationFormat::Avif)
             }
-            (Self::Animation(_), InputProcessableFormat::Gif) => {
-                Some(Self::Animation(AnimationFormat::Gif))
+            (Self::Animation(_) | Self::Image(_), InputProcessableFormat::Gif) => {
+                Self::Animation(AnimationFormat::Gif)
             }
             (Self::Animation(_), InputProcessableFormat::Webp) => {
-                Some(Self::Animation(AnimationFormat::Webp))
+                Self::Animation(AnimationFormat::Webp)
             }
-            (Self::Image(_), InputProcessableFormat::Apng) => None,
-            (Self::Image(_), InputProcessableFormat::Gif) => None,
         }
     }
 
