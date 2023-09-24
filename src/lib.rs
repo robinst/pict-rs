@@ -1707,7 +1707,7 @@ fn spawn_cleanup(repo: ArcRepo, config: &Configuration) {
     }
 
     crate::sync::spawn(async move {
-        let mut interval = actix_rt::time::interval(Duration::from_secs(30));
+        let mut interval = actix_web::rt::time::interval(Duration::from_secs(30));
 
         loop {
             interval.tick().await;

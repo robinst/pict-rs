@@ -1,9 +1,9 @@
 mod metrics;
 
-use actix_rt::time::Timeout;
 use actix_web::{
     dev::{Service, ServiceRequest, Transform},
     http::StatusCode,
+    rt::time::Timeout,
     HttpResponse, ResponseError,
 };
 use std::{

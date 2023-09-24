@@ -148,7 +148,7 @@ where
     S::Item: 'static,
 {
     streem::try_from_fn(|yielder| async move {
-        actix_rt::time::timeout(duration, async move {
+        actix_web::rt::time::timeout(duration, async move {
             let stream = std::pin::pin!(stream);
             let mut streamer = stream.into_streamer();
 

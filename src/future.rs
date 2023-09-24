@@ -6,11 +6,11 @@ use std::{
 pub(crate) type LocalBoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + 'a>>;
 
 pub(crate) trait WithTimeout: Future {
-    fn with_timeout(self, duration: Duration) -> actix_rt::time::Timeout<Self>
+    fn with_timeout(self, duration: Duration) -> actix_web::rt::time::Timeout<Self>
     where
         Self: Sized,
     {
-        actix_rt::time::timeout(duration, self)
+        actix_web::rt::time::timeout(duration, self)
     }
 }
 

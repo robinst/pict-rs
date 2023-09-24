@@ -62,7 +62,7 @@ where
             tracing::warn!("Retrying migration +{failure_count}");
         }
 
-        actix_rt::time::sleep(Duration::from_secs(3)).await;
+        actix_web::rt::time::sleep(Duration::from_secs(3)).await;
     }
 
     Ok(())
@@ -366,7 +366,7 @@ where
                     tracing::warn!("Failed moving file. Retrying +{failure_count}");
                 }
 
-                actix_rt::time::sleep(Duration::from_secs(3)).await;
+                actix_web::rt::time::sleep(Duration::from_secs(3)).await;
             }
         }
     }

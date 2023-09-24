@@ -1,4 +1,4 @@
-use actix_rt::task::JoinHandle;
+use actix_web::rt::task::JoinHandle;
 use actix_web::web::Bytes;
 use flume::r#async::RecvFut;
 use std::{
@@ -78,7 +78,7 @@ pub(crate) struct ProcessRead<I> {
     #[allow(dead_code)]
     handle: DropHandle,
     eof: bool,
-    sleep: Pin<Box<actix_rt::time::Sleep>>,
+    sleep: Pin<Box<actix_web::rt::time::Sleep>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -238,7 +238,7 @@ impl Process {
             .instrument(span),
         );
 
-        let sleep = actix_rt::time::sleep(timeout);
+        let sleep = actix_web::rt::time::sleep(timeout);
 
         ProcessRead {
             inner: stdout,

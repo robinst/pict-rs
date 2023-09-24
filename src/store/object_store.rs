@@ -2,13 +2,13 @@ use crate::{
     bytes_stream::BytesStream, error_code::ErrorCode, future::WithMetrics, repo::ArcRepo,
     store::Store, stream::LocalBoxStream,
 };
-use actix_rt::task::JoinError;
 use actix_web::{
     error::BlockingError,
     http::{
         header::{ByteRangeSpec, Range, CONTENT_LENGTH},
         StatusCode,
     },
+    rt::task::JoinError,
     web::Bytes,
 };
 use base64::{prelude::BASE64_STANDARD, Engine};

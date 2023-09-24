@@ -1,4 +1,4 @@
-#[actix_rt::main]
+#[actix_web::main]
 async fn main() -> color_eyre::Result<()> {
     pict_rs::PictRsConfiguration::build_default()?
         .install_tracing()?

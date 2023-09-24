@@ -11,13 +11,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = []
-io-uring = ["actix-rt/io-uring", "actix-server/io-uring", "tokio-uring", "sled/io_uring"]
+io-uring = ["dep:tokio-uring", "sled/io_uring", "actix-web/experimental-io-uring"]
 
 [dependencies]
 actix-form-data = "0.7.0-beta.4"
-actix-rt = { version = "2.7.0", default-features = false }
-actix-server = "2.0.0"
-actix-web = { version = "4.0.0", default-features = false }
+actix-web = { version = "4.0.0", default-features = false, features = ["macros"] }
 anyhow = "1.0"
 async-trait = "0.1.51"
 barrel = { version = "0.7.0", features = ["pg"] }

@@ -50,7 +50,7 @@ use super::{
 pub(crate) struct PostgresRepo {
     inner: Arc<Inner>,
     #[allow(dead_code)]
-    notifications: Arc<actix_rt::task::JoinHandle<()>>,
+    notifications: Arc<actix_web::rt::task::JoinHandle<()>>,
 }
 
 struct Inner {

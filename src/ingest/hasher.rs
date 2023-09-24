@@ -79,8 +79,8 @@ mod test {
 
     macro_rules! test_on_arbiter {
         ($fut:expr) => {
-            actix_rt::System::new().block_on(async move {
-                let arbiter = actix_rt::Arbiter::new();
+            actix_web::rt::System::new().block_on(async move {
+                let arbiter = actix_web::rt::Arbiter::new();
 
                 let (tx, rx) = crate::sync::channel(1);
 
