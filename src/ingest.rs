@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use crate::{
     bytes_stream::BytesStream,
+    details::Details,
     error::{Error, UploadError},
     formats::{InternalFormat, Validations},
     future::WithMetrics,
@@ -105,6 +106,8 @@ where
         .save_async_read(hasher_reader, input_type.media_type())
         .await?;
 
+    let details = Details::from_store(store, &identifier, media.process_timeout).await?;
+
     drop(permit);
 
     let mut session = Session {
@@ -138,6 +141,8 @@ where
     let hash = Hash::new(hash, size, input_type);
 
     save_upload(&mut session, repo, store, hash.clone(), &identifier).await?;
+
+    repo.relate_details(&identifier, &details).await?;
 
     if let Some(alias) = declared_alias {
         session.add_existing_alias(hash, alias).await?
