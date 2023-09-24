@@ -84,7 +84,7 @@ async fn process<S: Store + 'static>(
     hash: Hash,
 ) -> Result<(Details, Bytes), Error> {
     let guard = MetricsGuard::guard();
-    let permit = crate::PROCESS_SEMAPHORE.acquire().await;
+    let permit = crate::process_semaphore().acquire().await?;
 
     let identifier = input_identifier(
         repo,

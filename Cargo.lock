@@ -1827,7 +1827,6 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "mime",
- "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
  "pin-project-lite",

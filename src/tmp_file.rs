@@ -1,13 +1,16 @@
-use once_cell::sync::Lazy;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::OnceLock};
 use tokio::io::AsyncRead;
 use uuid::Uuid;
 
-static TMP_DIR: Lazy<PathBuf> = Lazy::new(|| {
-    let dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
-    std::fs::create_dir(&dir).unwrap();
-    dir
-});
+static TMP_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+fn tmp_dir() -> &'static PathBuf {
+    TMP_DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        std::fs::create_dir(&dir).unwrap();
+        dir
+    })
+}
 
 struct TmpFile(PathBuf);
 
@@ -28,14 +31,14 @@ pin_project_lite::pin_project! {
 
 pub(crate) fn tmp_file(ext: Option<&str>) -> PathBuf {
     if let Some(ext) = ext {
-        TMP_DIR.join(format!("{}{}", Uuid::new_v4(), ext))
+        tmp_dir().join(format!("{}{}", Uuid::new_v4(), ext))
     } else {
-        TMP_DIR.join(Uuid::new_v4().to_string())
+        tmp_dir().join(Uuid::new_v4().to_string())
     }
 }
 
 pub(crate) async fn remove_tmp_dir() -> std::io::Result<()> {
-    tokio::fs::remove_dir_all(&*TMP_DIR).await
+    tokio::fs::remove_dir_all(tmp_dir()).await
 }
 
 pub(crate) fn cleanup_tmpfile<R: AsyncRead>(reader: R, file: PathBuf) -> TmpFileCleanup<R> {

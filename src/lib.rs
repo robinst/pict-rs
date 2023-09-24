@@ -43,7 +43,6 @@ use future::WithTimeout;
 use futures_core::Stream;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::Metrics;
-use once_cell::sync::Lazy;
 use repo::ArcRepo;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
@@ -52,7 +51,7 @@ use std::{
     marker::PhantomData,
     path::Path,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, SystemTime},
 };
 use streem::IntoStreamer;
@@ -88,15 +87,19 @@ const DAYS: u32 = 24 * HOURS;
 
 const NOT_FOUND_KEY: &str = "404-alias";
 
-static PROCESS_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
-    let permits = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(1)
-        .saturating_sub(1)
-        .max(1);
+static PROCESS_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
-    crate::sync::bare_semaphore(permits)
-});
+fn process_semaphore() -> &'static Semaphore {
+    PROCESS_SEMAPHORE.get_or_init(|| {
+        let permits = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+            .saturating_sub(1)
+            .max(1);
+
+        crate::sync::bare_semaphore(permits)
+    })
+}
 
 async fn ensure_details<S: Store + 'static>(
     repo: &ArcRepo,

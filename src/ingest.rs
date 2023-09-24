@@ -57,7 +57,7 @@ pub(crate) async fn ingest<S>(
 where
     S: Store,
 {
-    let permit = crate::PROCESS_SEMAPHORE.acquire().await;
+    let permit = crate::process_semaphore().acquire().await?;
 
     let bytes = aggregate(stream).await?;
 
