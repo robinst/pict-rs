@@ -89,7 +89,11 @@ const DAYS: u32 = 24 * HOURS;
 const NOT_FOUND_KEY: &str = "404-alias";
 
 static PROCESS_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
-    let permits = num_cpus::get().saturating_sub(1).max(1);
+    let permits = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .saturating_sub(1)
+        .max(1);
 
     crate::sync::bare_semaphore(permits)
 });
