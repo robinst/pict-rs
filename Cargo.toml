@@ -15,7 +15,7 @@ io-uring = ["dep:tokio-uring", "sled/io_uring", "actix-web/experimental-io-uring
 
 [dependencies]
 actix-form-data = "0.7.0-beta.4"
-actix-web = { version = "4.0.0", default-features = false, features = ["macros"] }
+actix-web = { version = "4.0.0", default-features = false }
 anyhow = "1.0"
 async-trait = "0.1.51"
 barrel = { version = "0.7.0", features = ["pg"] }

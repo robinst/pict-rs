@@ -1,8 +1,9 @@
-#[actix_web::main]
-async fn main() -> color_eyre::Result<()> {
-    pict_rs::PictRsConfiguration::build_default()?
-        .install_tracing()?
-        .install_metrics()?
-        .run()
-        .await
+fn main() -> color_eyre::Result<()> {
+    actix_web::rt::System::new().block_on(async move {
+        pict_rs::PictRsConfiguration::build_default()?
+            .install_tracing()?
+            .install_metrics()?
+            .run()
+            .await
+    })
 }
