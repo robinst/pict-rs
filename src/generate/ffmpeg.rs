@@ -8,35 +8,39 @@ use crate::{
 #[derive(Clone, Copy, Debug)]
 pub(super) enum ThumbnailFormat {
     Jpeg,
-    // Webp,
+    Png,
+    Webp,
 }
 
 impl ThumbnailFormat {
     const fn as_ffmpeg_codec(self) -> &'static str {
         match self {
             Self::Jpeg => "mjpeg",
-            // Self::Webp => "webp",
+            Self::Png => "png",
+            Self::Webp => "webp",
         }
     }
 
     const fn to_file_extension(self) -> &'static str {
         match self {
             Self::Jpeg => ".jpeg",
-            // Self::Webp => ".webp",
+            Self::Png => ".png",
+            Self::Webp => ".webp",
         }
     }
 
     const fn as_ffmpeg_format(self) -> &'static str {
         match self {
-            Self::Jpeg => "image2",
-            // Self::Webp => "webp",
+            Self::Jpeg | Self::Png => "image2",
+            Self::Webp => "webp",
         }
     }
 
     pub(crate) fn media_type(self) -> mime::Mime {
         match self {
             Self::Jpeg => mime::IMAGE_JPEG,
-            // Self::Webp => crate::formats::mimes::image_webp(),
+            Self::Png => mime::IMAGE_PNG,
+            Self::Webp => crate::formats::mimes::image_webp(),
         }
     }
 }

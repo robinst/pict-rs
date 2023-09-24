@@ -201,7 +201,7 @@ where
         let (reader, media_type) = if let Some(processable_format) =
             original_details.internal_format().processable_format()
         {
-            let thumbnail_format = ImageFormat::Jpeg;
+            let thumbnail_format = media.image.format.unwrap_or(ImageFormat::Webp);
 
             let reader = magick::thumbnail(
                 store,
@@ -215,7 +215,13 @@ where
 
             (reader, thumbnail_format.media_type())
         } else {
-            let thumbnail_format = ffmpeg::ThumbnailFormat::Jpeg;
+            let thumbnail_format = match media.image.format {
+                Some(ImageFormat::Webp | ImageFormat::Avif | ImageFormat::Jxl) => {
+                    ffmpeg::ThumbnailFormat::Webp
+                }
+                Some(ImageFormat::Png) => ffmpeg::ThumbnailFormat::Png,
+                Some(ImageFormat::Jpeg) | None => ffmpeg::ThumbnailFormat::Jpeg,
+            };
 
             let reader = ffmpeg::thumbnail(
                 store.clone(),
