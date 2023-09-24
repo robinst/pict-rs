@@ -12,11 +12,10 @@ use std::{
 };
 
 use dashmap::DashMap;
-use deadpool::managed::Hook;
 use diesel::prelude::*;
 use diesel_async::{
     pooled_connection::{
-        deadpool::{BuildError, Object, Pool, PoolError},
+        deadpool::{BuildError, Hook, Object, Pool, PoolError},
         AsyncDieselConnectionManager, ManagerConfig,
     },
     AsyncConnection, AsyncPgConnection, RunQueryDsl,
