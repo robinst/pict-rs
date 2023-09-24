@@ -1,10 +1,10 @@
 use actix_web::web::Bytes;
-use tokio::io::AsyncRead;
 
 use crate::{
     ffmpeg::FfMpegError,
     formats::{InputVideoFormat, OutputVideo},
     process::Process,
+    read::BoxRead,
 };
 
 pub(super) async fn transcode_bytes(
@@ -13,7 +13,7 @@ pub(super) async fn transcode_bytes(
     crf: u8,
     timeout: u64,
     bytes: Bytes,
-) -> Result<impl AsyncRead + Unpin, FfMpegError> {
+) -> Result<BoxRead<'static>, FfMpegError> {
     let input_file = crate::tmp_file::tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)

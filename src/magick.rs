@@ -4,8 +4,10 @@ use crate::{
     error_code::ErrorCode,
     formats::ProcessableFormat,
     process::{Process, ProcessError},
+    read::BoxRead,
     store::Store,
 };
+
 use tokio::io::AsyncRead;
 
 #[derive(Debug, thiserror::Error)]
@@ -94,7 +96,7 @@ async fn process_image<F, Fut>(
     quality: Option<u8>,
     timeout: u64,
     write_file: F,
-) -> Result<impl AsyncRead + Unpin, MagickError>
+) -> Result<BoxRead<'static>, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
@@ -115,11 +117,9 @@ where
     let output_arg = format!("{}:-", format.magick_format());
     let quality = quality.map(|q| q.to_string());
 
-    let len = if format.coalesce() {
-        process_args.len() + 4
-    } else {
-        process_args.len() + 3
-    };
+    let len = format.coalesce().then(|| 4).unwrap_or(3)
+        + quality.is_some().then(|| 1).unwrap_or(0)
+        + process_args.len();
 
     let mut args: Vec<&str> = Vec::with_capacity(len);
     args.push("convert");
@@ -148,7 +148,7 @@ pub(crate) async fn process_image_store_read<S: Store + 'static>(
     format: ProcessableFormat,
     quality: Option<u8>,
     timeout: u64,
-) -> Result<impl AsyncRead + Unpin, MagickError> {
+) -> Result<BoxRead<'static>, MagickError> {
     let stream = store
         .to_stream(identifier, None, None)
         .await
@@ -178,7 +178,7 @@ pub(crate) async fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
     format: ProcessableFormat,
     quality: Option<u8>,
     timeout: u64,
-) -> Result<impl AsyncRead + Unpin, MagickError> {
+) -> Result<BoxRead<'static>, MagickError> {
     process_image(
         args,
         input_format,

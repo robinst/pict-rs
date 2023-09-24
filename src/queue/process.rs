@@ -199,11 +199,9 @@ async fn generate<S: Store + 'static>(
         store,
         process_map,
         target_format,
-        source,
         process_path,
         process_args,
-        original_details.video_format(),
-        None,
+        &original_details,
         &config.media,
         hash,
     )

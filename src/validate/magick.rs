@@ -1,10 +1,10 @@
 use actix_web::web::Bytes;
-use tokio::io::AsyncRead;
 
 use crate::{
     formats::{AnimationFormat, ImageFormat},
     magick::MagickError,
     process::Process,
+    read::BoxRead,
 };
 
 pub(super) async fn convert_image(
@@ -13,7 +13,7 @@ pub(super) async fn convert_image(
     quality: Option<u8>,
     timeout: u64,
     bytes: Bytes,
-) -> Result<impl AsyncRead + Unpin, MagickError> {
+) -> Result<BoxRead<'static>, MagickError> {
     convert(
         input.magick_format(),
         output.magick_format(),
@@ -31,7 +31,7 @@ pub(super) async fn convert_animation(
     quality: Option<u8>,
     timeout: u64,
     bytes: Bytes,
-) -> Result<impl AsyncRead + Unpin, MagickError> {
+) -> Result<BoxRead<'static>, MagickError> {
     convert(
         input.magick_format(),
         output.magick_format(),
@@ -50,7 +50,7 @@ async fn convert(
     quality: Option<u8>,
     timeout: u64,
     bytes: Bytes,
-) -> Result<impl AsyncRead + Unpin, MagickError> {
+) -> Result<BoxRead<'static>, MagickError> {
     let input_file = crate::tmp_file::tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
 

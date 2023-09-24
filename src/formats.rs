@@ -166,12 +166,18 @@ impl ProcessableFormat {
         }
     }
 
-    pub(crate) fn process_to(self, output: InputProcessableFormat) -> Option<Self> {
+    pub(crate) const fn process_to(self, output: InputProcessableFormat) -> Option<Self> {
         match (self, output) {
             (Self::Image(_), InputProcessableFormat::Avif) => Some(Self::Image(ImageFormat::Avif)),
-            (Self::Image(_), InputProcessableFormat::Jpeg) => Some(Self::Image(ImageFormat::Jpeg)),
-            (Self::Image(_), InputProcessableFormat::Jxl) => Some(Self::Image(ImageFormat::Jxl)),
-            (Self::Image(_), InputProcessableFormat::Png) => Some(Self::Image(ImageFormat::Png)),
+            (Self::Image(_) | Self::Animation(_), InputProcessableFormat::Jpeg) => {
+                Some(Self::Image(ImageFormat::Jpeg))
+            }
+            (Self::Image(_) | Self::Animation(_), InputProcessableFormat::Jxl) => {
+                Some(Self::Image(ImageFormat::Jxl))
+            }
+            (Self::Image(_) | Self::Animation(_), InputProcessableFormat::Png) => {
+                Some(Self::Image(ImageFormat::Png))
+            }
             (Self::Image(_), InputProcessableFormat::Webp) => Some(Self::Image(ImageFormat::Webp)),
             (Self::Animation(_), InputProcessableFormat::Apng) => {
                 Some(Self::Animation(AnimationFormat::Apng))
@@ -187,10 +193,11 @@ impl ProcessableFormat {
             }
             (Self::Image(_), InputProcessableFormat::Apng) => None,
             (Self::Image(_), InputProcessableFormat::Gif) => None,
-            (Self::Animation(_), InputProcessableFormat::Jpeg) => None,
-            (Self::Animation(_), InputProcessableFormat::Jxl) => None,
-            (Self::Animation(_), InputProcessableFormat::Png) => None,
         }
+    }
+
+    pub(crate) const fn should_thumbnail(self, output: Self) -> bool {
+        matches!((self, output), (Self::Animation(_), Self::Image(_)))
     }
 }
 

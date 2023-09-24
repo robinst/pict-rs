@@ -22,6 +22,7 @@ mod process;
 mod processor;
 mod queue;
 mod range;
+mod read;
 mod repo;
 mod repo_04;
 mod serde_str;
@@ -917,11 +918,9 @@ async fn process<S: Store + 'static>(
         &store,
         &process_map,
         format,
-        alias,
         thumbnail_path,
         thumbnail_args,
-        original_details.video_format(),
-        None,
+        &original_details,
         &config.media,
         hash,
     )
@@ -1087,7 +1086,7 @@ async fn details_query<S: Store + 'static>(
             let Some(alias) = repo.related(proxy).await? else {
                 return Ok(HttpResponse::NotFound().json(&serde_json::json!({
                     "msg": "Provided proxy URL has not been cached",
-                })))
+                })));
             };
             alias
         }
@@ -1193,9 +1192,7 @@ async fn do_serve<S: Store + 'static>(
     };
 
     let Some(identifier) = repo.identifier(hash.clone()).await? else {
-        tracing::warn!(
-            "Original File identifier for hash {hash:?} is missing, queue cleanup task",
-        );
+        tracing::warn!("Original File identifier for hash {hash:?} is missing, queue cleanup task",);
         crate::queue::cleanup_hash(&repo, hash).await?;
         return Ok(HttpResponse::NotFound().finish());
     };

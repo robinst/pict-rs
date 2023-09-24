@@ -130,28 +130,6 @@ pub(crate) trait FullRepo:
 
         self.aliases_for_hash(hash).await
     }
-
-    #[tracing::instrument(skip(self))]
-    async fn still_identifier_from_alias(
-        &self,
-        alias: &Alias,
-    ) -> Result<Option<Arc<str>>, RepoError> {
-        let Some(hash) = self.hash(alias).await? else {
-            return Ok(None);
-        };
-
-        let Some(identifier) = self.identifier(hash.clone()).await? else {
-            return Ok(None);
-        };
-
-        match self.details(&identifier).await? {
-            Some(details) if details.is_video() => {
-                self.motion_identifier(hash).await.map_err(From::from)
-            }
-            Some(_) => Ok(Some(identifier)),
-            None => Ok(None),
-        }
-    }
 }
 
 #[async_trait::async_trait(?Send)]

@@ -2,7 +2,6 @@ use std::{sync::Arc, time::Duration};
 
 use crate::{
     bytes_stream::BytesStream,
-    either::Either,
     error::{Error, UploadError},
     formats::{InternalFormat, Validations},
     future::WithMetrics,
@@ -93,12 +92,12 @@ where
             )
             .await?;
 
-            Either::left(processed_reader)
+            processed_reader
         } else {
-            Either::right(validated_reader)
+            validated_reader
         }
     } else {
-        Either::right(validated_reader)
+        validated_reader
     };
 
     let hasher_reader = Hasher::new(processed_reader);

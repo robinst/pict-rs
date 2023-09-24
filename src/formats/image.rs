@@ -90,7 +90,7 @@ impl ImageFormat {
         }
     }
 
-    pub(super) fn media_type(self) -> mime::Mime {
+    pub(crate) fn media_type(self) -> mime::Mime {
         match self {
             Self::Avif => super::mimes::image_avif(),
             Self::Jpeg => mime::IMAGE_JPEG,

@@ -1,14 +1,16 @@
+mod ffmpeg;
+mod magick;
+
 use crate::{
     concurrent_processor::ProcessMap,
     details::Details,
     error::{Error, UploadError},
-    ffmpeg::ThumbnailFormat,
-    formats::{InputProcessableFormat, InternalVideoFormat},
-    repo::{Alias, ArcRepo, Hash, VariantAlreadyExists},
+    formats::{ImageFormat, InputProcessableFormat, InternalVideoFormat, ProcessableFormat},
+    repo::{ArcRepo, Hash, VariantAlreadyExists},
     store::Store,
 };
 use actix_web::web::Bytes;
-use std::{path::PathBuf, time::Instant};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
 
@@ -45,11 +47,9 @@ pub(crate) async fn generate<S: Store + 'static>(
     store: &S,
     process_map: &ProcessMap,
     format: InputProcessableFormat,
-    alias: Alias,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
-    input_format: Option<InternalVideoFormat>,
-    thumbnail_format: Option<ThumbnailFormat>,
+    original_details: &Details,
     media: &crate::config::Media,
     hash: Hash,
 ) -> Result<(Details, Bytes), Error> {
@@ -57,11 +57,9 @@ pub(crate) async fn generate<S: Store + 'static>(
         repo,
         store,
         format,
-        alias,
         thumbnail_path.clone(),
         thumbnail_args,
-        input_format,
-        thumbnail_format,
+        original_details,
         media,
         hash.clone(),
     );
@@ -79,44 +77,24 @@ async fn process<S: Store + 'static>(
     repo: &ArcRepo,
     store: &S,
     output_format: InputProcessableFormat,
-    alias: Alias,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
-    input_format: Option<InternalVideoFormat>,
-    thumbnail_format: Option<ThumbnailFormat>,
+    original_details: &Details,
     media: &crate::config::Media,
     hash: Hash,
 ) -> Result<(Details, Bytes), Error> {
     let guard = MetricsGuard::guard();
     let permit = crate::PROCESS_SEMAPHORE.acquire().await;
 
-    let identifier = if let Some(identifier) = repo.still_identifier_from_alias(&alias).await? {
-        identifier
-    } else {
-        let Some(identifier) = repo.identifier(hash.clone()).await? else {
-            return Err(UploadError::MissingIdentifier.into());
-        };
-
-        let thumbnail_format = thumbnail_format.unwrap_or(ThumbnailFormat::Jpeg);
-
-        let reader = crate::ffmpeg::thumbnail(
-            store.clone(),
-            identifier,
-            input_format.unwrap_or(InternalVideoFormat::Mp4),
-            thumbnail_format,
-            media.process_timeout,
-        )
-        .await?;
-
-        let motion_identifier = store
-            .save_async_read(reader, thumbnail_format.media_type())
-            .await?;
-
-        repo.relate_motion_identifier(hash.clone(), &motion_identifier)
-            .await?;
-
-        motion_identifier
-    };
+    let identifier = input_identifier(
+        repo,
+        store,
+        output_format,
+        hash.clone(),
+        original_details,
+        media,
+    )
+    .await?;
 
     let input_details = if let Some(details) = repo.details(&identifier).await? {
         details
@@ -133,13 +111,13 @@ async fn process<S: Store + 'static>(
         .processable_format()
         .expect("Already verified format is processable");
 
-    let Some(format) = input_format.process_to(output_format) else {
-        return Err(UploadError::InvalidProcessExtension.into());
-    };
+    let format = input_format
+        .process_to(output_format)
+        .ok_or(UploadError::InvalidProcessExtension)?;
 
     let quality = match format {
-        crate::formats::ProcessableFormat::Image(format) => media.image.quality_for(format),
-        crate::formats::ProcessableFormat::Animation(format) => media.animation.quality_for(format),
+        ProcessableFormat::Image(format) => media.image.quality_for(format),
+        ProcessableFormat::Animation(format) => media.animation.quality_for(format),
     };
 
     let mut processed_reader = crate::magick::process_image_store_read(
@@ -184,4 +162,85 @@ async fn process<S: Store + 'static>(
     guard.disarm();
 
     Ok((details, bytes)) as Result<(Details, Bytes), Error>
+}
+
+#[tracing::instrument(skip_all)]
+async fn input_identifier<S>(
+    repo: &ArcRepo,
+    store: &S,
+    output_format: InputProcessableFormat,
+    hash: Hash,
+    original_details: &Details,
+    media: &crate::config::Media,
+) -> Result<Arc<str>, Error>
+where
+    S: Store + 'static,
+{
+    let should_thumbnail =
+        if let Some(input_format) = original_details.internal_format().processable_format() {
+            let output_format = input_format
+                .process_to(output_format)
+                .ok_or(UploadError::InvalidProcessExtension)?;
+
+            input_format.should_thumbnail(output_format)
+        } else {
+            // video case
+            true
+        };
+
+    if should_thumbnail {
+        if let Some(identifier) = repo.motion_identifier(hash.clone()).await? {
+            return Ok(identifier);
+        };
+
+        let identifier = repo
+            .identifier(hash.clone())
+            .await?
+            .ok_or(UploadError::MissingIdentifier)?;
+
+        let (reader, media_type) = if let Some(processable_format) =
+            original_details.internal_format().processable_format()
+        {
+            let thumbnail_format = ImageFormat::Jpeg;
+
+            let reader = magick::thumbnail(
+                store,
+                &identifier,
+                processable_format,
+                ProcessableFormat::Image(thumbnail_format),
+                media.image.quality_for(thumbnail_format),
+                media.process_timeout,
+            )
+            .await?;
+
+            (reader, thumbnail_format.media_type())
+        } else {
+            let thumbnail_format = ffmpeg::ThumbnailFormat::Jpeg;
+
+            let reader = ffmpeg::thumbnail(
+                store.clone(),
+                identifier,
+                original_details
+                    .video_format()
+                    .unwrap_or(InternalVideoFormat::Mp4),
+                thumbnail_format,
+                media.process_timeout,
+            )
+            .await?;
+
+            (reader, thumbnail_format.media_type())
+        };
+
+        let motion_identifier = store.save_async_read(reader, media_type).await?;
+
+        repo.relate_motion_identifier(hash, &motion_identifier)
+            .await?;
+
+        return Ok(motion_identifier);
+    }
+
+    repo.identifier(hash)
+        .await?
+        .ok_or(UploadError::MissingIdentifier)
+        .map_err(From::from)
 }

@@ -4,16 +4,15 @@ mod magick;
 
 use crate::{
     discover::Discovery,
-    either::Either,
     error::Error,
     error_code::ErrorCode,
     formats::{
         AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InputVideoFormat,
         InternalFormat, Validations,
     },
+    read::BoxRead,
 };
 use actix_web::web::Bytes;
-use tokio::io::AsyncRead;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ValidationError {
@@ -60,7 +59,7 @@ pub(crate) async fn validate_bytes(
     bytes: Bytes,
     validations: Validations<'_>,
     timeout: u64,
-) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
+) -> Result<(InternalFormat, BoxRead<'static>), Error> {
     if bytes.is_empty() {
         return Err(ValidationError::Empty.into());
     }
@@ -77,7 +76,7 @@ pub(crate) async fn validate_bytes(
             let (format, read) =
                 process_image(bytes, *input, width, height, validations.image, timeout).await?;
 
-            Ok((format, Either::left(read)))
+            Ok((format, read))
         }
         InputFile::Animation(input) => {
             let (format, read) = process_animation(
@@ -91,7 +90,7 @@ pub(crate) async fn validate_bytes(
             )
             .await?;
 
-            Ok((format, Either::right(Either::left(read))))
+            Ok((format, read))
         }
         InputFile::Video(input) => {
             let (format, read) = process_video(
@@ -105,7 +104,7 @@ pub(crate) async fn validate_bytes(
             )
             .await?;
 
-            Ok((format, Either::right(Either::right(read))))
+            Ok((format, read))
         }
     }
 }
@@ -118,7 +117,7 @@ async fn process_image(
     height: u16,
     validations: &crate::config::Image,
     timeout: u64,
-) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
+) -> Result<(InternalFormat, BoxRead<'static>), Error> {
     if width > validations.max_width {
         return Err(ValidationError::Width.into());
     }
@@ -140,9 +139,9 @@ async fn process_image(
     let read = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        Either::left(magick::convert_image(input.format, format, quality, timeout, bytes).await?)
+        magick::convert_image(input.format, format, quality, timeout, bytes).await?
     } else {
-        Either::right(exiftool::clear_metadata_bytes_read(bytes, timeout)?)
+        exiftool::clear_metadata_bytes_read(bytes, timeout)?
     };
 
     Ok((InternalFormat::Image(format), read))
@@ -183,7 +182,7 @@ async fn process_animation(
     frames: u32,
     validations: &crate::config::Animation,
     timeout: u64,
-) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
+) -> Result<(InternalFormat, BoxRead<'static>), Error> {
     validate_animation(bytes.len(), width, height, frames, validations)?;
 
     let AnimationOutput {
@@ -194,9 +193,9 @@ async fn process_animation(
     let read = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        Either::left(magick::convert_animation(input, format, quality, timeout, bytes).await?)
+        magick::convert_animation(input, format, quality, timeout, bytes).await?
     } else {
-        Either::right(exiftool::clear_metadata_bytes_read(bytes, timeout)?)
+        exiftool::clear_metadata_bytes_read(bytes, timeout)?
     };
 
     Ok((InternalFormat::Animation(format), read))
@@ -240,7 +239,7 @@ async fn process_video(
     frames: u32,
     validations: &crate::config::Video,
     timeout: u64,
-) -> Result<(InternalFormat, impl AsyncRead + Unpin), Error> {
+) -> Result<(InternalFormat, BoxRead<'static>), Error> {
     validate_video(bytes.len(), width, height, frames, validations)?;
 
     let output = input.build_output(

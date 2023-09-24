@@ -79,10 +79,6 @@ impl Details {
         }
     }
 
-    pub(crate) fn is_video(&self) -> bool {
-        self.inner.content_type.type_() == "video"
-    }
-
     pub(crate) fn created_at(&self) -> time::OffsetDateTime {
         self.inner.created_at.timestamp
     }
