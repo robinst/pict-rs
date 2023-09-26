@@ -62,7 +62,7 @@ tokio-util = { version = "0.7", default-features = false, features = [
   "codec",
   "io",
 ] }
-toml = "0.7.0"
+toml = "0.8.0"
 tracing = "0.1.15"
 tracing-error = "0.2.0"
 tracing-log = "0.1.2"
