@@ -378,21 +378,10 @@ mod io_uring {
     mod tests {
         use std::io::Read;
 
-        macro_rules! test_on_arbiter {
+        macro_rules! test_async {
             ($fut:expr) => {
-                actix_web::rt::System::new().block_on(async move {
-                    let arbiter = actix_web::rt::Arbiter::new();
-
-                    let (tx, rx) = crate::sync::channel(1);
-
-                    arbiter.spawn(async move {
-                        let handle = crate::sync::spawn($fut);
-
-                        let _ = tx.send(handle.await.unwrap());
-                    });
-
-                    rx.into_recv_async().await.unwrap()
-                })
+                actix_web::rt::System::new()
+                    .block_on(async move { crate::sync::spawn($fut).await.unwrap() })
             };
         }
 
@@ -402,7 +391,7 @@ mod io_uring {
         fn read() {
             let tmp = "/tmp/read-test";
 
-            test_on_arbiter!(async move {
+            test_async!(async move {
                 let mut file = super::File::open(EARTH_GIF).await.unwrap();
                 let mut tmp_file = tokio::fs::File::create(tmp).await.unwrap();
                 file.read_to_async_write(&mut tmp_file).await.unwrap();
@@ -428,7 +417,7 @@ mod io_uring {
         fn write() {
             let tmp = "/tmp/write-test";
 
-            test_on_arbiter!(async move {
+            test_async!(async move {
                 let mut file = tokio::fs::File::open(EARTH_GIF).await.unwrap();
                 let mut tmp_file = super::File::create(tmp).await.unwrap();
                 tmp_file.write_from_async_read(&mut file).await.unwrap();

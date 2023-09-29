@@ -77,27 +77,16 @@ mod test {
     use sha2::{Digest, Sha256};
     use std::io::Read;
 
-    macro_rules! test_on_arbiter {
+    macro_rules! test_async {
         ($fut:expr) => {
-            actix_web::rt::System::new().block_on(async move {
-                let arbiter = actix_web::rt::Arbiter::new();
-
-                let (tx, rx) = crate::sync::channel(1);
-
-                arbiter.spawn(async move {
-                    let handle = crate::sync::spawn($fut);
-
-                    let _ = tx.send(handle.await.unwrap());
-                });
-
-                rx.into_recv_async().await.unwrap()
-            })
+            actix_web::rt::System::new()
+                .block_on(async move { crate::sync::spawn($fut).await.unwrap() })
         };
     }
 
     #[test]
     fn hasher_works() {
-        let (hash, size) = test_on_arbiter!(async move {
+        let (hash, size) = test_async!(async move {
             let file1 = tokio::fs::File::open("./client-examples/earth.gif").await?;
 
             let mut reader = Hasher::new(file1);
