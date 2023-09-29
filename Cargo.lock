@@ -3035,8 +3035,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-actix-web"
-version = "0.7.6"
-source = "git+https://github.com/asonix/tracing-actix-web?branch=asonix/tracing-opentelemetry-021#0b337cc17fb88efc76d913751eee3ac66e4cd27f"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94982c2ad939d5d0bfd71c2f9b7ed273c72348485c72bb87bb4db6bd69df10cb"
 dependencies = [
  "actix-web",
  "opentelemetry",
