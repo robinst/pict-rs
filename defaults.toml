@@ -9,7 +9,7 @@ timeout = 30
 
 [tracing.logging]
 format = "normal"
-targets = "warn,tracing_actix_web=info,actix_server=info,actix_web=info"
+targets = "info"
 
 [tracing.console]
 buffer_capacity = 102400
