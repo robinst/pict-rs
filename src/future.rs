@@ -1,9 +1,38 @@
 use std::{
     future::Future,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 
+static NOOP_WAKER: OnceLock<std::task::Waker> = OnceLock::new();
+
+fn noop_waker() -> &'static std::task::Waker {
+    NOOP_WAKER.get_or_init(|| std::task::Waker::from(Arc::new(NoopWaker)))
+}
+
+struct NoopWaker;
+impl std::task::Wake for NoopWaker {
+    fn wake(self: std::sync::Arc<Self>) {}
+    fn wake_by_ref(self: &std::sync::Arc<Self>) {}
+}
+
 pub(crate) type LocalBoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + 'a>>;
+
+pub(crate) trait NowOrNever: Future {
+    fn now_or_never(self) -> Option<Self::Output>
+    where
+        Self: Sized,
+    {
+        let fut = std::pin::pin!(self);
+
+        let mut cx = std::task::Context::from_waker(noop_waker());
+
+        match fut.poll(&mut cx) {
+            std::task::Poll::Pending => None,
+            std::task::Poll::Ready(out) => Some(out),
+        }
+    }
+}
 
 pub(crate) trait WithTimeout: Future {
     fn with_timeout(self, duration: Duration) -> actix_web::rt::time::Timeout<Self>
@@ -30,6 +59,7 @@ pub(crate) trait WithMetrics: Future {
     }
 }
 
+impl<F> NowOrNever for F where F: Future {}
 impl<F> WithMetrics for F where F: Future {}
 impl<F> WithTimeout for F where F: Future {}
 

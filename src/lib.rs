@@ -42,7 +42,7 @@ use details::{ApiDetails, HumanDate};
 use future::WithTimeout;
 use futures_core::Stream;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use middleware::Metrics;
+use middleware::{Metrics, Payload};
 use repo::ArcRepo;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
@@ -1784,6 +1784,7 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
             .wrap(TracingLogger::default())
             .wrap(Deadline)
             .wrap(Metrics)
+            .wrap(Payload::new())
             .app_data(web::Data::new(process_map.clone()))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     })
@@ -1824,6 +1825,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
             .wrap(TracingLogger::default())
             .wrap(Deadline)
             .wrap(Metrics)
+            .wrap(Payload::new())
             .app_data(web::Data::new(process_map.clone()))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     })

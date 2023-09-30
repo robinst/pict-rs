@@ -1,4 +1,5 @@
 mod metrics;
+mod payload;
 
 use actix_web::{
     dev::{Service, ServiceRequest, Transform},
@@ -15,6 +16,7 @@ use std::{
 use crate::future::WithTimeout;
 
 pub(crate) use self::metrics::Metrics;
+pub(crate) use self::payload::Payload;
 
 pub(crate) struct Deadline;
 pub(crate) struct DeadlineMiddleware<S> {
@@ -128,7 +130,7 @@ where
                 if now < deadline {
                     Some((deadline - now).try_into().ok()?)
                 } else {
-                    None
+                    Some(std::time::Duration::from_secs(0))
                 }
             });
         DeadlineFuture::new(self.inner.call(req), duration)
