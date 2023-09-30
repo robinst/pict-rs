@@ -1961,6 +1961,10 @@ impl PictRsConfiguration {
         Ok(self)
     }
 
+    /// Install the configured pict-rs metrics collector
+    ///
+    /// This is a no-op if pict-rs is not configured to export metrics. Applications that register
+    /// their own metrics collectors shouldn't call this method.
     pub fn install_metrics(self) -> color_eyre::Result<Self> {
         if let Some(addr) = self.config.metrics.prometheus_address {
             PrometheusBuilder::new()
@@ -1972,9 +1976,6 @@ impl PictRsConfiguration {
     }
 
     /// Run the pict-rs application
-    ///
-    /// This must be called after `init_config`, or else the default configuration builder will run and
-    /// fail.
     pub async fn run(self) -> color_eyre::Result<()> {
         let PictRsConfiguration { config, operation } = self;
 

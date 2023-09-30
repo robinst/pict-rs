@@ -98,7 +98,9 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.as_mut().project() {
             InternalFutureProj::Internal { future } => future.poll(cx),
-            InternalFutureProj::Error { error } => Poll::Ready(Err(error.take().unwrap().into())),
+            InternalFutureProj::Error { error } => {
+                Poll::Ready(Err(error.take().expect("Polled after completion").into()))
+            }
         }
     }
 }

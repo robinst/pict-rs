@@ -20,7 +20,7 @@ const GENERATOR_KEY: &str = "last-path";
 
 #[tracing::instrument(skip_all)]
 pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result<(), Error> {
-    tracing::warn!("Running checks");
+    tracing::info!("Running checks");
     if let Err(e) = old_repo.health_check().await {
         tracing::warn!("Old repo is not configured correctly");
         return Err(e.into());
@@ -32,8 +32,8 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
 
     let total_size = old_repo.size().await?;
     let pct = (total_size / 100).max(1);
-    tracing::warn!("Checks complete, migrating repo");
-    tracing::warn!("{total_size} hashes will be migrated");
+    tracing::info!("Checks complete, migrating repo");
+    tracing::info!("{total_size} hashes will be migrated");
 
     let hash_stream = std::pin::pin!(old_repo.hashes());
     let mut hash_stream = hash_stream.into_streamer();
@@ -51,7 +51,7 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
         if index % pct == 0 {
             let percent = index / pct;
 
-            tracing::warn!("Migration {percent}% complete - {index}/{total_size}");
+            tracing::info!("Migration {percent}% complete - {index}/{total_size}");
         }
     }
 
@@ -61,7 +61,7 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
             .await?;
     }
 
-    tracing::warn!("Migration complete");
+    tracing::info!("Migration complete");
 
     Ok(())
 }
@@ -73,7 +73,7 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
     store: S,
     config: Configuration,
 ) -> Result<(), Error> {
-    tracing::warn!("Running checks");
+    tracing::info!("Running checks");
     if let Err(e) = old_repo.health_check().await {
         tracing::warn!("Old repo is not configured correctly");
         return Err(e.into());
@@ -89,8 +89,8 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
 
     let total_size = old_repo.size().await?;
     let pct = (total_size / 100).max(1);
-    tracing::warn!("Checks complete, migrating repo");
-    tracing::warn!("{total_size} hashes will be migrated");
+    tracing::info!("Checks complete, migrating repo");
+    tracing::info!("{total_size} hashes will be migrated");
 
     let mut hash_stream = old_repo.hashes().await.into_streamer();
 
@@ -117,7 +117,7 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
                 if index % pct == 0 {
                     let percent = index / pct;
 
-                    tracing::warn!("Migration {percent}% complete - {index}/{total_size}");
+                    tracing::info!("Migration {percent}% complete - {index}/{total_size}");
                 }
             }
         }
@@ -129,7 +129,7 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
         if index % pct == 0 {
             let percent = index / pct;
 
-            tracing::warn!("Migration {percent}% complete - {index}/{total_size}");
+            tracing::info!("Migration {percent}% complete - {index}/{total_size}");
         }
     }
 
@@ -145,7 +145,7 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
             .await?;
     }
 
-    tracing::warn!("Migration complete");
+    tracing::info!("Migration complete");
 
     Ok(())
 }
