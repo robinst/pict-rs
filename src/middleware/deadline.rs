@@ -96,7 +96,7 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        let duration: Result<Option<Duration>, ParseDeadlineError> = req
+        let duration = req
             .headers()
             .get("X-Request-Deadline")
             .map(|deadline| {
@@ -122,6 +122,7 @@ where
                 }
             })
             .transpose();
+
         DeadlineFuture::new(self.inner.call(req), duration)
     }
 }
