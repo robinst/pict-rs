@@ -18,6 +18,7 @@ pub(crate) struct ConfigFile {
     #[serde(default)]
     pub(crate) metrics: Metrics,
 
+    #[serde(default)]
     old_repo: OldRepo,
 
     pub(crate) media: Media,
@@ -424,7 +425,7 @@ impl Media {
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct OldRepo {
     pub(crate) path: Option<PathBuf>,

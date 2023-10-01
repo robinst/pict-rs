@@ -4,7 +4,6 @@ read_only = false
 max_file_count = 1
 
 [client]
-pool_size = 100
 timeout = 30
 
 [tracing.logging]
@@ -21,9 +20,6 @@ targets = "info"
 [metrics]
 
 [old_repo]
-path = "/mnt/sled-repo"
-cache_capacity = 67108864
-export_path = "/mnt/exports"
 
 [media]
 external_validation_timeout = 30
