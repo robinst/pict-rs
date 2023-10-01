@@ -1022,7 +1022,7 @@ If you're running with docker-compose, this could look like the following:
 ```bash
 $ sudo docker compose stop pictrs # stop the pict-rs container
 $ sudo docker compose run pictrs sh # launch a shell in the pict-rs container
-> pict-rs --version # verify pict-rs version is recent (should probably be 0.4.0 or later)
+> pict-rs --version # verify pict-rs version is recent (should probably be 0.5.0 or later)
 > pict-rs \
     migrate-repo \
     sled -p /mnt/sled-repo \
