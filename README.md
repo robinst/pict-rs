@@ -15,9 +15,16 @@ _a simple image hosting service_
     2. [Api](#api)
 3. [Administration](#administration)
     1. [Backups](#backups)
-    2. [0.3 to 0.4 Migration Guide](#0-3-to-0-4-migration-guide)
+    2. [0.4 to 0.5 Migration Guide](#0-4-to-0-5-migration-guide)
+        1. [Overview](#overview)
+        2. [Configuration Updates](#configuration-updates)
+            1. [Image Changes](#image-changes)
+            2. [Animation Changes](#animation-changes)
+            3. [Video Changes](#video-changes)
+        3. [Upgrading Directly to Postgres](#upgrading-directly-to-postgres)
     3. [Filesystem to Object Storage Migration](#filesystem-to-object-storage-migration)
         1. [Troubleshooting](#migration-troubleshooting)
+    4. [Sled to Postgres Migration](#sled-to-postgres-migration)
 4. [Development](#development)
     1. [Nix Development](#nix-development)
         1. [With direnv and nix-direnv](#with-direnv-and-nix-direnv)
@@ -254,7 +261,7 @@ More information is available in the [Ubuntu and Debian docs](./docs/ubuntu-and-
 
 ##### Compile from Source
 pict-rs can be compiled from source using a recent version of the rust compiler. I do development
-and produce releases on 1.70. pict-rs also requires the `protoc` protobuf compiler to be present at
+and produce releases on 1.72. pict-rs also requires the `protoc` protobuf compiler to be present at
 build-time in order to enable use of [`tokio-console`](https://github.com/tokio-rs/console).
 
 Like the Binary Download option, `imagemagick`, `ffmpeg`, and `exiftool` must be installed for
@@ -669,62 +676,122 @@ If you can't stop pict-rs, but would like to back up the database, there is an i
 `/internal/export` documented in [Api](#api) that can be used to produce a copy of the current
 database for easy backups.
 
-### 0.3 to 0.4 Migration Guide
-pict-rs will automatically migrate from the 0.3 db format to the 0.4 db format on the first launch
-of 0.4. If you are running the provided docker container without any custom configuration, there are
-no additional steps.
+### 0.4 to 0.5 Migration Guide
+#### Overview
+pict-rs will automatically migrate from the 0.4 db format to the 0.5 db format on the first launch
+of 0.5. This process might take a while, especially if you've been running pict-rs since before 0.3.
+The reason for this is pict-rs now requires original files to have associated details records stored
+in the database, and while generating these records happened by default for 0.3 and 0.4, images
+uploaded before this was standard may not have ever had their details records generated.
 
-If you have any custom configuration for file paths, or you are running outside of docker, then
-there is some extra configuration that needs to be done.
+_This upgrade must be performed while pict-rs is offline._
 
-If your previous `PICTRS__PATH` variable or `path` config was set, it needs to be translated to the
-new configuration format.
+#### Configuration Updates
+Previously, pict-rs only had two categories for files: images and videos. pict-rs 0.5 adds a third
+category: animation. With the new explicit support for animated file types, some configuration
+options have moved.
 
-`PICTRS_PATH` has split into three separate config options:
-- `PICTRS__OLD_DB__PATH`: This should be set to the same value that `PICTRS__PATH` was. It is used
-    during the migration from 0.3 to 0.4
-- `PICTRS__REPO__PATH`: This is the location of the 0.4 database. It should be set to a subdirectory
-    of the previous `PICTRS__PATH` directory. I would recommend `/previous/path/sled-repo`
-- `PICTRS__STORE__PATH`: This is the location of the files. It should be the `files` subdirectory of
-    the previous PICTRS__PATH directory.
+##### Image Changes
+| Old Environment Variable       | New Environment Variable              |
+| ------------------------------ | ------------------------------------- |
+| `PICTRS__MEDIA__FORMAT`        | `PICTRS__MEDIA__IMAGE__FORMAT`        |
+| `PICTRS__MEDIA__MAX_WIDTH`     | `PICTRS__MEDIA__IMAGE__MAX_WIDTH`     |
+| `PICTRS__MEDIA__MAX_HEIGHT`    | `PICTRS__MEDIA__IMAGE__MAX_HEIGHT`    |
+| `PICTRS__MEDIA__MAX_AREA`      | `PICTRS__MEDIA__IMAGE__MAX_AREA`      |
+|                                | `PICTRS__MEDIA__IMAGE__MAX_FILE_SIZE` |
 
-if you configured via the configuration file, these would be
+| Old TOML Value          | New TOML Value                |
+| ----------------------- | ----------------------------- |
+| `[media] format`        | `[media.image] format`        |
+| `[media] max_width`     | `[media.image] max_width`     |
+| `[media] max_height`    | `[media.image] max_height`    |
+| `[media] max_area`      | `[media.image] max_area`      |
+|                         | `[media.image] max_file_size` |
+
+##### Animation Changes
+| Old Environment Variable              | New Environment Variable                    |
+| ------------------------------------- | ------------------------------------------- |
+| `PICTRS__MEDIA__GIF__MAX_WIDTH`       | `PICTRS__MEDIA__ANIMATION__MAX_WIDTH`       |
+| `PICTRS__MEDIA__GIF__MAX_HEIGHT`      | `PICTRS__MEDIA__ANIMATION__MAX_HEIGHT`      |
+| `PICTRS__MEDIA__GIF__MAX_AREA`        | `PICTRS__MEDIA__ANIMATION__MAX_AREA`        |
+| `PICTRS__MEDIA__GIF__MAX_FILE_SIZE`   | `PICTRS__MEDIA__ANIMATION__MAX_FILE_SIZE`   |
+| `PICTRS__MEDIA__GIF__MAX_FRAME_COUNT` | `PICTRS__MEDIA__ANIMATION__MAX_FRAME_COUNT` |
+|                                       | `PICTRS__MEDIA__ANIMATION__FORMAT`          |
+|                                       | `PICTRS__MEDIA__ANIMATION__MAX_FILE_SIZE`   |
+
+| Old TOML Value                | New TOML Value                      |
+| ----------------------------- | ----------------------------------- |
+| `[media.gif] max_width`       | `[media.animation] max_width`       |
+| `[media.gif] max_height`      | `[media.animation] max_height`      |
+| `[media.gif] max_area`        | `[media.animation] max_area`        |
+| `[media.gif] max_file_size`   | `[media.animation] max_file_size`   |
+| `[media.gif] max_frame_count` | `[media.animation] max_frame_count` |
+|                               | `[media.animation] format`          |
+|                               | `[media.animation] max_file_size`   |
+
+##### Video Changes
+| Old Environment Variable             | New Environment Variable                |
+| ------------------------------------ | --------------------------------------- |
+| `PICTRS__MEDIA__ENABLE_SILENT_VIDEO` | `PICTRS__MEDIA__VIDEO__ENABLE`          |
+| `PICTRS__MEDIA__ENABLE_FULL_VIDEO`   | `PICTRS__MEDIA__VIDEO__ALLOW_AUDIO`     |
+| `PICTRS__MEDIA__VIDEO_CODEC`         | `PICTRS__MEDIA__VIDEO__VIDEO_CODEC`     |
+| `PICTRS__MEDIA__AUDIO_CODEC`         | `PICTRS__MEDIA__VIDEO__AUDIO_CODEC`     |
+| `PICTRS__MEDIA__MAX_FRAME_COUNT`     | `PICTRS__MEDIA__VIDEO__MAX_FRAME_COUNT` |
+| `PICTRS__MEDIA__ENABLE_FULL_VIDEO`   | `PICTRS__MEDIA__VIDEO__ALLOW_AUDIO`     |
+|                                      | `PICTRS__MEDIA__VIDEO__MAX_WIDTH`       |
+|                                      | `PICTRS__MEDIA__VIDEO__MAX_HEIGHT`      |
+|                                      | `PICTRS__MEDIA__VIDEO__MAX_AREA`        |
+|                                      | `PICTRS__MEDIA__VIDEO__MAX_FILE_SIZE`   |
+
+| Old TOML Value                | New TOML Value                  |
+| ----------------------------- | ------------------------------- |
+| `[media] enable_silent_video` | `[media.video] enable`          |
+| `[media] enable_full_video`   | `[media.video] allow_audio`     |
+| `[media] video_codec`         | `[media.video] video_codec`     |
+| `[media] audio_codec`         | `[media.video] audio_codec`     |
+| `[media] max_frame_count`     | `[media.video] max_frame_count` |
+| `[media] enable_full_video`   | `[media.video] allow_audio`     |
+|                               | `[media.video] max_width`       |
+|                               | `[media.video] max_height`      |
+|                               | `[media.video] max_area`        |
+|                               | `[media.video] max_file_size`   |
+
+Note that although each media type now includes its own `MAX_FILE_SIZE` configuration, the
+`PICTRS__MEDIA__MAX_FILE_SIZE` value still exists as a global limit for any file type.
+
+In addition to all the configuration options mentioned above, there are now individual quality
+settings that can be configured for each image and animation type, as well as for video files.
+Please see the [pict-rs.toml](./pict-rs.toml) file for more information.
+
+#### Upgrading Directly to Postgres
+pict-rs supports migrating directly to the postgres repo during the upgrade. In order to do this,
+the postgres repo needs to be configured and the `old_repo` needs to be specified. The `old_repo`
+section just contains the `path` of the `repo` section in your 0.4 config.
+
+Example:
 ```toml
-[old_db]
-path = "/previous/path"
+[old_repo]
+path = '/mnt/sled-repo'
 
 [repo]
-path = "/previous/path/sled-repo"
-
-[store]
-path = "/previous/path/files"
+type = 'postgres'
+url = 'postgres://user:password@host:5432/db'
 ```
 
-If your previous `RUST_LOG` variable was set, it has been split into two different configuration
-options:
-- `PICTRS__TRACING__LOGGING__TARGETS`: This dictates what logs should be printed in the console while
-    pict-rs is running.
-- `PICTRS__TRACING__OPENTELEMETRY__TARGETS`: This dictates what spans and events should be exported
-    as opentelemetry data, if enabled.
-
-You can also configure these options via the configuration file:
-```toml
-[tracing.logging]
-targets = "debug"
-
-[tracing.opentelemetry]
-targets = "debug"
+Or with environment varaibles:
+```
+PICTRS__OLD_REPO__PATH=/mnt/sled-repo
+PICTRS__REPO__TYPE=postgres
+PICTRS__REPO__URL=postgres://user:password@host:5432/db
 ```
 
-If the migration doesn't work due to a configuration error, the new sled-repo directory can be
-deleted and a new migration will be automatically triggered on the next launch.
-
+Once these variables are set, 0.5 can be started and the migration will automatically occur.
 
 ### Filesystem to Object Storage migration
 _Make sure you take a backup of the sled-repo directory before running this command!!! Migrating to
 object storage updates the database and if you need to revert for any reason, you'll want a backup._
 
-After migrating from 0.3 to 0.4, it is possible to migrate to object storage. This can be useful if
+It is possible to migrate to object storage. This can be useful if
 hosting in a cloud environment, since object storage is generally far cheaper than block storage.
 
 There's a few required configuration options for object storage. I will try to explain:
@@ -871,6 +938,7 @@ Error:
 Cause: the region was set improperly. Additionaly a path-style endpoint was used without passing
 `--use-path-style`
 
+
 Error:
 ```
    0: Error in store
@@ -883,7 +951,6 @@ Error:
       </Error>
 ```
 Cause: the access key was set improperly
-
 
 If you have enabled object storage without first migrating your existing files to object storage,
 these migrate commands may end up retrying file migrations indefinitely. In order to successfully
@@ -933,6 +1000,55 @@ Additionally, some providers might require you include the `region` in your endp
 `https://example.com`.
 
 Check your object storage provider's documentation to be sure you're setting the right values.
+
+### Sled to Postgres Migration
+If you upgraded to 0.5 without migrating to postgres at the same time, you can migrate to postgres
+after the fact with the built-in migration utility. Before running the migration, make sure you have
+a postgres role and database ready for pict-rs. The first thing pict-rs will do upon connecting to
+a new database is attempt to add the `pgcrypto` extension, so if the role you created for pict-rs
+does not have that permission, it will fail.
+
+The migration command is fairly simple. It just needs the path to your existing repo and the URL to
+your new repo.
+
+```bash
+$ pict-rs \
+    migrate-repo \
+    sled -p /path/to-/sled-repo \
+    postgres -u postgres://user:password@host:5432/db
+```
+
+If you're running with docker-compose, this could look like the following:
+```bash
+$ sudo docker compose stop pictrs # stop the pict-rs container
+$ sudo docker compose run pictrs sh # launch a shell in the pict-rs container
+> pict-rs --version # verify pict-rs version is recent (should probably be 0.4.0 or later)
+> pict-rs \
+    migrate-repo \
+    sled -p /mnt/sled-repo \
+    postgres -u postgres://user:password@host:5432/db
+> exit
+$ vi docker-compose.yml # edit the docker-compose yaml however you like to edit it, make sure all the variables described below are set
+$ sudo docker compose up -d pictrs # start pict-rs again after the migration. Note that this is not 'docker compose start'. using the `up` subcommand explicitly reloads configurations
+```
+
+_This command must be run while pict-rs is offline._
+
+This migration should be pretty quick, since there's no actual files getting moved around. After the
+migration completes, make sure pict-rs is configured to use the postgres repo, then start it back
+up.
+
+Example:
+```toml
+[repo]
+type = 'postgres'
+url = 'postgres://user:password@host:5432/db'
+```
+or
+```
+PICTRS__REPO__TYPE=postgres
+PICTRS__REPO__URL=postgres://user:password@host:5432/db
+```
 
 
 ## Development
