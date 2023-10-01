@@ -30,7 +30,7 @@ pub(crate) struct ConfigFile {
 
 impl ConfigFile {
     pub(crate) fn old_repo_path(&self) -> Option<&PathBuf> {
-        self.old_repo.path.as_ref().or_else(|| match self.repo {
+        self.old_repo.path.as_ref().or(match self.repo {
             Repo::Sled(ref sled) => Some(&sled.path),
             _ => None,
         })
