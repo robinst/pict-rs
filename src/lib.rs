@@ -1598,11 +1598,10 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
     error
 }
 
-fn build_client(config: &Configuration) -> Result<ClientWithMiddleware, Error> {
+fn build_client() -> Result<ClientWithMiddleware, Error> {
     let client = reqwest::Client::builder()
         .user_agent("pict-rs v0.5.0-main")
         .use_rustls_tls()
-        .pool_max_idle_per_host(config.client.pool_size)
         .build()
         .map_err(UploadError::BuildClient)?;
 
@@ -1979,7 +1978,7 @@ impl PictRsConfiguration {
     pub async fn run(self) -> color_eyre::Result<()> {
         let PictRsConfiguration { config, operation } = self;
 
-        let client = build_client(&config)?;
+        let client = build_client()?;
 
         match operation {
             Operation::Run => (),
@@ -2073,12 +2072,19 @@ impl PictRsConfiguration {
                 let store = FileStore::build(path, arc_repo.clone()).await?;
 
                 if arc_repo.get("migrate-0.4").await?.is_none() {
-                    if let Some(old_repo) = repo_04::open(&config.old_repo)? {
-                        repo::migrate_04(old_repo, arc_repo.clone(), store.clone(), config.clone())
+                    if let Some(path) = config.old_repo_path() {
+                        if let Some(old_repo) = repo_04::open(path)? {
+                            repo::migrate_04(
+                                old_repo,
+                                arc_repo.clone(),
+                                store.clone(),
+                                config.clone(),
+                            )
                             .await?;
-                        arc_repo
-                            .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
-                            .await?;
+                            arc_repo
+                                .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
+                                .await?;
+                        }
                     }
                 }
 
@@ -2129,12 +2135,19 @@ impl PictRsConfiguration {
                 .build(client.clone());
 
                 if arc_repo.get("migrate-0.4").await?.is_none() {
-                    if let Some(old_repo) = repo_04::open(&config.old_repo)? {
-                        repo::migrate_04(old_repo, arc_repo.clone(), store.clone(), config.clone())
+                    if let Some(path) = config.old_repo_path() {
+                        if let Some(old_repo) = repo_04::open(path)? {
+                            repo::migrate_04(
+                                old_repo,
+                                arc_repo.clone(),
+                                store.clone(),
+                                config.clone(),
+                            )
                             .await?;
-                        arc_repo
-                            .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
-                            .await?;
+                            arc_repo
+                                .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
+                                .await?;
+                        }
                     }
                 }
 

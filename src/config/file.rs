@@ -18,13 +18,22 @@ pub(crate) struct ConfigFile {
     #[serde(default)]
     pub(crate) metrics: Metrics,
 
-    pub(crate) old_repo: Sled,
+    old_repo: OldRepo,
 
     pub(crate) media: Media,
 
     pub(crate) repo: Repo,
 
     pub(crate) store: Store,
+}
+
+impl ConfigFile {
+    pub(crate) fn old_repo_path(&self) -> Option<&PathBuf> {
+        self.old_repo.path.as_ref().or_else(|| match self.repo {
+            Repo::Sled(ref sled) => Some(&sled.path),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -106,8 +115,6 @@ pub(crate) struct Server {
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub(crate) struct Client {
-    pub(crate) pool_size: usize,
-
     pub(crate) timeout: u64,
 }
 
@@ -415,6 +422,12 @@ impl Media {
             .as_ref()
             .map(|steps| steps.inner.as_slice())
     }
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct OldRepo {
+    pub(crate) path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

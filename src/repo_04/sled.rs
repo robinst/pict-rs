@@ -109,8 +109,8 @@ impl OldDetails {
 
 impl SledRepo {
     #[tracing::instrument]
-    pub(crate) fn build(path: PathBuf, cache_capacity: u64) -> color_eyre::Result<Option<Self>> {
-        let Some(db) = Self::open(path, cache_capacity)? else {
+    pub(crate) fn build(path: PathBuf) -> color_eyre::Result<Option<Self>> {
+        let Some(db) = Self::open(path)? else {
             return Ok(None);
         };
 
@@ -129,7 +129,7 @@ impl SledRepo {
         }))
     }
 
-    fn open(mut path: PathBuf, cache_capacity: u64) -> Result<Option<Db>, SledError> {
+    fn open(mut path: PathBuf) -> Result<Option<Db>, SledError> {
         path.push("v0.4.0-alpha.1");
 
         if let Err(e) = std::fs::metadata(&path) {
@@ -138,10 +138,7 @@ impl SledRepo {
             }
         }
 
-        let db = ::sled::Config::new()
-            .cache_capacity(cache_capacity)
-            .path(path)
-            .open()?;
+        let db = ::sled::Config::new().path(path).open()?;
 
         Ok(Some(db))
     }

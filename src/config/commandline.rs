@@ -52,7 +52,6 @@ impl Args {
             Command::Run(Run {
                 address,
                 api_key,
-                client_pool_size,
                 client_timeout,
                 metrics_prometheus_address,
                 media_preprocess_steps,
@@ -111,7 +110,6 @@ impl Args {
                 };
 
                 let client = Client {
-                    pool_size: client_pool_size,
                     timeout: client_timeout,
                 };
 
@@ -494,8 +492,6 @@ struct Server {
 #[serde(rename_all = "snake_case")]
 struct Client {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pool_size: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     timeout: Option<u64>,
 }
 
@@ -861,14 +857,6 @@ struct Run {
     /// The API KEY required to access restricted routes
     #[arg(long)]
     api_key: Option<String>,
-
-    /// Number of connections the internel HTTP client should maintain in its pool
-    ///
-    /// This number defaults to 100, and the total number is multiplied by the number of cores
-    /// available to the program. This means that running on a 2 core system will result in 200
-    /// pooled connections, and running on a 32 core system will result in 3200 pooled connections.
-    #[arg(long)]
-    client_pool_size: Option<usize>,
 
     /// How long (in seconds) the internel HTTP client should wait for responses
     ///

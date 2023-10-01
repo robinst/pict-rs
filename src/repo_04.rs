@@ -1,24 +1,17 @@
 use crate::{
-    config,
     details::Details,
     repo::{Alias, DeleteToken},
 };
 use futures_core::Stream;
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, path::PathBuf, sync::Arc};
 
 pub(crate) use self::sled::SledRepo;
 
 mod sled;
 
 #[tracing::instrument]
-pub(crate) fn open(config: &config::Sled) -> color_eyre::Result<Option<SledRepo>> {
-    let config::Sled {
-        path,
-        cache_capacity,
-        export_path: _,
-    } = config;
-
-    SledRepo::build(path.clone(), *cache_capacity)
+pub(crate) fn open(path: &PathBuf) -> color_eyre::Result<Option<SledRepo>> {
+    SledRepo::build(path.clone())
 }
 
 #[derive(Debug, thiserror::Error)]

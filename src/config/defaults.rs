@@ -10,7 +10,6 @@ pub(crate) struct Defaults {
     server: ServerDefaults,
     client: ClientDefaults,
     tracing: TracingDefaults,
-    old_repo: SledDefaults,
     media: MediaDefaults,
     repo: RepoDefaults,
     store: StoreDefaults,
@@ -27,7 +26,6 @@ struct ServerDefaults {
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 struct ClientDefaults {
-    pool_size: usize,
     timeout: u64,
 }
 
@@ -138,7 +136,7 @@ enum RepoDefaults {
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-struct SledDefaults {
+pub(super) struct SledDefaults {
     path: PathBuf,
     cache_capacity: u64,
     export_path: PathBuf,
@@ -183,10 +181,7 @@ impl Default for ServerDefaults {
 
 impl Default for ClientDefaults {
     fn default() -> Self {
-        ClientDefaults {
-            pool_size: 100,
-            timeout: 30,
-        }
+        ClientDefaults { timeout: 30 }
     }
 }
 
@@ -348,6 +343,16 @@ impl From<crate::config::commandline::Filesystem> for crate::config::primitives:
 impl From<crate::config::commandline::Filesystem> for crate::config::primitives::Store {
     fn from(value: crate::config::commandline::Filesystem) -> Self {
         crate::config::primitives::Store::Filesystem(value.into())
+    }
+}
+
+impl From<SledDefaults> for crate::config::file::Sled {
+    fn from(defaults: SledDefaults) -> Self {
+        crate::config::file::Sled {
+            path: defaults.path,
+            cache_capacity: defaults.cache_capacity,
+            export_path: defaults.export_path,
+        }
     }
 }
 
