@@ -106,7 +106,8 @@ where
         .save_async_read(hasher_reader, input_type.media_type())
         .await?;
 
-    let details = Details::from_store(store, &identifier, media.process_timeout).await?;
+    let bytes_stream = store.to_bytes(&identifier, None, None).await?;
+    let details = Details::from_bytes(media.process_timeout, bytes_stream.into_bytes()).await?;
 
     drop(permit);
 

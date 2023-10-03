@@ -17,11 +17,12 @@ _a simple image hosting service_
     1. [Backups](#backups)
     2. [0.4 to 0.5 Migration Guide](#0-4-to-0-5-migration-guide)
         1. [Overview](#overview)
-        2. [Configuration Updates](#configuration-updates)
+        2. [Upgrade Configuration](#upgrade-configuration)
+        3. [Configuration Updates](#configuration-updates)
             1. [Image Changes](#image-changes)
             2. [Animation Changes](#animation-changes)
             3. [Video Changes](#video-changes)
-        3. [Upgrading Directly to Postgres](#upgrading-directly-to-postgres)
+        4. [Upgrading Directly to Postgres](#upgrading-directly-to-postgres)
     3. [Filesystem to Object Storage Migration](#filesystem-to-object-storage-migration)
         1. [Troubleshooting](#migration-troubleshooting)
     4. [Sled to Postgres Migration](#sled-to-postgres-migration)
@@ -644,6 +645,30 @@ in the database, and while generating these records happened by default for 0.3 
 uploaded before this was standard may not have ever had their details records generated.
 
 _This upgrade must be performed while pict-rs is offline._
+
+#### Upgrade Configuration
+Because upgrades may take so long, there is a new configuration option introduced to attempt to
+improve its speed.
+
+```toml
+[upgrade]
+concurrency = 32
+```
+or
+```
+PICTRS__UPGRADE__CONCURRENCY=32
+```
+or
+```bash
+$ pict-rs run --upgrade-concurrency 32
+```
+
+This value dictates how many hashes pict-rs will attempt to migrate at the same time. Since this
+value will increase the number of concurrent connections to the Repo and the Store, as well as
+potentially increase CPU and memory use, it should be considered carefully before increasing.
+
+For large-scale deployments, it is likely this value should be bumped to 128, 256, or even 512. The
+default value is 32.
 
 #### Configuration Updates
 Previously, pict-rs only had two categories for files: images and videos. pict-rs 0.5 adds a third

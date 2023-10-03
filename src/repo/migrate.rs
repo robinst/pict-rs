@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use streem::IntoStreamer;
-use tokio::task::JoinSet;
+use tokio::{sync::Semaphore, task::JoinSet};
 
 use crate::{
     config::Configuration,
@@ -341,6 +341,18 @@ async fn set_details<S: Store>(
     }
 }
 
+static DETAILS_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+
+fn details_semaphore() -> &'static Semaphore {
+    DETAILS_SEMAPHORE.get_or_init(|| {
+        let parallelism = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1);
+
+        crate::sync::bare_semaphore(parallelism * 2)
+    })
+}
+
 #[tracing::instrument(skip_all)]
 async fn fetch_or_generate_details<S: Store>(
     old_repo: &OldSledRepo,
@@ -353,8 +365,13 @@ async fn fetch_or_generate_details<S: Store>(
     if let Some(details) = details_opt {
         Ok(details)
     } else {
-        Details::from_store(store, identifier, config.media.process_timeout)
-            .await
-            .map_err(From::from)
+        let bytes_stream = store.to_bytes(identifier, None, None).await?;
+        let bytes = bytes_stream.into_bytes();
+
+        let guard = details_semaphore().acquire().await?;
+        let details = Details::from_bytes(config.media.process_timeout, bytes).await?;
+        drop(guard);
+
+        Ok(details)
     }
 }

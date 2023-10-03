@@ -407,7 +407,12 @@ where
     let details = if let Some(details) = details_opt {
         details
     } else {
-        let new_details = Details::from_store(from, identifier, timeout)
+        let bytes_stream = from
+            .to_bytes(&identifier, None, None)
+            .await
+            .map_err(From::from)
+            .map_err(MigrateError::Details)?;
+        let new_details = Details::from_bytes(timeout, bytes_stream.into_bytes())
             .await
             .map_err(MigrateError::Details)?;
         repo.relate_details(identifier, &new_details)

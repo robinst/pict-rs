@@ -27,6 +27,15 @@ max_file_count = 1
 # distinct from the object storage client timeout, which can be configured separately
 timeout = 30
 
+[upgrade]
+## Optional: How many hashes will be migrated from the previous version of pict-rs at the same time
+# environment variable: PICTRS__UPGRADE__CONCURRENCY
+# default: 32
+#
+# Increasing this value will increase the number of concurrent connections to the Repo, and to the
+# Store, so make sure your deployment can handle more throughput before tweaking this.
+concurrency = 32
+
 
 ## Logging configuration
 [tracing.logging]

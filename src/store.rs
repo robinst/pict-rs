@@ -1,9 +1,10 @@
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{fmt::Debug, sync::Arc};
+use streem::IntoStreamer;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::{error_code::ErrorCode, stream::LocalBoxStream};
+use crate::{bytes_stream::BytesStream, error_code::ErrorCode, stream::LocalBoxStream};
 
 pub(crate) mod file_store;
 pub(crate) mod object_store;
@@ -22,6 +23,9 @@ pub(crate) enum StoreError {
     #[error("Error in 0.4 DB")]
     Repo04(#[from] crate::repo_04::RepoError),
 
+    #[error("Error reading bytes stream")]
+    ReadStream(#[source] std::io::Error),
+
     #[error("Requested file is not found")]
     FileNotFound(#[source] std::io::Error),
 
@@ -35,6 +39,7 @@ impl StoreError {
             Self::FileStore(e) => e.error_code(),
             Self::ObjectStore(e) => e.error_code(),
             Self::Repo(e) => e.error_code(),
+            Self::ReadStream(_) => ErrorCode::IO_ERROR,
             Self::Repo04(_) => ErrorCode::OLD_REPO_ERROR,
             Self::FileNotFound(_) | Self::ObjectNotFound(_) => ErrorCode::NOT_FOUND,
         }
@@ -111,6 +116,26 @@ pub(crate) trait Store: Clone + Debug {
         from_start: Option<u64>,
         len: Option<u64>,
     ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError>;
+
+    async fn to_bytes(
+        &self,
+        identifier: &Arc<str>,
+        from_start: Option<u64>,
+        len: Option<u64>,
+    ) -> Result<BytesStream, StoreError> {
+        let mut buf = BytesStream::new();
+
+        let mut streamer = self
+            .to_stream(identifier, from_start, len)
+            .await?
+            .into_streamer();
+
+        while let Some(bytes) = streamer.try_next().await.map_err(StoreError::ReadStream)? {
+            buf.add_bytes(bytes);
+        }
+
+        Ok(buf)
+    }
 
     async fn read_into<Writer>(
         &self,

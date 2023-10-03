@@ -122,8 +122,9 @@ async fn ensure_details<S: Store + 'static>(
         }
 
         tracing::debug!("generating new details from {:?}", identifier);
+        let bytes_stream = store.to_bytes(&identifier, None, None).await?;
         let new_details =
-            Details::from_store(store, &identifier, config.media.process_timeout).await?;
+            Details::from_bytes(config.media.process_timeout, bytes_stream.into_bytes()).await?;
         tracing::debug!("storing details for {:?}", identifier);
         repo.relate_details(&identifier, &new_details).await?;
         tracing::debug!("stored");
@@ -897,8 +898,10 @@ async fn process<S: Store + 'static>(
             }
 
             tracing::debug!("generating new details from {:?}", identifier);
+            let bytes_stream = store.to_bytes(&identifier, None, None).await?;
             let new_details =
-                Details::from_store(&store, &identifier, config.media.process_timeout).await?;
+                Details::from_bytes(config.media.process_timeout, bytes_stream.into_bytes())
+                    .await?;
             tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
             tracing::debug!("stored");
@@ -1015,8 +1018,10 @@ async fn process_head<S: Store + 'static>(
             }
 
             tracing::debug!("generating new details from {:?}", identifier);
+            let bytes_stream = store.to_bytes(&identifier, None, None).await?;
             let new_details =
-                Details::from_store(&store, &identifier, config.media.process_timeout).await?;
+                Details::from_bytes(config.media.process_timeout, bytes_stream.into_bytes())
+                    .await?;
             tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
             tracing::debug!("stored");
