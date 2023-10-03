@@ -249,6 +249,7 @@ impl Args {
             }
             Command::MigrateStore(MigrateStore {
                 skip_missing_files,
+                concurrency,
                 store,
             }) => {
                 let server = Server::default();
@@ -271,6 +272,7 @@ impl Args {
                             },
                             operation: Operation::MigrateStore {
                                 skip_missing_files,
+                                concurrency,
                                 from: from.into(),
                                 to: to.into(),
                             },
@@ -291,6 +293,7 @@ impl Args {
                                 },
                                 operation: Operation::MigrateStore {
                                     skip_missing_files,
+                                    concurrency,
                                     from: from.into(),
                                     to: to.into(),
                                 },
@@ -315,6 +318,7 @@ impl Args {
                                     },
                                     operation: Operation::MigrateStore {
                                         skip_missing_files,
+                                        concurrency,
                                         from: from.into(),
                                         to: to.into(),
                                     },
@@ -338,6 +342,7 @@ impl Args {
                                 },
                                 operation: Operation::MigrateStore {
                                     skip_missing_files,
+                                    concurrency,
                                     from: from.into(),
                                     to: to.into(),
                                 },
@@ -450,6 +455,7 @@ pub(crate) enum Operation {
     Run,
     MigrateStore {
         skip_missing_files: bool,
+        concurrency: usize,
         from: crate::config::primitives::Store,
         to: crate::config::primitives::Store,
     },
@@ -1091,6 +1097,12 @@ struct MigrateStore {
     /// pict-rs to ignore errors that are caused by files not existing.
     #[arg(long)]
     skip_missing_files: bool,
+
+    /// How many hashes pict-rs should attempt to migrate at the same time. This does not
+    /// correspond to a thread count, but instead how many in-flight migrations can happen.
+    /// Increasing this number may improve throughput
+    #[arg(long, default_value = "32")]
+    concurrency: usize,
 
     #[command(subcommand)]
     store: MigrateStoreFrom,

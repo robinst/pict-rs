@@ -766,10 +766,17 @@ There's a few required configuration options for object storage. I will try to e
 - secret-key: this is a second secret your cloud provider will give to you in order to access the
     bucket
 
+Additionally, there's a commandline argument that can be set to change the default level of
+concurrency for the migration. pict-rs will attempt to migrate 32 hashes at a time, but for large
+deployments, it may be worth trying to increase this value. Setting it to 128, 256, or even 512
+could be useful. Note that the bigger this value, the more concurrent connections to the object
+storage provider will be made.
+
 The command will look something like this:
 ```bash
 $ pict-rs \
     migrate-store \
+        --concurrency 32 \
     filesystem \
         -p /path/to/files \
     object-storage \

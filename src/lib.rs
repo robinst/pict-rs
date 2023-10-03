@@ -1840,6 +1840,7 @@ async fn migrate_inner<S1>(
     to: config::primitives::Store,
     skip_missing_files: bool,
     timeout: u64,
+    concurrency: usize,
 ) -> color_eyre::Result<()>
 where
     S1: Store + 'static,
@@ -1848,7 +1849,7 @@ where
         config::primitives::Store::Filesystem(config::Filesystem { path }) => {
             let to = FileStore::build(path.clone(), repo.clone()).await?;
 
-            migrate_store(repo, from, to, skip_missing_files, timeout).await?
+            migrate_store(repo, from, to, skip_missing_files, timeout, concurrency).await?
         }
         config::primitives::Store::ObjectStorage(config::primitives::ObjectStorage {
             endpoint,
@@ -1882,7 +1883,7 @@ where
             .await?
             .build(client);
 
-            migrate_store(repo, from, to, skip_missing_files, timeout).await?
+            migrate_store(repo, from, to, skip_missing_files, timeout, concurrency).await?
         }
     }
 
@@ -1984,6 +1985,7 @@ impl PictRsConfiguration {
             Operation::Run => (),
             Operation::MigrateStore {
                 skip_missing_files,
+                concurrency,
                 from,
                 to,
             } => {
@@ -1999,6 +2001,7 @@ impl PictRsConfiguration {
                             to,
                             skip_missing_files,
                             config.media.process_timeout,
+                            concurrency,
                         )
                         .await?;
                     }
@@ -2043,6 +2046,7 @@ impl PictRsConfiguration {
                             to,
                             skip_missing_files,
                             config.media.process_timeout,
+                            concurrency,
                         )
                         .await?;
                     }

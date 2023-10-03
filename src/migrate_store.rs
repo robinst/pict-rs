@@ -22,6 +22,7 @@ pub(super) async fn migrate_store<S1, S2>(
     to: S2,
     skip_missing_files: bool,
     timeout: u64,
+    concurrency: usize,
 ) -> Result<(), Error>
 where
     S1: Store + Clone + 'static,
@@ -48,6 +49,7 @@ where
         to.clone(),
         skip_missing_files,
         timeout,
+        concurrency,
     )
     .await
     {
@@ -88,6 +90,7 @@ async fn do_migrate_store<S1, S2>(
     to: S2,
     skip_missing_files: bool,
     timeout: u64,
+    concurrency: usize,
 ) -> Result<(), Error>
 where
     S1: Store + 'static,
@@ -129,7 +132,7 @@ where
     while let Some(hash) = stream.next().await {
         let hash = hash?;
 
-        if joinset.len() >= 32 {
+        if joinset.len() >= concurrency {
             if let Some(res) = joinset.join_next().await {
                 res.map_err(|_| UploadError::Canceled)??;
             }
