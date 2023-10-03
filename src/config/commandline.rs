@@ -53,6 +53,7 @@ impl Args {
                 address,
                 api_key,
                 client_timeout,
+                upgrade_concurrency,
                 metrics_prometheus_address,
                 media_preprocess_steps,
                 media_external_validation,
@@ -111,6 +112,10 @@ impl Args {
 
                 let client = Client {
                     timeout: client_timeout,
+                };
+
+                let upgrade = Upgrade {
+                    concurrency: upgrade_concurrency,
                 };
 
                 let metrics = Metrics {
@@ -200,6 +205,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
+                                upgrade,
                                 old_repo,
                                 tracing,
                                 metrics,
@@ -218,6 +224,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
+                                upgrade,
                                 old_repo,
                                 tracing,
                                 metrics,
@@ -234,6 +241,7 @@ impl Args {
                         config_format: ConfigFormat {
                             server,
                             client,
+                            upgrade,
                             old_repo,
                             tracing,
                             metrics,
@@ -254,6 +262,7 @@ impl Args {
             }) => {
                 let server = Server::default();
                 let client = Client::default();
+                let upgrade = Upgrade::default();
                 let media = Media::default();
                 let metrics = Metrics::default();
 
@@ -263,6 +272,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
+                                upgrade,
                                 old_repo,
                                 tracing,
                                 metrics,
@@ -284,6 +294,7 @@ impl Args {
                                 config_format: ConfigFormat {
                                     server,
                                     client,
+                                    upgrade,
                                     old_repo,
                                     tracing,
                                     metrics,
@@ -309,6 +320,7 @@ impl Args {
                                     config_format: ConfigFormat {
                                         server,
                                         client,
+                                        upgrade,
                                         old_repo,
                                         tracing,
                                         metrics,
@@ -333,6 +345,7 @@ impl Args {
                                 config_format: ConfigFormat {
                                     server,
                                     client,
+                                    upgrade,
                                     old_repo,
                                     tracing,
                                     metrics,
@@ -356,6 +369,7 @@ impl Args {
             Command::MigrateRepo(MigrateRepo { repo }) => {
                 let server = Server::default();
                 let client = Client::default();
+                let upgrade = Upgrade::default();
                 let media = Media::default();
                 let metrics = Metrics::default();
 
@@ -365,6 +379,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
+                                upgrade,
                                 old_repo,
                                 tracing,
                                 metrics,
@@ -383,6 +398,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
+                                upgrade,
                                 old_repo,
                                 tracing,
                                 metrics,
@@ -403,6 +419,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
+                                upgrade,
                                 old_repo,
                                 tracing,
                                 metrics,
@@ -421,6 +438,7 @@ impl Args {
                             config_format: ConfigFormat {
                                 server,
                                 client,
+                                upgrade,
                                 old_repo,
                                 tracing,
                                 metrics,
@@ -470,6 +488,7 @@ pub(crate) enum Operation {
 pub(super) struct ConfigFormat {
     server: Server,
     client: Client,
+    upgrade: Upgrade,
     #[serde(skip_serializing_if = "Option::is_none")]
     old_repo: Option<OldSled>,
     tracing: Tracing,
@@ -499,6 +518,13 @@ struct Server {
 struct Client {
     #[serde(skip_serializing_if = "Option::is_none")]
     timeout: Option<u64>,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct Upgrade {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    concurrency: Option<usize>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -869,6 +895,12 @@ struct Run {
     /// This number defaults to 30
     #[arg(long)]
     client_timeout: Option<u64>,
+
+    /// How many hashes pict-rs should try to migrate from 0.4 to 0.5 concurrently
+    ///
+    /// This number defaults to 32, but can be increased for better throughput
+    #[arg(long)]
+    upgrade_concurrency: Option<usize>,
 
     /// Whether to enable the prometheus scrape endpoint
     #[arg(long)]

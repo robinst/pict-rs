@@ -15,7 +15,6 @@ use crate::{
     store::Store,
 };
 
-const MIGRATE_CONCURRENCY: usize = 32;
 const GENERATOR_KEY: &str = "last-path";
 
 #[tracing::instrument(skip_all)]
@@ -110,7 +109,7 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
             tracing::warn!("Failed to read hash, skipping");
         }
 
-        while set.len() >= MIGRATE_CONCURRENCY {
+        while set.len() >= config.upgrade.concurrency {
             if set.join_next().await.is_some() {
                 index += 1;
 

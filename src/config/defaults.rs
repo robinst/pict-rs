@@ -9,6 +9,7 @@ use std::{net::SocketAddr, path::PathBuf};
 pub(crate) struct Defaults {
     server: ServerDefaults,
     client: ClientDefaults,
+    upgrade: UpgradeDefaults,
     tracing: TracingDefaults,
     media: MediaDefaults,
     repo: RepoDefaults,
@@ -27,6 +28,12 @@ struct ServerDefaults {
 #[serde(rename_all = "snake_case")]
 struct ClientDefaults {
     timeout: u64,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct UpgradeDefaults {
+    concurrency: usize,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -182,6 +189,12 @@ impl Default for ServerDefaults {
 impl Default for ClientDefaults {
     fn default() -> Self {
         ClientDefaults { timeout: 30 }
+    }
+}
+
+impl Default for UpgradeDefaults {
+    fn default() -> Self {
+        UpgradeDefaults { concurrency: 32 }
     }
 }
 

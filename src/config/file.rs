@@ -13,6 +13,8 @@ pub(crate) struct ConfigFile {
 
     pub(crate) client: Client,
 
+    pub(crate) upgrade: Upgrade,
+
     pub(crate) tracing: Tracing,
 
     #[serde(default)]
@@ -117,6 +119,11 @@ pub(crate) struct Server {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub(crate) struct Client {
     pub(crate) timeout: u64,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Upgrade {
+    pub(crate) concurrency: usize,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
