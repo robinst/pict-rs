@@ -3,6 +3,9 @@ address = '0.0.0.0:8080'
 api_key = 'api-key'
 max_file_count = 10
 
+[upgrade]
+concurrency = 512
+
 [tracing.logging]
 format = 'normal'
 targets = 'info'
@@ -82,5 +85,5 @@ endpoint = 'http://localhost:3900'
 use_path_style = true
 bucket_name = 'pict-rs'
 region = 'garage'
-access_key = 'GK052c0e31975c2f14bd841c6f'
-secret_key = 'f7a12660c7b242ec70b8341283f3642d46b56bbcf1aa312d5fd8a1aa89d981db'
+access_key = 'GK2182acf19c2bdb8b9c20e16e'
+secret_key = '0072105b8659adc02cce21d9135a88ebc279b3a35e170d23d31c63fb9307a168'
