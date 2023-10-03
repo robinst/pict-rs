@@ -177,7 +177,7 @@ impl PostgresRepo {
 
         let pool = Pool::builder(mgr)
             .runtime(deadpool::Runtime::Tokio1)
-            .wait_timeout(Some(Duration::from_secs(1)))
+            .wait_timeout(Some(Duration::from_secs(10)))
             .create_timeout(Some(Duration::from_secs(2)))
             .recycle_timeout(Some(Duration::from_secs(2)))
             .post_create(Hook::sync_fn(|_, _| {
