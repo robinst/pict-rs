@@ -52,6 +52,7 @@ webp = 60
 enable = true
 allow_audio = true
 max_area = 884000000
+video_codec = "vp9"
 
 [media.video.quality]
 crf_240 = 37
