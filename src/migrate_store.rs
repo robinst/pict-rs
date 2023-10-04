@@ -408,7 +408,7 @@ where
         details
     } else {
         let bytes_stream = from
-            .to_bytes(&identifier, None, None)
+            .to_bytes(identifier, None, None)
             .await
             .map_err(From::from)
             .map_err(MigrateError::Details)?;
