@@ -712,7 +712,8 @@ async fn delete(
     let token = DeleteToken::from_existing(&token);
     let alias = Alias::from_existing(&alias);
 
-    queue::cleanup_alias(&repo, alias, token).await?;
+    // delete alias inline
+    queue::cleanup::alias(&repo, alias, token).await?;
 
     Ok(HttpResponse::NoContent().finish())
 }

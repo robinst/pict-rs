@@ -71,6 +71,10 @@ impl DeleteToken {
             None
         }
     }
+
+    pub(crate) fn ct_eq(&self, rhs: &Self) -> bool {
+        subtle::ConstantTimeEq::ct_eq(self.id.as_bytes(), rhs.id.as_bytes()).unwrap_u8() == 1
+    }
 }
 
 impl std::str::FromStr for DeleteToken {

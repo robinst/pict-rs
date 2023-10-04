@@ -16,7 +16,7 @@ use std::{
 };
 use tracing::Instrument;
 
-mod cleanup;
+pub(crate) mod cleanup;
 mod process;
 
 const CLEANUP_QUEUE: &str = "cleanup";

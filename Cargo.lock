@@ -1860,6 +1860,7 @@ dependencies = [
  "sled",
  "storage-path-generator",
  "streem",
+ "subtle",
  "thiserror",
  "time",
  "tokio",

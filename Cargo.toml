@@ -53,6 +53,7 @@ sha2 = "0.10.0"
 sled = { version = "0.34.7" }
 storage-path-generator = "0.1.0"
 streem = "0.2.0"
+subtle = { version = "2.5.0", default-features = false }
 thiserror = "1.0"
 time = { version = "0.3.0", features = ["serde", "serde-well-known"] }
 tokio = { version = "1", features = ["full", "tracing"] }

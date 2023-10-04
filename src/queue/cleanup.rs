@@ -111,10 +111,10 @@ async fn hash(repo: &ArcRepo, hash: Hash) -> Result<(), Error> {
 }
 
 #[tracing::instrument(skip_all)]
-async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> Result<(), Error> {
+pub(crate) async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> Result<(), Error> {
     let saved_delete_token = repo.delete_token(&alias).await?;
 
-    if saved_delete_token.is_some() && saved_delete_token != Some(token) {
+    if !saved_delete_token.is_some_and(|t| t.ct_eq(&token)) {
         return Err(UploadError::InvalidToken.into());
     }
 
