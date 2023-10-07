@@ -2072,6 +2072,13 @@ impl PictRsConfiguration {
         Ok(self)
     }
 
+    /// Run the pict-rs application on a tokio `LocalSet`
+    ///
+    /// This must be called from within `tokio::main` directly
+    pub async fn run_on_localset(self) -> color_eyre::Result<()> {
+        tokio::task::LocalSet::new().run_until(self.run()).await
+    }
+
     /// Run the pict-rs application
     pub async fn run(self) -> color_eyre::Result<()> {
         let PictRsConfiguration { config, operation } = self;
