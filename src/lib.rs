@@ -103,6 +103,7 @@ fn process_semaphore() -> &'static Semaphore {
 }
 
 async fn ensure_details<S: Store + 'static>(
+    tmp_dir: &TmpDir,
     repo: &ArcRepo,
     store: &S,
     config: &Configuration,
@@ -124,8 +125,12 @@ async fn ensure_details<S: Store + 'static>(
 
         tracing::debug!("generating new details from {:?}", identifier);
         let bytes_stream = store.to_bytes(&identifier, None, None).await?;
-        let new_details =
-            Details::from_bytes(config.media.process_timeout, bytes_stream.into_bytes()).await?;
+        let new_details = Details::from_bytes(
+            tmp_dir,
+            config.media.process_timeout,
+            bytes_stream.into_bytes(),
+        )
+        .await?;
         tracing::debug!("storing details for {:?}", identifier);
         repo.relate_details(&identifier, &new_details).await?;
         tracing::debug!("stored");
@@ -296,28 +301,31 @@ impl<S: Store + 'static> FormData for Import<S> {
 #[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
 async fn upload<S: Store + 'static>(
     Multipart(Upload(value, _)): Multipart<Upload<S>>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    handle_upload(value, repo, store, config).await
+    handle_upload(value, tmp_dir, repo, store, config).await
 }
 
 /// Handle responding to successful uploads
 #[tracing::instrument(name = "Imported files", skip(value, repo, store, config))]
 async fn import<S: Store + 'static>(
     Multipart(Import(value, _)): Multipart<Import<S>>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    handle_upload(value, repo, store, config).await
+    handle_upload(value, tmp_dir, repo, store, config).await
 }
 
 /// Handle responding to successful uploads
 #[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
 async fn handle_upload<S: Store + 'static>(
     value: Value<Session>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -339,7 +347,7 @@ async fn handle_upload<S: Store + 'static>(
             tracing::debug!("Uploaded {} as {:?}", image.filename, alias);
             let delete_token = image.result.delete_token();
 
-            let details = ensure_details(&repo, &store, &config, alias).await?;
+            let details = ensure_details(&tmp_dir, &repo, &store, &config, alias).await?;
 
             files.push(serde_json::json!({
                 "file": alias.to_string(),
@@ -468,6 +476,7 @@ struct ClaimQuery {
 /// Claim a backgrounded upload
 #[tracing::instrument(name = "Waiting on upload", skip_all)]
 async fn claim_upload<S: Store + 'static>(
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -487,7 +496,7 @@ async fn claim_upload<S: Store + 'static>(
 
             match upload_result {
                 UploadResult::Success { alias, token } => {
-                    let details = ensure_details(&repo, &store, &config, &alias).await?;
+                    let details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
 
                     Ok(HttpResponse::Ok().json(&serde_json::json!({
                         "msg": "ok",
@@ -529,7 +538,7 @@ async fn ingest_inline<S: Store + 'static>(
 
     let alias = session.alias().expect("alias should exist").to_owned();
 
-    let details = ensure_details(repo, store, config, &alias).await?;
+    let details = ensure_details(tmp_dir, repo, store, config, &alias).await?;
 
     let delete_token = session.disarm();
 
@@ -925,9 +934,12 @@ async fn process<S: Store + 'static>(
 
             tracing::debug!("generating new details from {:?}", identifier);
             let bytes_stream = store.to_bytes(&identifier, None, None).await?;
-            let new_details =
-                Details::from_bytes(config.media.process_timeout, bytes_stream.into_bytes())
-                    .await?;
+            let new_details = Details::from_bytes(
+                &tmp_dir,
+                config.media.process_timeout,
+                bytes_stream.into_bytes(),
+            )
+            .await?;
             tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
             tracing::debug!("stored");
@@ -947,9 +959,10 @@ async fn process<S: Store + 'static>(
         return Err(UploadError::ReadOnly.into());
     }
 
-    let original_details = ensure_details(&repo, &store, &config, &alias).await?;
+    let original_details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
 
     let (details, bytes) = generate::generate(
+        &tmp_dir,
         &repo,
         &store,
         &process_map,
@@ -1001,6 +1014,7 @@ async fn process_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1045,9 +1059,12 @@ async fn process_head<S: Store + 'static>(
 
             tracing::debug!("generating new details from {:?}", identifier);
             let bytes_stream = store.to_bytes(&identifier, None, None).await?;
-            let new_details =
-                Details::from_bytes(config.media.process_timeout, bytes_stream.into_bytes())
-                    .await?;
+            let new_details = Details::from_bytes(
+                &tmp_dir,
+                config.media.process_timeout,
+                bytes_stream.into_bytes(),
+            )
+            .await?;
             tracing::debug!("storing details for {:?}", identifier);
             repo.relate_details(&identifier, &new_details).await?;
             tracing::debug!("stored");
@@ -1114,6 +1131,7 @@ async fn process_backgrounded<S: Store>(
 #[tracing::instrument(name = "Fetching query details", skip(repo, store, config))]
 async fn details_query<S: Store + 'static>(
     web::Query(alias_query): web::Query<AliasQuery>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1130,27 +1148,36 @@ async fn details_query<S: Store + 'static>(
         }
     };
 
-    do_details(alias, repo, store, config).await
+    do_details(alias, tmp_dir, repo, store, config).await
 }
 
 /// Fetch file details
 #[tracing::instrument(name = "Fetching details", skip(repo, store, config))]
 async fn details<S: Store + 'static>(
     alias: web::Path<Serde<Alias>>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    do_details(Serde::into_inner(alias.into_inner()), repo, store, config).await
+    do_details(
+        Serde::into_inner(alias.into_inner()),
+        tmp_dir,
+        repo,
+        store,
+        config,
+    )
+    .await
 }
 
 async fn do_details<S: Store + 'static>(
     alias: Alias,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let details = ensure_details(&repo, &store, &config, &alias).await?;
+    let details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
 
     Ok(HttpResponse::Ok().json(&details.into_api_details()))
 }
@@ -1192,7 +1219,7 @@ async fn serve_query<S: Store + 'static>(
         }
     };
 
-    do_serve(range, alias, repo, store, config).await
+    do_serve(range, alias, tmp_dir, repo, store, config).await
 }
 
 /// Serve files
@@ -1200,6 +1227,7 @@ async fn serve_query<S: Store + 'static>(
 async fn serve<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1207,6 +1235,7 @@ async fn serve<S: Store + 'static>(
     do_serve(
         range,
         Serde::into_inner(alias.into_inner()),
+        tmp_dir,
         repo,
         store,
         config,
@@ -1217,6 +1246,7 @@ async fn serve<S: Store + 'static>(
 async fn do_serve<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: Alias,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1237,7 +1267,7 @@ async fn do_serve<S: Store + 'static>(
         return Ok(HttpResponse::NotFound().finish());
     };
 
-    let details = ensure_details(&repo, &store, &config, &alias).await?;
+    let details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
 
     if let Some(public_url) = store.public_url(&identifier) {
         return Ok(HttpResponse::SeeOther()
@@ -1252,6 +1282,7 @@ async fn do_serve<S: Store + 'static>(
 async fn serve_query_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(alias_query): web::Query<AliasQuery>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1266,13 +1297,14 @@ async fn serve_query_head<S: Store + 'static>(
         }
     };
 
-    do_serve_head(range, alias, repo, store, config).await
+    do_serve_head(range, alias, tmp_dir, repo, store, config).await
 }
 
 #[tracing::instrument(name = "Serving file headers", skip(repo, store, config))]
 async fn serve_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1280,6 +1312,7 @@ async fn serve_head<S: Store + 'static>(
     do_serve_head(
         range,
         Serde::into_inner(alias.into_inner()),
+        tmp_dir,
         repo,
         store,
         config,
@@ -1290,6 +1323,7 @@ async fn serve_head<S: Store + 'static>(
 async fn do_serve_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: Alias,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1299,7 +1333,7 @@ async fn do_serve_head<S: Store + 'static>(
         return Ok(HttpResponse::NotFound().finish());
     };
 
-    let details = ensure_details(&repo, &store, &config, &alias).await?;
+    let details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
 
     if let Some(public_url) = store.public_url(&identifier) {
         return Ok(HttpResponse::SeeOther()
@@ -1876,7 +1910,9 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn migrate_inner<S1>(
+    tmp_dir: ArcTmpDir,
     repo: ArcRepo,
     client: ClientWithMiddleware,
     from: S1,
@@ -1892,7 +1928,16 @@ where
         config::primitives::Store::Filesystem(config::Filesystem { path }) => {
             let to = FileStore::build(path.clone(), repo.clone()).await?;
 
-            migrate_store(repo, from, to, skip_missing_files, timeout, concurrency).await?
+            migrate_store(
+                tmp_dir,
+                repo,
+                from,
+                to,
+                skip_missing_files,
+                timeout,
+                concurrency,
+            )
+            .await?
         }
         config::primitives::Store::ObjectStorage(config::primitives::ObjectStorage {
             endpoint,
@@ -1926,7 +1971,16 @@ where
             .await?
             .build(client);
 
-            migrate_store(repo, from, to, skip_missing_files, timeout, concurrency).await?
+            migrate_store(
+                tmp_dir,
+                repo,
+                from,
+                to,
+                skip_missing_files,
+                timeout,
+                concurrency,
+            )
+            .await?
         }
     }
 
@@ -2022,6 +2076,8 @@ impl PictRsConfiguration {
     pub async fn run(self) -> color_eyre::Result<()> {
         let PictRsConfiguration { config, operation } = self;
 
+        let tmp_dir = TmpDir::init().await?;
+
         let client = build_client()?;
 
         match operation {
@@ -2038,6 +2094,7 @@ impl PictRsConfiguration {
                     config::primitives::Store::Filesystem(config::Filesystem { path }) => {
                         let from = FileStore::build(path.clone(), repo.clone()).await?;
                         migrate_inner(
+                            tmp_dir,
                             repo,
                             client,
                             from,
@@ -2083,6 +2140,7 @@ impl PictRsConfiguration {
                         .build(client.clone());
 
                         migrate_inner(
+                            tmp_dir,
                             repo,
                             client,
                             from,
@@ -2112,8 +2170,6 @@ impl PictRsConfiguration {
             tracing::warn!("Launching in READ ONLY mode");
         }
 
-        let tmp_dir = TmpDir::init().await?;
-
         match config.store.clone() {
             config::Store::Filesystem(config::Filesystem { path }) => {
                 let arc_repo = repo.to_arc();
@@ -2124,6 +2180,7 @@ impl PictRsConfiguration {
                     if let Some(path) = config.old_repo_path() {
                         if let Some(old_repo) = repo_04::open(path)? {
                             repo::migrate_04(
+                                tmp_dir.clone(),
                                 old_repo,
                                 arc_repo.clone(),
                                 store.clone(),
@@ -2187,6 +2244,7 @@ impl PictRsConfiguration {
                     if let Some(path) = config.old_repo_path() {
                         if let Some(old_repo) = repo_04::open(path)? {
                             repo::migrate_04(
+                                tmp_dir.clone(),
                                 old_repo,
                                 arc_repo.clone(),
                                 store.clone(),
@@ -2214,8 +2272,6 @@ impl PictRsConfiguration {
                 }
             }
         }
-
-        self::tmp_file::remove_tmp_dir().await?;
 
         Ok(())
     }

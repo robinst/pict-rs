@@ -9,6 +9,7 @@ use crate::{
     formats::{AnimationFormat, ImageFormat, ImageInput, InputFile},
     magick::MagickError,
     process::Process,
+    tmp_file::TmpDir,
 };
 
 use super::Discovery;
@@ -31,6 +32,7 @@ struct Geometry {
 }
 
 pub(super) async fn confirm_bytes(
+    tmp_dir: &TmpDir,
     discovery: Option<Discovery>,
     timeout: u64,
     bytes: Bytes,
@@ -42,15 +44,12 @@ pub(super) async fn confirm_bytes(
             height,
             ..
         }) => {
-            let frames = count_avif_frames(
-                move |mut file| async move {
-                    file.write_from_bytes(bytes)
-                        .await
-                        .map_err(MagickError::Write)?;
-                    Ok(file)
-                },
-                timeout,
-            )
+            let frames = count_avif_frames(tmp_dir, timeout, move |mut file| async move {
+                file.write_from_bytes(bytes)
+                    .await
+                    .map_err(MagickError::Write)?;
+                Ok(file)
+            })
             .await?;
 
             if frames == 1 {
@@ -84,26 +83,23 @@ pub(super) async fn confirm_bytes(
         }
     }
 
-    discover_file(
-        move |mut file| async move {
-            file.write_from_bytes(bytes)
-                .await
-                .map_err(MagickError::Write)?;
+    discover_file(tmp_dir, timeout, move |mut file| async move {
+        file.write_from_bytes(bytes)
+            .await
+            .map_err(MagickError::Write)?;
 
-            Ok(file)
-        },
-        timeout,
-    )
+        Ok(file)
+    })
     .await
 }
 
 #[tracing::instrument(level = "DEBUG", skip(f))]
-async fn count_avif_frames<F, Fut>(f: F, timeout: u64) -> Result<u32, MagickError>
+async fn count_avif_frames<F, Fut>(tmp_dir: &TmpDir, timeout: u64, f: F) -> Result<u32, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
-    let input_file = crate::tmp_file::tmp_file(None);
+    let input_file = tmp_dir.tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
@@ -149,12 +145,16 @@ where
 }
 
 #[tracing::instrument(level = "DEBUG", skip(f))]
-async fn discover_file<F, Fut>(f: F, timeout: u64) -> Result<Discovery, MagickError>
+async fn discover_file<F, Fut>(
+    tmp_dir: &TmpDir,
+    timeout: u64,
+    f: F,
+) -> Result<Discovery, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
-    let input_file = crate::tmp_file::tmp_file(None);
+    let input_file = tmp_dir.tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await

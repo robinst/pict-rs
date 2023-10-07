@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::{Arc, OnceLock},
-};
+use std::{path::PathBuf, sync::Arc};
 use tokio::io::AsyncRead;
 use uuid::Uuid;
 
@@ -34,16 +31,6 @@ impl Drop for TmpDir {
     }
 }
 
-static TMP_DIR: OnceLock<PathBuf> = OnceLock::new();
-
-fn tmp_dir() -> &'static PathBuf {
-    TMP_DIR.get_or_init(|| {
-        let dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
-        std::fs::create_dir(&dir).unwrap();
-        dir
-    })
-}
-
 struct TmpFile(PathBuf);
 
 impl Drop for TmpFile {
@@ -59,18 +46,6 @@ pin_project_lite::pin_project! {
 
         file: TmpFile,
     }
-}
-
-pub(crate) fn tmp_file(ext: Option<&str>) -> PathBuf {
-    if let Some(ext) = ext {
-        tmp_dir().join(format!("{}{}", Uuid::new_v4(), ext))
-    } else {
-        tmp_dir().join(Uuid::new_v4().to_string())
-    }
-}
-
-pub(crate) async fn remove_tmp_dir() -> std::io::Result<()> {
-    tokio::fs::remove_dir_all(tmp_dir()).await
 }
 
 pub(crate) fn cleanup_tmpfile<R: AsyncRead>(reader: R, file: PathBuf) -> TmpFileCleanup<R> {

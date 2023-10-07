@@ -10,6 +10,7 @@ use crate::{
         Mp4AudioCodec, Mp4Codec, WebmAlphaCodec, WebmAudioCodec, WebmCodec,
     },
     process::Process,
+    tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
 use tokio::io::AsyncReadExt;
@@ -158,22 +159,20 @@ struct Flags {
 }
 
 pub(super) async fn discover_bytes(
+    tmp_dir: &TmpDir,
     timeout: u64,
     bytes: Bytes,
 ) -> Result<Option<Discovery>, FfMpegError> {
-    discover_file(
-        move |mut file| {
-            let bytes = bytes.clone();
+    discover_file(tmp_dir, timeout, move |mut file| {
+        let bytes = bytes.clone();
 
-            async move {
-                file.write_from_bytes(bytes)
-                    .await
-                    .map_err(FfMpegError::Write)?;
-                Ok(file)
-            }
-        },
-        timeout,
-    )
+        async move {
+            file.write_from_bytes(bytes)
+                .await
+                .map_err(FfMpegError::Write)?;
+            Ok(file)
+        }
+    })
     .await
 }
 
@@ -192,12 +191,16 @@ async fn allows_alpha(pixel_format: &str, timeout: u64) -> Result<bool, FfMpegEr
 }
 
 #[tracing::instrument(skip(f))]
-async fn discover_file<F, Fut>(f: F, timeout: u64) -> Result<Option<Discovery>, FfMpegError>
+async fn discover_file<F, Fut>(
+    tmp_dir: &TmpDir,
+    timeout: u64,
+    f: F,
+) -> Result<Option<Discovery>, FfMpegError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, FfMpegError>>,
 {
-    let input_file = crate::tmp_file::tmp_file(None);
+    let input_file = tmp_dir.tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await

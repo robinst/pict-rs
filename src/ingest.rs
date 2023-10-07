@@ -86,6 +86,7 @@ where
             };
 
             crate::magick::process_image_async_read(
+                tmp_dir,
                 validated_reader,
                 magick_args,
                 format,
@@ -109,7 +110,8 @@ where
         .await?;
 
     let bytes_stream = store.to_bytes(&identifier, None, None).await?;
-    let details = Details::from_bytes(media.process_timeout, bytes_stream.into_bytes()).await?;
+    let details =
+        Details::from_bytes(tmp_dir, media.process_timeout, bytes_stream.into_bytes()).await?;
 
     drop(permit);
 

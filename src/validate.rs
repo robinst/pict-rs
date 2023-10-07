@@ -71,7 +71,7 @@ pub(crate) async fn validate_bytes(
         width,
         height,
         frames,
-    } = crate::discover::discover_bytes(timeout, bytes.clone()).await?;
+    } = crate::discover::discover_bytes(tmp_dir, timeout, bytes.clone()).await?;
 
     match &input {
         InputFile::Image(input) => {
@@ -186,7 +186,8 @@ fn validate_animation(
     Ok(())
 }
 
-#[tracing::instrument(skip(bytes, validations))]
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(tmp_dir, bytes, validations))]
 async fn process_animation(
     tmp_dir: &TmpDir,
     bytes: Bytes,
@@ -244,7 +245,8 @@ fn validate_video(
     Ok(())
 }
 
-#[tracing::instrument(skip(bytes, validations))]
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(tmp_dir, bytes, validations))]
 async fn process_video(
     tmp_dir: &TmpDir,
     bytes: Bytes,

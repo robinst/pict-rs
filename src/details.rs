@@ -3,6 +3,7 @@ use crate::{
     error::Error,
     formats::{InternalFormat, InternalVideoFormat},
     serde_str::Serde,
+    tmp_file::TmpDir,
 };
 use actix_web::web;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -79,13 +80,17 @@ impl Details {
     }
 
     #[tracing::instrument(level = "DEBUG")]
-    pub(crate) async fn from_bytes(timeout: u64, input: web::Bytes) -> Result<Self, Error> {
+    pub(crate) async fn from_bytes(
+        tmp_dir: &TmpDir,
+        timeout: u64,
+        input: web::Bytes,
+    ) -> Result<Self, Error> {
         let Discovery {
             input,
             width,
             height,
             frames,
-        } = crate::discover::discover_bytes(timeout, input).await?;
+        } = crate::discover::discover_bytes(tmp_dir, timeout, input).await?;
 
         Ok(Details::from_parts(
             input.internal_format(),

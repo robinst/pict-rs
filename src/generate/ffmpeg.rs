@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     ffmpeg::FfMpegError, formats::InternalVideoFormat, process::Process, read::BoxRead,
-    store::Store,
+    store::Store, tmp_file::TmpDir,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -47,19 +47,20 @@ impl ThumbnailFormat {
 
 #[tracing::instrument(skip(store))]
 pub(super) async fn thumbnail<S: Store>(
+    tmp_dir: &TmpDir,
     store: S,
     from: Arc<str>,
     input_format: InternalVideoFormat,
     format: ThumbnailFormat,
     timeout: u64,
 ) -> Result<BoxRead<'static>, FfMpegError> {
-    let input_file = crate::tmp_file::tmp_file(Some(input_format.file_extension()));
+    let input_file = tmp_dir.tmp_file(Some(input_format.file_extension()));
     let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(FfMpegError::CreateDir)?;
 
-    let output_file = crate::tmp_file::tmp_file(Some(format.to_file_extension()));
+    let output_file = tmp_dir.tmp_file(Some(format.to_file_extension()));
     let output_file_str = output_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&output_file)
         .await

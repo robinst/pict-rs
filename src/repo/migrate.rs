@@ -13,6 +13,7 @@ use crate::{
         SledRepo as OldSledRepo,
     },
     store::Store,
+    tmp_file::{ArcTmpDir, TmpDir},
 };
 
 const GENERATOR_KEY: &str = "last-path";
@@ -67,6 +68,7 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
 
 #[tracing::instrument(skip_all)]
 pub(crate) async fn migrate_04<S: Store + 'static>(
+    tmp_dir: ArcTmpDir,
     old_repo: OldSledRepo,
     new_repo: ArcRepo,
     store: S,
@@ -99,6 +101,7 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
     while let Some(res) = hash_stream.next().await {
         if let Ok(hash) = res {
             set.spawn_local(migrate_hash_04(
+                tmp_dir.clone(),
                 old_repo.clone(),
                 new_repo.clone(),
                 store.clone(),
@@ -169,6 +172,7 @@ async fn migrate_hash(old_repo: ArcRepo, new_repo: ArcRepo, hash: Hash) {
 }
 
 async fn migrate_hash_04<S: Store>(
+    tmp_dir: ArcTmpDir,
     old_repo: OldSledRepo,
     new_repo: ArcRepo,
     store: S,
@@ -177,8 +181,15 @@ async fn migrate_hash_04<S: Store>(
 ) {
     let mut hash_failures = 0;
 
-    while let Err(e) =
-        do_migrate_hash_04(&old_repo, &new_repo, &store, &config, old_hash.clone()).await
+    while let Err(e) = do_migrate_hash_04(
+        &tmp_dir,
+        &old_repo,
+        &new_repo,
+        &store,
+        &config,
+        old_hash.clone(),
+    )
+    .await
     {
         hash_failures += 1;
 
@@ -266,6 +277,7 @@ async fn do_migrate_hash(old_repo: &ArcRepo, new_repo: &ArcRepo, hash: Hash) -> 
 
 #[tracing::instrument(skip_all)]
 async fn do_migrate_hash_04<S: Store>(
+    tmp_dir: &TmpDir,
     old_repo: &OldSledRepo,
     new_repo: &ArcRepo,
     store: &S,
@@ -279,7 +291,7 @@ async fn do_migrate_hash_04<S: Store>(
 
     let size = store.len(&identifier).await?;
 
-    let hash_details = set_details(old_repo, new_repo, store, config, &identifier).await?;
+    let hash_details = set_details(tmp_dir, old_repo, new_repo, store, config, &identifier).await?;
 
     let aliases = old_repo.aliases_for_hash(old_hash.clone()).await?;
     let variants = old_repo.variants(old_hash.clone()).await?;
@@ -309,7 +321,7 @@ async fn do_migrate_hash_04<S: Store>(
             .relate_motion_identifier(hash.clone(), &identifier)
             .await?;
 
-        set_details(old_repo, new_repo, store, config, &identifier).await?;
+        set_details(tmp_dir, old_repo, new_repo, store, config, &identifier).await?;
     }
 
     for (variant, identifier) in variants {
@@ -317,7 +329,7 @@ async fn do_migrate_hash_04<S: Store>(
             .relate_variant_identifier(hash.clone(), variant.clone(), &identifier)
             .await?;
 
-        set_details(old_repo, new_repo, store, config, &identifier).await?;
+        set_details(tmp_dir, old_repo, new_repo, store, config, &identifier).await?;
 
         new_repo.accessed_variant(hash.clone(), variant).await?;
     }
@@ -326,6 +338,7 @@ async fn do_migrate_hash_04<S: Store>(
 }
 
 async fn set_details<S: Store>(
+    tmp_dir: &TmpDir,
     old_repo: &OldSledRepo,
     new_repo: &ArcRepo,
     store: &S,
@@ -335,7 +348,8 @@ async fn set_details<S: Store>(
     if let Some(details) = new_repo.details(identifier).await? {
         Ok(details)
     } else {
-        let details = fetch_or_generate_details(old_repo, store, config, identifier).await?;
+        let details =
+            fetch_or_generate_details(tmp_dir, old_repo, store, config, identifier).await?;
         new_repo.relate_details(identifier, &details).await?;
         Ok(details)
     }
@@ -355,6 +369,7 @@ fn details_semaphore() -> &'static Semaphore {
 
 #[tracing::instrument(skip_all)]
 async fn fetch_or_generate_details<S: Store>(
+    tmp_dir: &TmpDir,
     old_repo: &OldSledRepo,
     store: &S,
     config: &Configuration,
@@ -369,7 +384,7 @@ async fn fetch_or_generate_details<S: Store>(
         let bytes = bytes_stream.into_bytes();
 
         let guard = details_semaphore().acquire().await?;
-        let details = Details::from_bytes(config.media.process_timeout, bytes).await?;
+        let details = Details::from_bytes(tmp_dir, config.media.process_timeout, bytes).await?;
         drop(guard);
 
         Ok(details)

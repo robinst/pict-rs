@@ -12,7 +12,7 @@ use crate::{
     repo::{Alias, ArcRepo, UploadId, UploadResult},
     serde_str::Serde,
     store::Store,
-    tmp_file::ArcTmpDir,
+    tmp_file::{ArcTmpDir, TmpDir},
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -55,6 +55,7 @@ where
                     process_args,
                 } => {
                     generate(
+                        tmp_dir,
                         repo,
                         store,
                         process_map,
@@ -110,7 +111,8 @@ impl Drop for UploadGuard {
     }
 }
 
-#[tracing::instrument(skip(repo, store, client, media))]
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(tmp_dir, repo, store, client, media))]
 async fn process_ingest<S>(
     tmp_dir: &ArcTmpDir,
     repo: &ArcRepo,
@@ -183,6 +185,7 @@ where
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(repo, store, process_map, process_path, process_args, config))]
 async fn generate<S: Store + 'static>(
+    tmp_dir: &TmpDir,
     repo: &ArcRepo,
     store: &S,
     process_map: &ProcessMap,
@@ -204,9 +207,10 @@ async fn generate<S: Store + 'static>(
         return Ok(());
     }
 
-    let original_details = crate::ensure_details(repo, store, config, &source).await?;
+    let original_details = crate::ensure_details(tmp_dir, repo, store, config, &source).await?;
 
     crate::generate::generate(
+        tmp_dir,
         repo,
         store,
         process_map,

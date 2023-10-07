@@ -8,6 +8,7 @@ use crate::{
     formats::{ImageFormat, InputProcessableFormat, InternalVideoFormat, ProcessableFormat},
     repo::{ArcRepo, Hash, VariantAlreadyExists},
     store::Store,
+    tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
 use std::{path::PathBuf, sync::Arc, time::Instant};
@@ -43,6 +44,7 @@ impl Drop for MetricsGuard {
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(repo, store, hash, process_map, media))]
 pub(crate) async fn generate<S: Store + 'static>(
+    tmp_dir: &TmpDir,
     repo: &ArcRepo,
     store: &S,
     process_map: &ProcessMap,
@@ -54,6 +56,7 @@ pub(crate) async fn generate<S: Store + 'static>(
     hash: Hash,
 ) -> Result<(Details, Bytes), Error> {
     let process_fut = process(
+        tmp_dir,
         repo,
         store,
         format,
@@ -74,6 +77,7 @@ pub(crate) async fn generate<S: Store + 'static>(
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(repo, store, hash, media))]
 async fn process<S: Store + 'static>(
+    tmp_dir: &TmpDir,
     repo: &ArcRepo,
     store: &S,
     output_format: InputProcessableFormat,
@@ -87,6 +91,7 @@ async fn process<S: Store + 'static>(
     let permit = crate::process_semaphore().acquire().await?;
 
     let identifier = input_identifier(
+        tmp_dir,
         repo,
         store,
         output_format,
@@ -101,7 +106,8 @@ async fn process<S: Store + 'static>(
     } else {
         let bytes_stream = store.to_bytes(&identifier, None, None).await?;
 
-        let details = Details::from_bytes(media.process_timeout, bytes_stream.into_bytes()).await?;
+        let details =
+            Details::from_bytes(tmp_dir, media.process_timeout, bytes_stream.into_bytes()).await?;
 
         repo.relate_details(&identifier, &details).await?;
 
@@ -121,6 +127,7 @@ async fn process<S: Store + 'static>(
     };
 
     let mut processed_reader = crate::magick::process_image_store_read(
+        tmp_dir,
         store,
         &identifier,
         thumbnail_args,
@@ -140,7 +147,7 @@ async fn process<S: Store + 'static>(
 
     drop(permit);
 
-    let details = Details::from_bytes(media.process_timeout, bytes.clone()).await?;
+    let details = Details::from_bytes(tmp_dir, media.process_timeout, bytes.clone()).await?;
 
     let identifier = store
         .save_bytes(bytes.clone(), details.media_type())
@@ -166,6 +173,7 @@ async fn process<S: Store + 'static>(
 
 #[tracing::instrument(skip_all)]
 async fn input_identifier<S>(
+    tmp_dir: &TmpDir,
     repo: &ArcRepo,
     store: &S,
     output_format: InputProcessableFormat,
@@ -202,6 +210,7 @@ where
             let thumbnail_format = media.image.format.unwrap_or(ImageFormat::Webp);
 
             let reader = magick::thumbnail(
+                tmp_dir,
                 store,
                 &identifier,
                 processable_format,
@@ -222,6 +231,7 @@ where
             };
 
             let reader = ffmpeg::thumbnail(
+                tmp_dir,
                 store.clone(),
                 identifier,
                 original_details

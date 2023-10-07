@@ -297,6 +297,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_image_jobs<S, F>(
     tmp_dir: &ArcTmpDir,
     repo: &ArcRepo,

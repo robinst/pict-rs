@@ -2,9 +2,11 @@ use std::sync::Arc;
 
 use crate::{
     formats::ProcessableFormat, magick::MagickError, process::Process, read::BoxRead, store::Store,
+    tmp_file::TmpDir,
 };
 
 async fn thumbnail_animation<F, Fut>(
+    tmp_dir: &TmpDir,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
@@ -15,7 +17,7 @@ where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
-    let input_file = crate::tmp_file::tmp_file(None);
+    let input_file = tmp_dir.tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
@@ -52,6 +54,7 @@ where
 }
 
 pub(super) async fn thumbnail<S: Store + 'static>(
+    tmp_dir: &TmpDir,
     store: &S,
     identifier: &Arc<str>,
     input_format: ProcessableFormat,
@@ -65,6 +68,7 @@ pub(super) async fn thumbnail<S: Store + 'static>(
         .map_err(MagickError::Store)?;
 
     thumbnail_animation(
+        tmp_dir,
         input_format,
         format,
         quality,

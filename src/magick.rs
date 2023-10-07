@@ -6,6 +6,7 @@ use crate::{
     process::{Process, ProcessError},
     read::BoxRead,
     store::Store,
+    tmp_file::TmpDir,
 };
 
 use tokio::io::AsyncRead;
@@ -90,6 +91,7 @@ impl MagickError {
 }
 
 async fn process_image<F, Fut>(
+    tmp_dir: &TmpDir,
     process_args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
@@ -101,7 +103,7 @@ where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
-    let input_file = crate::tmp_file::tmp_file(None);
+    let input_file = tmp_dir.tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
@@ -141,7 +143,9 @@ where
     Ok(Box::pin(clean_reader))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn process_image_store_read<S: Store + 'static>(
+    tmp_dir: &TmpDir,
     store: &S,
     identifier: &Arc<str>,
     args: Vec<String>,
@@ -156,6 +160,7 @@ pub(crate) async fn process_image_store_read<S: Store + 'static>(
         .map_err(MagickError::Store)?;
 
     process_image(
+        tmp_dir,
         args,
         input_format,
         format,
@@ -173,6 +178,7 @@ pub(crate) async fn process_image_store_read<S: Store + 'static>(
 }
 
 pub(crate) async fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
+    tmp_dir: &TmpDir,
     async_read: A,
     args: Vec<String>,
     input_format: ProcessableFormat,
@@ -181,6 +187,7 @@ pub(crate) async fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
     timeout: u64,
 ) -> Result<BoxRead<'static>, MagickError> {
     process_image(
+        tmp_dir,
         args,
         input_format,
         format,

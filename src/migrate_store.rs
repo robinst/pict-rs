@@ -14,9 +14,11 @@ use crate::{
     error::{Error, UploadError},
     repo::{ArcRepo, Hash},
     store::Store,
+    tmp_file::{ArcTmpDir, TmpDir},
 };
 
 pub(super) async fn migrate_store<S1, S2>(
+    tmp_dir: ArcTmpDir,
     repo: ArcRepo,
     from: S1,
     to: S2,
@@ -44,6 +46,7 @@ where
     let mut failure_count = 0;
 
     while let Err(e) = do_migrate_store(
+        tmp_dir.clone(),
         repo.clone(),
         from.clone(),
         to.clone(),
@@ -71,6 +74,7 @@ where
 }
 
 struct MigrateState<S1, S2> {
+    tmp_dir: ArcTmpDir,
     repo: ArcRepo,
     from: S1,
     to: S2,
@@ -85,6 +89,7 @@ struct MigrateState<S1, S2> {
 }
 
 async fn do_migrate_store<S1, S2>(
+    tmp_dir: ArcTmpDir,
     repo: ArcRepo,
     from: S1,
     to: S2,
@@ -114,6 +119,7 @@ where
     let mut stream = stream.into_streamer();
 
     let state = Rc::new(MigrateState {
+        tmp_dir: tmp_dir.clone(),
         repo: repo.clone(),
         from,
         to,
@@ -161,6 +167,7 @@ where
     S2: Store,
 {
     let MigrateState {
+        tmp_dir,
         repo,
         from,
         to,
@@ -223,7 +230,17 @@ where
 
     if let Some(identifier) = repo.motion_identifier(hash.clone()).await? {
         if !repo.is_migrated(&identifier).await? {
-            match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
+            match migrate_file(
+                tmp_dir,
+                repo,
+                from,
+                to,
+                &identifier,
+                *skip_missing_files,
+                *timeout,
+            )
+            .await
+            {
                 Ok(new_identifier) => {
                     migrate_details(repo, &identifier, &new_identifier).await?;
                     repo.relate_motion_identifier(hash.clone(), &new_identifier)
@@ -252,7 +269,17 @@ where
 
     for (variant, identifier) in repo.variants(hash.clone()).await? {
         if !repo.is_migrated(&identifier).await? {
-            match migrate_file(repo, from, to, &identifier, *skip_missing_files, *timeout).await {
+            match migrate_file(
+                tmp_dir,
+                repo,
+                from,
+                to,
+                &identifier,
+                *skip_missing_files,
+                *timeout,
+            )
+            .await
+            {
                 Ok(new_identifier) => {
                     migrate_details(repo, &identifier, &new_identifier).await?;
                     repo.remove_variant(hash.clone(), variant.clone()).await?;
@@ -282,6 +309,7 @@ where
     }
 
     match migrate_file(
+        tmp_dir,
         repo,
         from,
         to,
@@ -340,6 +368,7 @@ where
 }
 
 async fn migrate_file<S1, S2>(
+    tmp_dir: &TmpDir,
     repo: &ArcRepo,
     from: &S1,
     to: &S2,
@@ -354,7 +383,7 @@ where
     let mut failure_count = 0;
 
     loop {
-        match do_migrate_file(repo, from, to, identifier, timeout).await {
+        match do_migrate_file(tmp_dir, repo, from, to, identifier, timeout).await {
             Ok(identifier) => return Ok(identifier),
             Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                 return Err(MigrateError::From(e));
@@ -383,6 +412,7 @@ enum MigrateError {
 }
 
 async fn do_migrate_file<S1, S2>(
+    tmp_dir: &TmpDir,
     repo: &ArcRepo,
     from: &S1,
     to: &S2,
@@ -412,7 +442,7 @@ where
             .await
             .map_err(From::from)
             .map_err(MigrateError::Details)?;
-        let new_details = Details::from_bytes(timeout, bytes_stream.into_bytes())
+        let new_details = Details::from_bytes(tmp_dir, timeout, bytes_stream.into_bytes())
             .await
             .map_err(MigrateError::Details)?;
         repo.relate_details(identifier, &new_details)
