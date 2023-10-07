@@ -1,20 +1,28 @@
 fn main() -> color_eyre::Result<()> {
-    let config = pict_rs::PictRsConfiguration::build_default()?
-        .install_tracing()?
-        .install_metrics()?;
-
-    run(config)
+    run()
 }
 
 #[cfg(feature = "io-uring")]
-fn run(config: pict_rs::PictRsConfiguration) -> color_eyre::Result<()> {
-    tokio_uring::start(config.run())
+fn run() -> color_eyre::Result<()> {
+    tokio_uring::start(async move {
+        pict_rs::PictRsConfiguration::build_default()?
+            .install_tracing()?
+            .install_metrics()?
+            .run()
+            .await
+    })
 }
 
 #[cfg(not(feature = "io-uring"))]
-fn run(config: pict_rs::PictRsConfiguration) -> color_eyre::Result<()> {
+fn run() -> color_eyre::Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(config.run())
+        .block_on(async move {
+            pict_rs::PictRsConfiguration::build_default()?
+                .install_tracing()?
+                .install_metrics()?
+                .run_on_localset()
+                .await
+        })
 }
