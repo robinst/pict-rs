@@ -2196,13 +2196,19 @@ impl PictRsConfiguration {
 
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        launch_file_store(tmp_dir, arc_repo, store, client, config, move |sc| {
-                            sled_extra_config(sc, sled_repo.clone())
-                        })
+                        launch_file_store(
+                            tmp_dir.clone(),
+                            arc_repo,
+                            store,
+                            client,
+                            config,
+                            move |sc| sled_extra_config(sc, sled_repo.clone()),
+                        )
                         .await?;
                     }
                     Repo::Postgres(_) => {
-                        launch_file_store(tmp_dir, arc_repo, store, client, config, |_| {}).await?;
+                        launch_file_store(tmp_dir.clone(), arc_repo, store, client, config, |_| {})
+                            .await?;
                     }
                 }
             }
@@ -2260,18 +2266,32 @@ impl PictRsConfiguration {
 
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        launch_object_store(tmp_dir, arc_repo, store, client, config, move |sc| {
-                            sled_extra_config(sc, sled_repo.clone())
-                        })
+                        launch_object_store(
+                            tmp_dir.clone(),
+                            arc_repo,
+                            store,
+                            client,
+                            config,
+                            move |sc| sled_extra_config(sc, sled_repo.clone()),
+                        )
                         .await?;
                     }
                     Repo::Postgres(_) => {
-                        launch_object_store(tmp_dir, arc_repo, store, client, config, |_| {})
-                            .await?;
+                        launch_object_store(
+                            tmp_dir.clone(),
+                            arc_repo,
+                            store,
+                            client,
+                            config,
+                            |_| {},
+                        )
+                        .await?;
                     }
                 }
             }
         }
+
+        tmp_dir.cleanup().await?;
 
         Ok(())
     }

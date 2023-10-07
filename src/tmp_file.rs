@@ -6,28 +6,44 @@ pub(crate) type ArcTmpDir = Arc<TmpDir>;
 
 #[derive(Debug)]
 pub(crate) struct TmpDir {
-    path: PathBuf,
+    path: Option<PathBuf>,
 }
 
 impl TmpDir {
     pub(crate) async fn init() -> std::io::Result<Arc<Self>> {
         let path = std::env::temp_dir().join(Uuid::new_v4().to_string());
         tokio::fs::create_dir(&path).await?;
-        Ok(Arc::new(TmpDir { path }))
+        Ok(Arc::new(TmpDir { path: Some(path) }))
     }
 
     pub(crate) fn tmp_file(&self, ext: Option<&str>) -> PathBuf {
         if let Some(ext) = ext {
-            self.path.join(format!("{}{}", Uuid::new_v4(), ext))
+            self.path
+                .as_ref()
+                .expect("tmp path exists")
+                .join(format!("{}{}", Uuid::new_v4(), ext))
         } else {
-            self.path.join(Uuid::new_v4().to_string())
+            self.path
+                .as_ref()
+                .expect("tmp path exists")
+                .join(Uuid::new_v4().to_string())
         }
+    }
+
+    pub(crate) async fn cleanup(self: Arc<Self>) -> std::io::Result<()> {
+        if let Some(path) = Arc::into_inner(self).and_then(|mut this| this.path.take()) {
+            tokio::fs::remove_dir_all(path).await?;
+        }
+
+        Ok(())
     }
 }
 
 impl Drop for TmpDir {
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.path).expect("Removed directory");
+        if let Some(path) = self.path.as_ref() {
+            std::fs::remove_dir_all(path).expect("Removed directory");
+        }
     }
 }
 
