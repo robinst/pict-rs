@@ -55,6 +55,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use streem::IntoStreamer;
+use tmp_file::{ArcTmpDir, TmpDir};
 use tokio::sync::Semaphore;
 use tracing::Instrument;
 use tracing_actix_web::TracingLogger;
@@ -139,9 +140,10 @@ impl<S: Store + 'static> FormData for Upload<S> {
     type Error = Error;
 
     fn form(req: &HttpRequest) -> Form<Self::Item, Self::Error> {
-        // Create a new Multipart Form validator
-        //
-        // This form is expecting a single array field, 'images' with at most 10 files in it
+        let tmp_dir = req
+            .app_data::<web::Data<ArcTmpDir>>()
+            .expect("No TmpDir in request")
+            .clone();
         let repo = req
             .app_data::<web::Data<ArcRepo>>()
             .expect("No repo in request")
@@ -159,6 +161,9 @@ impl<S: Store + 'static> FormData for Upload<S> {
             .expect("No configuration in request")
             .clone();
 
+        // Create a new Multipart Form validator
+        //
+        // This form is expecting a single array field, 'images' with at most 10 files in it
         Form::new()
             .max_files(config.server.max_file_count)
             .max_file_size(config.media.max_file_size * MEGABYTES)
@@ -166,6 +171,7 @@ impl<S: Store + 'static> FormData for Upload<S> {
             .field(
                 "images",
                 Field::array(Field::file(move |filename, _, stream| {
+                    let tmp_dir = tmp_dir.clone();
                     let repo = repo.clone();
                     let store = store.clone();
                     let client = client.clone();
@@ -183,8 +189,16 @@ impl<S: Store + 'static> FormData for Upload<S> {
 
                             let stream = crate::stream::from_err(stream);
 
-                            ingest::ingest(&repo, &**store, &client, stream, None, &config.media)
-                                .await
+                            ingest::ingest(
+                                &tmp_dir,
+                                &repo,
+                                &**store,
+                                &client,
+                                stream,
+                                None,
+                                &config.media,
+                            )
+                            .await
                         }
                         .instrument(span),
                     )
@@ -204,6 +218,10 @@ impl<S: Store + 'static> FormData for Import<S> {
     type Error = Error;
 
     fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
+        let tmp_dir = req
+            .app_data::<web::Data<ArcTmpDir>>()
+            .expect("No TmpDir in request")
+            .clone();
         let repo = req
             .app_data::<web::Data<ArcRepo>>()
             .expect("No repo in request")
@@ -231,6 +249,7 @@ impl<S: Store + 'static> FormData for Import<S> {
             .field(
                 "images",
                 Field::array(Field::file(move |filename, _, stream| {
+                    let tmp_dir = tmp_dir.clone();
                     let repo = repo.clone();
                     let store = store.clone();
                     let client = client.clone();
@@ -249,6 +268,7 @@ impl<S: Store + 'static> FormData for Import<S> {
                             let stream = crate::stream::from_err(stream);
 
                             ingest::ingest(
+                                &tmp_dir,
                                 &repo,
                                 &**store,
                                 &client,
@@ -499,12 +519,13 @@ struct UrlQuery {
 
 async fn ingest_inline<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
+    tmp_dir: &TmpDir,
     repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
     config: &Configuration,
 ) -> Result<(Alias, DeleteToken, Details), Error> {
-    let session = ingest::ingest(repo, store, client, stream, None, &config.media).await?;
+    let session = ingest::ingest(tmp_dir, repo, store, client, stream, None, &config.media).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
 
@@ -519,6 +540,7 @@ async fn ingest_inline<S: Store + 'static>(
 #[tracing::instrument(name = "Downloading file", skip(client, repo, store, config))]
 async fn download<S: Store + 'static>(
     client: web::Data<ClientWithMiddleware>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -529,7 +551,7 @@ async fn download<S: Store + 'static>(
     if query.backgrounded {
         do_download_backgrounded(stream, repo, store).await
     } else {
-        do_download_inline(stream, repo, store, &client, config).await
+        do_download_inline(stream, &tmp_dir, repo, store, &client, config).await
     }
 }
 
@@ -562,6 +584,7 @@ async fn download_stream(
 )]
 async fn do_download_inline<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
+    tmp_dir: &TmpDir,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     client: &ClientWithMiddleware,
@@ -570,7 +593,7 @@ async fn do_download_inline<S: Store + 'static>(
     metrics::increment_counter!("pict-rs.files", "download" => "inline");
 
     let (alias, delete_token, details) =
-        ingest_inline(stream, &repo, &store, client, &config).await?;
+        ingest_inline(stream, tmp_dir, &repo, &store, client, &config).await?;
 
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
@@ -832,6 +855,7 @@ async fn process<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     client: web::Data<ClientWithMiddleware>,
@@ -848,7 +872,8 @@ async fn process<S: Store + 'static>(
             } else if !config.server.read_only {
                 let stream = download_stream(&client, proxy.as_str(), &config).await?;
 
-                let (alias, _, _) = ingest_inline(stream, &repo, &store, &client, &config).await?;
+                let (alias, _, _) =
+                    ingest_inline(stream, &tmp_dir, &repo, &store, &client, &config).await?;
 
                 repo.relate_url(proxy, alias.clone()).await?;
 
@@ -1135,6 +1160,7 @@ async fn do_details<S: Store + 'static>(
 async fn serve_query<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(alias_query): web::Query<AliasQuery>,
+    tmp_dir: web::Data<ArcTmpDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     client: web::Data<ClientWithMiddleware>,
@@ -1148,7 +1174,8 @@ async fn serve_query<S: Store + 'static>(
             } else if !config.server.read_only {
                 let stream = download_stream(&client, proxy.as_str(), &config).await?;
 
-                let (alias, _, _) = ingest_inline(stream, &repo, &store, &client, &config).await?;
+                let (alias, _, _) =
+                    ingest_inline(stream, &tmp_dir, &repo, &store, &client, &config).await?;
 
                 repo.relate_url(proxy, alias.clone()).await?;
 
@@ -1735,6 +1762,7 @@ fn spawn_cleanup(repo: ArcRepo, config: &Configuration) {
 }
 
 fn spawn_workers<S>(
+    tmp_dir: ArcTmpDir,
     repo: ArcRepo,
     store: S,
     client: ClientWithMiddleware,
@@ -1749,6 +1777,7 @@ fn spawn_workers<S>(
         config.clone(),
     ));
     crate::sync::spawn(queue::process_images(
+        tmp_dir,
         repo,
         store,
         client,
@@ -1758,6 +1787,7 @@ fn spawn_workers<S>(
 }
 
 async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(
+    tmp_dir: ArcTmpDir,
     repo: ArcRepo,
     store: FileStore,
     client: ClientWithMiddleware,
@@ -1771,6 +1801,7 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
     spawn_cleanup(repo.clone(), &config);
 
     HttpServer::new(move || {
+        let tmp_dir = tmp_dir.clone();
         let client = client.clone();
         let store = store.clone();
         let repo = repo.clone();
@@ -1778,6 +1809,7 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
         let extra_config = extra_config.clone();
 
         spawn_workers(
+            tmp_dir.clone(),
             repo.clone(),
             store.clone(),
             client.clone(),
@@ -1791,6 +1823,7 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
             .wrap(Metrics)
             .wrap(Payload::new())
             .app_data(web::Data::new(process_map.clone()))
+            .app_data(web::Data::new(tmp_dir))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     })
     .bind(address)?
@@ -1799,6 +1832,7 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
 }
 
 async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(
+    tmp_dir: ArcTmpDir,
     repo: ArcRepo,
     store: ObjectStore,
     client: ClientWithMiddleware,
@@ -1812,6 +1846,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
     spawn_cleanup(repo.clone(), &config);
 
     HttpServer::new(move || {
+        let tmp_dir = tmp_dir.clone();
         let client = client.clone();
         let store = store.clone();
         let repo = repo.clone();
@@ -1819,6 +1854,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
         let extra_config = extra_config.clone();
 
         spawn_workers(
+            tmp_dir.clone(),
             repo.clone(),
             store.clone(),
             client.clone(),
@@ -1832,6 +1868,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
             .wrap(Metrics)
             .wrap(Payload::new())
             .app_data(web::Data::new(process_map.clone()))
+            .app_data(web::Data::new(tmp_dir))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     })
     .bind(address)?
@@ -2075,6 +2112,8 @@ impl PictRsConfiguration {
             tracing::warn!("Launching in READ ONLY mode");
         }
 
+        let tmp_dir = TmpDir::init().await?;
+
         match config.store.clone() {
             config::Store::Filesystem(config::Filesystem { path }) => {
                 let arc_repo = repo.to_arc();
@@ -2100,13 +2139,13 @@ impl PictRsConfiguration {
 
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        launch_file_store(arc_repo, store, client, config, move |sc| {
+                        launch_file_store(tmp_dir, arc_repo, store, client, config, move |sc| {
                             sled_extra_config(sc, sled_repo.clone())
                         })
                         .await?;
                     }
                     Repo::Postgres(_) => {
-                        launch_file_store(arc_repo, store, client, config, |_| {}).await?;
+                        launch_file_store(tmp_dir, arc_repo, store, client, config, |_| {}).await?;
                     }
                 }
             }
@@ -2163,13 +2202,14 @@ impl PictRsConfiguration {
 
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        launch_object_store(arc_repo, store, client, config, move |sc| {
+                        launch_object_store(tmp_dir, arc_repo, store, client, config, move |sc| {
                             sled_extra_config(sc, sled_repo.clone())
                         })
                         .await?;
                     }
                     Repo::Postgres(_) => {
-                        launch_object_store(arc_repo, store, client, config, |_| {}).await?;
+                        launch_object_store(tmp_dir, arc_repo, store, client, config, |_| {})
+                            .await?;
                     }
                 }
             }

@@ -12,10 +12,12 @@ use crate::{
     repo::{Alias, ArcRepo, UploadId, UploadResult},
     serde_str::Serde,
     store::Store,
+    tmp_file::ArcTmpDir,
 };
 use std::{path::PathBuf, sync::Arc};
 
 pub(super) fn perform<'a, S>(
+    tmp_dir: &'a ArcTmpDir,
     repo: &'a ArcRepo,
     store: &'a S,
     client: &'a ClientWithMiddleware,
@@ -35,6 +37,7 @@ where
                     declared_alias,
                 } => {
                     process_ingest(
+                        tmp_dir,
                         repo,
                         store,
                         client,
@@ -109,6 +112,7 @@ impl Drop for UploadGuard {
 
 #[tracing::instrument(skip(repo, store, client, media))]
 async fn process_ingest<S>(
+    tmp_dir: &ArcTmpDir,
     repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
@@ -123,6 +127,7 @@ where
     let guard = UploadGuard::guard(upload_id);
 
     let fut = async {
+        let tmp_dir = tmp_dir.clone();
         let ident = unprocessed_identifier.clone();
         let store2 = store.clone();
         let repo = repo.clone();
@@ -132,9 +137,16 @@ where
         let error_boundary = crate::sync::spawn(async move {
             let stream = crate::stream::from_err(store2.to_stream(&ident, None, None).await?);
 
-            let session =
-                crate::ingest::ingest(&repo, &store2, &client, stream, declared_alias, &media)
-                    .await?;
+            let session = crate::ingest::ingest(
+                &tmp_dir,
+                &repo,
+                &store2,
+                &client,
+                stream,
+                declared_alias,
+                &media,
+            )
+            .await?;
 
             Ok(session) as Result<Session, Error>
         })

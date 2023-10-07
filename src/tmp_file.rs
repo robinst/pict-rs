@@ -1,6 +1,38 @@
-use std::{path::PathBuf, sync::OnceLock};
+use std::{
+    path::PathBuf,
+    sync::{Arc, OnceLock},
+};
 use tokio::io::AsyncRead;
 use uuid::Uuid;
+
+pub(crate) type ArcTmpDir = Arc<TmpDir>;
+
+#[derive(Debug)]
+pub(crate) struct TmpDir {
+    path: PathBuf,
+}
+
+impl TmpDir {
+    pub(crate) async fn init() -> std::io::Result<Arc<Self>> {
+        let path = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        tokio::fs::create_dir(&path).await?;
+        Ok(Arc::new(TmpDir { path }))
+    }
+
+    pub(crate) fn tmp_file(&self, ext: Option<&str>) -> PathBuf {
+        if let Some(ext) = ext {
+            self.path.join(format!("{}{}", Uuid::new_v4(), ext))
+        } else {
+            self.path.join(Uuid::new_v4().to_string())
+        }
+    }
+}
+
+impl Drop for TmpDir {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.path).expect("Removed directory");
+    }
+}
 
 static TMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 

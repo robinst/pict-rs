@@ -11,6 +11,7 @@ use crate::{
         InternalFormat, Validations,
     },
     read::BoxRead,
+    tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
 
@@ -56,6 +57,7 @@ const MEGABYTES: usize = 1024 * 1024;
 
 #[tracing::instrument(skip_all)]
 pub(crate) async fn validate_bytes(
+    tmp_dir: &TmpDir,
     bytes: Bytes,
     validations: Validations<'_>,
     timeout: u64,
@@ -73,13 +75,22 @@ pub(crate) async fn validate_bytes(
 
     match &input {
         InputFile::Image(input) => {
-            let (format, read) =
-                process_image(bytes, *input, width, height, validations.image, timeout).await?;
+            let (format, read) = process_image(
+                tmp_dir,
+                bytes,
+                *input,
+                width,
+                height,
+                validations.image,
+                timeout,
+            )
+            .await?;
 
             Ok((format, read))
         }
         InputFile::Animation(input) => {
             let (format, read) = process_animation(
+                tmp_dir,
                 bytes,
                 *input,
                 width,
@@ -94,6 +105,7 @@ pub(crate) async fn validate_bytes(
         }
         InputFile::Video(input) => {
             let (format, read) = process_video(
+                tmp_dir,
                 bytes,
                 *input,
                 width,
@@ -111,6 +123,7 @@ pub(crate) async fn validate_bytes(
 
 #[tracing::instrument(skip(bytes, validations))]
 async fn process_image(
+    tmp_dir: &TmpDir,
     bytes: Bytes,
     input: ImageInput,
     width: u16,
@@ -139,7 +152,7 @@ async fn process_image(
     let read = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        magick::convert_image(input.format, format, quality, timeout, bytes).await?
+        magick::convert_image(tmp_dir, input.format, format, quality, timeout, bytes).await?
     } else {
         exiftool::clear_metadata_bytes_read(bytes, timeout)?
     };
@@ -175,6 +188,7 @@ fn validate_animation(
 
 #[tracing::instrument(skip(bytes, validations))]
 async fn process_animation(
+    tmp_dir: &TmpDir,
     bytes: Bytes,
     input: AnimationFormat,
     width: u16,
@@ -193,7 +207,7 @@ async fn process_animation(
     let read = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        magick::convert_animation(input, format, quality, timeout, bytes).await?
+        magick::convert_animation(tmp_dir, input, format, quality, timeout, bytes).await?
     } else {
         exiftool::clear_metadata_bytes_read(bytes, timeout)?
     };
@@ -232,6 +246,7 @@ fn validate_video(
 
 #[tracing::instrument(skip(bytes, validations))]
 async fn process_video(
+    tmp_dir: &TmpDir,
     bytes: Bytes,
     input: InputVideoFormat,
     width: u16,
@@ -250,7 +265,7 @@ async fn process_video(
 
     let crf = validations.crf_for(width, height);
 
-    let read = ffmpeg::transcode_bytes(input, output, crf, timeout, bytes).await?;
+    let read = ffmpeg::transcode_bytes(tmp_dir, input, output, crf, timeout, bytes).await?;
 
     Ok((InternalFormat::Video(output.format.internal_format()), read))
 }

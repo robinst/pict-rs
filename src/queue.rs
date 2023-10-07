@@ -4,9 +4,10 @@ use crate::{
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     future::LocalBoxFuture,
-    repo::{Alias, DeleteToken, FullRepo, Hash, JobId, UploadId},
+    repo::{Alias, ArcRepo, DeleteToken, Hash, JobId, UploadId},
     serde_str::Serde,
     store::Store,
+    tmp_file::ArcTmpDir,
 };
 use reqwest_middleware::ClientWithMiddleware;
 use std::{
@@ -60,7 +61,7 @@ enum Process {
 }
 
 pub(crate) async fn cleanup_alias(
-    repo: &Arc<dyn FullRepo>,
+    repo: &ArcRepo,
     alias: Alias,
     token: DeleteToken,
 ) -> Result<(), Error> {
@@ -73,16 +74,13 @@ pub(crate) async fn cleanup_alias(
     Ok(())
 }
 
-pub(crate) async fn cleanup_hash(repo: &Arc<dyn FullRepo>, hash: Hash) -> Result<(), Error> {
+pub(crate) async fn cleanup_hash(repo: &ArcRepo, hash: Hash) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::Hash { hash }).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
-pub(crate) async fn cleanup_identifier(
-    repo: &Arc<dyn FullRepo>,
-    identifier: &Arc<str>,
-) -> Result<(), Error> {
+pub(crate) async fn cleanup_identifier(repo: &ArcRepo, identifier: &Arc<str>) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::Identifier {
         identifier: identifier.to_string(),
     })
@@ -92,7 +90,7 @@ pub(crate) async fn cleanup_identifier(
 }
 
 async fn cleanup_variants(
-    repo: &Arc<dyn FullRepo>,
+    repo: &ArcRepo,
     hash: Hash,
     variant: Option<String>,
 ) -> Result<(), Error> {
@@ -102,26 +100,26 @@ async fn cleanup_variants(
     Ok(())
 }
 
-pub(crate) async fn cleanup_outdated_proxies(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
+pub(crate) async fn cleanup_outdated_proxies(repo: &ArcRepo) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::OutdatedProxies).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
-pub(crate) async fn cleanup_outdated_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
+pub(crate) async fn cleanup_outdated_variants(repo: &ArcRepo) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::OutdatedVariants).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
-pub(crate) async fn cleanup_all_variants(repo: &Arc<dyn FullRepo>) -> Result<(), Error> {
+pub(crate) async fn cleanup_all_variants(repo: &ArcRepo) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::AllVariants).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }
 
 pub(crate) async fn queue_ingest(
-    repo: &Arc<dyn FullRepo>,
+    repo: &ArcRepo,
     identifier: &Arc<str>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
@@ -137,7 +135,7 @@ pub(crate) async fn queue_ingest(
 }
 
 pub(crate) async fn queue_generate(
-    repo: &Arc<dyn FullRepo>,
+    repo: &ArcRepo,
     target_format: InputProcessableFormat,
     source: Alias,
     process_path: PathBuf,
@@ -154,22 +152,20 @@ pub(crate) async fn queue_generate(
     Ok(())
 }
 
-pub(crate) async fn process_cleanup<S: Store>(
-    repo: Arc<dyn FullRepo>,
-    store: S,
-    config: Configuration,
-) {
+pub(crate) async fn process_cleanup<S: Store>(repo: ArcRepo, store: S, config: Configuration) {
     process_jobs(&repo, &store, &config, CLEANUP_QUEUE, cleanup::perform).await
 }
 
 pub(crate) async fn process_images<S: Store + 'static>(
-    repo: Arc<dyn FullRepo>,
+    tmp_dir: ArcTmpDir,
+    repo: ArcRepo,
     store: S,
     client: ClientWithMiddleware,
     process_map: ProcessMap,
     config: Configuration,
 ) {
     process_image_jobs(
+        &tmp_dir,
         &repo,
         &store,
         &client,
@@ -182,7 +178,7 @@ pub(crate) async fn process_images<S: Store + 'static>(
 }
 
 async fn process_jobs<S, F>(
-    repo: &Arc<dyn FullRepo>,
+    repo: &ArcRepo,
     store: &S,
     config: &Configuration,
     queue: &'static str,
@@ -190,7 +186,7 @@ async fn process_jobs<S, F>(
 ) where
     S: Store,
     for<'a> F: Fn(
-            &'a Arc<dyn FullRepo>,
+            &'a ArcRepo,
             &'a S,
             &'a Configuration,
             serde_json::Value,
@@ -249,7 +245,7 @@ impl Drop for MetricsGuard {
 }
 
 async fn job_loop<S, F>(
-    repo: &Arc<dyn FullRepo>,
+    repo: &ArcRepo,
     store: &S,
     config: &Configuration,
     worker_id: uuid::Uuid,
@@ -259,7 +255,7 @@ async fn job_loop<S, F>(
 where
     S: Store,
     for<'a> F: Fn(
-            &'a Arc<dyn FullRepo>,
+            &'a ArcRepo,
             &'a S,
             &'a Configuration,
             serde_json::Value,
@@ -302,7 +298,8 @@ where
 }
 
 async fn process_image_jobs<S, F>(
-    repo: &Arc<dyn FullRepo>,
+    tmp_dir: &ArcTmpDir,
+    repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
     process_map: &ProcessMap,
@@ -312,7 +309,8 @@ async fn process_image_jobs<S, F>(
 ) where
     S: Store,
     for<'a> F: Fn(
-            &'a Arc<dyn FullRepo>,
+            &'a ArcTmpDir,
+            &'a ArcRepo,
             &'a S,
             &'a ClientWithMiddleware,
             &'a ProcessMap,
@@ -325,6 +323,7 @@ async fn process_image_jobs<S, F>(
 
     loop {
         let res = image_job_loop(
+            tmp_dir,
             repo,
             store,
             client,
@@ -353,7 +352,8 @@ async fn process_image_jobs<S, F>(
 
 #[allow(clippy::too_many_arguments)]
 async fn image_job_loop<S, F>(
-    repo: &Arc<dyn FullRepo>,
+    tmp_dir: &ArcTmpDir,
+    repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
     process_map: &ProcessMap,
@@ -365,7 +365,8 @@ async fn image_job_loop<S, F>(
 where
     S: Store,
     for<'a> F: Fn(
-            &'a Arc<dyn FullRepo>,
+            &'a ArcTmpDir,
+            &'a ArcRepo,
             &'a S,
             &'a ClientWithMiddleware,
             &'a ProcessMap,
@@ -389,7 +390,7 @@ where
                         queue,
                         worker_id,
                         job_id,
-                        (callback)(repo, store, client, process_map, config, job),
+                        (callback)(tmp_dir, repo, store, client, process_map, config, job),
                     )
                 })
                 .instrument(span)
@@ -409,7 +410,7 @@ where
 }
 
 async fn heartbeat<Fut>(
-    repo: &Arc<dyn FullRepo>,
+    repo: &ArcRepo,
     queue: &'static str,
     worker_id: uuid::Uuid,
     job_id: JobId,

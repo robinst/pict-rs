@@ -5,16 +5,18 @@ use crate::{
     formats::{InputVideoFormat, OutputVideo},
     process::Process,
     read::BoxRead,
+    tmp_file::TmpDir,
 };
 
 pub(super) async fn transcode_bytes(
+    tmp_dir: &TmpDir,
     input_format: InputVideoFormat,
     output_format: OutputVideo,
     crf: u8,
     timeout: u64,
     bytes: Bytes,
 ) -> Result<BoxRead<'static>, FfMpegError> {
-    let input_file = crate::tmp_file::tmp_file(None);
+    let input_file = tmp_dir.tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
@@ -29,7 +31,7 @@ pub(super) async fn transcode_bytes(
         .map_err(FfMpegError::Write)?;
     tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
 
-    let output_file = crate::tmp_file::tmp_file(None);
+    let output_file = tmp_dir.tmp_file(None);
     let output_file_str = output_file.to_str().ok_or(FfMpegError::Path)?;
 
     transcode_files(

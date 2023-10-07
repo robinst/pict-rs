@@ -5,9 +5,11 @@ use crate::{
     magick::MagickError,
     process::Process,
     read::BoxRead,
+    tmp_file::TmpDir,
 };
 
 pub(super) async fn convert_image(
+    tmp_dir: &TmpDir,
     input: ImageFormat,
     output: ImageFormat,
     quality: Option<u8>,
@@ -15,6 +17,7 @@ pub(super) async fn convert_image(
     bytes: Bytes,
 ) -> Result<BoxRead<'static>, MagickError> {
     convert(
+        tmp_dir,
         input.magick_format(),
         output.magick_format(),
         false,
@@ -26,6 +29,7 @@ pub(super) async fn convert_image(
 }
 
 pub(super) async fn convert_animation(
+    tmp_dir: &TmpDir,
     input: AnimationFormat,
     output: AnimationFormat,
     quality: Option<u8>,
@@ -33,6 +37,7 @@ pub(super) async fn convert_animation(
     bytes: Bytes,
 ) -> Result<BoxRead<'static>, MagickError> {
     convert(
+        tmp_dir,
         input.magick_format(),
         output.magick_format(),
         true,
@@ -44,6 +49,7 @@ pub(super) async fn convert_animation(
 }
 
 async fn convert(
+    tmp_dir: &TmpDir,
     input: &'static str,
     output: &'static str,
     coalesce: bool,
@@ -51,7 +57,7 @@ async fn convert(
     timeout: u64,
     bytes: Bytes,
 ) -> Result<BoxRead<'static>, MagickError> {
-    let input_file = crate::tmp_file::tmp_file(None);
+    let input_file = tmp_dir.tmp_file(None);
     let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
 
     crate::store::file_store::safe_create_parent(&input_file)
