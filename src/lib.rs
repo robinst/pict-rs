@@ -2080,6 +2080,9 @@ impl PictRsConfiguration {
     }
 
     /// Run the pict-rs application
+    ///
+    /// This must be called from within a tokio `LocalSet`, which is created by default for
+    /// actix-rt runtimes, and by tokio_uring
     pub async fn run(self) -> color_eyre::Result<()> {
         let PictRsConfiguration { config, operation } = self;
 
