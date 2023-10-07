@@ -1,9 +1,5 @@
-fn main() -> color_eyre::Result<()> {
-    run()
-}
-
 #[cfg(feature = "io-uring")]
-fn run() -> color_eyre::Result<()> {
+fn main() -> color_eyre::Result<()> {
     tokio_uring::start(async move {
         pict_rs::PictRsConfiguration::build_default()?
             .install_tracing()?
@@ -14,7 +10,7 @@ fn run() -> color_eyre::Result<()> {
 }
 
 #[cfg(not(feature = "io-uring"))]
-fn run() -> color_eyre::Result<()> {
+fn main() -> color_eyre::Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
