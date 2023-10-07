@@ -12,7 +12,7 @@
 
 rustPlatform.buildRustPackage {
   pname = "pict-rs";
-  version = "0.5.0-alpha.19";
+  version = "0.5.0-alpha.20";
   src = ./.;
 
   cargoLock = {
