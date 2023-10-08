@@ -15,7 +15,10 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_core::Stream;
 use reqwest::{header::RANGE, Body, Response};
 use reqwest_middleware::{ClientWithMiddleware, RequestBuilder};
-use rusty_s3::{actions::S3Action, Bucket, BucketError, Credentials, UrlStyle};
+use rusty_s3::{
+    actions::{CreateMultipartUpload, S3Action},
+    Bucket, BucketError, Credentials, UrlStyle,
+};
 use std::{string::FromUtf8Error, sync::Arc, time::Duration};
 use storage_path_generator::{Generator, Path};
 use streem::IntoStreamer;
@@ -120,16 +123,6 @@ pub(crate) struct ObjectStoreConfig {
     signature_expiration: u64,
     client_timeout: u64,
     public_endpoint: Option<Url>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-struct InitiateMultipartUploadResponse {
-    #[serde(rename = "Bucket")]
-    _bucket: String,
-    #[serde(rename = "Key")]
-    _key: String,
-    #[serde(rename = "UploadId")]
-    upload_id: String,
 }
 
 impl ObjectStoreConfig {
@@ -255,10 +248,9 @@ impl Store for ObjectStore {
             return Err(status_error(response).await);
         }
 
-        let body = response.bytes().await.map_err(ObjectError::Request)?;
-        let body: InitiateMultipartUploadResponse =
-            quick_xml::de::from_reader(&*body).map_err(ObjectError::from)?;
-        let upload_id = &body.upload_id;
+        let body = response.text().await.map_err(ObjectError::Request)?;
+        let body = CreateMultipartUpload::parse_response(&body).map_err(ObjectError::Xml)?;
+        let upload_id = body.upload_id();
 
         // hack-ish: use async block as Result boundary
         let res = async {
@@ -280,7 +272,7 @@ impl Store for ObjectStore {
                 let this = self.clone();
 
                 let object_id2 = object_id.clone();
-                let upload_id2 = upload_id.clone();
+                let upload_id2 = upload_id.to_string();
                 let handle = crate::sync::spawn(
                     async move {
                         let response = this
