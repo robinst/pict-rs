@@ -22,7 +22,7 @@ barrel = { version = "0.7.0", features = ["pg"] }
 base64 = "0.21.0"
 clap = { version = "4.0.2", features = ["derive"] }
 color-eyre = "0.6"
-config = "0.13.0"
+config = { version = "0.13.0", default-features = false, features = ["json", "ron", "toml", "yaml"] }
 console-subscriber = "0.2"
 dashmap = "5.1.0"
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
