@@ -1,4 +1,3 @@
-use actix_web::rt::task::JoinHandle;
 use actix_web::web::Bytes;
 use flume::r#async::RecvFut;
 use std::{
@@ -11,6 +10,7 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncWriteExt, ReadBuf},
     process::{Child, ChildStdin, ChildStdout, Command},
+    task::JoinHandle,
 };
 use tracing::{Instrument, Span};
 
@@ -78,7 +78,7 @@ pub(crate) struct ProcessRead<I> {
     #[allow(dead_code)]
     handle: DropHandle,
     eof: bool,
-    sleep: Pin<Box<actix_web::rt::time::Sleep>>,
+    sleep: Pin<Box<tokio::time::Sleep>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -213,6 +213,7 @@ impl Process {
         span.follows_from(Span::current());
 
         let handle = crate::sync::spawn(
+            "await-process",
             async move {
                 let child_fut = async {
                     (f)(stdin).await?;
@@ -238,7 +239,7 @@ impl Process {
             .instrument(span),
         );
 
-        let sleep = actix_web::rt::time::sleep(timeout);
+        let sleep = tokio::time::sleep(timeout);
 
         ProcessRead {
             inner: stdout,

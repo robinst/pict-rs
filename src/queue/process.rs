@@ -136,7 +136,7 @@ where
         let client = client.clone();
 
         let media = media.clone();
-        let error_boundary = crate::sync::spawn(async move {
+        let error_boundary = crate::sync::spawn("ingest-media", async move {
             let stream = crate::stream::from_err(store2.to_stream(&ident, None, None).await?);
 
             let session = crate::ingest::ingest(

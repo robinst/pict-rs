@@ -51,7 +51,7 @@ struct TmpFile(PathBuf);
 
 impl Drop for TmpFile {
     fn drop(&mut self) {
-        crate::sync::spawn(tokio::fs::remove_file(self.0.clone()));
+        crate::sync::spawn("remove-tmpfile", tokio::fs::remove_file(self.0.clone()));
     }
 }
 

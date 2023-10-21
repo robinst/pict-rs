@@ -248,6 +248,7 @@ impl Drop for Session {
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup hash", hash = ?hash);
 
                 crate::sync::spawn(
+                    "session-cleanup-hash",
                     async move {
                         let _ = crate::queue::cleanup_hash(&repo, hash).await;
                     }
@@ -262,6 +263,7 @@ impl Drop for Session {
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup alias", alias = ?alias);
 
                 crate::sync::spawn(
+                    "session-cleanup-alias",
                     async move {
                         let _ = crate::queue::cleanup_alias(&repo, alias, token).await;
                     }
@@ -275,6 +277,7 @@ impl Drop for Session {
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Session cleanup identifier", identifier = ?identifier);
 
                 crate::sync::spawn(
+                    "session-cleanup-identifier",
                     async move {
                         let _ = crate::queue::cleanup_identifier(&repo, &identifier).await;
                     }

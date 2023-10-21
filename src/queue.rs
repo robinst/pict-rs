@@ -203,7 +203,7 @@ async fn process_jobs<S, F>(
             tracing::warn!("{}", format!("{e:?}"));
 
             if e.is_disconnected() {
-                actix_web::rt::time::sleep(Duration::from_secs(10)).await;
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
 
             continue;
@@ -341,7 +341,7 @@ async fn process_image_jobs<S, F>(
             tracing::warn!("{}", format!("{e:?}"));
 
             if e.is_disconnected() {
-                actix_web::rt::time::sleep(Duration::from_secs(3)).await;
+                tokio::time::sleep(Duration::from_secs(3)).await;
             }
 
             continue;
@@ -423,7 +423,7 @@ where
     let mut fut =
         std::pin::pin!(fut.instrument(tracing::info_span!("job-future", job_id = ?job_id)));
 
-    let mut interval = actix_web::rt::time::interval(Duration::from_secs(5));
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
 
     let mut hb = None;
 

@@ -1772,8 +1772,8 @@ fn spawn_cleanup(repo: ArcRepo, config: &Configuration) {
         return;
     }
 
-    crate::sync::spawn(async move {
-        let mut interval = actix_web::rt::time::interval(Duration::from_secs(30));
+    crate::sync::spawn("queue-cleanup", async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
 
         loop {
             interval.tick().await;
@@ -1805,19 +1805,14 @@ fn spawn_workers<S>(
 ) where
     S: Store + 'static,
 {
-    crate::sync::spawn(queue::process_cleanup(
-        repo.clone(),
-        store.clone(),
-        config.clone(),
-    ));
-    crate::sync::spawn(queue::process_images(
-        tmp_dir,
-        repo,
-        store,
-        client,
-        process_map,
-        config,
-    ));
+    crate::sync::spawn(
+        "cleanup-worker",
+        queue::process_cleanup(repo.clone(), store.clone(), config.clone()),
+    );
+    crate::sync::spawn(
+        "process-worker",
+        queue::process_images(tmp_dir, repo, store, client, process_map, config),
+    );
 }
 
 async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(

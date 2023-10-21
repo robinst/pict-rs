@@ -4,7 +4,13 @@ use tokio::sync::{Notify, Semaphore};
 
 #[track_caller]
 pub(crate) fn channel<T>(bound: usize) -> (flume::Sender<T>, flume::Receiver<T>) {
-    tracing::trace_span!(parent: None, "make channel").in_scope(|| flume::bounded(bound))
+    let span = tracing::trace_span!(parent: None, "make channel");
+    let guard = span.enter();
+
+    let channel = flume::bounded(bound);
+
+    drop(guard);
+    channel
 }
 
 #[track_caller]
@@ -14,31 +20,60 @@ pub(crate) fn notify() -> Arc<Notify> {
 
 #[track_caller]
 pub(crate) fn bare_notify() -> Notify {
-    tracing::trace_span!(parent: None, "make notifier").in_scope(Notify::new)
+    let span = tracing::trace_span!(parent: None, "make notifier");
+    let guard = span.enter();
+
+    let notify = Notify::new();
+
+    drop(guard);
+    notify
 }
 
 #[track_caller]
 pub(crate) fn bare_semaphore(permits: usize) -> Semaphore {
-    tracing::trace_span!(parent: None, "make semaphore").in_scope(|| Semaphore::new(permits))
+    let span = tracing::trace_span!(parent: None, "make semaphore");
+    let guard = span.enter();
+
+    let semaphore = Semaphore::new(permits);
+
+    drop(guard);
+    semaphore
 }
 
 #[track_caller]
-pub(crate) fn spawn<F>(future: F) -> actix_web::rt::task::JoinHandle<F::Output>
+pub(crate) fn spawn<F>(name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: std::future::Future + 'static,
     F::Output: 'static,
 {
-    tracing::trace_span!(parent: None, "spawn task").in_scope(|| actix_web::rt::spawn(future))
+    let span = tracing::trace_span!(parent: None, "spawn task");
+    let guard = span.enter();
+
+    let handle = tokio::task::Builder::new()
+        .name(name)
+        .spawn_local(future)
+        .expect("Failed to spawn");
+
+    drop(guard);
+    handle
 }
 
 #[track_caller]
-pub(crate) fn spawn_blocking<F, Out>(function: F) -> actix_web::rt::task::JoinHandle<Out>
+pub(crate) fn spawn_blocking<F, Out>(name: &str, function: F) -> tokio::task::JoinHandle<Out>
 where
     F: FnOnce() -> Out + Send + 'static,
     Out: Send + 'static,
 {
     let outer_span = tracing::Span::current();
 
-    tracing::trace_span!(parent: None, "spawn blocking task")
-        .in_scope(|| actix_web::rt::task::spawn_blocking(move || outer_span.in_scope(function)))
+    let span = tracing::trace_span!(parent: None, "spawn blocking task");
+    let guard = span.enter();
+
+    let handle = tokio::task::Builder::new()
+        .name(name)
+        .spawn_blocking(move || outer_span.in_scope(function))
+        .expect("Failed to spawn");
+
+    drop(guard);
+    handle
 }

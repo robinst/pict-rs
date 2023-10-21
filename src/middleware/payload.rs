@@ -47,7 +47,7 @@ async fn drain(rx: flume::Receiver<actix_web::dev::Payload>) {
 }
 
 #[derive(Clone)]
-struct DrainHandle(Option<Rc<actix_web::rt::task::JoinHandle<()>>>);
+struct DrainHandle(Option<Rc<tokio::task::JoinHandle<()>>>);
 
 pub(crate) struct Payload {
     sender: flume::Sender<actix_web::dev::Payload>,
@@ -65,7 +65,7 @@ pub(crate) struct PayloadStream {
 }
 
 impl DrainHandle {
-    fn new(handle: actix_web::rt::task::JoinHandle<()>) -> Self {
+    fn new(handle: tokio::task::JoinHandle<()>) -> Self {
         Self(Some(Rc::new(handle)))
     }
 }
@@ -74,7 +74,7 @@ impl Payload {
     pub(crate) fn new() -> Self {
         let (tx, rx) = crate::sync::channel(LIMIT);
 
-        let handle = DrainHandle::new(crate::sync::spawn(drain(rx)));
+        let handle = DrainHandle::new(crate::sync::spawn("drain-payloads", drain(rx)));
 
         Payload { sender: tx, handle }
     }

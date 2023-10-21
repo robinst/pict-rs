@@ -30,7 +30,7 @@ macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
         let $ident = $self.$ident.clone();
 
-        crate::sync::spawn_blocking(move || $expr)
+        crate::sync::spawn_blocking("sled-io", move || $expr)
             .await
             .map_err(SledError::from)
             .map_err(RepoError::from)?
@@ -174,7 +174,7 @@ impl SledRepo {
 
         let this = self.db.clone();
 
-        crate::sync::spawn_blocking(move || {
+        crate::sync::spawn_blocking("sled-io", move || {
             let export = this.export();
             export_db.import(export);
         })
@@ -257,7 +257,7 @@ impl AliasAccessRepo for SledRepo {
         let alias_access = self.alias_access.clone();
         let inverse_alias_access = self.inverse_alias_access.clone();
 
-        let res = crate::sync::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (&alias_access, &inverse_alias_access).transaction(
                 |(alias_access, inverse_alias_access)| {
                     if let Some(old) = alias_access.insert(alias.to_bytes(), &value_bytes)? {
@@ -323,7 +323,7 @@ impl AliasAccessRepo for SledRepo {
         let alias_access = self.alias_access.clone();
         let inverse_alias_access = self.inverse_alias_access.clone();
 
-        let res = crate::sync::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (&alias_access, &inverse_alias_access).transaction(
                 |(alias_access, inverse_alias_access)| {
                     if let Some(old) = alias_access.remove(alias.to_bytes())? {
@@ -363,7 +363,7 @@ impl VariantAccessRepo for SledRepo {
         let variant_access = self.variant_access.clone();
         let inverse_variant_access = self.inverse_variant_access.clone();
 
-        let res = crate::sync::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (&variant_access, &inverse_variant_access).transaction(
                 |(variant_access, inverse_variant_access)| {
                     if let Some(old) = variant_access.insert(&key, &value_bytes)? {
@@ -433,7 +433,7 @@ impl VariantAccessRepo for SledRepo {
         let variant_access = self.variant_access.clone();
         let inverse_variant_access = self.inverse_variant_access.clone();
 
-        let res = crate::sync::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (&variant_access, &inverse_variant_access).transaction(
                 |(variant_access, inverse_variant_access)| {
                     if let Some(old) = variant_access.remove(&key)? {
@@ -633,7 +633,7 @@ impl QueueRepo for SledRepo {
         let queue = self.queue.clone();
         let job_state = self.job_state.clone();
 
-        let res = crate::sync::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (&queue, &job_state).transaction(|(queue, job_state)| {
                 let state = JobState::pending();
 
@@ -683,7 +683,7 @@ impl QueueRepo for SledRepo {
             let job_state = self.job_state.clone();
 
             let span = tracing::Span::current();
-            let opt = crate::sync::spawn_blocking(move || {
+            let opt = crate::sync::spawn_blocking("sled-io", move || {
                 let _guard = span.enter();
                 // Job IDs are generated with Uuid version 7 - defining their first bits as a
                 // timestamp. Scanning a prefix should give us jobs in the order they were queued.
@@ -776,7 +776,7 @@ impl QueueRepo for SledRepo {
 
         let job_state = self.job_state.clone();
 
-        crate::sync::spawn_blocking(move || {
+        crate::sync::spawn_blocking("sled-io", move || {
             if let Some(state) = job_state.get(&key)? {
                 let new_state = JobState::running(worker_id);
 
@@ -806,7 +806,7 @@ impl QueueRepo for SledRepo {
         let queue = self.queue.clone();
         let job_state = self.job_state.clone();
 
-        let res = crate::sync::spawn_blocking(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (&queue, &job_state).transaction(|(queue, job_state)| {
                 queue.remove(&key[..])?;
                 job_state.remove(&key[..])?;
@@ -1065,7 +1065,7 @@ impl HashRepo for SledRepo {
             None => (self.hashes_inverse.iter(), None),
         };
 
-        crate::sync::spawn_blocking(move || {
+        crate::sync::spawn_blocking("sled-io", move || {
             let page_iter = page_iter
                 .keys()
                 .rev()
@@ -1117,7 +1117,7 @@ impl HashRepo for SledRepo {
         let page_iter = self.hashes_inverse.range(..=date_nanos);
         let prev_iter = Some(self.hashes_inverse.range(date_nanos..));
 
-        crate::sync::spawn_blocking(move || {
+        crate::sync::spawn_blocking("sled-io", move || {
             let page_iter = page_iter
                 .keys()
                 .rev()
@@ -1245,7 +1245,7 @@ impl HashRepo for SledRepo {
 
         let hash_variant_identifiers = self.hash_variant_identifiers.clone();
 
-        crate::sync::spawn_blocking(move || {
+        crate::sync::spawn_blocking("sled-io", move || {
             hash_variant_identifiers
                 .compare_and_swap(key, Option::<&[u8]>::None, Some(value.as_bytes()))
                 .map(|res| res.map_err(|_| VariantAlreadyExists))
@@ -1537,8 +1537,8 @@ impl std::fmt::Debug for SledRepo {
     }
 }
 
-impl From<actix_web::rt::task::JoinError> for SledError {
-    fn from(_: actix_web::rt::task::JoinError) -> Self {
+impl From<tokio::task::JoinError> for SledError {
+    fn from(_: tokio::task::JoinError) -> Self {
         SledError::Panic
     }
 }

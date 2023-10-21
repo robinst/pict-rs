@@ -49,7 +49,7 @@ use super::{
 pub(crate) struct PostgresRepo {
     inner: Arc<Inner>,
     #[allow(dead_code)]
-    notifications: Arc<actix_web::rt::task::JoinHandle<()>>,
+    notifications: Arc<tokio::task::JoinHandle<()>>,
 }
 
 struct Inner {
@@ -151,7 +151,7 @@ impl PostgresRepo {
             .await
             .map_err(ConnectPostgresError::ConnectForMigration)?;
 
-        let handle = crate::sync::spawn(conn);
+        let handle = crate::sync::spawn("postgres-migrations", conn);
 
         embedded::migrations::runner()
             .run_async(&mut client)
@@ -199,7 +199,10 @@ impl PostgresRepo {
             upload_notifications: DashMap::new(),
         });
 
-        let handle = crate::sync::spawn(delegate_notifications(rx, inner.clone(), parallelism * 8));
+        let handle = crate::sync::spawn(
+            "postgres-delegate-notifications",
+            delegate_notifications(rx, inner.clone(), parallelism * 8),
+        );
 
         let notifications = Arc::new(handle);
 
@@ -411,7 +414,7 @@ fn spawn_db_notification_task(
     sender: flume::Sender<Notification>,
     mut conn: Connection<Socket, NoTlsStream>,
 ) {
-    crate::sync::spawn(async move {
+    crate::sync::spawn("postgres-notifications", async move {
         while let Some(res) = std::future::poll_fn(|cx| conn.poll_message(cx)).await {
             match res {
                 Err(e) => {

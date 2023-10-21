@@ -30,7 +30,7 @@ where
 {
     let (tx, rx) = crate::sync::channel(1);
 
-    let handle = crate::sync::spawn(async move {
+    let handle = crate::sync::spawn("send-stream", async move {
         let stream = std::pin::pin!(stream);
         let mut streamer = stream.into_streamer();
 
@@ -59,7 +59,7 @@ where
 {
     let (tx, rx) = crate::sync::channel(buffer);
 
-    let handle = crate::sync::spawn_blocking(move || {
+    let handle = crate::sync::spawn_blocking("blocking-iterator", move || {
         for value in iterator {
             if tx.send(value).is_err() {
                 break;
@@ -148,7 +148,7 @@ where
     S::Item: 'static,
 {
     streem::try_from_fn(|yielder| async move {
-        actix_web::rt::time::timeout(duration, async move {
+        tokio::time::timeout(duration, async move {
             let stream = std::pin::pin!(stream);
             let mut streamer = stream.into_streamer();
 

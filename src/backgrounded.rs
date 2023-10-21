@@ -83,6 +83,7 @@ impl Drop for Backgrounded {
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Backgrounded cleanup Identifier", identifier = ?identifier);
 
                 crate::sync::spawn(
+                    "backgrounded-cleanup-identifier",
                     async move {
                         let _ = crate::queue::cleanup_identifier(&repo, &identifier).await;
                     }
@@ -96,6 +97,7 @@ impl Drop for Backgrounded {
                 let cleanup_span = tracing::info_span!(parent: &cleanup_parent_span, "Backgrounded cleanup Upload ID", upload_id = ?upload_id);
 
                 crate::sync::spawn(
+                    "backgrounded-claim-upload",
                     async move {
                         let _ = repo.claim(upload_id).await;
                     }

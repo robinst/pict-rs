@@ -274,6 +274,7 @@ impl Store for ObjectStore {
                 let object_id2 = object_id.clone();
                 let upload_id2 = upload_id.to_string();
                 let handle = crate::sync::spawn(
+                    "upload-multipart-part",
                     async move {
                         let response = this
                             .create_upload_part_request(

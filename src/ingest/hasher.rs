@@ -80,7 +80,7 @@ mod test {
     macro_rules! test_async {
         ($fut:expr) => {
             actix_web::rt::System::new()
-                .block_on(async move { crate::sync::spawn($fut).await.unwrap() })
+                .block_on(async move { crate::sync::spawn("tests", $fut).await.unwrap() })
         };
     }
 

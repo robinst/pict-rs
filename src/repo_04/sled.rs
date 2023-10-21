@@ -34,7 +34,7 @@ macro_rules! b {
     ($self:ident.$ident:ident, $expr:expr) => {{
         let $ident = $self.$ident.clone();
 
-        crate::sync::spawn_blocking(move || $expr)
+        crate::sync::spawn_blocking("04-sled-io", move || $expr)
             .await
             .map_err(SledError::from)
             .map_err(RepoError::from)?
@@ -313,8 +313,8 @@ impl std::fmt::Debug for SledRepo {
     }
 }
 
-impl From<actix_web::rt::task::JoinError> for SledError {
-    fn from(_: actix_web::rt::task::JoinError) -> Self {
+impl From<tokio::task::JoinError> for SledError {
+    fn from(_: tokio::task::JoinError) -> Self {
         SledError::Panic
     }
 }

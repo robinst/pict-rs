@@ -35,11 +35,11 @@ pub(crate) trait NowOrNever: Future {
 }
 
 pub(crate) trait WithTimeout: Future {
-    fn with_timeout(self, duration: Duration) -> actix_web::rt::time::Timeout<Self>
+    fn with_timeout(self, duration: Duration) -> tokio::time::Timeout<Self>
     where
         Self: Sized,
     {
-        actix_web::rt::time::timeout(duration, self)
+        tokio::time::timeout(duration, self)
     }
 }
 
