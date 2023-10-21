@@ -43,6 +43,7 @@
             rustc
             rustfmt
             taplo
+            tokio-console
           ];
 
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
