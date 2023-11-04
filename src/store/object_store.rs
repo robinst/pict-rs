@@ -57,7 +57,7 @@ pub(crate) enum ObjectError {
     Utf8(#[from] FromUtf8Error),
 
     #[error("Failed to parse xml")]
-    Xml(#[from] quick_xml::de::DeError),
+    Xml(#[source] XmlError),
 
     #[error("Invalid length")]
     Length,
@@ -70,6 +70,29 @@ pub(crate) enum ObjectError {
 
     #[error("Invalid status: {0}\n{1}")]
     Status(StatusCode, String),
+}
+
+#[derive(Debug)]
+pub(crate) struct XmlError {
+    inner: Box<dyn std::error::Error + Send + Sync>,
+}
+
+impl XmlError {
+    fn new<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
+        XmlError { inner: Box::new(e) }
+    }
+}
+
+impl std::fmt::Display for XmlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
+impl std::error::Error for XmlError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.inner.source()
+    }
 }
 
 impl ObjectError {
@@ -249,7 +272,9 @@ impl Store for ObjectStore {
         }
 
         let body = response.text().await.map_err(ObjectError::Request)?;
-        let body = CreateMultipartUpload::parse_response(&body).map_err(ObjectError::Xml)?;
+        let body = CreateMultipartUpload::parse_response(&body)
+            .map_err(XmlError::new)
+            .map_err(ObjectError::Xml)?;
         let upload_id = body.upload_id();
 
         // hack-ish: use async block as Result boundary
