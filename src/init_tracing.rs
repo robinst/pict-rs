@@ -1,10 +1,8 @@
 use crate::config::{LogFormat, OpenTelemetry, Tracing};
 use console_subscriber::ConsoleLayer;
-use opentelemetry::{
-    sdk::{propagation::TraceContextPropagator, Resource},
-    KeyValue,
-};
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::{propagation::TraceContextPropagator, Resource};
 use tracing::subscriber::set_global_default;
 use tracing_error::ErrorLayer;
 use tracing_log::LogTracer;
@@ -62,7 +60,7 @@ where
         let tracer = opentelemetry_otlp::new_pipeline()
             .tracing()
             .with_trace_config(
-                opentelemetry::sdk::trace::config().with_resource(Resource::new(vec![
+                opentelemetry_sdk::trace::config().with_resource(Resource::new(vec![
                     KeyValue::new("service.name", otel.service_name.clone()),
                 ])),
             )
@@ -71,7 +69,7 @@ where
                     .tonic()
                     .with_endpoint(url.as_str()),
             )
-            .install_batch(opentelemetry::runtime::Tokio)?;
+            .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 
         let otel_layer = tracing_opentelemetry::layer()
             .with_tracer(tracer)
