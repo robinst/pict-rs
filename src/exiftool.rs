@@ -45,7 +45,7 @@ impl ExifError {
 
 #[tracing::instrument(level = "trace", skip(input))]
 pub(crate) async fn needs_reorienting(timeout: u64, input: Bytes) -> Result<bool, ExifError> {
-    let process = Process::run("exiftool", &["-n", "-Orientation", "-"], timeout)?;
+    let process = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?;
     let mut reader = process.bytes_read(input);
 
     let mut buf = String::new();
@@ -62,7 +62,7 @@ pub(crate) fn clear_metadata_bytes_read(
     timeout: u64,
     input: Bytes,
 ) -> Result<impl AsyncRead + Unpin, ExifError> {
-    let process = Process::run("exiftool", &["-all=", "-", "-out", "-"], timeout)?;
+    let process = Process::run("exiftool", &["-all=", "-", "-out", "-"], &[], timeout)?;
 
     Ok(process.bytes_read(input))
 }

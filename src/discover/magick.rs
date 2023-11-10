@@ -7,7 +7,7 @@ use tokio::io::AsyncReadExt;
 use crate::{
     discover::DiscoverError,
     formats::{AnimationFormat, ImageFormat, ImageInput, InputFile},
-    magick::MagickError,
+    magick::{MagickError, MAGICK_TEMPORARY_PATH},
     process::Process,
     tmp_file::TmpDir,
 };
@@ -99,8 +99,12 @@ where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
+    let temporary_path = tmp_dir
+        .tmp_folder()
+        .await
+        .map_err(MagickError::CreateTemporaryDirectory)?;
+
     let input_file = tmp_dir.tmp_file(None);
-    let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(MagickError::CreateDir)?;
@@ -111,9 +115,17 @@ where
     let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
+    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
+
     let process = Process::run(
         "magick",
-        &["convert", "-ping", input_file_str, "INFO:"],
+        &[
+            "convert".as_ref(),
+            "-ping".as_ref(),
+            input_file.as_os_str(),
+            "INFO:".as_ref(),
+        ],
+        &envs,
         timeout,
     )?;
 
@@ -123,9 +135,9 @@ where
         .read_to_string(&mut output)
         .await
         .map_err(MagickError::Read)?;
-    tokio::fs::remove_file(input_file_str)
-        .await
-        .map_err(MagickError::RemoveFile)?;
+
+    drop(input_file);
+    drop(temporary_path);
 
     if output.is_empty() {
         return Err(MagickError::Empty);
@@ -154,8 +166,12 @@ where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
+    let temporary_path = tmp_dir
+        .tmp_folder()
+        .await
+        .map_err(MagickError::CreateTemporaryDirectory)?;
+
     let input_file = tmp_dir.tmp_file(None);
-    let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(MagickError::CreateDir)?;
@@ -166,9 +182,17 @@ where
     let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
+    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
+
     let process = Process::run(
         "magick",
-        &["convert", "-ping", input_file_str, "JSON:"],
+        &[
+            "convert".as_ref(),
+            "-ping".as_ref(),
+            input_file.as_os_str(),
+            "JSON:".as_ref(),
+        ],
+        &envs,
         timeout,
     )?;
 
@@ -178,9 +202,8 @@ where
         .read_to_end(&mut output)
         .await
         .map_err(MagickError::Read)?;
-    tokio::fs::remove_file(input_file_str)
-        .await
-        .map_err(MagickError::RemoveFile)?;
+
+    drop(input_file);
 
     if output.is_empty() {
         return Err(MagickError::Empty);

@@ -1,7 +1,11 @@
-use std::sync::Arc;
+use std::{ffi::OsStr, sync::Arc};
 
 use crate::{
-    formats::ProcessableFormat, magick::MagickError, process::Process, read::BoxRead, store::Store,
+    formats::ProcessableFormat,
+    magick::{MagickError, MAGICK_TEMPORARY_PATH},
+    process::Process,
+    read::BoxRead,
+    store::Store,
     tmp_file::TmpDir,
 };
 
@@ -17,8 +21,12 @@ where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
+    let temporary_path = tmp_dir
+        .tmp_folder()
+        .await
+        .map_err(MagickError::CreateTemporaryDirectory)?;
+
     let input_file = tmp_dir.tmp_file(None);
-    let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(MagickError::CreateDir)?;
@@ -29,26 +37,33 @@ where
     let tmp_one = (write_file)(tmp_one).await?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
-    let input_arg = format!("{}:{input_file_str}[0]", input_format.magick_format());
+    let input_arg = [
+        input_format.magick_format().as_ref(),
+        input_file.as_os_str(),
+    ]
+    .join(":".as_ref());
     let output_arg = format!("{}:-", format.magick_format());
     let quality = quality.map(|q| q.to_string());
 
     let len = 3 + if format.coalesce() { 1 } else { 0 } + if quality.is_some() { 1 } else { 0 };
 
-    let mut args: Vec<&str> = Vec::with_capacity(len);
-    args.push("convert");
+    let mut args: Vec<&OsStr> = Vec::with_capacity(len);
+    args.push("convert".as_ref());
     args.push(&input_arg);
     if format.coalesce() {
-        args.push("-coalesce");
+        args.push("-coalesce".as_ref());
     }
     if let Some(quality) = &quality {
-        args.extend(["-quality", quality]);
+        args.extend(["-quality".as_ref(), quality.as_ref()] as [&OsStr; 2]);
     }
-    args.push(&output_arg);
+    args.push(output_arg.as_ref());
 
-    let reader = Process::run("magick", &args, timeout)?.read();
+    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
 
-    let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, input_file);
+    let reader = Process::run("magick", &args, &envs, timeout)?.read();
+
+    let clean_reader = input_file.reader(reader);
+    let clean_reader = temporary_path.reader(clean_reader);
 
     Ok(Box::pin(clean_reader))
 }

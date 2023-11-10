@@ -29,17 +29,11 @@ pub(crate) enum FfMpegError {
     #[error("Error closing file")]
     CloseFile(#[source] std::io::Error),
 
-    #[error("Error removing file")]
-    RemoveFile(#[source] std::io::Error),
-
     #[error("Error in store")]
     Store(#[source] StoreError),
 
     #[error("Invalid media file provided")]
     CommandFailed(ProcessError),
-
-    #[error("Invalid file path")]
-    Path,
 }
 
 impl From<ProcessError> for FfMpegError {
@@ -64,9 +58,7 @@ impl FfMpegError {
             | Self::ReadFile(_)
             | Self::OpenFile(_)
             | Self::CreateFile(_)
-            | Self::CloseFile(_)
-            | Self::RemoveFile(_)
-            | Self::Path => ErrorCode::COMMAND_ERROR,
+            | Self::CloseFile(_) => ErrorCode::COMMAND_ERROR,
         }
     }
 

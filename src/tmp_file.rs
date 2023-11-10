@@ -1,4 +1,8 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    ops::Deref,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::io::AsyncRead;
 use uuid::Uuid;
 
@@ -16,18 +20,31 @@ impl TmpDir {
         Ok(Arc::new(TmpDir { path: Some(path) }))
     }
 
-    pub(crate) fn tmp_file(&self, ext: Option<&str>) -> PathBuf {
+    fn build_tmp_file(&self, ext: Option<&str>) -> Arc<Path> {
         if let Some(ext) = ext {
-            self.path
-                .as_ref()
-                .expect("tmp path exists")
-                .join(format!("{}{}", Uuid::new_v4(), ext))
+            Arc::from(self.path.as_ref().expect("tmp path exists").join(format!(
+                "{}{}",
+                Uuid::new_v4(),
+                ext
+            )))
         } else {
-            self.path
-                .as_ref()
-                .expect("tmp path exists")
-                .join(Uuid::new_v4().to_string())
+            Arc::from(
+                self.path
+                    .as_ref()
+                    .expect("tmp path exists")
+                    .join(Uuid::new_v4().to_string()),
+            )
         }
+    }
+
+    pub(crate) fn tmp_file(&self, ext: Option<&str>) -> TmpFile {
+        TmpFile(self.build_tmp_file(ext))
+    }
+
+    pub(crate) async fn tmp_folder(&self) -> std::io::Result<TmpFolder> {
+        let path = self.build_tmp_file(None);
+        tokio::fs::create_dir(&path).await?;
+        Ok(TmpFolder(path))
     }
 
     pub(crate) async fn cleanup(self: Arc<Self>) -> std::io::Result<()> {
@@ -47,7 +64,66 @@ impl Drop for TmpDir {
     }
 }
 
-struct TmpFile(PathBuf);
+#[must_use]
+pub(crate) struct TmpFolder(Arc<Path>);
+
+impl TmpFolder {
+    pub(crate) fn reader<R: AsyncRead>(self, reader: R) -> TmpFolderCleanup<R> {
+        TmpFolderCleanup {
+            inner: reader,
+            folder: self,
+        }
+    }
+}
+
+impl AsRef<Path> for TmpFolder {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Deref for TmpFolder {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for TmpFolder {
+    fn drop(&mut self) {
+        crate::sync::spawn(
+            "remove-tmpfolder",
+            tokio::fs::remove_dir_all(self.0.clone()),
+        );
+    }
+}
+
+#[must_use]
+pub(crate) struct TmpFile(Arc<Path>);
+
+impl TmpFile {
+    pub(crate) fn reader<R: AsyncRead>(self, reader: R) -> TmpFileCleanup<R> {
+        TmpFileCleanup {
+            inner: reader,
+            file: self,
+        }
+    }
+}
+
+impl AsRef<Path> for TmpFile {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Deref for TmpFile {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl Drop for TmpFile {
     fn drop(&mut self) {
@@ -64,14 +140,28 @@ pin_project_lite::pin_project! {
     }
 }
 
-pub(crate) fn cleanup_tmpfile<R: AsyncRead>(reader: R, file: PathBuf) -> TmpFileCleanup<R> {
-    TmpFileCleanup {
-        inner: reader,
-        file: TmpFile(file),
+pin_project_lite::pin_project! {
+    pub(crate) struct TmpFolderCleanup<R> {
+        #[pin]
+        inner: R,
+
+        folder: TmpFolder,
     }
 }
 
 impl<R: AsyncRead> AsyncRead for TmpFileCleanup<R> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let this = self.as_mut().project();
+
+        this.inner.poll_read(cx, buf)
+    }
+}
+
+impl<R: AsyncRead> AsyncRead for TmpFolderCleanup<R> {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,

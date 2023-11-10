@@ -1,3 +1,5 @@
+use std::ffi::OsStr;
+
 use actix_web::web::Bytes;
 
 use crate::{
@@ -17,7 +19,6 @@ pub(super) async fn transcode_bytes(
     bytes: Bytes,
 ) -> Result<BoxRead<'static>, FfMpegError> {
     let input_file = tmp_dir.tmp_file(None);
-    let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(FfMpegError::CreateDir)?;
@@ -32,12 +33,11 @@ pub(super) async fn transcode_bytes(
     tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
 
     let output_file = tmp_dir.tmp_file(None);
-    let output_file_str = output_file.to_str().ok_or(FfMpegError::Path)?;
 
     transcode_files(
-        input_file_str,
+        input_file.as_os_str(),
         input_format,
-        output_file_str,
+        output_file.as_os_str(),
         output_format,
         crf,
         timeout,
@@ -52,15 +52,15 @@ pub(super) async fn transcode_bytes(
         .await
         .map_err(FfMpegError::ReadFile)?;
     let reader = tokio_util::io::StreamReader::new(stream);
-    let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, output_file);
+    let clean_reader = output_file.reader(reader);
 
     Ok(Box::pin(clean_reader))
 }
 
 async fn transcode_files(
-    input_path: &str,
+    input_path: &OsStr,
     input_format: InputVideoFormat,
-    output_path: &str,
+    output_path: &OsStr,
     output_format: OutputVideo,
     crf: u8,
     timeout: u64,
@@ -74,47 +74,51 @@ async fn transcode_files(
     } = output_format;
 
     let mut args = vec![
-        "-hide_banner",
-        "-v",
-        "warning",
-        "-f",
-        input_format.ffmpeg_format(),
-        "-i",
+        "-hide_banner".as_ref(),
+        "-v".as_ref(),
+        "warning".as_ref(),
+        "-f".as_ref(),
+        input_format.ffmpeg_format().as_ref(),
+        "-i".as_ref(),
         input_path,
     ];
 
     if transcode_video {
         args.extend([
-            "-pix_fmt",
-            output_format.pix_fmt(),
-            "-vf",
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-c:v",
-            output_format.ffmpeg_video_codec(),
-            "-crf",
-            &crf,
-        ]);
+            "-pix_fmt".as_ref(),
+            output_format.pix_fmt().as_ref(),
+            "-vf".as_ref(),
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2".as_ref(),
+            "-c:v".as_ref(),
+            output_format.ffmpeg_video_codec().as_ref(),
+            "-crf".as_ref(),
+            &crf.as_ref(),
+        ] as [&OsStr; 8]);
 
         if output_format.is_vp9() {
-            args.extend(["-b:v", "0"]);
+            args.extend(["-b:v".as_ref(), "0".as_ref()] as [&OsStr; 2]);
         }
     } else {
-        args.extend(["-c:v", "copy"]);
+        args.extend(["-c:v".as_ref(), "copy".as_ref()] as [&OsStr; 2]);
     }
 
     if transcode_audio {
         if let Some(audio_codec) = output_format.ffmpeg_audio_codec() {
-            args.extend(["-c:a", audio_codec]);
+            args.extend(["-c:a".as_ref(), audio_codec.as_ref()] as [&OsStr; 2]);
         } else {
-            args.push("-an")
+            args.push("-an".as_ref())
         }
     } else {
-        args.extend(["-c:a", "copy"]);
+        args.extend(["-c:a".as_ref(), "copy".as_ref()] as [&OsStr; 2]);
     }
 
-    args.extend(["-f", output_format.ffmpeg_format(), output_path]);
+    args.extend([
+        "-f".as_ref(),
+        output_format.ffmpeg_format().as_ref(),
+        output_path,
+    ]);
 
-    Process::run("ffmpeg", &args, timeout)?.wait().await?;
+    Process::run("ffmpeg", &args, &[], timeout)?.wait().await?;
 
     Ok(())
 }

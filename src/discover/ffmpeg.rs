@@ -201,7 +201,6 @@ where
     Fut: std::future::Future<Output = Result<crate::file::File, FfMpegError>>,
 {
     let input_file = tmp_dir.tmp_file(None);
-    let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(FfMpegError::CreateDir)?;
@@ -215,17 +214,18 @@ where
     let process = Process::run(
         "ffprobe",
         &[
-            "-v",
-            "quiet",
-            "-count_frames",
-            "-show_entries",
-            "stream=width,height,nb_read_frames,codec_name,pix_fmt:format=format_name",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            "-print_format",
-            "json",
-            input_file_str,
+            "-v".as_ref(),
+            "quiet".as_ref(),
+            "-count_frames".as_ref(),
+            "-show_entries".as_ref(),
+            "stream=width,height,nb_read_frames,codec_name,pix_fmt:format=format_name".as_ref(),
+            "-of".as_ref(),
+            "default=noprint_wrappers=1:nokey=1".as_ref(),
+            "-print_format".as_ref(),
+            "json".as_ref(),
+            input_file.as_os_str(),
         ],
+        &[],
         timeout,
     )?;
 
@@ -235,9 +235,8 @@ where
         .read_to_end(&mut output)
         .await
         .map_err(FfMpegError::Read)?;
-    tokio::fs::remove_file(input_file_str)
-        .await
-        .map_err(FfMpegError::RemoveFile)?;
+
+    drop(input_file);
 
     let output: FfMpegDiscovery = serde_json::from_slice(&output).map_err(FfMpegError::Json)?;
 
@@ -273,6 +272,7 @@ async fn alpha_pixel_formats(timeout: u64) -> Result<HashSet<String>, FfMpegErro
             "-print_format",
             "json",
         ],
+        &[],
         timeout,
     )?;
 

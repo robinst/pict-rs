@@ -1,6 +1,7 @@
 use actix_web::web::Bytes;
 use flume::r#async::RecvFut;
 use std::{
+    ffi::OsStr,
     future::Future,
     pin::Pin,
     process::{ExitStatus, Stdio},
@@ -115,9 +116,24 @@ impl ProcessError {
 }
 
 impl Process {
-    pub(crate) fn run(command: &str, args: &[&str], timeout: u64) -> Result<Self, ProcessError> {
-        let res = tracing::trace_span!(parent: None, "Create command", %command)
-            .in_scope(|| Self::spawn(command, Command::new(command).args(args), timeout));
+    pub(crate) fn run<T>(
+        command: &str,
+        args: &[T],
+        envs: &[(&str, &OsStr)],
+        timeout: u64,
+    ) -> Result<Self, ProcessError>
+    where
+        T: AsRef<OsStr>,
+    {
+        let res = tracing::trace_span!(parent: None, "Create command", %command).in_scope(|| {
+            Self::spawn(
+                command,
+                Command::new(command)
+                    .args(args)
+                    .envs(envs.into_iter().copied()),
+                timeout,
+            )
+        });
 
         match res {
             Ok(this) => Ok(this),

@@ -1,8 +1,10 @@
+use std::ffi::OsStr;
+
 use actix_web::web::Bytes;
 
 use crate::{
     formats::{AnimationFormat, ImageFormat},
-    magick::MagickError,
+    magick::{MagickError, MAGICK_TEMPORARY_PATH},
     process::Process,
     read::BoxRead,
     tmp_file::TmpDir,
@@ -57,8 +59,12 @@ async fn convert(
     timeout: u64,
     bytes: Bytes,
 ) -> Result<BoxRead<'static>, MagickError> {
+    let temporary_path = tmp_dir
+        .tmp_folder()
+        .await
+        .map_err(MagickError::CreateTemporaryDirectory)?;
+
     let input_file = tmp_dir.tmp_file(None);
-    let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
 
     crate::store::file_store::safe_create_parent(&input_file)
         .await
@@ -73,27 +79,30 @@ async fn convert(
         .map_err(MagickError::Write)?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
-    let input_arg = format!("{input}:{input_file_str}");
+    let input_arg = [input.as_ref(), input_file.as_os_str()].join(":".as_ref());
     let output_arg = format!("{output}:-");
     let quality = quality.map(|q| q.to_string());
 
-    let mut args = vec!["convert"];
+    let mut args: Vec<&OsStr> = vec!["convert".as_ref()];
 
     if coalesce {
-        args.push("-coalesce");
+        args.push("-coalesce".as_ref());
     }
 
-    args.extend(["-strip", "-auto-orient", &input_arg]);
+    args.extend(["-strip".as_ref(), "-auto-orient".as_ref(), &input_arg] as [&OsStr; 3]);
 
     if let Some(quality) = &quality {
-        args.extend(["-quality", quality]);
+        args.extend(["-quality".as_ref(), quality.as_ref()] as [&OsStr; 2]);
     }
 
-    args.push(&output_arg);
+    args.push(output_arg.as_ref());
 
-    let reader = Process::run("magick", &args, timeout)?.read();
+    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
 
-    let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, input_file);
+    let reader = Process::run("magick", &args, &envs, timeout)?.read();
+
+    let clean_reader = input_file.reader(reader);
+    let clean_reader = temporary_path.reader(clean_reader);
 
     Ok(Box::pin(clean_reader))
 }

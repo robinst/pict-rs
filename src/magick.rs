@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ffi::OsStr, sync::Arc};
 
 use crate::{
     error_code::ErrorCode,
@@ -10,6 +10,8 @@ use crate::{
 };
 
 use tokio::io::AsyncRead;
+
+pub(crate) const MAGICK_TEMPORARY_PATH: &str = "MAGICK_TEMPORARY_PATH";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum MagickError {
@@ -34,11 +36,11 @@ pub(crate) enum MagickError {
     #[error("Error creating directory")]
     CreateDir(#[source] crate::store::file_store::FileError),
 
+    #[error("Error creating temporary directory")]
+    CreateTemporaryDirectory(#[source] std::io::Error),
+
     #[error("Error closing file")]
     CloseFile(#[source] std::io::Error),
-
-    #[error("Error removing file")]
-    RemoveFile(#[source] std::io::Error),
 
     #[error("Error in metadata discovery")]
     Discover(#[source] crate::discover::DiscoverError),
@@ -48,9 +50,6 @@ pub(crate) enum MagickError {
 
     #[error("Command output is empty")]
     Empty,
-
-    #[error("Invalid file path")]
-    Path,
 }
 
 impl From<ProcessError> for MagickError {
@@ -73,11 +72,10 @@ impl MagickError {
             | Self::Write(_)
             | Self::CreateFile(_)
             | Self::CreateDir(_)
+            | Self::CreateTemporaryDirectory(_)
             | Self::CloseFile(_)
-            | Self::RemoveFile(_)
             | Self::Discover(_)
-            | Self::Empty
-            | Self::Path => ErrorCode::COMMAND_ERROR,
+            | Self::Empty => ErrorCode::COMMAND_ERROR,
         }
     }
 
@@ -103,8 +101,12 @@ where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
+    let temporary_path = tmp_dir
+        .tmp_folder()
+        .await
+        .map_err(MagickError::CreateTemporaryDirectory)?;
+
     let input_file = tmp_dir.tmp_file(None);
-    let input_file_str = input_file.to_str().ok_or(MagickError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(MagickError::CreateDir)?;
@@ -115,7 +117,11 @@ where
     let tmp_one = (write_file)(tmp_one).await?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
-    let input_arg = format!("{}:{input_file_str}", input_format.magick_format());
+    let input_arg = [
+        input_format.magick_format().as_ref(),
+        input_file.as_os_str(),
+    ]
+    .join(":".as_ref());
     let output_arg = format!("{}:-", format.magick_format());
     let quality = quality.map(|q| q.to_string());
 
@@ -124,21 +130,24 @@ where
         + if quality.is_some() { 1 } else { 0 }
         + process_args.len();
 
-    let mut args: Vec<&str> = Vec::with_capacity(len);
-    args.push("convert");
+    let mut args: Vec<&OsStr> = Vec::with_capacity(len);
+    args.push("convert".as_ref());
     args.push(&input_arg);
     if input_format.coalesce() {
-        args.push("-coalesce");
+        args.push("-coalesce".as_ref());
     }
-    args.extend(process_args.iter().map(|s| s.as_str()));
+    args.extend(process_args.iter().map(|s| AsRef::<OsStr>::as_ref(s)));
     if let Some(quality) = &quality {
-        args.extend(["-quality", quality]);
+        args.extend(["-quality".as_ref(), quality.as_ref()] as [&OsStr; 2]);
     }
-    args.push(&output_arg);
+    args.push(output_arg.as_ref());
 
-    let reader = Process::run("magick", &args, timeout)?.read();
+    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
 
-    let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, input_file);
+    let reader = Process::run("magick", &args, &envs, timeout)?.read();
+
+    let clean_reader = input_file.reader(reader);
+    let clean_reader = temporary_path.reader(clean_reader);
 
     Ok(Box::pin(clean_reader))
 }

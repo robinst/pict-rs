@@ -55,13 +55,11 @@ pub(super) async fn thumbnail<S: Store>(
     timeout: u64,
 ) -> Result<BoxRead<'static>, FfMpegError> {
     let input_file = tmp_dir.tmp_file(Some(input_format.file_extension()));
-    let input_file_str = input_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(FfMpegError::CreateDir)?;
 
     let output_file = tmp_dir.tmp_file(Some(format.to_file_extension()));
-    let output_file_str = output_file.to_str().ok_or(FfMpegError::Path)?;
     crate::store::file_store::safe_create_parent(&output_file)
         .await
         .map_err(FfMpegError::CreateDir)?;
@@ -82,26 +80,25 @@ pub(super) async fn thumbnail<S: Store>(
     let process = Process::run(
         "ffmpeg",
         &[
-            "-hide_banner",
-            "-v",
-            "warning",
-            "-i",
-            input_file_str,
-            "-frames:v",
-            "1",
-            "-codec",
-            format.as_ffmpeg_codec(),
-            "-f",
-            format.as_ffmpeg_format(),
-            output_file_str,
+            "-hide_banner".as_ref(),
+            "-v".as_ref(),
+            "warning".as_ref(),
+            "-i".as_ref(),
+            input_file.as_os_str(),
+            "-frames:v".as_ref(),
+            "1".as_ref(),
+            "-codec".as_ref(),
+            format.as_ffmpeg_codec().as_ref(),
+            "-f".as_ref(),
+            format.as_ffmpeg_format().as_ref(),
+            output_file.as_os_str(),
         ],
+        &[],
         timeout,
     )?;
 
     process.wait().await?;
-    tokio::fs::remove_file(input_file)
-        .await
-        .map_err(FfMpegError::RemoveFile)?;
+    drop(input_file);
 
     let tmp_two = crate::file::File::open(&output_file)
         .await
@@ -111,7 +108,7 @@ pub(super) async fn thumbnail<S: Store>(
         .await
         .map_err(FfMpegError::ReadFile)?;
     let reader = tokio_util::io::StreamReader::new(stream);
-    let clean_reader = crate::tmp_file::cleanup_tmpfile(reader, output_file);
+    let clean_reader = output_file.reader(reader);
 
     Ok(Box::pin(clean_reader))
 }

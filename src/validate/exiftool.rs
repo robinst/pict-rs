@@ -7,7 +7,7 @@ pub(crate) fn clear_metadata_bytes_read(
     input: Bytes,
     timeout: u64,
 ) -> Result<BoxRead<'static>, ExifError> {
-    let process = Process::run("exiftool", &["-all=", "-", "-out", "-"], timeout)?;
+    let process = Process::run("exiftool", &["-all=", "-", "-out", "-"], &[], timeout)?;
 
     Ok(Box::pin(process.bytes_read(input)))
 }
