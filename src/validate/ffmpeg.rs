@@ -92,7 +92,7 @@ async fn transcode_files(
             "-c:v".as_ref(),
             output_format.ffmpeg_video_codec().as_ref(),
             "-crf".as_ref(),
-            &crf.as_ref(),
+            crf.as_ref(),
         ] as [&OsStr; 8]);
 
         if output_format.is_vp9() {

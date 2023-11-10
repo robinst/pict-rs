@@ -128,9 +128,7 @@ impl Process {
         let res = tracing::trace_span!(parent: None, "Create command", %command).in_scope(|| {
             Self::spawn(
                 command,
-                Command::new(command)
-                    .args(args)
-                    .envs(envs.into_iter().copied()),
+                Command::new(command).args(args).envs(envs.iter().copied()),
                 timeout,
             )
         });

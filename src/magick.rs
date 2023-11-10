@@ -136,7 +136,7 @@ where
     if input_format.coalesce() {
         args.push("-coalesce".as_ref());
     }
-    args.extend(process_args.iter().map(|s| AsRef::<OsStr>::as_ref(s)));
+    args.extend(process_args.iter().map(AsRef::<OsStr>::as_ref));
     if let Some(quality) = &quality {
         args.extend(["-quality".as_ref(), quality.as_ref()] as [&OsStr; 2]);
     }
