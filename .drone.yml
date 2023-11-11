@@ -122,7 +122,6 @@ steps:
   pull: always
   commands:
   - cargo build --target=$TARGET --release
-  - $TOOL-strip target/$TARGET/release/pict-rs
   - cp target/$TARGET/release/pict-rs .
   - cp pict-rs pict-rs-linux-amd64
 
@@ -214,7 +213,6 @@ steps:
   pull: always
   commands:
   - cargo build --target=$TARGET --release
-  - $TOOL-strip target/$TARGET/release/pict-rs
   - cp target/$TARGET/release/pict-rs .
   - cp pict-rs pict-rs-linux-arm64v8
 
@@ -306,7 +304,6 @@ steps:
   pull: always
   commands:
   - cargo build --target=$TARGET --release
-  - $TOOL-strip target/$TARGET/release/pict-rs
   - cp target/$TARGET/release/pict-rs .
   - cp pict-rs pict-rs-linux-arm32v7
 
