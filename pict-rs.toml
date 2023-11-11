@@ -5,6 +5,13 @@
 # default: 0.0.0.0:8080
 address = '0.0.0.0:8080'
 
+## Optional: whether to reject any operations that would change the state of pict-rs.
+# environment variable: PICTRS__SERVER__READ_ONLY
+# default: false
+#
+# This can be useful if you need to run a copy of pict-rs while performing maintenance.
+read_only = false
+
 ## Optional: shared secret for internal endpoints
 # environment variable: PICTRS__SERVER__API_KEY
 # default: empty
