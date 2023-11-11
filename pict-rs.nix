@@ -11,18 +11,17 @@
 
 rustPlatform.buildRustPackage {
   pname = "pict-rs";
-  version = "0.5.0-beta.1";
+  version = "0.5.0-beta.2";
   src = ./.;
 
   cargoLock = {
     lockFile = ./Cargo.lock;
   };
 
-  RUSTFLAGS = "--cfg tokio_unstable --cfg uuid_unstable";
-
   nativeBuildInputs = [ stdenv makeWrapper ];
   buildInputs = lib.optionals stdenv.isDarwin [ Security ];
 
+  RUSTFLAGS = "--cfg tokio_unstable --cfg uuid_unstable";
   TARGET_CC = "${stdenv.cc}/bin/${stdenv.cc.targetPrefix}cc";
   TARGET_AR = "${stdenv.cc}/bin/${stdenv.cc.targetPrefix}ar";
 
