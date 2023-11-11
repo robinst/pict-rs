@@ -81,7 +81,7 @@ impl Args {
                 media_animation_quality_apng,
                 media_animation_quality_avif,
                 media_animation_quality_webp,
-                media_video_enable,
+                media_video_disable,
                 media_video_allow_audio,
                 media_video_max_width,
                 media_video_max_height,
@@ -172,7 +172,7 @@ impl Args {
                 };
 
                 let video = Video {
-                    enable: media_video_enable,
+                    enable: !media_video_disable,
                     allow_audio: media_video_allow_audio,
                     max_file_size: media_video_max_file_size,
                     max_width: media_video_max_width,
@@ -741,10 +741,14 @@ impl AnimationQuality {
     }
 }
 
+fn is_set(input: &bool) -> bool {
+    *input
+}
+
 #[derive(Debug, Default, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 struct Video {
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(skip_serializing_if = "is_set")]
     enable: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     allow_audio: bool,
@@ -1025,9 +1029,9 @@ struct Run {
     #[arg(long)]
     media_animation_quality_webp: Option<u8>,
 
-    /// Whether to enable video uploads
+    /// Whether to disable video uploads (enabled by default)
     #[arg(long)]
-    media_video_enable: bool,
+    media_video_disable: bool,
     /// Whether to enable audio in video uploads
     #[arg(long)]
     media_video_allow_audio: bool,
