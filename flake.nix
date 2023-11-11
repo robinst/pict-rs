@@ -38,7 +38,6 @@
             garage
             gcc
             imagemagick
-            protobuf
             rust-analyzer
             rustc
             rustfmt

@@ -4,7 +4,6 @@
 , lib
 , makeWrapper
 , nixosTests
-, protobuf
 , rustPlatform
 , Security
 , stdenv
@@ -12,20 +11,20 @@
 
 rustPlatform.buildRustPackage {
   pname = "pict-rs";
-  version = "0.5.0-alpha.20";
+  version = "0.5.0-beta.1";
   src = ./.;
 
   cargoLock = {
     lockFile = ./Cargo.lock;
   };
 
-  PROTOC = "${protobuf}/bin/protoc";
-  PROTOC_INCLUDE = "${protobuf}/include";
-
   RUSTFLAGS = "--cfg tokio_unstable --cfg uuid_unstable";
 
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [ stdenv makeWrapper ];
   buildInputs = lib.optionals stdenv.isDarwin [ Security ];
+
+  TARGET_CC = "${stdenv.cc}/bin/${stdenv.cc.targetPrefix}cc";
+  TARGET_AR = "${stdenv.cc}/bin/${stdenv.cc.targetPrefix}ar";
 
   postInstall = ''
     wrapProgram $out/bin/pict-rs \
