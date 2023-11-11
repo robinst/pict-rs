@@ -119,6 +119,18 @@ impl Details {
         }
     }
 
+    pub(crate) fn danger_dummy(format: InternalFormat) -> Self {
+        Self::from_parts_full(
+            format,
+            0,
+            0,
+            None,
+            HumanDate {
+                timestamp: time::OffsetDateTime::now_utc(),
+            },
+        )
+    }
+
     pub(crate) fn from_parts_full(
         format: InternalFormat,
         width: u16,

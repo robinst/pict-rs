@@ -113,6 +113,16 @@ async fn ensure_details<S: Store + 'static>(
         return Err(UploadError::MissingAlias.into());
     };
 
+    ensure_details_identifier(tmp_dir, repo, store, config, &identifier).await
+}
+
+async fn ensure_details_identifier<S: Store + 'static>(
+    tmp_dir: &TmpDir,
+    repo: &ArcRepo,
+    store: &S,
+    config: &Configuration,
+    identifier: &Arc<str>,
+) -> Result<Details, Error> {
     let details = repo.details(&identifier).await?;
 
     if let Some(details) = details {
@@ -121,10 +131,14 @@ async fn ensure_details<S: Store + 'static>(
     } else {
         if config.server.read_only {
             return Err(UploadError::ReadOnly.into());
+        } else if config.server.danger_dummy_mode {
+            return Ok(Details::danger_dummy(formats::InternalFormat::Image(
+                formats::ImageFormat::Png,
+            )));
         }
 
         tracing::debug!("generating new details from {:?}", identifier);
-        let bytes_stream = store.to_bytes(&identifier, None, None).await?;
+        let bytes_stream = store.to_bytes(identifier, None, None).await?;
         let new_details = Details::from_bytes(
             tmp_dir,
             config.media.process_timeout,
@@ -132,7 +146,7 @@ async fn ensure_details<S: Store + 'static>(
         )
         .await?;
         tracing::debug!("storing details for {:?}", identifier);
-        repo.relate_details(&identifier, &new_details).await?;
+        repo.relate_details(identifier, &new_details).await?;
         tracing::debug!("stored");
         Ok(new_details)
     }
@@ -195,13 +209,7 @@ impl<S: Store + 'static> FormData for Upload<S> {
                             let stream = crate::stream::from_err(stream);
 
                             ingest::ingest(
-                                &tmp_dir,
-                                &repo,
-                                &**store,
-                                &client,
-                                stream,
-                                None,
-                                &config.media,
+                                &tmp_dir, &repo, &**store, &client, stream, None, &config,
                             )
                             .await
                         }
@@ -279,7 +287,7 @@ impl<S: Store + 'static> FormData for Import<S> {
                                 &client,
                                 stream,
                                 Some(Alias::from_existing(&filename)),
-                                &config.media,
+                                &config,
                             )
                             .await
                         }
@@ -534,7 +542,7 @@ async fn ingest_inline<S: Store + 'static>(
     client: &ClientWithMiddleware,
     config: &Configuration,
 ) -> Result<(Alias, DeleteToken, Details), Error> {
-    let session = ingest::ingest(tmp_dir, repo, store, client, stream, None, &config.media).await?;
+    let session = ingest::ingest(tmp_dir, repo, store, client, stream, None, &config).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
 
@@ -922,29 +930,8 @@ async fn process<S: Store + 'static>(
     let identifier_opt = repo.variant_identifier(hash.clone(), path_string).await?;
 
     if let Some(identifier) = identifier_opt {
-        let details = repo.details(&identifier).await?;
-
-        let details = if let Some(details) = details {
-            tracing::debug!("details exist");
-            details
-        } else {
-            if config.server.read_only {
-                return Err(UploadError::ReadOnly.into());
-            }
-
-            tracing::debug!("generating new details from {:?}", identifier);
-            let bytes_stream = store.to_bytes(&identifier, None, None).await?;
-            let new_details = Details::from_bytes(
-                &tmp_dir,
-                config.media.process_timeout,
-                bytes_stream.into_bytes(),
-            )
-            .await?;
-            tracing::debug!("storing details for {:?}", identifier);
-            repo.relate_details(&identifier, &new_details).await?;
-            tracing::debug!("stored");
-            new_details
-        };
+        let details =
+            ensure_details_identifier(&tmp_dir, &repo, &store, &config, &identifier).await?;
 
         if let Some(public_url) = store.public_url(&identifier) {
             return Ok(HttpResponse::SeeOther()
@@ -970,7 +957,7 @@ async fn process<S: Store + 'static>(
         thumbnail_path,
         thumbnail_args,
         &original_details,
-        &config.media,
+        &config,
         hash,
     )
     .await?;
@@ -1047,29 +1034,8 @@ async fn process_head<S: Store + 'static>(
     let identifier_opt = repo.variant_identifier(hash.clone(), path_string).await?;
 
     if let Some(identifier) = identifier_opt {
-        let details = repo.details(&identifier).await?;
-
-        let details = if let Some(details) = details {
-            tracing::debug!("details exist");
-            details
-        } else {
-            if config.server.read_only {
-                return Err(UploadError::ReadOnly.into());
-            }
-
-            tracing::debug!("generating new details from {:?}", identifier);
-            let bytes_stream = store.to_bytes(&identifier, None, None).await?;
-            let new_details = Details::from_bytes(
-                &tmp_dir,
-                config.media.process_timeout,
-                bytes_stream.into_bytes(),
-            )
-            .await?;
-            tracing::debug!("storing details for {:?}", identifier);
-            repo.relate_details(&identifier, &new_details).await?;
-            tracing::debug!("stored");
-            new_details
-        };
+        let details =
+            ensure_details_identifier(&tmp_dir, &repo, &store, &config, &identifier).await?;
 
         if let Some(public_url) = store.public_url(&identifier) {
             return Ok(HttpResponse::SeeOther()

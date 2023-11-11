@@ -44,7 +44,7 @@ where
                         Arc::from(identifier),
                         Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
-                        &config.media,
+                        config,
                     )
                     .await?
                 }
@@ -112,7 +112,7 @@ impl Drop for UploadGuard {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, repo, store, client, media))]
+#[tracing::instrument(skip(tmp_dir, repo, store, client, config))]
 async fn process_ingest<S>(
     tmp_dir: &ArcTmpDir,
     repo: &ArcRepo,
@@ -121,7 +121,7 @@ async fn process_ingest<S>(
     unprocessed_identifier: Arc<str>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
-    media: &crate::config::Media,
+    config: &Configuration,
 ) -> Result<(), Error>
 where
     S: Store + 'static,
@@ -135,7 +135,7 @@ where
         let repo = repo.clone();
         let client = client.clone();
 
-        let media = media.clone();
+        let config = config.clone();
         let error_boundary = crate::sync::spawn("ingest-media", async move {
             let stream = crate::stream::from_err(store2.to_stream(&ident, None, None).await?);
 
@@ -146,7 +146,7 @@ where
                 &client,
                 stream,
                 declared_alias,
-                &media,
+                &config,
             )
             .await?;
 
@@ -218,7 +218,7 @@ async fn generate<S: Store + 'static>(
         process_path,
         process_args,
         &original_details,
-        &config.media,
+        config,
         hash,
     )
     .await?;

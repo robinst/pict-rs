@@ -42,7 +42,7 @@ impl Drop for MetricsGuard {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(repo, store, hash, process_map, media))]
+#[tracing::instrument(skip(repo, store, hash, process_map, config))]
 pub(crate) async fn generate<S: Store + 'static>(
     tmp_dir: &TmpDir,
     repo: &ArcRepo,
@@ -52,30 +52,41 @@ pub(crate) async fn generate<S: Store + 'static>(
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
     original_details: &Details,
-    media: &crate::config::Media,
+    config: &crate::config::Configuration,
     hash: Hash,
 ) -> Result<(Details, Bytes), Error> {
-    let process_fut = process(
-        tmp_dir,
-        repo,
-        store,
-        format,
-        thumbnail_path.clone(),
-        thumbnail_args,
-        original_details,
-        media,
-        hash.clone(),
-    );
+    if config.server.danger_dummy_mode {
+        let identifier = repo
+            .identifier(hash)
+            .await?
+            .ok_or(UploadError::MissingIdentifier)?;
 
-    let (details, bytes) = process_map
-        .process(hash, thumbnail_path, process_fut)
-        .await?;
+        let bytes = store.to_bytes(&identifier, None, None).await?.into_bytes();
 
-    Ok((details, bytes))
+        Ok((original_details.clone(), bytes))
+    } else {
+        let process_fut = process(
+            tmp_dir,
+            repo,
+            store,
+            format,
+            thumbnail_path.clone(),
+            thumbnail_args,
+            original_details,
+            config,
+            hash.clone(),
+        );
+
+        let (details, bytes) = process_map
+            .process(hash, thumbnail_path, process_fut)
+            .await?;
+
+        Ok((details, bytes))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(repo, store, hash, media))]
+#[tracing::instrument(skip(repo, store, hash, config))]
 async fn process<S: Store + 'static>(
     tmp_dir: &TmpDir,
     repo: &ArcRepo,
@@ -84,7 +95,7 @@ async fn process<S: Store + 'static>(
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
     original_details: &Details,
-    media: &crate::config::Media,
+    config: &crate::config::Configuration,
     hash: Hash,
 ) -> Result<(Details, Bytes), Error> {
     let guard = MetricsGuard::guard();
@@ -97,22 +108,12 @@ async fn process<S: Store + 'static>(
         output_format,
         hash.clone(),
         original_details,
-        media,
+        &config.media,
     )
     .await?;
 
-    let input_details = if let Some(details) = repo.details(&identifier).await? {
-        details
-    } else {
-        let bytes_stream = store.to_bytes(&identifier, None, None).await?;
-
-        let details =
-            Details::from_bytes(tmp_dir, media.process_timeout, bytes_stream.into_bytes()).await?;
-
-        repo.relate_details(&identifier, &details).await?;
-
-        details
-    };
+    let input_details =
+        crate::ensure_details_identifier(tmp_dir, repo, store, config, &identifier).await?;
 
     let input_format = input_details
         .internal_format()
@@ -122,8 +123,8 @@ async fn process<S: Store + 'static>(
     let format = input_format.process_to(output_format);
 
     let quality = match format {
-        ProcessableFormat::Image(format) => media.image.quality_for(format),
-        ProcessableFormat::Animation(format) => media.animation.quality_for(format),
+        ProcessableFormat::Image(format) => config.media.image.quality_for(format),
+        ProcessableFormat::Animation(format) => config.media.animation.quality_for(format),
     };
 
     let mut processed_reader = crate::magick::process_image_store_read(
@@ -134,7 +135,7 @@ async fn process<S: Store + 'static>(
         input_format,
         format,
         quality,
-        media.process_timeout,
+        config.media.process_timeout,
     )
     .await?;
 
@@ -147,7 +148,7 @@ async fn process<S: Store + 'static>(
 
     drop(permit);
 
-    let details = Details::from_bytes(tmp_dir, media.process_timeout, bytes.clone()).await?;
+    let details = Details::from_bytes(tmp_dir, config.media.process_timeout, bytes.clone()).await?;
 
     let identifier = store
         .save_bytes(bytes.clone(), details.media_type())

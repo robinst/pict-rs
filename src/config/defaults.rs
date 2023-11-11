@@ -21,6 +21,7 @@ pub(crate) struct Defaults {
 struct ServerDefaults {
     address: SocketAddr,
     read_only: bool,
+    danger_dummy_mode: bool,
     max_file_count: u32,
 }
 
@@ -181,6 +182,7 @@ impl Default for ServerDefaults {
         ServerDefaults {
             address: "0.0.0.0:8080".parse().expect("Valid address string"),
             read_only: false,
+            danger_dummy_mode: false,
             max_file_count: 1,
         }
     }

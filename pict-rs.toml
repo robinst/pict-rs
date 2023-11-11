@@ -12,6 +12,14 @@ address = '0.0.0.0:8080'
 # This can be useful if you need to run a copy of pict-rs while performing maintenance.
 read_only = false
 
+## Optional: whether to run pict-rs without dependencies.
+# environment variable: PICTRS__SERVER__DANGER_DUMMY_MODE
+# default: false
+#
+# This means pict-rs will not be able to inspect metadata of uploaded media, or perform processing
+# on it. This mode is provided for use in test environments. It should not be used in production.
+danger_dummy_mode = false
+
 ## Optional: shared secret for internal endpoints
 # environment variable: PICTRS__SERVER__API_KEY
 # default: empty

@@ -113,6 +113,8 @@ pub(crate) struct Server {
 
     pub(crate) read_only: bool,
 
+    pub(crate) danger_dummy_mode: bool,
+
     pub(crate) max_file_count: u32,
 }
 

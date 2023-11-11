@@ -100,6 +100,7 @@ impl Args {
                 media_video_quality_2160,
                 media_filters,
                 read_only,
+                danger_dummy_mode,
                 max_file_count,
                 store,
             }) => {
@@ -107,6 +108,7 @@ impl Args {
                     address,
                     api_key,
                     read_only,
+                    danger_dummy_mode,
                     max_file_count,
                 };
 
@@ -509,6 +511,8 @@ struct Server {
     api_key: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     read_only: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    danger_dummy_mode: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_file_count: Option<u32>,
 }
@@ -1096,6 +1100,11 @@ struct Run {
     /// Don't permit ingesting media
     #[arg(long)]
     read_only: bool,
+
+    /// Allow running without ffmpeg, imagemagick, or exiftool. This will allow hosting arbitrary
+    /// files and provide inaccurate metadata for uploaded media
+    #[arg(long)]
+    danger_dummy_mode: bool,
 
     #[command(subcommand)]
     store: Option<RunStore>,

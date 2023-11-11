@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
 use crate::{
     bytes_stream::BytesStream,
@@ -18,7 +18,7 @@ use streem::IntoStreamer;
 use tracing::{Instrument, Span};
 
 mod hasher;
-use hasher::Hasher;
+use hasher::{Hasher, State};
 
 #[derive(Debug)]
 pub(crate) struct Session {
@@ -46,16 +46,12 @@ where
     Ok(buf.into_bytes())
 }
 
-#[tracing::instrument(skip(repo, store, client, stream, media))]
-pub(crate) async fn ingest<S>(
+async fn process_ingest<S>(
     tmp_dir: &TmpDir,
-    repo: &ArcRepo,
     store: &S,
-    client: &ClientWithMiddleware,
     stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
-    declared_alias: Option<Alias>,
     media: &crate::config::Media,
-) -> Result<Session, Error>
+) -> Result<(InternalFormat, Arc<str>, Details, Rc<RefCell<State>>), Error>
 where
     S: Store,
 {
@@ -115,6 +111,56 @@ where
 
     drop(permit);
 
+    Ok((input_type, identifier, details, state))
+}
+
+async fn dummy_ingest<S>(
+    store: &S,
+    stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
+) -> Result<(InternalFormat, Arc<str>, Details, Rc<RefCell<State>>), Error>
+where
+    S: Store,
+{
+    let stream = crate::stream::map(stream, |res| match res {
+        Ok(bytes) => Ok(bytes),
+        Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+    });
+
+    let reader = Box::pin(tokio_util::io::StreamReader::new(stream));
+
+    let hasher_reader = Hasher::new(reader);
+    let state = hasher_reader.state();
+
+    let input_type = InternalFormat::Image(crate::formats::ImageFormat::Png);
+
+    let identifier = store
+        .save_async_read(hasher_reader, input_type.media_type())
+        .await?;
+
+    let details = Details::danger_dummy(input_type);
+
+    Ok((input_type, identifier, details, state))
+}
+
+#[tracing::instrument(skip(repo, store, client, stream, config))]
+pub(crate) async fn ingest<S>(
+    tmp_dir: &TmpDir,
+    repo: &ArcRepo,
+    store: &S,
+    client: &ClientWithMiddleware,
+    stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
+    declared_alias: Option<Alias>,
+    config: &crate::config::Configuration,
+) -> Result<Session, Error>
+where
+    S: Store,
+{
+    let (input_type, identifier, details, state) = if config.server.danger_dummy_mode {
+        dummy_ingest(store, stream).await?
+    } else {
+        process_ingest(tmp_dir, store, stream, &config.media).await?
+    };
+
     let mut session = Session {
         repo: repo.clone(),
         delete_token: DeleteToken::generate(),
@@ -123,12 +169,14 @@ where
         identifier: Some(identifier.clone()),
     };
 
-    if let Some(endpoint) = &media.external_validation {
+    if let Some(endpoint) = &config.media.external_validation {
         let stream = store.to_stream(&identifier, None, None).await?;
 
         let response = client
             .post(endpoint.as_str())
-            .timeout(Duration::from_secs(media.external_validation_timeout))
+            .timeout(Duration::from_secs(
+                config.media.external_validation_timeout,
+            ))
             .header("Content-Type", input_type.media_type().as_ref())
             .body(Body::wrap_stream(crate::stream::make_send(stream)))
             .send()
