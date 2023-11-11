@@ -123,7 +123,7 @@ async fn ensure_details_identifier<S: Store + 'static>(
     config: &Configuration,
     identifier: &Arc<str>,
 ) -> Result<Details, Error> {
-    let details = repo.details(&identifier).await?;
+    let details = repo.details(identifier).await?;
 
     if let Some(details) = details {
         tracing::debug!("details exist");
@@ -542,7 +542,7 @@ async fn ingest_inline<S: Store + 'static>(
     client: &ClientWithMiddleware,
     config: &Configuration,
 ) -> Result<(Alias, DeleteToken, Details), Error> {
-    let session = ingest::ingest(tmp_dir, repo, store, client, stream, None, &config).await?;
+    let session = ingest::ingest(tmp_dir, repo, store, client, stream, None, config).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
 
