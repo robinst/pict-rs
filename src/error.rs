@@ -45,7 +45,7 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.inner.source()
+        Some(self.inner.as_ref())
     }
 }
 
@@ -53,6 +53,7 @@ impl<T> From<T> for Error
 where
     UploadError: From<T>,
 {
+    #[track_caller]
     fn from(error: T) -> Self {
         let inner = Report::from(UploadError::from(error));
         let debug = Arc::from(format!("{inner:?}"));
