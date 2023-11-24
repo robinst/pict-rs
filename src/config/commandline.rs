@@ -470,7 +470,7 @@ pub(super) struct Output {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum Operation {
     Run,
     MigrateStore {

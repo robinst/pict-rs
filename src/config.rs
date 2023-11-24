@@ -54,6 +54,8 @@ impl ConfigSource<PathBuf, ()> {
     }
 }
 
+// deserialized Configuration for the pict-rs application
+#[derive(Debug)]
 pub struct PictRsConfiguration {
     pub(crate) config: Configuration,
     pub(crate) operation: Operation,

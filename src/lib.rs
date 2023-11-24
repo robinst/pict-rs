@@ -1961,12 +1961,9 @@ impl<P: AsRef<Path>, T: serde::Serialize> ConfigSource<P, T> {
     ///
     /// ```rust
     /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     pict_rs::ConfigSource::memory(serde_json::json!({
+    ///     let configuration = pict_rs::ConfigSource::memory(serde_json::json!({
     ///         "server": {
     ///             "address": "127.0.0.1:8080"
-    ///         },
-    ///         "old_db": {
-    ///             "path": "./old"
     ///         },
     ///         "repo": {
     ///             "type": "sled",
@@ -2036,6 +2033,29 @@ impl PictRsConfiguration {
     /// Run the pict-rs application on a tokio `LocalSet`
     ///
     /// This must be called from within `tokio::main` directly
+    ///
+    /// Example:
+    /// ```rust
+    /// #[tokio::main]
+    /// async fn main() -> color_eyre::Result<()> {
+    ///     let pict_rs_server = pict_rs::ConfigSource::memory(serde_json::json!({
+    ///         "repo": {
+    ///             "type": "sled",
+    ///             "path": "/tmp/pict-rs/run-on-localset/sled-repo",
+    ///         },
+    ///         "store": {
+    ///             "type": "filesystem",
+    ///             "path": "/tmp/pict-rs/run-on-localset/files",
+    ///         },
+    ///     }))
+    ///         .init::<&str>(None)?
+    ///         .run_on_localset();
+    ///
+    ///     let _ = tokio::time::timeout(std::time::Duration::from_secs(1), pict_rs_server).await;
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
     pub async fn run_on_localset(self) -> color_eyre::Result<()> {
         tokio::task::LocalSet::new().run_until(self.run()).await
     }
@@ -2044,6 +2064,30 @@ impl PictRsConfiguration {
     ///
     /// This must be called from within a tokio `LocalSet`, which is created by default for
     /// actix-rt runtimes, and by tokio_uring
+    ///
+    /// Example:
+    /// ```rust
+    /// fn main() -> color_eyre::Result<()> {
+    ///     tokio_uring::start(async move {
+    ///         let pict_rs_server = pict_rs::ConfigSource::memory(serde_json::json!({
+    ///             "repo": {
+    ///                 "type": "sled",
+    ///                 "path": "/tmp/pict-rs/run/sled-repo",
+    ///             },
+    ///             "store": {
+    ///                 "type": "filesystem",
+    ///                 "path": "/tmp/pict-rs/run/files",
+    ///             },
+    ///         }))
+    ///         .init::<&str>(None)?
+    ///         .run();
+    ///
+    ///         let _ = tokio::time::timeout(std::time::Duration::from_secs(1), pict_rs_server).await;
+    ///
+    ///         Ok(())
+    ///     })
+    /// }
+    /// ```
     pub async fn run(self) -> color_eyre::Result<()> {
         let PictRsConfiguration { config, operation } = self;
 
