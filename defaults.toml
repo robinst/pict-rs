@@ -3,6 +3,7 @@ address = "0.0.0.0:8080"
 read_only = false
 danger_dummy_mode = false
 max_file_count = 1
+temporary_directory = "/tmp"
 
 [client]
 timeout = 30

@@ -52,6 +52,7 @@ impl Args {
             Command::Run(Run {
                 address,
                 api_key,
+                temporary_directory,
                 client_timeout,
                 upgrade_concurrency,
                 metrics_prometheus_address,
@@ -110,6 +111,7 @@ impl Args {
                     read_only,
                     danger_dummy_mode,
                     max_file_count,
+                    temporary_directory,
                 };
 
                 let client = Client {
@@ -515,6 +517,8 @@ struct Server {
     danger_dummy_mode: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_file_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temporary_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -897,6 +901,10 @@ struct Run {
     /// The API KEY required to access restricted routes
     #[arg(long)]
     api_key: Option<String>,
+
+    /// The temporary directory pict-rs should use when processing media
+    #[arg(long)]
+    temporary_directory: Option<PathBuf>,
 
     /// How long (in seconds) the internel HTTP client should wait for responses
     ///

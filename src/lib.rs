@@ -2091,7 +2091,7 @@ impl PictRsConfiguration {
     pub async fn run(self) -> color_eyre::Result<()> {
         let PictRsConfiguration { config, operation } = self;
 
-        let tmp_dir = TmpDir::init().await?;
+        let tmp_dir = TmpDir::init(&config.server.temporary_directory).await?;
 
         let client = build_client()?;
 

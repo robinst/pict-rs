@@ -14,8 +14,8 @@ pub(crate) struct TmpDir {
 }
 
 impl TmpDir {
-    pub(crate) async fn init() -> std::io::Result<Arc<Self>> {
-        let path = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    pub(crate) async fn init<P: AsRef<Path>>(path: P) -> std::io::Result<Arc<Self>> {
+        let path = path.as_ref().join(Uuid::new_v4().to_string());
         tokio::fs::create_dir(&path).await?;
         Ok(Arc::new(TmpDir { path: Some(path) }))
     }

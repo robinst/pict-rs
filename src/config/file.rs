@@ -116,6 +116,8 @@ pub(crate) struct Server {
     pub(crate) danger_dummy_mode: bool,
 
     pub(crate) max_file_count: u32,
+
+    pub(crate) temporary_directory: PathBuf,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

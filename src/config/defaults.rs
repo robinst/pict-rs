@@ -23,6 +23,7 @@ struct ServerDefaults {
     read_only: bool,
     danger_dummy_mode: bool,
     max_file_count: u32,
+    temporary_directory: PathBuf,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -184,6 +185,7 @@ impl Default for ServerDefaults {
             read_only: false,
             danger_dummy_mode: false,
             max_file_count: 1,
+            temporary_directory: std::env::temp_dir(),
         }
     }
 }

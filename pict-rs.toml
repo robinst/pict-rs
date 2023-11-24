@@ -32,6 +32,11 @@ api_key = 'API_KEY'
 # default: 1
 max_file_count = 1
 
+## Optional: directory pict-rs will use to create temporary files
+# environment variable: PICTRS__SERVER__TEMPORARY_DIRECTORY
+# default: The system's advertised temporary directory ("/tmp" on most linuxes)
+temporary_directory = "/tmp"
+
 ## Client configuration
 [client]
 ## Optional: time (in seconds) the client will wait for a response before giving up
