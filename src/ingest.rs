@@ -55,9 +55,11 @@ async fn process_ingest<S>(
 where
     S: Store,
 {
-    let permit = crate::process_semaphore().acquire().await?;
+    let bytes = tokio::time::timeout(Duration::from_secs(60), aggregate(stream))
+        .await
+        .map_err(|_| UploadError::AggregateTimeout)??;
 
-    let bytes = aggregate(stream).await?;
+    let permit = crate::process_semaphore().acquire().await?;
 
     let prescribed = Validations {
         image: &media.image,

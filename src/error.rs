@@ -150,6 +150,9 @@ pub(crate) enum UploadError {
     #[error("Response timeout")]
     Timeout(#[from] crate::stream::TimeoutError),
 
+    #[error("Client took too long to send request")]
+    AggregateTimeout,
+
     #[error("Failed external validation")]
     FailedExternalValidation,
 }
@@ -183,7 +186,7 @@ impl UploadError {
             Self::PushJob(_) => ErrorCode::PUSH_JOB,
             Self::Range => ErrorCode::RANGE_NOT_SATISFIABLE,
             Self::Limit(_) => ErrorCode::VALIDATE_FILE_SIZE,
-            Self::Timeout(_) => ErrorCode::STREAM_TOO_SLOW,
+            Self::Timeout(_) | Self::AggregateTimeout => ErrorCode::STREAM_TOO_SLOW,
             Self::FailedExternalValidation => ErrorCode::FAILED_EXTERNAL_VALIDATION,
         }
     }
@@ -233,7 +236,8 @@ impl ResponseError for Error {
                 | UploadError::Validation(_)
                 | UploadError::UnsupportedProcessExtension
                 | UploadError::ReadOnly
-                | UploadError::FailedExternalValidation,
+                | UploadError::FailedExternalValidation
+                | UploadError::AggregateTimeout,
             ) => StatusCode::BAD_REQUEST,
             Some(UploadError::Magick(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::Ffmpeg(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
