@@ -15,7 +15,7 @@ _a simple image hosting service_
     2. [Api](#api)
 3. [Administration](#administration)
     1. [Backups](#backups)
-    2. [0.4 to 0.5 Migration Guide](#0-4-to-0-5-migration-guide)
+    2. [0.4 to 0.5 Migration Guide](#04-to-05-migration-guide)
         1. [Overview](#overview)
         2. [Upgrade Configuration](#upgrade-configuration)
         3. [Configuration Updates](#configuration-updates)
