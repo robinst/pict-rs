@@ -153,6 +153,9 @@ pub(crate) enum UploadError {
     #[error("Client took too long to send request")]
     AggregateTimeout,
 
+    #[error("Timed out while waiting for media processing")]
+    ProcessTimeout,
+
     #[error("Failed external validation")]
     FailedExternalValidation,
 }
@@ -187,6 +190,7 @@ impl UploadError {
             Self::Range => ErrorCode::RANGE_NOT_SATISFIABLE,
             Self::Limit(_) => ErrorCode::VALIDATE_FILE_SIZE,
             Self::Timeout(_) | Self::AggregateTimeout => ErrorCode::STREAM_TOO_SLOW,
+            Self::ProcessTimeout => ErrorCode::COMMAND_TIMEOUT,
             Self::FailedExternalValidation => ErrorCode::FAILED_EXTERNAL_VALIDATION,
         }
     }

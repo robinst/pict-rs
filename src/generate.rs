@@ -6,12 +6,17 @@ use crate::{
     details::Details,
     error::{Error, UploadError},
     formats::{ImageFormat, InputProcessableFormat, InternalVideoFormat, ProcessableFormat},
+    future::{WithMetrics, WithTimeout},
     repo::{ArcRepo, Hash, VariantAlreadyExists},
     store::Store,
     tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
 
@@ -79,7 +84,10 @@ pub(crate) async fn generate<S: Store + 'static>(
 
         let (details, bytes) = process_map
             .process(hash, thumbnail_path, process_fut)
-            .await?;
+            .with_timeout(Duration::from_secs(config.media.process_timeout * 4))
+            .with_metrics("pict-rs.generate.process")
+            .await
+            .map_err(|_| UploadError::ProcessTimeout)??;
 
         Ok((details, bytes))
     }
