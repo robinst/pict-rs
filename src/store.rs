@@ -76,6 +76,7 @@ impl From<crate::store::object_store::ObjectError> for StoreError {
             e @ crate::store::object_store::ObjectError::Status(
                 actix_web::http::StatusCode::NOT_FOUND,
                 _,
+                _,
             ) => Self::ObjectNotFound(e),
             e => Self::ObjectStore(e),
         }

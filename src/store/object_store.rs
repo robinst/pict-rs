@@ -68,8 +68,8 @@ pub(crate) enum ObjectError {
     #[error("Task cancelled")]
     Canceled,
 
-    #[error("Invalid status: {0}\n{1}")]
-    Status(StatusCode, String),
+    #[error("Invalid status {0} for {2:?} - {1}")]
+    Status(StatusCode, String, Option<Arc<str>>),
 }
 
 #[derive(Debug)]
@@ -105,7 +105,7 @@ impl ObjectError {
             | Self::Xml(_)
             | Self::Length
             | Self::Etag
-            | Self::Status(_, _) => ErrorCode::OBJECT_REQUEST_ERROR,
+            | Self::Status(_, _, _) => ErrorCode::OBJECT_REQUEST_ERROR,
             Self::IO(_) => ErrorCode::OBJECT_IO_ERROR,
             Self::Utf8(_) => ErrorCode::PARSE_OBJECT_ID_ERROR,
             Self::Canceled => ErrorCode::PANIC,
@@ -187,7 +187,7 @@ where
     Ok(buf)
 }
 
-async fn status_error(response: Response) -> StoreError {
+async fn status_error(response: Response, object: Option<Arc<str>>) -> StoreError {
     let status = response.status();
 
     let body = match response.text().await {
@@ -195,7 +195,7 @@ async fn status_error(response: Response) -> StoreError {
         Ok(body) => body,
     };
 
-    ObjectError::Status(status, body).into()
+    ObjectError::Status(status, body, object).into()
 }
 
 #[async_trait::async_trait(?Send)]
@@ -210,7 +210,7 @@ impl Store for ObjectStore {
             .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
-            return Err(status_error(response).await);
+            return Err(status_error(response, None).await);
         }
 
         Ok(())
@@ -252,7 +252,7 @@ impl Store for ObjectStore {
                 .map_err(ObjectError::from)?;
 
             if !response.status().is_success() {
-                return Err(status_error(response).await);
+                return Err(status_error(response, None).await);
             }
 
             return Ok(object_id);
@@ -268,7 +268,7 @@ impl Store for ObjectStore {
             .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
-            return Err(status_error(response).await);
+            return Err(status_error(response, None).await);
         }
 
         let body = response.text().await.map_err(ObjectError::Request)?;
@@ -316,7 +316,7 @@ impl Store for ObjectStore {
                             .map_err(ObjectError::from)?;
 
                         if !response.status().is_success() {
-                            return Err(status_error(response).await);
+                            return Err(status_error(response, None).await);
                         }
 
                         let etag = response
@@ -357,7 +357,7 @@ impl Store for ObjectStore {
                 .map_err(ObjectError::from)?;
 
             if !response.status().is_success() {
-                return Err(status_error(response).await);
+                return Err(status_error(response, None).await);
             }
 
             Ok(()) as Result<(), StoreError>
@@ -392,7 +392,7 @@ impl Store for ObjectStore {
             .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
-            return Err(status_error(response).await);
+            return Err(status_error(response, None).await);
         }
 
         Ok(object_id)
@@ -420,7 +420,7 @@ impl Store for ObjectStore {
             .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
-            return Err(status_error(response).await);
+            return Err(status_error(response, Some(identifier.clone())).await);
         }
 
         Ok(Box::pin(crate::stream::metrics(
@@ -448,7 +448,7 @@ impl Store for ObjectStore {
         if !response.status().is_success() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                status_error(response).await,
+                status_error(response, Some(identifier.clone())).await,
             ));
         }
 
@@ -477,7 +477,7 @@ impl Store for ObjectStore {
             .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
-            return Err(status_error(response).await);
+            return Err(status_error(response, Some(identifier.clone())).await);
         }
 
         let length = response
@@ -502,7 +502,7 @@ impl Store for ObjectStore {
             .map_err(ObjectError::from)?;
 
         if !response.status().is_success() {
-            return Err(status_error(response).await);
+            return Err(status_error(response, Some(identifier.clone())).await);
         }
 
         Ok(())
