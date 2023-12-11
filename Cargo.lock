@@ -21,15 +21,15 @@ dependencies = [
 
 [[package]]
 name = "actix-form-data"
-version = "0.7.0-beta.4"
+version = "0.7.0-beta.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2163627f82eef55c4551f3e58ba0da92d733fa3afe8d0c13986a9ba00d1f9f7"
+checksum = "02564e87c7a34fe7877d6b60259413ea04412b91abbabd3c2c71610e24800d0d"
 dependencies = [
  "actix-multipart",
- "actix-rt",
  "actix-web",
  "futures-core",
  "mime",
+ "streem",
  "thiserror",
  "tokio",
  "tracing",
@@ -68,16 +68,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
-]
-
-[[package]]
-name = "actix-macros"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e01ed3140b2f8d422c68afa1ed2e85d996ea619c988ac834d255db32138655cb"
-dependencies = [
- "quote",
- "syn 2.0.39",
 ]
 
 [[package]]
@@ -122,7 +112,6 @@ version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28f32d40287d3f402ae0028a9d54bef51af15c8769492826a69d28f81893151d"
 dependencies = [
- "actix-macros",
  "futures-core",
  "tokio",
  "tokio-uring",
@@ -1307,9 +1296,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.150"
+version = "0.2.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89d92a4743f9a61002fae18374ed11e7973f530cb3a3255fb354818118b2203c"
+checksum = "302d7ab3130588088d277783b1e2d2e10c9e9e4a16dd9050e6ec93fb3e7048f4"
 
 [[package]]
 name = "linked-hash-map"
