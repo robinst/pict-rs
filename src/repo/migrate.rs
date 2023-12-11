@@ -166,7 +166,7 @@ async fn migrate_hash(old_repo: ArcRepo, new_repo: ArcRepo, hash: Hash) {
 
             break;
         } else {
-            tracing::warn!("Failed to migrate hash {hash:?}, retrying +{hash_failures}",);
+            tracing::debug!("Failed to migrate hash {hash:?}, retrying +{hash_failures}");
         }
     }
 }
@@ -202,7 +202,7 @@ async fn migrate_hash_04<S: Store>(
 
             break;
         } else {
-            tracing::warn!(
+            tracing::debug!(
                 "Failed to migrate hash {}, retrying +{hash_failures}",
                 hex::encode(&old_hash[..])
             );
