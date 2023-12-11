@@ -1,6 +1,7 @@
 use std::{
     future::{ready, Ready},
     rc::Rc,
+    time::Duration,
 };
 
 use actix_web::{
@@ -18,10 +19,11 @@ async fn drain(rx: flume::Receiver<actix_web::dev::Payload>) {
     let mut set = JoinSet::new();
 
     while let Ok(payload) = rx.recv_async().await {
-        set.spawn_local(async move {
+        // draining a payload is a best-effort task - if we can't collect in 2 minutes we bail
+        set.spawn_local(tokio::time::timeout(Duration::from_secs(120), async move {
             let mut streamer = payload.into_streamer();
             while streamer.next().await.is_some() {}
-        });
+        }));
 
         let mut count = 0;
 
