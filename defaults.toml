@@ -14,6 +14,7 @@ concurrency = 32
 [tracing.logging]
 format = "normal"
 targets = "info"
+log_spans = false
 
 [tracing.console]
 buffer_capacity = 102400

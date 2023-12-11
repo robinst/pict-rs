@@ -153,6 +153,8 @@ pub(crate) struct Logging {
     pub(crate) format: LogFormat,
 
     pub(crate) targets: Serde<Targets>,
+
+    pub(crate) log_spans: bool,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

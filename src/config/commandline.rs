@@ -17,6 +17,7 @@ impl Args {
             old_repo_cache_capacity,
             log_format,
             log_targets,
+            log_spans,
             console_address,
             console_buffer_capacity,
             opentelemetry_url,
@@ -36,6 +37,7 @@ impl Args {
             logging: Logging {
                 format: log_format,
                 targets: log_targets.map(Serde::new),
+                log_spans,
             },
             console: Console {
                 address: console_address,
@@ -550,6 +552,8 @@ struct Logging {
     format: Option<LogFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
     targets: Option<Serde<Targets>>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    log_spans: bool,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -854,6 +858,9 @@ pub(super) struct Args {
     /// Log levels to print to stdout, respects RUST_LOG formatting
     #[arg(long)]
     log_targets: Option<Targets>,
+    /// Whether to log openning and closing of tracing spans to stdout
+    #[arg(long)]
+    log_spans: bool,
 
     /// Address and port to expose tokio-console metrics
     #[arg(long)]

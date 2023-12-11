@@ -53,6 +53,7 @@ struct TracingDefaults {
 struct LoggingDefaults {
     format: LogFormat,
     targets: Serde<Targets>,
+    log_spans: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -207,6 +208,7 @@ impl Default for LoggingDefaults {
         LoggingDefaults {
             format: LogFormat::Normal,
             targets: "info".parse().expect("Valid targets string"),
+            log_spans: false,
         }
     }
 }
