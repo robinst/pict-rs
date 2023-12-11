@@ -74,6 +74,8 @@ Options:
           Format of logs printed to stdout [possible values: compact, json, normal, pretty]
       --log-targets <LOG_TARGETS>
           Log levels to print to stdout, respects RUST_LOG formatting
+      --log-spans
+          Whether to log openning and closing of tracing spans to stdout
       --console-address <CONSOLE_ADDRESS>
           Address and port to expose tokio-console metrics
       --console-buffer-capacity <CONSOLE_BUFFER_CAPACITY>
