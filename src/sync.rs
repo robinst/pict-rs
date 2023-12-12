@@ -46,13 +46,19 @@ where
     F: std::future::Future + 'static,
     F::Output: 'static,
 {
+    #[cfg(not(tokio_unstable))]
+    let _ = name;
+
     let span = tracing::trace_span!(parent: None, "spawn task");
     let guard = span.enter();
 
+    #[cfg(tokio_unstable)]
     let handle = tokio::task::Builder::new()
         .name(name)
         .spawn_local(future)
         .expect("Failed to spawn");
+    #[cfg(not(tokio_unstable))]
+    let handle = tokio::task::spawn_local(future);
 
     drop(guard);
     handle
@@ -64,15 +70,21 @@ where
     F: FnOnce() -> Out + Send + 'static,
     Out: Send + 'static,
 {
+    #[cfg(not(tokio_unstable))]
+    let _ = name;
+
     let outer_span = tracing::Span::current();
 
     let span = tracing::trace_span!(parent: None, "spawn blocking task");
     let guard = span.enter();
 
+    #[cfg(tokio_unstable)]
     let handle = tokio::task::Builder::new()
         .name(name)
         .spawn_blocking(move || outer_span.in_scope(function))
         .expect("Failed to spawn");
+    #[cfg(not(tokio_unstable))]
+    let handle = tokio::task::spawn_blocking(move || outer_span.in_scope(function));
 
     drop(guard);
     handle
