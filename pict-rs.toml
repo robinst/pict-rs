@@ -74,6 +74,11 @@ format = 'normal'
 # Follows the same format as RUST_LOG
 targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
 
+## Optional: whether pict-rs should log the new & close span events for tracing spans to stdout
+# environment variable: PICTRS__TRACING__LOGGING__LOG_SPANS
+# default: false
+log_spans = false
+
 
 ## Console configuration
 [tracing.console]
