@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use streem::IntoStreamer;
+use tracing::{Instrument, Span};
 
 use crate::{
     config::Configuration,
@@ -19,7 +20,7 @@ pub(super) fn perform<'a, S>(
     job: serde_json::Value,
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
-    S: Store,
+    S: Store + 'static,
 {
     Box::pin(async move {
         match serde_json::from_value(job) {
@@ -43,6 +44,7 @@ where
                 Cleanup::AllVariants => all_variants(repo).await?,
                 Cleanup::OutdatedVariants => outdated_variants(repo, configuration).await?,
                 Cleanup::OutdatedProxies => outdated_proxies(repo, configuration).await?,
+                Cleanup::Prune => prune(repo, store).await?,
             },
             Err(e) => {
                 tracing::warn!("Invalid job: {}", format!("{e}"));
@@ -209,6 +211,74 @@ async fn hash_variant(
             super::cleanup_identifier(repo, &identifier).await?;
         }
     }
+
+    Ok(())
+}
+
+#[tracing::instrument(skip_all)]
+async fn prune<S>(repo: &ArcRepo, store: &S) -> Result<(), Error>
+where
+    S: Store + 'static,
+{
+    repo.set("prune-missing-started", b"1".to_vec().into())
+        .await?;
+
+    let hash_stream = std::pin::pin!(repo.hashes());
+    let mut hash_stream = hash_stream.into_streamer();
+
+    let mut count: u64 = 0;
+
+    while let Some(hash) = hash_stream.try_next().await? {
+        let repo = repo.clone();
+        let store = store.clone();
+
+        let current_span = Span::current();
+
+        let span = tracing::info_span!(parent: current_span, "error-boundary");
+
+        let res = crate::sync::spawn(
+            "prune-missing",
+            async move {
+                let mut count = count;
+
+                if let Some(ident) = repo.identifier(hash.clone()).await? {
+                    match store.len(&ident).await {
+                        Err(e) if e.is_not_found() => {
+                            super::cleanup_hash(&repo, hash).await?;
+
+                            count += 1;
+
+                            repo.set(
+                                "prune-missing-queued",
+                                Vec::from(count.to_be_bytes()).into(),
+                            )
+                            .await?;
+                        }
+                        _ => (),
+                    }
+                }
+
+                Ok(count) as Result<u64, Error>
+            }
+            .instrument(span),
+        )
+        .await;
+
+        match res {
+            Ok(Ok(updated)) => count = updated,
+            Ok(Err(e)) => {
+                tracing::warn!("Prune missing identifier failed - {e:?}");
+            }
+            Err(_) => {
+                tracing::warn!("Prune missing identifier panicked.");
+            }
+        }
+
+        count += 1;
+    }
+
+    repo.set("prune-missing-complete", b"1".to_vec().into())
+        .await?;
 
     Ok(())
 }

@@ -43,6 +43,7 @@ enum Cleanup {
     AllVariants,
     OutdatedVariants,
     OutdatedProxies,
+    Prune,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -114,6 +115,12 @@ pub(crate) async fn cleanup_outdated_variants(repo: &ArcRepo) -> Result<(), Erro
 
 pub(crate) async fn cleanup_all_variants(repo: &ArcRepo) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::AllVariants).map_err(UploadError::PushJob)?;
+    repo.push(CLEANUP_QUEUE, job).await?;
+    Ok(())
+}
+
+pub(crate) async fn prune_missing(repo: &ArcRepo) -> Result<(), Error> {
+    let job = serde_json::to_value(Cleanup::Prune).map_err(UploadError::PushJob)?;
     repo.push(CLEANUP_QUEUE, job).await?;
     Ok(())
 }

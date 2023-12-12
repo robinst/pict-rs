@@ -1445,6 +1445,50 @@ fn srv_head(
     builder
 }
 
+#[derive(serde::Serialize)]
+struct PruneResponse {
+    complete: bool,
+    progress: u64,
+    total: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PruneQuery {
+    force: bool,
+}
+
+#[tracing::instrument(name = "Prune missing identifiers", skip(repo))]
+async fn prune_missing(
+    repo: web::Data<ArcRepo>,
+    query: Option<web::Query<PruneQuery>>,
+) -> Result<HttpResponse, Error> {
+    let total = repo.size().await?;
+
+    let progress = if let Some(progress) = repo.get("prune-missing-queued").await? {
+        progress
+            .as_ref()
+            .try_into()
+            .map(u64::from_be_bytes)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let complete = repo.get("prune-missing-complete").await?.is_some();
+
+    let started = repo.get("prune-missing-started").await?.is_some();
+
+    if !started || query.is_some_and(|q| q.force) {
+        queue::prune_missing(&repo).await?;
+    }
+
+    Ok(HttpResponse::Ok().json(PruneResponse {
+        complete,
+        progress,
+        total,
+    }))
+}
+
 #[tracing::instrument(name = "Spawning variant cleanup", skip(repo, config))]
 async fn clean_variants(
     repo: web::Data<ArcRepo>,
@@ -1729,6 +1773,7 @@ fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
                 .service(web::resource("/identifier").route(web::get().to(identifier::<S>)))
                 .service(web::resource("/set_not_found").route(web::post().to(set_not_found)))
                 .service(web::resource("/hashes").route(web::get().to(page)))
+                .service(web::resource("/prune_missing").route(web::post().to(prune_missing)))
                 .configure(extra_config),
         );
 }
