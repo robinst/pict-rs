@@ -159,7 +159,11 @@ pub(crate) async fn queue_generate(
     Ok(())
 }
 
-pub(crate) async fn process_cleanup<S: Store>(repo: ArcRepo, store: S, config: Configuration) {
+pub(crate) async fn process_cleanup<S: Store + 'static>(
+    repo: ArcRepo,
+    store: S,
+    config: Configuration,
+) {
     process_jobs(&repo, &store, &config, CLEANUP_QUEUE, cleanup::perform).await
 }
 
