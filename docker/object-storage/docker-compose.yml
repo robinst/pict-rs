@@ -39,7 +39,7 @@ services:
       - ./storage/minio:/mnt
 
   garage:
-    image: dxflrs/garage:v0.8.3
+    image: dxflrs/garage:v0.9.0
     ports:
       - "3900:3900"
       - "3901:3901"

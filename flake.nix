@@ -38,6 +38,7 @@
             garage
             gcc
             imagemagick
+            minio-client
             rust-analyzer
             rustc
             rustfmt
