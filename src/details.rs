@@ -79,7 +79,7 @@ impl Details {
         self.inner.created_at.timestamp
     }
 
-    #[tracing::instrument(level = "DEBUG")]
+    #[tracing::instrument(level = "debug", skip_all)]
     pub(crate) async fn from_bytes(
         tmp_dir: &TmpDir,
         timeout: u64,

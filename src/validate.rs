@@ -121,7 +121,7 @@ pub(crate) async fn validate_bytes(
     }
 }
 
-#[tracing::instrument(skip(bytes, validations))]
+#[tracing::instrument(skip(tmp_dir, bytes, validations))]
 async fn process_image(
     tmp_dir: &TmpDir,
     bytes: Bytes,

@@ -26,6 +26,7 @@ pub(crate) enum DiscoverError {
     UnsupportedFileType(String),
 }
 
+#[tracing::instrument(level = "trace", skip_all)]
 pub(crate) async fn discover_bytes(
     tmp_dir: &TmpDir,
     timeout: u64,

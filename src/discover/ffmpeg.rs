@@ -158,6 +158,7 @@ struct Flags {
     alpha: usize,
 }
 
+#[tracing::instrument(skip_all)]
 pub(super) async fn discover_bytes(
     tmp_dir: &TmpDir,
     timeout: u64,
@@ -190,7 +191,7 @@ async fn allows_alpha(pixel_format: &str, timeout: u64) -> Result<bool, FfMpegEr
     }
 }
 
-#[tracing::instrument(skip(f))]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn discover_file<F, Fut>(
     tmp_dir: &TmpDir,
     timeout: u64,
@@ -259,6 +260,7 @@ where
     Ok(Some(discovery))
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn alpha_pixel_formats(timeout: u64) -> Result<HashSet<String>, FfMpegError> {
     let process = Process::run(
         "ffprobe",

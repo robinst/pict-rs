@@ -31,6 +31,7 @@ struct Geometry {
     height: u16,
 }
 
+#[tracing::instrument(skip_all)]
 pub(super) async fn confirm_bytes(
     tmp_dir: &TmpDir,
     discovery: Option<Discovery>,
@@ -93,7 +94,7 @@ pub(super) async fn confirm_bytes(
     .await
 }
 
-#[tracing::instrument(level = "DEBUG", skip(f))]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn count_avif_frames<F, Fut>(tmp_dir: &TmpDir, timeout: u64, f: F) -> Result<u32, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
@@ -156,7 +157,7 @@ where
     Ok(lines)
 }
 
-#[tracing::instrument(level = "DEBUG", skip(f))]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn discover_file<F, Fut>(
     tmp_dir: &TmpDir,
     timeout: u64,

@@ -45,7 +45,7 @@ impl ThumbnailFormat {
     }
 }
 
-#[tracing::instrument(skip(store))]
+#[tracing::instrument(skip(tmp_dir, store, timeout))]
 pub(super) async fn thumbnail<S: Store>(
     tmp_dir: &TmpDir,
     store: S,

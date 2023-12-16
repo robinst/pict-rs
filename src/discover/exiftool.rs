@@ -9,7 +9,7 @@ use crate::{
 
 use super::Discovery;
 
-#[tracing::instrument(level = "DEBUG", skip_all)]
+#[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn check_reorient(
     Discovery {
         input,
@@ -40,7 +40,7 @@ pub(super) async fn check_reorient(
     })
 }
 
-#[tracing::instrument(level = "trace", skip(input))]
+#[tracing::instrument(level = "trace", skip_all)]
 async fn needs_reorienting(input: Bytes, timeout: u64) -> Result<bool, ExifError> {
     let process = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?;
     let mut reader = process.bytes_read(input);

@@ -57,7 +57,7 @@ pub(crate) struct FileStore {
 
 #[async_trait::async_trait(?Send)]
 impl Store for FileStore {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn health_check(&self) -> Result<(), StoreError> {
         tokio::fs::metadata(&self.root_dir)
             .await
@@ -227,7 +227,7 @@ impl FileStore {
         Ok(target_path.join(filename))
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self, path), fields(path = ?path.as_ref()))]
+    #[tracing::instrument(level = "debug", skip(self, path), fields(path = ?path.as_ref()))]
     async fn safe_remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), FileError> {
         tokio::fs::remove_file(&path).await?;
         self.try_remove_parents(path.as_ref()).await;

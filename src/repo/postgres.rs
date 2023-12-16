@@ -243,7 +243,7 @@ impl Drop for GetConnectionMetricsGuard {
 }
 
 impl Inner {
-    #[tracing::instrument(level = "TRACE", skip(self))]
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn get_connection(&self) -> Result<Object<AsyncPgConnection>, PostgresError> {
         let guard = GetConnectionMetricsGuard::guard();
 
@@ -446,7 +446,7 @@ impl BaseRepo for PostgresRepo {}
 
 #[async_trait::async_trait(?Send)]
 impl HashRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn size(&self) -> Result<u64, RepoError> {
         use schema::hashes::dsl::*;
 
@@ -464,7 +464,7 @@ impl HashRepo for PostgresRepo {
         Ok(count.try_into().expect("non-negative count"))
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn bound(&self, input_hash: Hash) -> Result<Option<OrderedHash>, RepoError> {
         use schema::hashes::dsl::*;
 
@@ -488,7 +488,7 @@ impl HashRepo for PostgresRepo {
         }))
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn hash_page_by_date(
         &self,
         date: time::OffsetDateTime,
@@ -519,7 +519,7 @@ impl HashRepo for PostgresRepo {
         self.hashes_ordered(ordered_hash, limit).await
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn hashes_ordered(
         &self,
         bound: Option<OrderedHash>,
@@ -592,7 +592,7 @@ impl HashRepo for PostgresRepo {
         })
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn create_hash_with_timestamp(
         &self,
         input_hash: Hash,
@@ -627,7 +627,7 @@ impl HashRepo for PostgresRepo {
         }
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn update_identifier(
         &self,
         input_hash: Hash,
@@ -650,7 +650,7 @@ impl HashRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn identifier(&self, input_hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         use schema::hashes::dsl::*;
 
@@ -670,7 +670,7 @@ impl HashRepo for PostgresRepo {
         Ok(opt.map(Arc::from))
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn relate_variant_identifier(
         &self,
         input_hash: Hash,
@@ -703,7 +703,7 @@ impl HashRepo for PostgresRepo {
         }
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn variant_identifier(
         &self,
         input_hash: Hash,
@@ -729,7 +729,7 @@ impl HashRepo for PostgresRepo {
         Ok(opt)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn variants(&self, input_hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
         use schema::variants::dsl::*;
 
@@ -751,7 +751,7 @@ impl HashRepo for PostgresRepo {
         Ok(vec)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn remove_variant(
         &self,
         input_hash: Hash,
@@ -774,7 +774,7 @@ impl HashRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn relate_motion_identifier(
         &self,
         input_hash: Hash,
@@ -797,7 +797,7 @@ impl HashRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn motion_identifier(&self, input_hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
         use schema::hashes::dsl::*;
 
@@ -819,7 +819,7 @@ impl HashRepo for PostgresRepo {
         Ok(opt)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn cleanup_hash(&self, input_hash: Hash) -> Result<(), RepoError> {
         let mut conn = self.get_connection().await?;
 
@@ -847,7 +847,7 @@ impl HashRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl AliasRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn create_alias(
         &self,
         input_alias: &Alias,
@@ -880,7 +880,7 @@ impl AliasRepo for PostgresRepo {
         }
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn delete_token(&self, input_alias: &Alias) -> Result<Option<DeleteToken>, RepoError> {
         use schema::aliases::dsl::*;
 
@@ -900,7 +900,7 @@ impl AliasRepo for PostgresRepo {
         Ok(opt)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn hash(&self, input_alias: &Alias) -> Result<Option<Hash>, RepoError> {
         use schema::aliases::dsl::*;
 
@@ -920,7 +920,7 @@ impl AliasRepo for PostgresRepo {
         Ok(opt)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn aliases_for_hash(&self, input_hash: Hash) -> Result<Vec<Alias>, RepoError> {
         use schema::aliases::dsl::*;
 
@@ -939,7 +939,7 @@ impl AliasRepo for PostgresRepo {
         Ok(vec)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn cleanup_alias(&self, input_alias: &Alias) -> Result<(), RepoError> {
         use schema::aliases::dsl::*;
 
@@ -960,7 +960,7 @@ impl AliasRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl SettingsRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self, input_value))]
+    #[tracing::instrument(level = "debug", skip(self, input_value))]
     async fn set(&self, input_key: &'static str, input_value: Arc<[u8]>) -> Result<(), RepoError> {
         use schema::settings::dsl::*;
 
@@ -983,7 +983,7 @@ impl SettingsRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn get(&self, input_key: &'static str) -> Result<Option<Arc<[u8]>>, RepoError> {
         use schema::settings::dsl::*;
 
@@ -1007,7 +1007,7 @@ impl SettingsRepo for PostgresRepo {
         Ok(opt)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn remove(&self, input_key: &'static str) -> Result<(), RepoError> {
         use schema::settings::dsl::*;
 
@@ -1028,7 +1028,7 @@ impl SettingsRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl DetailsRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self, input_details))]
+    #[tracing::instrument(level = "debug", skip(self, input_details))]
     async fn relate_details(
         &self,
         input_identifier: &Arc<str>,
@@ -1053,7 +1053,7 @@ impl DetailsRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn details(&self, input_identifier: &Arc<str>) -> Result<Option<Details>, RepoError> {
         use schema::details::dsl::*;
 
@@ -1077,7 +1077,7 @@ impl DetailsRepo for PostgresRepo {
         Ok(opt)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn cleanup_details(&self, input_identifier: &Arc<str>) -> Result<(), RepoError> {
         use schema::details::dsl::*;
 
@@ -1098,7 +1098,7 @@ impl DetailsRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self, job_json))]
+    #[tracing::instrument(level = "debug", skip(self, job_json))]
     async fn push(
         &self,
         queue_name: &'static str,
@@ -1125,7 +1125,7 @@ impl QueueRepo for PostgresRepo {
         Ok(JobId(job_id))
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn pop(
         &self,
         queue_name: &'static str,
@@ -1223,7 +1223,7 @@ impl QueueRepo for PostgresRepo {
         }
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn heartbeat(
         &self,
         queue_name: &'static str,
@@ -1253,7 +1253,7 @@ impl QueueRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn complete_job(
         &self,
         queue_name: &'static str,
@@ -1283,7 +1283,7 @@ impl QueueRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl StoreMigrationRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn is_continuing_migration(&self) -> Result<bool, RepoError> {
         use schema::store_migrations::dsl::*;
 
@@ -1301,7 +1301,7 @@ impl StoreMigrationRepo for PostgresRepo {
         Ok(count > 0)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn mark_migrated(
         &self,
         input_old_identifier: &Arc<str>,
@@ -1328,7 +1328,7 @@ impl StoreMigrationRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn is_migrated(&self, input_old_identifier: &Arc<str>) -> Result<bool, RepoError> {
         use schema::store_migrations::dsl::*;
 
@@ -1347,7 +1347,7 @@ impl StoreMigrationRepo for PostgresRepo {
         Ok(b)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn clear(&self) -> Result<(), RepoError> {
         use schema::store_migrations::dsl::*;
 
@@ -1367,7 +1367,7 @@ impl StoreMigrationRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl ProxyRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn relate_url(&self, input_url: Url, input_alias: Alias) -> Result<(), RepoError> {
         use schema::proxies::dsl::*;
 
@@ -1385,7 +1385,7 @@ impl ProxyRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn related(&self, input_url: Url) -> Result<Option<Alias>, RepoError> {
         use schema::proxies::dsl::*;
 
@@ -1405,7 +1405,7 @@ impl ProxyRepo for PostgresRepo {
         Ok(opt)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn remove_relation(&self, input_alias: Alias) -> Result<(), RepoError> {
         use schema::proxies::dsl::*;
 
@@ -1426,7 +1426,7 @@ impl ProxyRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl AliasAccessRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn set_accessed_alias(
         &self,
         input_alias: Alias,
@@ -1451,7 +1451,7 @@ impl AliasAccessRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn alias_accessed_at(
         &self,
         input_alias: Alias,
@@ -1475,7 +1475,7 @@ impl AliasAccessRepo for PostgresRepo {
         Ok(opt)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn older_aliases(
         &self,
         timestamp: time::OffsetDateTime,
@@ -1513,7 +1513,7 @@ impl AliasAccessRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl VariantAccessRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn set_accessed_variant(
         &self,
         input_hash: Hash,
@@ -1539,7 +1539,7 @@ impl VariantAccessRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn variant_accessed_at(
         &self,
         input_hash: Hash,
@@ -1564,7 +1564,7 @@ impl VariantAccessRepo for PostgresRepo {
         Ok(opt)
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn older_variants(
         &self,
         timestamp: time::OffsetDateTime,
@@ -1638,7 +1638,7 @@ impl From<InnerUploadResult> for UploadResult {
 
 #[async_trait::async_trait(?Send)]
 impl UploadRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn create_upload(&self) -> Result<UploadId, RepoError> {
         use schema::uploads::dsl::*;
 
@@ -1657,7 +1657,7 @@ impl UploadRepo for PostgresRepo {
         Ok(UploadId { id: uuid })
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn wait(&self, upload_id: UploadId) -> Result<UploadResult, RepoError> {
         let guard = WaitMetricsGuard::guard();
         use schema::uploads::dsl::*;
@@ -1714,7 +1714,7 @@ impl UploadRepo for PostgresRepo {
         }
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn claim(&self, upload_id: UploadId) -> Result<(), RepoError> {
         use schema::uploads::dsl::*;
 
@@ -1732,7 +1732,7 @@ impl UploadRepo for PostgresRepo {
         Ok(())
     }
 
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn complete_upload(
         &self,
         upload_id: UploadId,
@@ -1762,7 +1762,7 @@ impl UploadRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl FullRepo for PostgresRepo {
-    #[tracing::instrument(level = "DEBUG", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn health_check(&self) -> Result<(), RepoError> {
         let next = self.inner.health_count.fetch_add(1, Ordering::Relaxed);
 
