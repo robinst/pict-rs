@@ -36,12 +36,12 @@
             exiftool
             ffmpeg_6-full
             garage
-            gcc
             imagemagick
             minio-client
             rust-analyzer
             rustc
             rustfmt
+            stdenv.cc
             taplo
             tokio-console
           ];
