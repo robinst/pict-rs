@@ -1,4 +1,7 @@
-use std::sync::{Arc, OnceLock};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use streem::IntoStreamer;
 use tokio::{sync::Semaphore, task::JoinSet};
@@ -6,7 +9,7 @@ use tokio::{sync::Semaphore, task::JoinSet};
 use crate::{
     config::Configuration,
     details::Details,
-    error::Error,
+    error::{Error, UploadError},
     repo::{ArcRepo, DeleteToken, Hash},
     repo_04::{
         AliasRepo as _, HashRepo as _, IdentifierRepo as _, SettingsRepo as _,
@@ -41,7 +44,7 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
     let mut index = 0;
     while let Some(res) = hash_stream.next().await {
         if let Ok(hash) = res {
-            let _ = migrate_hash(old_repo.clone(), new_repo.clone(), hash).await;
+            migrate_hash(old_repo.clone(), new_repo.clone(), hash).await;
         } else {
             tracing::warn!("Failed to read hash, skipping");
         }
@@ -58,6 +61,12 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
     if let Some(generator_state) = old_repo.get(GENERATOR_KEY).await? {
         new_repo
             .set(GENERATOR_KEY, generator_state.to_vec().into())
+            .await?;
+    }
+
+    if let Some(generator_state) = old_repo.get(crate::NOT_FOUND_KEY).await? {
+        new_repo
+            .set(crate::NOT_FOUND_KEY, generator_state.to_vec().into())
             .await?;
     }
 
@@ -181,7 +190,7 @@ async fn migrate_hash_04<S: Store>(
 ) {
     let mut hash_failures = 0;
 
-    while let Err(e) = do_migrate_hash_04(
+    while let Err(e) = timed_migrate_hash_04(
         &tmp_dir,
         &old_repo,
         &new_repo,
@@ -273,6 +282,22 @@ async fn do_migrate_hash(old_repo: &ArcRepo, new_repo: &ArcRepo, hash: Hash) -> 
     }
 
     Ok(())
+}
+
+async fn timed_migrate_hash_04<S: Store>(
+    tmp_dir: &TmpDir,
+    old_repo: &OldSledRepo,
+    new_repo: &ArcRepo,
+    store: &S,
+    config: &Configuration,
+    old_hash: sled::IVec,
+) -> Result<(), Error> {
+    tokio::time::timeout(
+        Duration::from_secs(config.media.external_validation_timeout * 6),
+        do_migrate_hash_04(tmp_dir, old_repo, new_repo, store, config, old_hash),
+    )
+    .await
+    .map_err(|_| UploadError::ProcessTimeout)?
 }
 
 #[tracing::instrument(skip_all)]
