@@ -68,11 +68,11 @@ format = 'normal'
 
 ## Optional: log targets
 # environment variable: PICTRS__TRACING__LOGGING__TARGETS
-# default: warn,tracing_actix_web=info,actix_server=info,actix_web=info
+# default: info
 #
 # Dictates which traces should print to stdout
 # Follows the same format as RUST_LOG
-targets = 'warn,tracing_actix_web=info,actix_server=info,actix_web=info'
+targets = 'info'
 
 ## Optional: whether pict-rs should log the new & close span events for tracing spans to stdout
 # environment variable: PICTRS__TRACING__LOGGING__LOG_SPANS
