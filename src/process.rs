@@ -14,21 +14,25 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncWriteExt, ReadBuf},
     process::{Child, ChildStdin, ChildStdout, Command},
-    task::JoinHandle,
 };
 use tracing::{Instrument, Span};
+use uuid::Uuid;
 
-use crate::{error_code::ErrorCode, future::WithTimeout};
+use crate::{
+    error_code::ErrorCode,
+    future::{LocalBoxFuture, WithTimeout},
+    sync::DropHandle,
+};
 
 struct MetricsGuard {
     start: Instant,
     armed: bool,
-    command: String,
+    command: Arc<str>,
 }
 
 impl MetricsGuard {
-    fn guard(command: String) -> Self {
-        metrics::increment_counter!("pict-rs.process.start", "command" => command.clone());
+    fn guard(command: Arc<str>) -> Self {
+        metrics::increment_counter!("pict-rs.process.start", "command" => command.to_string());
 
         Self {
             start: Instant::now(),
@@ -47,11 +51,11 @@ impl Drop for MetricsGuard {
         metrics::histogram!(
             "pict-rs.process.duration",
             self.start.elapsed().as_secs_f64(),
-            "command" => self.command.clone(),
+            "command" => self.command.to_string(),
             "completed" => (!self.armed).to_string(),
         );
 
-        metrics::increment_counter!("pict-rs.process.end", "completed" => (!self.armed).to_string() , "command" => self.command.clone());
+        metrics::increment_counter!("pict-rs.process.end", "completed" => (!self.armed).to_string() , "command" => self.command.to_string());
     }
 }
 
@@ -59,20 +63,17 @@ impl Drop for MetricsGuard {
 struct StatusError(ExitStatus);
 
 pub(crate) struct Process {
-    command: String,
+    command: Arc<str>,
     child: Child,
     guard: MetricsGuard,
     timeout: Duration,
+    id: Uuid,
 }
 
 impl std::fmt::Debug for Process {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Process").field("child", &"Child").finish()
     }
-}
-
-struct DropHandle {
-    inner: JoinHandle<std::io::Result<()>>,
 }
 
 struct ProcessReadState {
@@ -86,29 +87,31 @@ struct ProcessReadWaker {
 }
 
 pub(crate) struct ProcessRead {
-    inner: ChildStdout,
-    handle: DropHandle,
+    stdout: ChildStdout,
+    handle: LocalBoxFuture<'static, std::io::Result<()>>,
     closed: bool,
     state: Arc<ProcessReadState>,
-    span: Span,
+    span: Option<Span>,
+    command: Arc<str>,
+    id: Uuid,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ProcessError {
     #[error("Required command {0} not found, make sure it exists in pict-rs' $PATH")]
-    NotFound(String),
+    NotFound(Arc<str>),
 
     #[error("Cannot run command {0} due to invalid permissions on binary, make sure the pict-rs user has permission to run it")]
-    PermissionDenied(String),
+    PermissionDenied(Arc<str>),
 
     #[error("Reached process spawn limit")]
     LimitReached,
 
     #[error("{0} timed out")]
-    Timeout(String),
+    Timeout(Arc<str>),
 
     #[error("{0} Failed with {1}")]
-    Status(String, ExitStatus),
+    Status(Arc<str>, ExitStatus),
 
     #[error("Unknown process error")]
     Other(#[source] std::io::Error),
@@ -136,10 +139,14 @@ impl Process {
     where
         T: AsRef<OsStr>,
     {
+        let command: Arc<str> = Arc::from(String::from(command));
+
         let res = tracing::trace_span!(parent: None, "Create command", %command).in_scope(|| {
             Self::spawn(
-                command,
-                Command::new(command).args(args).envs(envs.iter().copied()),
+                command.clone(),
+                Command::new(command.as_ref())
+                    .args(args)
+                    .envs(envs.iter().copied()),
                 timeout,
             )
         });
@@ -147,9 +154,9 @@ impl Process {
         match res {
             Ok(this) => Ok(this),
             Err(e) => match e.kind() {
-                std::io::ErrorKind::NotFound => Err(ProcessError::NotFound(command.to_string())),
+                std::io::ErrorKind::NotFound => Err(ProcessError::NotFound(command)),
                 std::io::ErrorKind::PermissionDenied => {
-                    Err(ProcessError::PermissionDenied(command.to_string()))
+                    Err(ProcessError::PermissionDenied(command))
                 }
                 std::io::ErrorKind::WouldBlock => Err(ProcessError::LimitReached),
                 _ => Err(ProcessError::Other(e)),
@@ -157,9 +164,9 @@ impl Process {
         }
     }
 
-    fn spawn(command: &str, cmd: &mut Command, timeout: u64) -> std::io::Result<Self> {
+    fn spawn(command: Arc<str>, cmd: &mut Command, timeout: u64) -> std::io::Result<Self> {
         tracing::trace_span!(parent: None, "Spawn command", %command).in_scope(|| {
-            let guard = MetricsGuard::guard(command.into());
+            let guard = MetricsGuard::guard(command.clone());
 
             let cmd = cmd
                 .stdin(Stdio::piped())
@@ -168,20 +175,22 @@ impl Process {
 
             cmd.spawn().map(|child| Process {
                 child,
-                command: String::from(command),
+                command,
                 guard,
                 timeout: Duration::from_secs(timeout),
+                id: Uuid::now_v7(),
             })
         })
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), fields(command = %self.command, id = %self.id))]
     pub(crate) async fn wait(self) -> Result<(), ProcessError> {
         let Process {
             command,
             mut child,
             guard,
             timeout,
+            id: _,
         } = self;
 
         let res = child.wait().with_timeout(timeout).await;
@@ -226,52 +235,44 @@ impl Process {
             mut child,
             guard,
             timeout,
+            id,
         } = self;
 
         let stdin = child.stdin.take().expect("stdin exists");
         let stdout = child.stdout.take().expect("stdout exists");
 
-        let background_span =
-            tracing::info_span!(parent: None, "Background process task", %command);
-        background_span.follows_from(Span::current());
+        let handle = Box::pin(async move {
+            let child_fut = async {
+                (f)(stdin).await?;
 
-        let span = tracing::info_span!(parent: None, "Foreground process task", %command);
-        span.follows_from(Span::current());
+                child.wait().await
+            };
 
-        let handle = crate::sync::spawn(
-            "await-process",
-            async move {
-                let child_fut = async {
-                    (f)(stdin).await?;
+            let error = match child_fut.with_timeout(timeout).await {
+                Ok(Ok(status)) if status.success() => {
+                    guard.disarm();
+                    return Ok(());
+                }
+                Ok(Ok(status)) => {
+                    std::io::Error::new(std::io::ErrorKind::Other, StatusError(status))
+                }
+                Ok(Err(e)) => e,
+                Err(_) => std::io::ErrorKind::TimedOut.into(),
+            };
 
-                    child.wait().await
-                };
+            child.kill().await?;
 
-                let error = match child_fut.with_timeout(timeout).await {
-                    Ok(Ok(status)) if status.success() => {
-                        guard.disarm();
-                        return Ok(());
-                    }
-                    Ok(Ok(status)) => {
-                        std::io::Error::new(std::io::ErrorKind::Other, StatusError(status))
-                    }
-                    Ok(Err(e)) => e,
-                    Err(_) => std::io::ErrorKind::TimedOut.into(),
-                };
-
-                child.kill().await?;
-
-                Err(error)
-            }
-            .instrument(background_span),
-        );
+            Err(error)
+        });
 
         ProcessRead {
-            inner: stdout,
-            handle: DropHandle { inner: handle },
+            stdout,
+            handle,
             closed: false,
             state: ProcessReadState::new_woken(),
-            span,
+            span: None,
+            command,
+            id,
         }
     }
 }
@@ -345,14 +346,19 @@ impl AsyncRead for ProcessRead {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        let span = self.span.clone();
+        let command = self.command.clone();
+        let id = self.id;
+        let span = self
+            .span
+            .get_or_insert_with(|| tracing::info_span!("process task", %command, %id))
+            .clone();
         let guard = span.enter();
 
         let value = loop {
             // always poll for bytes when poll_read is called
             let before_size = buf.filled().len();
 
-            if let Poll::Ready(res) = Pin::new(&mut self.inner).poll_read(cx, buf) {
+            if let Poll::Ready(res) = Pin::new(&mut self.stdout).poll_read(cx, buf) {
                 if let Err(e) = res {
                     self.closed = true;
 
@@ -368,11 +374,10 @@ impl AsyncRead for ProcessRead {
                 // only poll handle if we've been explicitly woken
                 let mut handle_cx = Context::from_waker(&waker);
 
-                if let Poll::Ready(res) = Pin::new(&mut self.handle.inner).poll(&mut handle_cx) {
+                if let Poll::Ready(res) = Pin::new(&mut self.handle).poll(&mut handle_cx) {
                     let error = match res {
-                        Ok(Ok(())) => continue,
-                        Ok(Err(e)) => e,
-                        Err(e) => std::io::Error::new(std::io::ErrorKind::Other, e),
+                        Ok(()) => continue,
+                        Err(e) => e,
                     };
 
                     self.closed = true;
@@ -395,12 +400,6 @@ impl AsyncRead for ProcessRead {
         drop(guard);
 
         value
-    }
-}
-
-impl Drop for DropHandle {
-    fn drop(&mut self) {
-        self.inner.abort();
     }
 }
 

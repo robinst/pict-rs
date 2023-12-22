@@ -144,7 +144,7 @@ where
     Ok((input_type, identifier, details, state))
 }
 
-#[tracing::instrument(skip(repo, store, client, stream, config))]
+#[tracing::instrument(skip(tmp_dir, repo, store, client, stream, config))]
 pub(crate) async fn ingest<S>(
     tmp_dir: &TmpDir,
     repo: &ArcRepo,

@@ -866,7 +866,7 @@ async fn not_found_hash(repo: &ArcRepo) -> Result<Option<(Alias, Hash)>, Error> 
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(
     name = "Serving processed image",
-    skip(repo, store, client, config, process_map)
+    skip(tmp_dir, repo, store, client, config, process_map)
 )]
 async fn process<S: Store + 'static>(
     range: Option<web::Header<Range>>,

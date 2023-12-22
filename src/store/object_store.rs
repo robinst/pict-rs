@@ -298,7 +298,7 @@ impl Store for ObjectStore {
 
                 let object_id2 = object_id.clone();
                 let upload_id2 = upload_id.to_string();
-                let handle = crate::sync::spawn(
+                let handle = crate::sync::abort_on_drop(crate::sync::spawn(
                     "upload-multipart-part",
                     async move {
                         let response = this
@@ -333,7 +333,7 @@ impl Store for ObjectStore {
                         Ok(etag) as Result<String, StoreError>
                     }
                     .instrument(tracing::Span::current()),
-                );
+                ));
 
                 futures.push(handle);
             }

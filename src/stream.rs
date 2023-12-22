@@ -30,7 +30,7 @@ where
 {
     let (tx, rx) = crate::sync::channel(1);
 
-    let handle = crate::sync::spawn("send-stream", async move {
+    let handle = crate::sync::abort_on_drop(crate::sync::spawn("send-stream", async move {
         let stream = std::pin::pin!(stream);
         let mut streamer = stream.into_streamer();
 
@@ -39,7 +39,7 @@ where
                 break;
             }
         }
-    });
+    }));
 
     streem::from_fn(|yiedler| async move {
         let mut stream = rx.into_stream().into_streamer();

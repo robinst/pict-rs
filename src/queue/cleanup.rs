@@ -236,7 +236,7 @@ where
 
         let span = tracing::info_span!(parent: current_span, "error-boundary");
 
-        let res = crate::sync::spawn(
+        let res = crate::sync::abort_on_drop(crate::sync::spawn(
             "prune-missing",
             async move {
                 let mut count = count;
@@ -261,7 +261,7 @@ where
                 Ok(count) as Result<u64, Error>
             }
             .instrument(span),
-        )
+        ))
         .await;
 
         match res {

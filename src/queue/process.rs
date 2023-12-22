@@ -1,5 +1,6 @@
 use reqwest_middleware::ClientWithMiddleware;
 use time::Instant;
+use tracing::{Instrument, Span};
 
 use crate::{
     concurrent_processor::ProcessMap,
@@ -135,23 +136,30 @@ where
         let repo = repo.clone();
         let client = client.clone();
 
+        let current_span = Span::current();
+        let span = tracing::info_span!(parent: current_span, "error_boundary");
+
         let config = config.clone();
-        let error_boundary = crate::sync::spawn("ingest-media", async move {
-            let stream = crate::stream::from_err(store2.to_stream(&ident, None, None).await?);
+        let error_boundary = crate::sync::abort_on_drop(crate::sync::spawn(
+            "ingest-media",
+            async move {
+                let stream = crate::stream::from_err(store2.to_stream(&ident, None, None).await?);
 
-            let session = crate::ingest::ingest(
-                &tmp_dir,
-                &repo,
-                &store2,
-                &client,
-                stream,
-                declared_alias,
-                &config,
-            )
-            .await?;
+                let session = crate::ingest::ingest(
+                    &tmp_dir,
+                    &repo,
+                    &store2,
+                    &client,
+                    stream,
+                    declared_alias,
+                    &config,
+                )
+                .await?;
 
-            Ok(session) as Result<Session, Error>
-        })
+                Ok(session) as Result<Session, Error>
+            }
+            .instrument(span),
+        ))
         .await;
 
         store.remove(&unprocessed_identifier).await?;

@@ -47,7 +47,7 @@ impl Drop for MetricsGuard {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(repo, store, hash, process_map, config))]
+#[tracing::instrument(skip(tmp_dir, repo, store, hash, process_map, config))]
 pub(crate) async fn generate<S: Store + 'static>(
     tmp_dir: &TmpDir,
     repo: &ArcRepo,

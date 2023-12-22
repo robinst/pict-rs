@@ -33,6 +33,7 @@ use crate::{
     future::{WithMetrics, WithTimeout},
     serde_str::Serde,
     stream::LocalBoxStream,
+    sync::DropHandle,
 };
 
 use self::job_status::JobStatus;
@@ -49,7 +50,7 @@ use super::{
 pub(crate) struct PostgresRepo {
     inner: Arc<Inner>,
     #[allow(dead_code)]
-    notifications: Arc<tokio::task::JoinHandle<()>>,
+    notifications: Arc<DropHandle<()>>,
 }
 
 struct Inner {
@@ -151,7 +152,7 @@ impl PostgresRepo {
             .await
             .map_err(ConnectPostgresError::ConnectForMigration)?;
 
-        let handle = crate::sync::spawn("postgres-migrations", conn);
+        let handle = crate::sync::abort_on_drop(crate::sync::spawn("postgres-migrations", conn));
 
         embedded::migrations::runner()
             .run_async(&mut client)
@@ -199,10 +200,10 @@ impl PostgresRepo {
             upload_notifications: DashMap::new(),
         });
 
-        let handle = crate::sync::spawn(
+        let handle = crate::sync::abort_on_drop(crate::sync::spawn(
             "postgres-delegate-notifications",
             delegate_notifications(rx, inner.clone(), parallelism * 8),
-        );
+        ));
 
         let notifications = Arc::new(handle);
 

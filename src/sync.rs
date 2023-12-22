@@ -1,6 +1,40 @@
 use std::sync::Arc;
 
-use tokio::sync::{Notify, Semaphore};
+use tokio::{
+    sync::{Notify, Semaphore},
+    task::JoinHandle,
+};
+
+pub(crate) struct DropHandle<T> {
+    handle: JoinHandle<T>,
+}
+
+pub(crate) fn abort_on_drop<T>(handle: JoinHandle<T>) -> DropHandle<T> {
+    DropHandle { handle }
+}
+
+impl<T> DropHandle<T> {
+    pub(crate) fn abort(&self) {
+        self.handle.abort();
+    }
+}
+
+impl<T> Drop for DropHandle<T> {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+impl<T> std::future::Future for DropHandle<T> {
+    type Output = <JoinHandle<T> as std::future::Future>::Output;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        std::pin::Pin::new(&mut self.handle).poll(cx)
+    }
+}
 
 #[track_caller]
 pub(crate) fn channel<T>(bound: usize) -> (flume::Sender<T>, flume::Receiver<T>) {
