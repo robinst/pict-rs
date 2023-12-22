@@ -370,22 +370,20 @@ impl AsyncRead for ProcessRead {
                 } else {
                     break Poll::Ready(Ok(()));
                 }
+            } else if self.closed {
+                // Stop if we're closed
+                break Poll::Ready(Ok(()));
             } else if let Some(waker) = self.get_waker(HANDLE_WAKER) {
                 // only poll handle if we've been explicitly woken
                 let mut handle_cx = Context::from_waker(&waker);
 
                 if let Poll::Ready(res) = Pin::new(&mut self.handle).poll(&mut handle_cx) {
-                    let error = match res {
-                        Ok(()) => continue,
-                        Err(e) => e,
-                    };
-
                     self.closed = true;
-                    break Poll::Ready(Err(error));
+
+                    if let Err(e) = res {
+                        break Poll::Ready(Err(e));
+                    }
                 }
-            } else if self.closed {
-                // Stop if we're closed
-                break Poll::Ready(Ok(()));
             } else if self.set_parent_waker(cx.waker()) {
                 // if we updated the stored waker, mark all as woken an try polling again
                 // This doesn't actually "wake" the waker, it just allows the handle to be polled
