@@ -167,7 +167,7 @@ fn payload_to_io_error(e: reqwest::Error) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
 }
 
-#[tracing::instrument(skip(stream))]
+#[tracing::instrument(level = "debug", skip(stream))]
 async fn read_chunk<S>(stream: &mut S) -> Result<BytesStream, ObjectError>
 where
     S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
@@ -177,8 +177,8 @@ where
     let mut stream = stream.into_streamer();
 
     while buf.len() < CHUNK_SIZE {
-        if let Some(res) = stream.next().await {
-            buf.add_bytes(res?)
+        if let Some(bytes) = stream.try_next().await? {
+            buf.add_bytes(bytes)
         } else {
             break;
         }
@@ -603,7 +603,7 @@ impl ObjectStore {
 
         let length = buf.len();
 
-        let hashing_span = tracing::info_span!("Hashing request body");
+        let hashing_span = tracing::debug_span!("Hashing request body");
         let hash_string = actix_web::web::block(move || {
             let guard = hashing_span.enter();
             let mut hasher = md5::Md5::new();
