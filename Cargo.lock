@@ -1743,7 +1743,6 @@ version = "0.5.0-rc.2"
 dependencies = [
  "actix-form-data",
  "actix-web",
- "anyhow",
  "async-trait",
  "barrel",
  "base64 0.21.5",
