@@ -15,13 +15,12 @@ use tokio::{
     io::{AsyncRead, AsyncWriteExt, ReadBuf},
     process::{Child, ChildStdin, ChildStdout, Command},
 };
-use tracing::{Instrument, Span};
+use tracing::Span;
 use uuid::Uuid;
 
 use crate::{
     error_code::ErrorCode,
     future::{LocalBoxFuture, WithTimeout},
-    sync::DropHandle,
 };
 
 struct MetricsGuard {
