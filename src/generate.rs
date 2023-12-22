@@ -94,7 +94,7 @@ pub(crate) async fn generate<S: Store + 'static>(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(repo, store, hash, config))]
+#[tracing::instrument(skip(tmp_dir, repo, store, hash, config))]
 async fn process<S: Store + 'static>(
     tmp_dir: &TmpDir,
     repo: &ArcRepo,

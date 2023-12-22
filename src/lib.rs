@@ -996,7 +996,10 @@ async fn process<S: Store + 'static>(
     ))
 }
 
-#[tracing::instrument(name = "Serving processed image headers", skip(repo, store, config))]
+#[tracing::instrument(
+    name = "Serving processed image headers",
+    skip(tmp_dir, repo, store, config)
+)]
 async fn process_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
