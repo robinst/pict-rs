@@ -212,7 +212,7 @@ where
     let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
 
-    let process = Process::run(
+    let output = Process::run(
         "ffprobe",
         &[
             "-v".as_ref(),
@@ -228,14 +228,10 @@ where
         ],
         &[],
         timeout,
-    )?;
-
-    let mut output = Vec::new();
-    process
-        .read()
-        .read_to_end(&mut output)
-        .await
-        .map_err(FfMpegError::Read)?;
+    )?
+    .read()
+    .to_vec()
+    .await?;
 
     drop(input_file);
 
@@ -262,7 +258,7 @@ where
 
 #[tracing::instrument(level = "debug", skip_all)]
 async fn alpha_pixel_formats(timeout: u64) -> Result<HashSet<String>, FfMpegError> {
-    let process = Process::run(
+    let output = Process::run(
         "ffprobe",
         &[
             "-v",
@@ -276,14 +272,10 @@ async fn alpha_pixel_formats(timeout: u64) -> Result<HashSet<String>, FfMpegErro
         ],
         &[],
         timeout,
-    )?;
-
-    let mut output = Vec::new();
-    process
-        .read()
-        .read_to_end(&mut output)
-        .await
-        .map_err(FfMpegError::Read)?;
+    )?
+    .read()
+    .to_vec()
+    .await?;
 
     let formats: PixelFormatOutput = serde_json::from_slice(&output).map_err(FfMpegError::Json)?;
 

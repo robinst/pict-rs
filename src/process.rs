@@ -1,5 +1,6 @@
 use actix_web::web::Bytes;
 use std::{
+    any::Any,
     ffi::OsStr,
     future::Future,
     pin::Pin,
@@ -12,15 +13,17 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    io::{AsyncRead, AsyncWriteExt, ReadBuf},
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf},
     process::{Child, ChildStdin, ChildStdout, Command},
 };
-use tracing::Span;
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 use crate::{
+    error::Error,
     error_code::ErrorCode,
     future::{LocalBoxFuture, WithTimeout},
+    read::BoxRead,
 };
 
 struct MetricsGuard {
@@ -75,24 +78,12 @@ impl std::fmt::Debug for Process {
     }
 }
 
-struct ProcessReadState {
-    flags: AtomicU8,
-    parent: Mutex<Option<Waker>>,
-}
-
-struct ProcessReadWaker {
-    state: Arc<ProcessReadState>,
-    flag: u8,
-}
-
 pub(crate) struct ProcessRead {
-    stdout: ChildStdout,
-    handle: LocalBoxFuture<'static, std::io::Result<()>>,
-    closed: bool,
-    state: Arc<ProcessReadState>,
-    span: Option<Span>,
+    reader: BoxRead<'static>,
+    handle: LocalBoxFuture<'static, Result<(), ProcessError>>,
     command: Arc<str>,
     id: Uuid,
+    extras: Box<dyn Any>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -112,6 +103,9 @@ pub(crate) enum ProcessError {
     #[error("{0} Failed with {1}")]
     Status(Arc<str>, ExitStatus),
 
+    #[error("Failed to read stdout for {0}")]
+    Read(Arc<str>, #[source] std::io::Error),
+
     #[error("Unknown process error")]
     Other(#[source] std::io::Error),
 }
@@ -121,10 +115,14 @@ impl ProcessError {
         match self {
             Self::NotFound(_) => ErrorCode::COMMAND_NOT_FOUND,
             Self::PermissionDenied(_) => ErrorCode::COMMAND_PERMISSION_DENIED,
-            Self::LimitReached | Self::Other(_) => ErrorCode::COMMAND_ERROR,
+            Self::LimitReached | Self::Read(_, _) | Self::Other(_) => ErrorCode::COMMAND_ERROR,
             Self::Timeout(_) => ErrorCode::COMMAND_TIMEOUT,
             Self::Status(_, _) => ErrorCode::COMMAND_FAILURE,
         }
+    }
+
+    pub(crate) fn is_client_error(&self) -> bool {
+        matches!(self, Self::Timeout(_))
     }
 }
 
@@ -240,6 +238,7 @@ impl Process {
         let stdin = child.stdin.take().expect("stdin exists");
         let stdout = child.stdout.take().expect("stdout exists");
 
+        let command2 = command.clone();
         let handle = Box::pin(async move {
             let child_fut = async {
                 (f)(stdin).await?;
@@ -252,184 +251,108 @@ impl Process {
                     guard.disarm();
                     return Ok(());
                 }
-                Ok(Ok(status)) => {
-                    std::io::Error::new(std::io::ErrorKind::Other, StatusError(status))
-                }
-                Ok(Err(e)) => e,
-                Err(_) => std::io::ErrorKind::TimedOut.into(),
+                Ok(Ok(status)) => ProcessError::Status(command2, status),
+                Ok(Err(e)) => ProcessError::Other(e),
+                Err(_) => ProcessError::Timeout(command2),
             };
 
-            child.kill().await?;
+            child.kill().await.map_err(ProcessError::Other)?;
 
             Err(error)
         });
 
         ProcessRead {
-            stdout,
+            reader: Box::pin(stdout),
             handle,
-            closed: false,
-            state: ProcessReadState::new_woken(),
-            span: None,
             command,
             id,
+            extras: Box::new(()),
         }
-    }
-}
-
-impl ProcessReadState {
-    fn new_woken() -> Arc<Self> {
-        Arc::new(Self {
-            flags: AtomicU8::new(0xff),
-            parent: Mutex::new(None),
-        })
-    }
-
-    fn clone_parent(&self) -> Option<Waker> {
-        let guard = self.parent.lock().unwrap();
-        guard.as_ref().cloned()
-    }
-
-    fn into_parts(self) -> (AtomicU8, Option<Waker>) {
-        let ProcessReadState { flags, parent } = self;
-
-        let parent = parent.lock().unwrap().take();
-
-        (flags, parent)
     }
 }
 
 impl ProcessRead {
-    fn get_waker(&self, flag: u8) -> Option<Waker> {
-        let mask = 0xff ^ flag;
-        let previous = self.state.flags.fetch_and(mask, Ordering::AcqRel);
-        let active = previous & flag;
-
-        if active == flag {
-            Some(
-                Arc::new(ProcessReadWaker {
-                    state: self.state.clone(),
-                    flag,
-                })
-                .into(),
-            )
-        } else {
-            None
+    pub(crate) fn new(reader: BoxRead<'static>, command: Arc<str>, id: Uuid) -> Self {
+        Self {
+            reader,
+            handle: Box::pin(async { Ok(()) }),
+            command,
+            id,
+            extras: Box::new(()),
         }
     }
 
-    fn set_parent_waker(&self, parent: &Waker) -> bool {
-        let mut guard = self.state.parent.lock().unwrap();
-        if let Some(waker) = guard.as_mut() {
-            if !waker.will_wake(parent) {
-                *waker = parent.clone();
-                true
-            } else {
-                false
-            }
-        } else {
-            *guard = Some(parent.clone());
-            true
-        }
+    pub(crate) async fn to_vec(self) -> Result<Vec<u8>, ProcessError> {
+        let cmd = self.command.clone();
+
+        self.with_stdout(move |mut stdout| async move {
+            let mut vec = Vec::new();
+
+            stdout
+                .read_to_end(&mut vec)
+                .await
+                .map_err(|e| ProcessError::Read(cmd, e))
+                .map(move |_| vec)
+        })
+        .await?
     }
 
-    fn mark_all_woken(&self) {
-        self.state.flags.store(0xff, Ordering::Release);
-    }
-}
+    pub(crate) async fn to_string(self) -> Result<String, ProcessError> {
+        let cmd = self.command.clone();
 
-const HANDLE_WAKER: u8 = 0b_0100;
+        self.with_stdout(move |mut stdout| async move {
+            let mut s = String::new();
 
-impl AsyncRead for ProcessRead {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        let command = self.command.clone();
-        let id = self.id;
-        let span = self
-            .span
-            .get_or_insert_with(|| tracing::info_span!("process task", %command, %id))
-            .clone();
-        let guard = span.enter();
-
-        let value = loop {
-            // always poll for bytes when poll_read is called
-            let before_size = buf.filled().len();
-
-            if let Poll::Ready(res) = Pin::new(&mut self.stdout).poll_read(cx, buf) {
-                if let Err(e) = res {
-                    self.closed = true;
-
-                    break Poll::Ready(Err(e));
-                } else if buf.filled().len() == before_size {
-                    self.closed = true;
-
-                    break Poll::Ready(Ok(()));
-                } else {
-                    break Poll::Ready(Ok(()));
-                }
-            } else if self.closed {
-                // Stop if we're closed
-                break Poll::Ready(Ok(()));
-            } else if let Some(waker) = self.get_waker(HANDLE_WAKER) {
-                // only poll handle if we've been explicitly woken
-                let mut handle_cx = Context::from_waker(&waker);
-
-                if let Poll::Ready(res) = Pin::new(&mut self.handle).poll(&mut handle_cx) {
-                    self.closed = true;
-
-                    if let Err(e) = res {
-                        break Poll::Ready(Err(e));
-                    }
-                }
-            } else if self.set_parent_waker(cx.waker()) {
-                // if we updated the stored waker, mark all as woken an try polling again
-                // This doesn't actually "wake" the waker, it just allows the handle to be polled
-                // again next iteration
-                self.mark_all_woken();
-            } else {
-                // if the waker hasn't changed and nothing polled ready, return pending
-                break Poll::Pending;
-            }
-        };
-
-        drop(guard);
-
-        value
-    }
-}
-
-impl Wake for ProcessReadWaker {
-    fn wake(self: Arc<Self>) {
-        match Arc::try_unwrap(self) {
-            Ok(ProcessReadWaker { state, flag }) => match Arc::try_unwrap(state) {
-                Ok(state) => {
-                    let (flags, parent) = state.into_parts();
-
-                    flags.fetch_and(flag, Ordering::AcqRel);
-
-                    if let Some(parent) = parent {
-                        parent.wake();
-                    }
-                }
-                Err(state) => {
-                    state.flags.fetch_or(flag, Ordering::AcqRel);
-
-                    if let Some(waker) = state.clone_parent() {
-                        waker.wake();
-                    }
-                }
-            },
-            Err(this) => this.wake_by_ref(),
-        }
+            stdout
+                .read_to_string(&mut s)
+                .await
+                .map_err(|e| ProcessError::Read(cmd, e))
+                .map(move |_| s)
+        })
+        .await?
     }
 
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.state.flags.fetch_or(self.flag, Ordering::AcqRel);
+    pub(crate) async fn with_stdout<Fut>(
+        self,
+        f: impl FnOnce(BoxRead<'static>) -> Fut,
+    ) -> Result<Fut::Output, ProcessError>
+    where
+        Fut: Future,
+    {
+        let Self {
+            reader,
+            handle,
+            command,
+            id,
+            extras,
+        } = self;
 
-        if let Some(parent) = self.state.clone_parent() {
-            parent.wake();
+        let (out, res) = tokio::join!(
+            (f)(reader).instrument(tracing::info_span!("cmd-reader", %command, %id)),
+            handle.instrument(tracing::info_span!("cmd-handle", %command, %id))
+        );
+        res?;
+
+        drop(extras);
+
+        Ok(out)
+    }
+
+    pub(crate) fn add_extras<Extras: 'static>(self, more_extras: Extras) -> ProcessRead {
+        let Self {
+            reader,
+            handle,
+            command,
+            id,
+            extras,
+        } = self;
+
+        Self {
+            reader,
+            handle,
+            command,
+            id,
+            extras: Box::new((extras, more_extras)),
         }
     }
 }

@@ -96,6 +96,9 @@ pub(crate) enum UploadError {
     #[error("Error in exiftool")]
     Exiftool(#[from] crate::exiftool::ExifError),
 
+    #[error("Error in process")]
+    Process(#[from] crate::process::ProcessError),
+
     #[error("Error building reqwest client")]
     BuildClient(#[source] reqwest::Error),
 
@@ -172,6 +175,7 @@ impl UploadError {
             Self::Ffmpeg(e) => e.error_code(),
             Self::Magick(e) => e.error_code(),
             Self::Exiftool(e) => e.error_code(),
+            Self::Process(e) => e.error_code(),
             Self::BuildClient(_) | Self::RequestMiddleware(_) | Self::Request(_) => {
                 ErrorCode::HTTP_CLIENT_ERROR
             }
@@ -246,6 +250,7 @@ impl ResponseError for Error {
             Some(UploadError::Magick(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::Ffmpeg(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::Exiftool(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
+            Some(UploadError::Process(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::MissingAlias) => StatusCode::NOT_FOUND,
             Some(UploadError::Ffmpeg(e)) if e.is_not_found() => StatusCode::NOT_FOUND,
             Some(UploadError::InvalidToken) => StatusCode::FORBIDDEN,

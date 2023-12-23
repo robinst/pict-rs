@@ -68,10 +68,10 @@ where
     };
 
     tracing::trace!("Validating bytes");
-    let (input_type, validated_reader) =
+    let (input_type, process_read) =
         crate::validate::validate_bytes(tmp_dir, bytes, prescribed, media.process_timeout).await?;
 
-    let processed_reader = if let Some(operations) = media.preprocess_steps() {
+    let process_read = if let Some(operations) = media.preprocess_steps() {
         if let Some(format) = input_type.processable_format() {
             let (_, magick_args) =
                 crate::processor::build_chain(operations, format.file_extension())?;
@@ -83,9 +83,9 @@ where
                 }
             };
 
-            crate::magick::process_image_async_read(
+            crate::magick::process_image_process_read(
                 tmp_dir,
-                validated_reader,
+                process_read,
                 magick_args,
                 format,
                 format,
@@ -94,18 +94,23 @@ where
             )
             .await?
         } else {
-            validated_reader
+            process_read
         }
     } else {
-        validated_reader
+        process_read
     };
 
-    let hasher_reader = Hasher::new(processed_reader);
-    let state = hasher_reader.state();
+    let (state, identifier) = process_read
+        .with_stdout(|stdout| async move {
+            let hasher_reader = Hasher::new(stdout);
+            let state = hasher_reader.state();
 
-    let identifier = store
-        .save_async_read(hasher_reader, input_type.media_type())
-        .await?;
+            store
+                .save_async_read(hasher_reader, input_type.media_type())
+                .await
+                .map(move |identifier| (state, identifier))
+        })
+        .await??;
 
     let bytes_stream = store.to_bytes(&identifier, None, None).await?;
     let details =

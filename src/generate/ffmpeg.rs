@@ -1,8 +1,14 @@
 use std::sync::Arc;
 
+use uuid::Uuid;
+
 use crate::{
-    ffmpeg::FfMpegError, formats::InternalVideoFormat, process::Process, read::BoxRead,
-    store::Store, tmp_file::TmpDir,
+    ffmpeg::FfMpegError,
+    formats::InternalVideoFormat,
+    process::{Process, ProcessRead},
+    read::BoxRead,
+    store::Store,
+    tmp_file::TmpDir,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -53,7 +59,7 @@ pub(super) async fn thumbnail<S: Store>(
     input_format: InternalVideoFormat,
     format: ThumbnailFormat,
     timeout: u64,
-) -> Result<BoxRead<'static>, FfMpegError> {
+) -> Result<ProcessRead, FfMpegError> {
     let input_file = tmp_dir.tmp_file(Some(input_format.file_extension()));
     crate::store::file_store::safe_create_parent(&input_file)
         .await
@@ -108,7 +114,13 @@ pub(super) async fn thumbnail<S: Store>(
         .await
         .map_err(FfMpegError::ReadFile)?;
     let reader = tokio_util::io::StreamReader::new(stream);
-    let clean_reader = output_file.reader(reader);
 
-    Ok(Box::pin(clean_reader))
+    let reader = ProcessRead::new(
+        Box::pin(reader),
+        Arc::from(String::from("ffmpeg")),
+        Uuid::now_v7(),
+    )
+    .add_extras(output_file);
+
+    Ok(reader)
 }

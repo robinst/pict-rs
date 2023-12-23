@@ -5,9 +5,9 @@ use actix_web::web::Bytes;
 use crate::{
     formats::{AnimationFormat, ImageFormat},
     magick::{MagickError, MAGICK_TEMPORARY_PATH},
-    process::Process,
+    process::{Process, ProcessRead},
     read::BoxRead,
-    tmp_file::TmpDir,
+    tmp_file::{TmpDir, TmpFile, TmpFolder},
 };
 
 pub(super) async fn convert_image(
@@ -17,7 +17,7 @@ pub(super) async fn convert_image(
     quality: Option<u8>,
     timeout: u64,
     bytes: Bytes,
-) -> Result<BoxRead<'static>, MagickError> {
+) -> Result<ProcessRead, MagickError> {
     convert(
         tmp_dir,
         input.magick_format(),
@@ -37,7 +37,7 @@ pub(super) async fn convert_animation(
     quality: Option<u8>,
     timeout: u64,
     bytes: Bytes,
-) -> Result<BoxRead<'static>, MagickError> {
+) -> Result<ProcessRead, MagickError> {
     convert(
         tmp_dir,
         input.magick_format(),
@@ -58,7 +58,7 @@ async fn convert(
     quality: Option<u8>,
     timeout: u64,
     bytes: Bytes,
-) -> Result<BoxRead<'static>, MagickError> {
+) -> Result<ProcessRead, MagickError> {
     let temporary_path = tmp_dir
         .tmp_folder()
         .await
@@ -101,8 +101,7 @@ async fn convert(
 
     let reader = Process::run("magick", &args, &envs, timeout)?.read();
 
-    let clean_reader = input_file.reader(reader);
-    let clean_reader = temporary_path.reader(clean_reader);
+    let clean_reader = reader.add_extras(input_file).add_extras(temporary_path);
 
-    Ok(Box::pin(clean_reader))
+    Ok(clean_reader)
 }

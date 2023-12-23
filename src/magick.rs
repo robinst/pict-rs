@@ -3,7 +3,7 @@ use std::{ffi::OsStr, sync::Arc};
 use crate::{
     error_code::ErrorCode,
     formats::ProcessableFormat,
-    process::{Process, ProcessError},
+    process::{Process, ProcessError, ProcessRead},
     read::BoxRead,
     store::Store,
     tmp_file::TmpDir,
@@ -96,7 +96,7 @@ async fn process_image<F, Fut>(
     quality: Option<u8>,
     timeout: u64,
     write_file: F,
-) -> Result<BoxRead<'static>, MagickError>
+) -> Result<ProcessRead, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
@@ -144,12 +144,12 @@ where
 
     let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
 
-    let reader = Process::run("magick", &args, &envs, timeout)?.read();
+    let reader = Process::run("magick", &args, &envs, timeout)?
+        .read()
+        .add_extras(input_file)
+        .add_extras(temporary_path);
 
-    let clean_reader = input_file.reader(reader);
-    let clean_reader = temporary_path.reader(clean_reader);
-
-    Ok(Box::pin(clean_reader))
+    Ok(reader)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -162,7 +162,7 @@ pub(crate) async fn process_image_store_read<S: Store + 'static>(
     format: ProcessableFormat,
     quality: Option<u8>,
     timeout: u64,
-) -> Result<BoxRead<'static>, MagickError> {
+) -> Result<ProcessRead, MagickError> {
     let stream = store
         .to_stream(identifier, None, None)
         .await
@@ -194,7 +194,7 @@ pub(crate) async fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
     format: ProcessableFormat,
     quality: Option<u8>,
     timeout: u64,
-) -> Result<BoxRead<'static>, MagickError> {
+) -> Result<ProcessRead, MagickError> {
     process_image(
         tmp_dir,
         args,
@@ -207,6 +207,38 @@ pub(crate) async fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
                 .write_from_async_read(async_read)
                 .await
                 .map_err(MagickError::Write)?;
+            Ok(tmp_file)
+        },
+    )
+    .await
+}
+
+pub(crate) async fn process_image_process_read(
+    tmp_dir: &TmpDir,
+    process_read: ProcessRead,
+    args: Vec<String>,
+    input_format: ProcessableFormat,
+    format: ProcessableFormat,
+    quality: Option<u8>,
+    timeout: u64,
+) -> Result<ProcessRead, MagickError> {
+    process_image(
+        tmp_dir,
+        args,
+        input_format,
+        format,
+        quality,
+        timeout,
+        |mut tmp_file| async move {
+            process_read
+                .with_stdout(|stdout| async {
+                    tmp_file
+                        .write_from_async_read(stdout)
+                        .await
+                        .map_err(MagickError::Write)
+                })
+                .await??;
+
             Ok(tmp_file)
         },
     )

@@ -10,6 +10,7 @@ use crate::{
         AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InputVideoFormat,
         InternalFormat, Validations,
     },
+    process::ProcessRead,
     read::BoxRead,
     tmp_file::TmpDir,
 };
@@ -61,7 +62,7 @@ pub(crate) async fn validate_bytes(
     bytes: Bytes,
     validations: Validations<'_>,
     timeout: u64,
-) -> Result<(InternalFormat, BoxRead<'static>), Error> {
+) -> Result<(InternalFormat, ProcessRead), Error> {
     if bytes.is_empty() {
         return Err(ValidationError::Empty.into());
     }
@@ -75,7 +76,7 @@ pub(crate) async fn validate_bytes(
 
     match &input {
         InputFile::Image(input) => {
-            let (format, read) = process_image(
+            let (format, process_read) = process_image(
                 tmp_dir,
                 bytes,
                 *input,
@@ -86,10 +87,10 @@ pub(crate) async fn validate_bytes(
             )
             .await?;
 
-            Ok((format, read))
+            Ok((format, process_read))
         }
         InputFile::Animation(input) => {
-            let (format, read) = process_animation(
+            let (format, process_read) = process_animation(
                 tmp_dir,
                 bytes,
                 *input,
@@ -101,10 +102,10 @@ pub(crate) async fn validate_bytes(
             )
             .await?;
 
-            Ok((format, read))
+            Ok((format, process_read))
         }
         InputFile::Video(input) => {
-            let (format, read) = process_video(
+            let (format, process_read) = process_video(
                 tmp_dir,
                 bytes,
                 *input,
@@ -116,7 +117,7 @@ pub(crate) async fn validate_bytes(
             )
             .await?;
 
-            Ok((format, read))
+            Ok((format, process_read))
         }
     }
 }
@@ -130,7 +131,7 @@ async fn process_image(
     height: u16,
     validations: &crate::config::Image,
     timeout: u64,
-) -> Result<(InternalFormat, BoxRead<'static>), Error> {
+) -> Result<(InternalFormat, ProcessRead), Error> {
     if width > validations.max_width {
         return Err(ValidationError::Width.into());
     }
@@ -149,7 +150,7 @@ async fn process_image(
         needs_transcode,
     } = input.build_output(validations.format);
 
-    let read = if needs_transcode {
+    let process_read = if needs_transcode {
         let quality = validations.quality_for(format);
 
         magick::convert_image(tmp_dir, input.format, format, quality, timeout, bytes).await?
@@ -157,7 +158,7 @@ async fn process_image(
         exiftool::clear_metadata_bytes_read(bytes, timeout)?
     };
 
-    Ok((InternalFormat::Image(format), read))
+    Ok((InternalFormat::Image(format), process_read))
 }
 
 fn validate_animation(
@@ -197,7 +198,7 @@ async fn process_animation(
     frames: u32,
     validations: &crate::config::Animation,
     timeout: u64,
-) -> Result<(InternalFormat, BoxRead<'static>), Error> {
+) -> Result<(InternalFormat, ProcessRead), Error> {
     validate_animation(bytes.len(), width, height, frames, validations)?;
 
     let AnimationOutput {
@@ -205,7 +206,7 @@ async fn process_animation(
         needs_transcode,
     } = input.build_output(validations.format);
 
-    let read = if needs_transcode {
+    let process_read = if needs_transcode {
         let quality = validations.quality_for(format);
 
         magick::convert_animation(tmp_dir, input, format, quality, timeout, bytes).await?
@@ -213,7 +214,7 @@ async fn process_animation(
         exiftool::clear_metadata_bytes_read(bytes, timeout)?
     };
 
-    Ok((InternalFormat::Animation(format), read))
+    Ok((InternalFormat::Animation(format), process_read))
 }
 
 fn validate_video(
@@ -256,7 +257,7 @@ async fn process_video(
     frames: u32,
     validations: &crate::config::Video,
     timeout: u64,
-) -> Result<(InternalFormat, BoxRead<'static>), Error> {
+) -> Result<(InternalFormat, ProcessRead), Error> {
     validate_video(bytes.len(), width, height, frames, validations)?;
 
     let output = input.build_output(
@@ -267,7 +268,10 @@ async fn process_video(
 
     let crf = validations.crf_for(width, height);
 
-    let read = ffmpeg::transcode_bytes(tmp_dir, input, output, crf, timeout, bytes).await?;
+    let process_read = ffmpeg::transcode_bytes(tmp_dir, input, output, crf, timeout, bytes).await?;
 
-    Ok((InternalFormat::Video(output.format.internal_format()), read))
+    Ok((
+        InternalFormat::Video(output.format.internal_format()),
+        process_read,
+    ))
 }

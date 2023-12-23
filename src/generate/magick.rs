@@ -3,7 +3,7 @@ use std::{ffi::OsStr, sync::Arc};
 use crate::{
     formats::ProcessableFormat,
     magick::{MagickError, MAGICK_TEMPORARY_PATH},
-    process::Process,
+    process::{Process, ProcessRead},
     read::BoxRead,
     store::Store,
     tmp_file::TmpDir,
@@ -16,7 +16,7 @@ async fn thumbnail_animation<F, Fut>(
     quality: Option<u8>,
     timeout: u64,
     write_file: F,
-) -> Result<BoxRead<'static>, MagickError>
+) -> Result<ProcessRead, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
@@ -60,12 +60,12 @@ where
 
     let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
 
-    let reader = Process::run("magick", &args, &envs, timeout)?.read();
+    let reader = Process::run("magick", &args, &envs, timeout)?
+        .read()
+        .add_extras(input_file)
+        .add_extras(temporary_path);
 
-    let clean_reader = input_file.reader(reader);
-    let clean_reader = temporary_path.reader(clean_reader);
-
-    Ok(Box::pin(clean_reader))
+    Ok(reader)
 }
 
 pub(super) async fn thumbnail<S: Store + 'static>(
@@ -76,7 +76,7 @@ pub(super) async fn thumbnail<S: Store + 'static>(
     format: ProcessableFormat,
     quality: Option<u8>,
     timeout: u64,
-) -> Result<BoxRead<'static>, MagickError> {
+) -> Result<ProcessRead, MagickError> {
     let stream = store
         .to_stream(identifier, None, None)
         .await

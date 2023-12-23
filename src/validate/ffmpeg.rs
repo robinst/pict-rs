@@ -1,11 +1,12 @@
-use std::ffi::OsStr;
+use std::{ffi::OsStr, sync::Arc};
 
 use actix_web::web::Bytes;
+use uuid::Uuid;
 
 use crate::{
     ffmpeg::FfMpegError,
     formats::{InputVideoFormat, OutputVideo},
-    process::Process,
+    process::{Process, ProcessRead},
     read::BoxRead,
     tmp_file::TmpDir,
 };
@@ -17,7 +18,7 @@ pub(super) async fn transcode_bytes(
     crf: u8,
     timeout: u64,
     bytes: Bytes,
-) -> Result<BoxRead<'static>, FfMpegError> {
+) -> Result<ProcessRead, FfMpegError> {
     let input_file = tmp_dir.tmp_file(None);
     crate::store::file_store::safe_create_parent(&input_file)
         .await
@@ -52,9 +53,15 @@ pub(super) async fn transcode_bytes(
         .await
         .map_err(FfMpegError::ReadFile)?;
     let reader = tokio_util::io::StreamReader::new(stream);
-    let clean_reader = output_file.reader(reader);
 
-    Ok(Box::pin(clean_reader))
+    let process_read = ProcessRead::new(
+        Box::pin(reader),
+        Arc::from(String::from("ffmpeg")),
+        Uuid::now_v7(),
+    )
+    .add_extras(output_file);
+
+    Ok(process_read)
 }
 
 async fn transcode_files(

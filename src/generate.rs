@@ -135,7 +135,7 @@ async fn process<S: Store + 'static>(
         ProcessableFormat::Animation(format) => config.media.animation.quality_for(format),
     };
 
-    let mut processed_reader = crate::magick::process_image_store_read(
+    let vec = crate::magick::process_image_store_read(
         tmp_dir,
         store,
         &identifier,
@@ -145,13 +145,11 @@ async fn process<S: Store + 'static>(
         quality,
         config.media.process_timeout,
     )
+    .await?
+    .to_vec()
+    .instrument(tracing::info_span!("Reading processed image to vec"))
     .await?;
 
-    let mut vec = Vec::new();
-    processed_reader
-        .read_to_end(&mut vec)
-        .instrument(tracing::info_span!("Reading processed image to vec"))
-        .await?;
     let bytes = Bytes::from(vec);
 
     drop(permit);
@@ -254,7 +252,9 @@ where
             (reader, thumbnail_format.media_type())
         };
 
-        let motion_identifier = store.save_async_read(reader, media_type).await?;
+        let motion_identifier = reader
+            .with_stdout(|mut stdout| async { store.save_async_read(stdout, media_type).await })
+            .await??;
 
         repo.relate_motion_identifier(hash, &motion_identifier)
             .await?;

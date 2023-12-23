@@ -42,14 +42,10 @@ pub(super) async fn check_reorient(
 
 #[tracing::instrument(level = "trace", skip_all)]
 async fn needs_reorienting(input: Bytes, timeout: u64) -> Result<bool, ExifError> {
-    let process = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?;
-    let mut reader = process.bytes_read(input);
-
-    let mut buf = String::new();
-    reader
-        .read_to_string(&mut buf)
-        .await
-        .map_err(ExifError::Read)?;
+    let buf = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?
+        .bytes_read(input)
+        .to_string()
+        .await?;
 
     Ok(!buf.is_empty())
 }

@@ -1,6 +1,6 @@
 use crate::{
     error_code::ErrorCode,
-    process::{Process, ProcessError},
+    process::{Process, ProcessError, ProcessRead},
 };
 use actix_web::web::Bytes;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -45,14 +45,10 @@ impl ExifError {
 
 #[tracing::instrument(level = "trace", skip(input))]
 pub(crate) async fn needs_reorienting(timeout: u64, input: Bytes) -> Result<bool, ExifError> {
-    let process = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?;
-    let mut reader = process.bytes_read(input);
-
-    let mut buf = String::new();
-    reader
-        .read_to_string(&mut buf)
-        .await
-        .map_err(ExifError::Read)?;
+    let buf = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?
+        .bytes_read(input)
+        .to_string()
+        .await?;
 
     Ok(!buf.is_empty())
 }
@@ -61,7 +57,7 @@ pub(crate) async fn needs_reorienting(timeout: u64, input: Bytes) -> Result<bool
 pub(crate) fn clear_metadata_bytes_read(
     timeout: u64,
     input: Bytes,
-) -> Result<impl AsyncRead + Unpin, ExifError> {
+) -> Result<ProcessRead, ExifError> {
     let process = Process::run("exiftool", &["-all=", "-", "-out", "-"], &[], timeout)?;
 
     Ok(process.bytes_read(input))
