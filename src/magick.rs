@@ -23,9 +23,6 @@ pub(crate) enum MagickError {
     #[error("Invalid output format")]
     Json(#[source] serde_json::Error),
 
-    #[error("Error reading bytes")]
-    Read(#[source] std::io::Error),
-
     #[error("Error writing bytes")]
     Write(#[source] std::io::Error),
 
@@ -67,7 +64,6 @@ impl MagickError {
             Self::Store(e) => e.error_code(),
             Self::Process(e) => e.error_code(),
             Self::Json(_)
-            | Self::Read(_)
             | Self::Write(_)
             | Self::CreateFile(_)
             | Self::CreateDir(_)
@@ -177,33 +173,6 @@ pub(crate) async fn process_image_store_read<S: Store + 'static>(
         |mut tmp_file| async move {
             tmp_file
                 .write_from_stream(stream)
-                .await
-                .map_err(MagickError::Write)?;
-            Ok(tmp_file)
-        },
-    )
-    .await
-}
-
-pub(crate) async fn process_image_async_read<A: AsyncRead + Unpin + 'static>(
-    tmp_dir: &TmpDir,
-    async_read: A,
-    args: Vec<String>,
-    input_format: ProcessableFormat,
-    format: ProcessableFormat,
-    quality: Option<u8>,
-    timeout: u64,
-) -> Result<ProcessRead, MagickError> {
-    process_image(
-        tmp_dir,
-        args,
-        input_format,
-        format,
-        quality,
-        timeout,
-        |mut tmp_file| async move {
-            tmp_file
-                .write_from_async_read(async_read)
                 .await
                 .map_err(MagickError::Write)?;
             Ok(tmp_file)

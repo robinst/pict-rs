@@ -5,9 +5,6 @@ pub(crate) enum FfMpegError {
     #[error("Error in ffmpeg process")]
     Process(#[source] ProcessError),
 
-    #[error("Error reading output")]
-    Read(#[source] std::io::Error),
-
     #[error("Error writing bytes")]
     Write(#[source] std::io::Error),
 
@@ -51,8 +48,7 @@ impl FfMpegError {
             Self::CommandFailed(_) => ErrorCode::COMMAND_FAILURE,
             Self::Store(s) => s.error_code(),
             Self::Process(e) => e.error_code(),
-            Self::Read(_)
-            | Self::Write(_)
+            Self::Write(_)
             | Self::Json(_)
             | Self::CreateDir(_)
             | Self::ReadFile(_)

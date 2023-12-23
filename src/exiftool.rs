@@ -9,9 +9,6 @@ pub(crate) enum ExifError {
     #[error("Error in process")]
     Process(#[source] ProcessError),
 
-    #[error("Error reading process output")]
-    Read(#[source] std::io::Error),
-
     #[error("Invalid media file provided")]
     CommandFailed(ProcessError),
 }
@@ -29,16 +26,15 @@ impl ExifError {
     pub(crate) const fn error_code(&self) -> ErrorCode {
         match self {
             Self::Process(e) => e.error_code(),
-            Self::Read(_) => ErrorCode::COMMAND_ERROR,
             Self::CommandFailed(_) => ErrorCode::COMMAND_FAILURE,
         }
     }
     pub(crate) fn is_client_error(&self) -> bool {
         // if exiftool bails we probably have bad input
-        matches!(
-            self,
-            Self::CommandFailed(_) | Self::Process(ProcessError::Timeout(_))
-        )
+        match self {
+            Self::CommandFailed(_) => true,
+            Self::Process(e) => e.is_client_error(),
+        }
     }
 }
 

@@ -67,15 +67,6 @@ impl Drop for TmpDir {
 #[must_use]
 pub(crate) struct TmpFolder(Arc<Path>);
 
-impl TmpFolder {
-    pub(crate) fn reader<R: AsyncRead>(self, reader: R) -> TmpFolderCleanup<R> {
-        TmpFolderCleanup {
-            inner: reader,
-            folder: self,
-        }
-    }
-}
-
 impl AsRef<Path> for TmpFolder {
     fn as_ref(&self) -> &Path {
         &self.0
@@ -102,15 +93,6 @@ impl Drop for TmpFolder {
 #[must_use]
 pub(crate) struct TmpFile(Arc<Path>);
 
-impl TmpFile {
-    pub(crate) fn reader<R: AsyncRead>(self, reader: R) -> TmpFileCleanup<R> {
-        TmpFileCleanup {
-            inner: reader,
-            file: self,
-        }
-    }
-}
-
 impl AsRef<Path> for TmpFile {
     fn as_ref(&self) -> &Path {
         &self.0
@@ -128,47 +110,5 @@ impl Deref for TmpFile {
 impl Drop for TmpFile {
     fn drop(&mut self) {
         crate::sync::spawn("remove-tmpfile", tokio::fs::remove_file(self.0.clone()));
-    }
-}
-
-pin_project_lite::pin_project! {
-    pub(crate) struct TmpFileCleanup<R> {
-        #[pin]
-        inner: R,
-
-        file: TmpFile,
-    }
-}
-
-pin_project_lite::pin_project! {
-    pub(crate) struct TmpFolderCleanup<R> {
-        #[pin]
-        inner: R,
-
-        folder: TmpFolder,
-    }
-}
-
-impl<R: AsyncRead> AsyncRead for TmpFileCleanup<R> {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        let this = self.as_mut().project();
-
-        this.inner.poll_read(cx, buf)
-    }
-}
-
-impl<R: AsyncRead> AsyncRead for TmpFolderCleanup<R> {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        let this = self.as_mut().project();
-
-        this.inner.poll_read(cx, buf)
     }
 }
