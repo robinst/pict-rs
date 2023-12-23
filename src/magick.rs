@@ -1,14 +1,14 @@
-use std::{ffi::OsStr, sync::Arc};
+use std::ffi::OsStr;
+
+use actix_web::web::Bytes;
 
 use crate::{
     error_code::ErrorCode,
     formats::ProcessableFormat,
     process::{Process, ProcessError, ProcessRead},
-    store::Store,
+    stream::LocalBoxStream,
     tmp_file::TmpDir,
 };
-
-
 
 pub(crate) const MAGICK_TEMPORARY_PATH: &str = "MAGICK_TEMPORARY_PATH";
 
@@ -16,9 +16,6 @@ pub(crate) const MAGICK_TEMPORARY_PATH: &str = "MAGICK_TEMPORARY_PATH";
 pub(crate) enum MagickError {
     #[error("Error in imagemagick process")]
     Process(#[source] ProcessError),
-
-    #[error("Error in store")]
-    Store(#[source] crate::store::StoreError),
 
     #[error("Invalid output format")]
     Json(#[source] serde_json::Error),
@@ -44,6 +41,9 @@ pub(crate) enum MagickError {
     #[error("Invalid media file provided")]
     CommandFailed(ProcessError),
 
+    #[error("Error cleaning up after command")]
+    Cleanup(#[source] std::io::Error),
+
     #[error("Command output is empty")]
     Empty,
 }
@@ -61,7 +61,6 @@ impl MagickError {
     pub(crate) const fn error_code(&self) -> ErrorCode {
         match self {
             Self::CommandFailed(_) => ErrorCode::COMMAND_FAILURE,
-            Self::Store(e) => e.error_code(),
             Self::Process(e) => e.error_code(),
             Self::Json(_)
             | Self::Write(_)
@@ -70,6 +69,7 @@ impl MagickError {
             | Self::CreateTemporaryDirectory(_)
             | Self::CloseFile(_)
             | Self::Discover(_)
+            | Self::Cleanup(_)
             | Self::Empty => ErrorCode::COMMAND_ERROR,
         }
     }
@@ -148,21 +148,15 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn process_image_store_read<S: Store + 'static>(
+pub(crate) async fn process_image_stream_read(
     tmp_dir: &TmpDir,
-    store: &S,
-    identifier: &Arc<str>,
+    stream: LocalBoxStream<'static, std::io::Result<Bytes>>,
     args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
     timeout: u64,
 ) -> Result<ProcessRead, MagickError> {
-    let stream = store
-        .to_stream(identifier, None, None)
-        .await
-        .map_err(MagickError::Store)?;
-
     process_image(
         tmp_dir,
         args,

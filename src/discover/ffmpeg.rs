@@ -229,10 +229,10 @@ where
         timeout,
     )?
     .read()
-    .to_vec()
+    .into_vec()
     .await?;
 
-    drop(input_file);
+    input_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
 
     let output: FfMpegDiscovery = serde_json::from_slice(&output).map_err(FfMpegError::Json)?;
 
@@ -273,7 +273,7 @@ async fn alpha_pixel_formats(timeout: u64) -> Result<HashSet<String>, FfMpegErro
         timeout,
     )?
     .read()
-    .to_vec()
+    .into_vec()
     .await?;
 
     let formats: PixelFormatOutput = serde_json::from_slice(&output).map_err(FfMpegError::Json)?;

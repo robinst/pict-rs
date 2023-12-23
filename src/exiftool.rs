@@ -42,7 +42,7 @@ impl ExifError {
 pub(crate) async fn needs_reorienting(timeout: u64, input: Bytes) -> Result<bool, ExifError> {
     let buf = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?
         .bytes_read(input)
-        .to_string()
+        .into_string()
         .await?;
 
     Ok(!buf.is_empty())

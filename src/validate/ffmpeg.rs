@@ -44,6 +44,8 @@ pub(super) async fn transcode_bytes(
     )
     .await?;
 
+    input_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
+
     let tmp_two = crate::file::File::open(&output_file)
         .await
         .map_err(FfMpegError::OpenFile)?;

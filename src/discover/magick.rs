@@ -129,11 +129,14 @@ where
         timeout,
     )?
     .read()
-    .to_string()
+    .into_string()
     .await?;
 
-    drop(input_file);
-    drop(temporary_path);
+    input_file.cleanup().await.map_err(MagickError::Cleanup)?;
+    temporary_path
+        .cleanup()
+        .await
+        .map_err(MagickError::Cleanup)?;
 
     if output.is_empty() {
         return Err(MagickError::Empty);
@@ -192,11 +195,14 @@ where
         timeout,
     )?
     .read()
-    .to_vec()
+    .into_vec()
     .await?;
 
-    drop(input_file);
-    drop(temporary_path);
+    input_file.cleanup().await.map_err(MagickError::Cleanup)?;
+    temporary_path
+        .cleanup()
+        .await
+        .map_err(MagickError::Cleanup)?;
 
     if output.is_empty() {
         return Err(MagickError::Empty);

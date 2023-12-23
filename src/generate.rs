@@ -135,10 +135,11 @@ async fn process<S: Store + 'static>(
         ProcessableFormat::Animation(format) => config.media.animation.quality_for(format),
     };
 
-    let vec = crate::magick::process_image_store_read(
+    let stream = store.to_stream(&identifier, None, None).await?;
+
+    let vec = crate::magick::process_image_stream_read(
         tmp_dir,
-        store,
-        &identifier,
+        stream,
         thumbnail_args,
         input_format,
         format,
@@ -146,7 +147,7 @@ async fn process<S: Store + 'static>(
         config.media.process_timeout,
     )
     .await?
-    .to_vec()
+    .into_vec()
     .instrument(tracing::info_span!("Reading processed image to vec"))
     .await?;
 
@@ -216,10 +217,11 @@ where
         {
             let thumbnail_format = media.image.format.unwrap_or(ImageFormat::Webp);
 
+            let stream = store.to_stream(&identifier, None, None).await?;
+
             let reader = magick::thumbnail(
                 tmp_dir,
-                store,
-                &identifier,
+                stream,
                 processable_format,
                 ProcessableFormat::Image(thumbnail_format),
                 media.image.quality_for(thumbnail_format),

@@ -1,6 +1,5 @@
 use actix_web::web::Bytes;
 use std::{
-    any::Any,
     ffi::OsStr,
     future::Future,
     process::{ExitStatus, Stdio},
@@ -72,12 +71,36 @@ impl std::fmt::Debug for Process {
     }
 }
 
+#[async_trait::async_trait(?Send)]
+pub(crate) trait Extras {
+    async fn consume(&mut self) -> std::io::Result<()>;
+}
+
+#[async_trait::async_trait(?Send)]
+impl Extras for () {
+    async fn consume(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl<T> Extras for (Box<dyn Extras>, T)
+where
+    T: Extras,
+{
+    async fn consume(&mut self) -> std::io::Result<()> {
+        let (res1, res2) = tokio::join!(self.0.consume(), self.1.consume());
+        res1?;
+        res2
+    }
+}
+
 pub(crate) struct ProcessRead {
     reader: BoxRead<'static>,
     handle: LocalBoxFuture<'static, Result<(), ProcessError>>,
     command: Arc<str>,
     id: Uuid,
-    extras: Box<dyn Any>,
+    extras: Box<dyn Extras>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -100,6 +123,9 @@ pub(crate) enum ProcessError {
     #[error("Failed to read stdout for {0}")]
     Read(Arc<str>, #[source] std::io::Error),
 
+    #[error("Failed to cleanup for command {0}")]
+    Cleanup(Arc<str>, #[source] std::io::Error),
+
     #[error("Unknown process error")]
     Other(#[source] std::io::Error),
 }
@@ -109,7 +135,9 @@ impl ProcessError {
         match self {
             Self::NotFound(_) => ErrorCode::COMMAND_NOT_FOUND,
             Self::PermissionDenied(_) => ErrorCode::COMMAND_PERMISSION_DENIED,
-            Self::LimitReached | Self::Read(_, _) | Self::Other(_) => ErrorCode::COMMAND_ERROR,
+            Self::LimitReached | Self::Read(_, _) | Self::Cleanup(_, _) | Self::Other(_) => {
+                ErrorCode::COMMAND_ERROR
+            }
             Self::Timeout(_) => ErrorCode::COMMAND_TIMEOUT,
             Self::Status(_, _) => ErrorCode::COMMAND_FAILURE,
         }
@@ -276,7 +304,7 @@ impl ProcessRead {
         }
     }
 
-    pub(crate) async fn to_vec(self) -> Result<Vec<u8>, ProcessError> {
+    pub(crate) async fn into_vec(self) -> Result<Vec<u8>, ProcessError> {
         let cmd = self.command.clone();
 
         self.with_stdout(move |mut stdout| async move {
@@ -291,7 +319,7 @@ impl ProcessRead {
         .await?
     }
 
-    pub(crate) async fn to_string(self) -> Result<String, ProcessError> {
+    pub(crate) async fn into_string(self) -> Result<String, ProcessError> {
         let cmd = self.command.clone();
 
         self.with_stdout(move |mut stdout| async move {
@@ -318,21 +346,25 @@ impl ProcessRead {
             handle,
             command,
             id,
-            extras,
+            mut extras,
         } = self;
 
         let (out, res) = tokio::join!(
             (f)(reader).instrument(tracing::info_span!("cmd-reader", %command, %id)),
             handle.instrument(tracing::info_span!("cmd-handle", %command, %id))
         );
-        res?;
 
-        drop(extras);
+        extras
+            .consume()
+            .await
+            .map_err(|e| ProcessError::Cleanup(command, e))?;
+
+        res?;
 
         Ok(out)
     }
 
-    pub(crate) fn add_extras<Extras: 'static>(self, more_extras: Extras) -> ProcessRead {
+    pub(crate) fn add_extras<E: Extras + 'static>(self, more_extras: E) -> ProcessRead {
         let Self {
             reader,
             handle,

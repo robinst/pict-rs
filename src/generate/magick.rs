@@ -1,10 +1,12 @@
-use std::{ffi::OsStr, sync::Arc};
+use std::ffi::OsStr;
+
+use actix_web::web::Bytes;
 
 use crate::{
     formats::ProcessableFormat,
     magick::{MagickError, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
-    store::Store,
+    stream::LocalBoxStream,
     tmp_file::TmpDir,
 };
 
@@ -67,20 +69,14 @@ where
     Ok(reader)
 }
 
-pub(super) async fn thumbnail<S: Store + 'static>(
+pub(super) async fn thumbnail(
     tmp_dir: &TmpDir,
-    store: &S,
-    identifier: &Arc<str>,
+    stream: LocalBoxStream<'static, std::io::Result<Bytes>>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
     timeout: u64,
 ) -> Result<ProcessRead, MagickError> {
-    let stream = store
-        .to_stream(identifier, None, None)
-        .await
-        .map_err(MagickError::Store)?;
-
     thumbnail_animation(
         tmp_dir,
         input_format,

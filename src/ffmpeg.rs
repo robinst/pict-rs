@@ -26,6 +26,9 @@ pub(crate) enum FfMpegError {
     #[error("Error closing file")]
     CloseFile(#[source] std::io::Error),
 
+    #[error("Error cleaning up after command")]
+    Cleanup(#[source] std::io::Error),
+
     #[error("Error in store")]
     Store(#[source] StoreError),
 
@@ -53,6 +56,7 @@ impl FfMpegError {
             | Self::CreateDir(_)
             | Self::ReadFile(_)
             | Self::OpenFile(_)
+            | Self::Cleanup(_)
             | Self::CreateFile(_)
             | Self::CloseFile(_) => ErrorCode::COMMAND_ERROR,
         }
