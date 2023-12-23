@@ -57,7 +57,8 @@ impl TmpDir {
 
 impl Drop for TmpDir {
     fn drop(&mut self) {
-        if let Some(path) = self.path.as_ref() {
+        if let Some(path) = self.path.take() {
+            tracing::warn!("TmpDir - Blocking remove of {path:?}");
             std::fs::remove_dir_all(path).expect("Removed directory");
         }
     }
@@ -98,7 +99,10 @@ impl Deref for TmpFolder {
 impl Drop for TmpFolder {
     fn drop(&mut self) {
         if let Some(path) = self.0.take() {
-            let _ = std::fs::remove_dir_all(path);
+            tracing::warn!("TmpFolder - Blocking remove of directory {path:?}");
+            if let Err(e) = std::fs::remove_dir_all(path) {
+                tracing::error!("Failed removing directory {e}");
+            }
         }
     }
 }
@@ -138,7 +142,10 @@ impl Deref for TmpFile {
 impl Drop for TmpFile {
     fn drop(&mut self) {
         if let Some(path) = self.0.take() {
-            let _ = std::fs::remove_file(path);
+            tracing::warn!("TmpFile - Blocking remove of file {path:?}");
+            if let Err(e) = std::fs::remove_file(path) {
+                tracing::error!("Failed removing file {e}");
+            }
         }
     }
 }
