@@ -102,8 +102,9 @@ pub(super) async fn thumbnail<S: Store>(
         timeout,
     )?;
 
-    process.wait().await?;
+    let res = process.wait().await;
     input_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
+    res?;
 
     let tmp_two = crate::file::File::open(&output_file)
         .await

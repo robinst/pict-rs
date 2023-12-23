@@ -117,7 +117,7 @@ where
 
     let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
 
-    let output = Process::run(
+    let res = Process::run(
         "magick",
         &[
             "convert".as_ref(),
@@ -130,13 +130,15 @@ where
     )?
     .read()
     .into_string()
-    .await?;
+    .await;
 
     input_file.cleanup().await.map_err(MagickError::Cleanup)?;
     temporary_path
         .cleanup()
         .await
         .map_err(MagickError::Cleanup)?;
+
+    let output = res?;
 
     if output.is_empty() {
         return Err(MagickError::Empty);
@@ -183,7 +185,7 @@ where
 
     let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
 
-    let output = Process::run(
+    let res = Process::run(
         "magick",
         &[
             "convert".as_ref(),
@@ -196,13 +198,15 @@ where
     )?
     .read()
     .into_vec()
-    .await?;
+    .await;
 
     input_file.cleanup().await.map_err(MagickError::Cleanup)?;
     temporary_path
         .cleanup()
         .await
         .map_err(MagickError::Cleanup)?;
+
+    let output = res?;
 
     if output.is_empty() {
         return Err(MagickError::Empty);

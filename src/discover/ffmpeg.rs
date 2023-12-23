@@ -211,7 +211,7 @@ where
     let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
 
-    let output = Process::run(
+    let res = Process::run(
         "ffprobe",
         &[
             "-v".as_ref(),
@@ -230,9 +230,11 @@ where
     )?
     .read()
     .into_vec()
-    .await?;
+    .await;
 
     input_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
+
+    let output = res?;
 
     let output: FfMpegDiscovery = serde_json::from_slice(&output).map_err(FfMpegError::Json)?;
 
