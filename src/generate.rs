@@ -17,7 +17,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::io::AsyncReadExt;
+
 use tracing::Instrument;
 
 struct MetricsGuard {
@@ -253,7 +253,7 @@ where
         };
 
         let motion_identifier = reader
-            .with_stdout(|mut stdout| async { store.save_async_read(stdout, media_type).await })
+            .with_stdout(|stdout| async { store.save_async_read(stdout, media_type).await })
             .await??;
 
         repo.relate_motion_identifier(hash, &motion_identifier)

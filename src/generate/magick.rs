@@ -4,7 +4,6 @@ use crate::{
     formats::ProcessableFormat,
     magick::{MagickError, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
-    read::BoxRead,
     store::Store,
     tmp_file::TmpDir,
 };

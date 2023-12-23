@@ -4,7 +4,6 @@ use crate::{
     error_code::ErrorCode,
     formats::ProcessableFormat,
     process::{Process, ProcessError, ProcessRead},
-    read::BoxRead,
     store::Store,
     tmp_file::TmpDir,
 };

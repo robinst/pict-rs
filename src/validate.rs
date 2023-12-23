@@ -11,7 +11,6 @@ use crate::{
         InternalFormat, Validations,
     },
     process::ProcessRead,
-    read::BoxRead,
     tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;

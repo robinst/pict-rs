@@ -3,24 +3,18 @@ use std::{
     any::Any,
     ffi::OsStr,
     future::Future,
-    pin::Pin,
     process::{ExitStatus, Stdio},
-    sync::{
-        atomic::{AtomicU8, Ordering},
-        Arc, Mutex,
-    },
-    task::{Context, Poll, Wake, Waker},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf},
-    process::{Child, ChildStdin, ChildStdout, Command},
+    io::{AsyncReadExt, AsyncWriteExt},
+    process::{Child, ChildStdin, Command},
 };
-use tracing::{Instrument, Span};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::{
-    error::Error,
     error_code::ErrorCode,
     future::{LocalBoxFuture, WithTimeout},
     read::BoxRead,

@@ -6,7 +6,6 @@ use crate::{
     ffmpeg::FfMpegError,
     formats::InternalVideoFormat,
     process::{Process, ProcessRead},
-    read::BoxRead,
     store::Store,
     tmp_file::TmpDir,
 };

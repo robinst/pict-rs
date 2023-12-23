@@ -1,5 +1,4 @@
 use actix_web::web::Bytes;
-use tokio::io::AsyncReadExt;
 
 use crate::{
     exiftool::ExifError,

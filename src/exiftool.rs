@@ -3,7 +3,6 @@ use crate::{
     process::{Process, ProcessError, ProcessRead},
 };
 use actix_web::web::Bytes;
-use tokio::io::{AsyncRead, AsyncReadExt};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ExifError {

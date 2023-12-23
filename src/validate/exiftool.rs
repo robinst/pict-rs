@@ -3,7 +3,6 @@ use actix_web::web::Bytes;
 use crate::{
     exiftool::ExifError,
     process::{Process, ProcessRead},
-    read::BoxRead,
 };
 
 #[tracing::instrument(level = "trace", skip_all)]

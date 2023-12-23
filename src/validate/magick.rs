@@ -6,8 +6,7 @@ use crate::{
     formats::{AnimationFormat, ImageFormat},
     magick::{MagickError, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
-    read::BoxRead,
-    tmp_file::{TmpDir, TmpFile, TmpFolder},
+    tmp_file::TmpDir,
 };
 
 pub(super) async fn convert_image(
