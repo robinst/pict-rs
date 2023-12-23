@@ -4,7 +4,7 @@ FROM asonix/rust-runner:latest-linux-$REPO_ARCH
 
 USER root
 RUN \
-  apk add exiftool imagemagick ffmpeg && \
+  apk add exiftool imagemagick imagemagick-heic ffmpeg && \
   chown -R app:app /mnt
 
 COPY pict-rs /usr/local/bin/pict-rs
