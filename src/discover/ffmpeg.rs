@@ -13,7 +13,6 @@ use crate::{
     tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
-use tokio::io::AsyncReadExt;
 
 use super::Discovery;
 

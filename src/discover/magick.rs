@@ -2,7 +2,6 @@
 mod tests;
 
 use actix_web::web::Bytes;
-use tokio::io::AsyncReadExt;
 
 use crate::{
     discover::DiscoverError,
