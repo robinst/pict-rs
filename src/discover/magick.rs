@@ -189,7 +189,7 @@ where
         "magick",
         &[
             "convert".as_ref(),
-            "-ping".as_ref(),
+            // "-ping".as_ref(), // re-enable -ping after imagemagick fix
             input_file.as_os_str(),
             "JSON:".as_ref(),
         ],
@@ -197,7 +197,7 @@ where
         timeout,
     )?
     .read()
-    .into_vec()
+    .into_string()
     .await;
 
     input_file.cleanup().await.map_err(MagickError::Cleanup)?;
@@ -213,7 +213,7 @@ where
     }
 
     let output: Vec<MagickDiscovery> =
-        serde_json::from_slice(&output).map_err(MagickError::Json)?;
+        serde_json::from_str(&output).map_err(|e| MagickError::Json(output, e))?;
 
     parse_discovery(output).map_err(MagickError::Discover)
 }

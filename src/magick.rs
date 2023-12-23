@@ -17,8 +17,8 @@ pub(crate) enum MagickError {
     #[error("Error in imagemagick process")]
     Process(#[source] ProcessError),
 
-    #[error("Invalid output format")]
-    Json(#[source] serde_json::Error),
+    #[error("Invalid output format: {0}")]
+    Json(String, #[source] serde_json::Error),
 
     #[error("Error writing bytes")]
     Write(#[source] std::io::Error),
@@ -62,7 +62,7 @@ impl MagickError {
         match self {
             Self::CommandFailed(_) => ErrorCode::COMMAND_FAILURE,
             Self::Process(e) => e.error_code(),
-            Self::Json(_)
+            Self::Json(_, _)
             | Self::Write(_)
             | Self::CreateFile(_)
             | Self::CreateDir(_)
