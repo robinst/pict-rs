@@ -1121,7 +1121,7 @@ async fn details_query<S: Store + 'static>(
 }
 
 /// Fetch file details
-#[tracing::instrument(name = "Fetching details", skip(repo, store, config))]
+#[tracing::instrument(name = "Fetching details", skip(tmp_dir, repo, store, config))]
 async fn details<S: Store + 'static>(
     alias: web::Path<Serde<Alias>>,
     tmp_dir: web::Data<ArcTmpDir>,

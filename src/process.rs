@@ -223,8 +223,7 @@ impl Process {
             Ok(Ok(status)) => Err(ProcessError::Status(command, status)),
             Ok(Err(e)) => Err(ProcessError::Other(e)),
             Err(_) => {
-                child.kill().await.map_err(ProcessError::Other)?;
-
+                let _ = child.kill().await;
                 Err(ProcessError::Timeout(command))
             }
         }
@@ -268,19 +267,18 @@ impl Process {
                 child.wait().await
             };
 
-            let error = match child_fut.with_timeout(timeout).await {
+            match child_fut.with_timeout(timeout).await {
                 Ok(Ok(status)) if status.success() => {
                     guard.disarm();
-                    return Ok(());
+                    Ok(())
                 }
-                Ok(Ok(status)) => ProcessError::Status(command2, status),
-                Ok(Err(e)) => ProcessError::Other(e),
-                Err(_) => ProcessError::Timeout(command2),
-            };
-
-            child.kill().await.map_err(ProcessError::Other)?;
-
-            Err(error)
+                Ok(Ok(status)) => Err(ProcessError::Status(command2, status)),
+                Ok(Err(e)) => Err(ProcessError::Other(e)),
+                Err(_) => {
+                    child.kill().await.map_err(ProcessError::Other)?;
+                    Err(ProcessError::Timeout(command2))
+                }
+            }
         });
 
         ProcessRead {
