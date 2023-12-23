@@ -8,7 +8,7 @@ use crate::{
     tmp_file::TmpDir,
 };
 
-use tokio::io::AsyncRead;
+
 
 pub(crate) const MAGICK_TEMPORARY_PATH: &str = "MAGICK_TEMPORARY_PATH";
 
