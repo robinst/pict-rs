@@ -39,40 +39,7 @@ pub(super) async fn confirm_bytes(
 ) -> Result<Discovery, MagickError> {
     match discovery {
         Some(Discovery {
-            input: InputFile::Animation(AnimationFormat::Avif),
-            width,
-            height,
-            ..
-        }) => {
-            let frames = count_avif_frames(tmp_dir, timeout, move |mut file| async move {
-                file.write_from_bytes(bytes)
-                    .await
-                    .map_err(MagickError::Write)?;
-                Ok(file)
-            })
-            .await?;
-
-            if frames == 1 {
-                return Ok(Discovery {
-                    input: InputFile::Image(ImageInput {
-                        format: ImageFormat::Avif,
-                        needs_reorient: false,
-                    }),
-                    width,
-                    height,
-                    frames: None,
-                });
-            }
-
-            return Ok(Discovery {
-                input: InputFile::Animation(AnimationFormat::Avif),
-                width,
-                height,
-                frames: Some(frames),
-            });
-        }
-        Some(Discovery {
-            input: InputFile::Animation(AnimationFormat::Webp),
+            input: InputFile::Animation(AnimationFormat::Webp | AnimationFormat::Avif),
             ..
         }) => {
             // continue
@@ -91,70 +58,6 @@ pub(super) async fn confirm_bytes(
         Ok(file)
     })
     .await
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-async fn count_avif_frames<F, Fut>(tmp_dir: &TmpDir, timeout: u64, f: F) -> Result<u32, MagickError>
-where
-    F: FnOnce(crate::file::File) -> Fut,
-    Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
-{
-    let temporary_path = tmp_dir
-        .tmp_folder()
-        .await
-        .map_err(MagickError::CreateTemporaryDirectory)?;
-
-    let input_file = tmp_dir.tmp_file(None);
-    crate::store::file_store::safe_create_parent(&input_file)
-        .await
-        .map_err(MagickError::CreateDir)?;
-
-    let tmp_one = crate::file::File::create(&input_file)
-        .await
-        .map_err(MagickError::CreateFile)?;
-    let tmp_one = (f)(tmp_one).await?;
-    tmp_one.close().await.map_err(MagickError::CloseFile)?;
-
-    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
-
-    let res = Process::run(
-        "magick",
-        &[
-            "convert".as_ref(),
-            "-ping".as_ref(),
-            input_file.as_os_str(),
-            "INFO:".as_ref(),
-        ],
-        &envs,
-        timeout,
-    )?
-    .read()
-    .into_string()
-    .await;
-
-    input_file.cleanup().await.map_err(MagickError::Cleanup)?;
-    temporary_path
-        .cleanup()
-        .await
-        .map_err(MagickError::Cleanup)?;
-
-    let output = res?;
-
-    if output.is_empty() {
-        return Err(MagickError::Empty);
-    }
-
-    let lines: u32 = output
-        .lines()
-        .count()
-        .try_into()
-        .expect("Reasonable frame count");
-
-    if lines == 0 {
-        return Err(MagickError::Empty);
-    }
-
-    Ok(lines)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
