@@ -196,7 +196,7 @@ impl<S: Store + 'static> FormData for Upload<S> {
                     let client = client.clone();
                     let config = config.clone();
 
-                    metrics::increment_counter!("pict-rs.files", "upload" => "inline");
+                    metrics::counter!("pict-rs.files", "upload" => "inline").increment(1);
 
                     let span = tracing::info_span!("file-upload", ?filename);
 
@@ -268,7 +268,7 @@ impl<S: Store + 'static> FormData for Import<S> {
                     let client = client.clone();
                     let config = config.clone();
 
-                    metrics::increment_counter!("pict-rs.files", "import" => "inline");
+                    metrics::counter!("pict-rs.files", "import" => "inline").increment(1);
 
                     let span = tracing::info_span!("file-import", ?filename);
 
@@ -410,7 +410,7 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
                     let repo = (**repo).clone();
                     let store = (**store).clone();
 
-                    metrics::increment_counter!("pict-rs.files", "upload" => "background");
+                    metrics::counter!("pict-rs.files", "upload" => "background").increment(1);
 
                     let span = tracing::info_span!("file-proxy", ?filename);
 
@@ -500,7 +500,7 @@ async fn claim_upload<S: Store + 'static>(
         Ok(wait_res) => {
             let upload_result = wait_res?;
             repo.claim(upload_id).await?;
-            metrics::increment_counter!("pict-rs.background.upload.claim");
+            metrics::counter!("pict-rs.background.upload.claim").increment(1);
 
             match upload_result {
                 UploadResult::Success { alias, token } => {
@@ -607,7 +607,7 @@ async fn do_download_inline<S: Store + 'static>(
     client: &ClientWithMiddleware,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    metrics::increment_counter!("pict-rs.files", "download" => "inline");
+    metrics::counter!("pict-rs.files", "download" => "inline").increment(1);
 
     let (alias, delete_token, details) =
         ingest_inline(stream, tmp_dir, &repo, &store, client, &config).await?;
@@ -628,7 +628,7 @@ async fn do_download_backgrounded<S: Store + 'static>(
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
 ) -> Result<HttpResponse, Error> {
-    metrics::increment_counter!("pict-rs.files", "download" => "background");
+    metrics::counter!("pict-rs.files", "download" => "background").increment(1);
 
     let backgrounded = Backgrounded::proxy((**repo).clone(), (**store).clone(), stream).await?;
 

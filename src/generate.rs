@@ -27,7 +27,7 @@ struct MetricsGuard {
 
 impl MetricsGuard {
     fn guard() -> Self {
-        metrics::increment_counter!("pict-rs.generate.start");
+        metrics::counter!("pict-rs.generate.start").increment(1);
         Self {
             start: Instant::now(),
             armed: true,
@@ -41,8 +41,10 @@ impl MetricsGuard {
 
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
-        metrics::histogram!("pict-rs.generate.duration", self.start.elapsed().as_secs_f64(), "completed" => (!self.armed).to_string());
-        metrics::increment_counter!("pict-rs.generate.end", "completed" => (!self.armed).to_string());
+        metrics::histogram!("pict-rs.generate.duration", "completed" => (!self.armed).to_string())
+            .record(self.start.elapsed().as_secs_f64());
+        metrics::counter!("pict-rs.generate.end", "completed" => (!self.armed).to_string())
+            .increment(1);
     }
 }
 

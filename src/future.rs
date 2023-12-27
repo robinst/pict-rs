@@ -100,6 +100,7 @@ where
 
 impl Drop for Metrics {
     fn drop(&mut self) {
-        metrics::histogram!(self.name, self.start.elapsed().as_secs_f64(), "complete" => self.complete.to_string());
+        metrics::histogram!(self.name, "complete" => self.complete.to_string())
+            .record(self.start.elapsed().as_secs_f64());
     }
 }

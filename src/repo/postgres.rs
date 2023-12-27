@@ -182,11 +182,11 @@ impl PostgresRepo {
             .create_timeout(Some(Duration::from_secs(2)))
             .recycle_timeout(Some(Duration::from_secs(2)))
             .post_create(Hook::sync_fn(|_, _| {
-                metrics::increment_counter!("pict-rs.postgres.pool.connection.create");
+                metrics::counter!("pict-rs.postgres.pool.connection.create").increment(1);
                 Ok(())
             }))
             .post_recycle(Hook::sync_fn(|_, _| {
-                metrics::increment_counter!("pict-rs.postgres.pool.connection.recycle");
+                metrics::counter!("pict-rs.postgres.pool.connection.recycle").increment(1);
                 Ok(())
             }))
             .max_size(parallelism * 8)
@@ -238,8 +238,9 @@ impl GetConnectionMetricsGuard {
 
 impl Drop for GetConnectionMetricsGuard {
     fn drop(&mut self) {
-        metrics::increment_counter!("pict-rs.postgres.pool.get", "completed" => (!self.armed).to_string());
-        metrics::histogram!("pict-rs.postgres.pool.get.duration", self.start.elapsed().as_secs_f64(), "completed" => (!self.armed).to_string());
+        metrics::counter!("pict-rs.postgres.pool.get", "completed" => (!self.armed).to_string())
+            .increment(1);
+        metrics::histogram!("pict-rs.postgres.pool.get.duration", "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_secs_f64());
     }
 }
 
@@ -321,7 +322,7 @@ impl<'a> JobNotifierState<'a> {
             .or_insert_with(crate::sync::notify)
             .notify_one();
 
-        metrics::increment_counter!("pict-rs.postgres.job-notifier.notified", "queue" => queue_name.to_string());
+        metrics::counter!("pict-rs.postgres.job-notifier.notified", "queue" => queue_name.to_string()).increment(1);
     }
 }
 
@@ -339,7 +340,7 @@ impl<'a> UploadNotifierState<'a> {
             .and_then(|weak| weak.upgrade())
         {
             notifier.notify_waiters();
-            metrics::increment_counter!("pict-rs.postgres.upload-notifier.notified");
+            metrics::counter!("pict-rs.postgres.upload-notifier.notified").increment(1);
         }
     }
 }
@@ -363,7 +364,7 @@ async fn delegate_notifications(
     let upload_notifier_state = UploadNotifierState { inner: &inner };
 
     while let Ok(notification) = receiver.recv_async().await {
-        metrics::increment_counter!("pict-rs.postgres.notification");
+        metrics::counter!("pict-rs.postgres.notification").increment(1);
 
         match notification.channel() {
             "queue_status_channel" => {

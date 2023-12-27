@@ -233,7 +233,7 @@ struct MetricsGuard {
 
 impl MetricsGuard {
     fn guard(worker_id: uuid::Uuid, queue: &'static str) -> Self {
-        metrics::increment_counter!("pict-rs.job.start", "queue" => queue, "worker-id" => worker_id.to_string());
+        metrics::counter!("pict-rs.job.start", "queue" => queue, "worker-id" => worker_id.to_string()).increment(1);
 
         Self {
             worker_id,
@@ -250,8 +250,8 @@ impl MetricsGuard {
 
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
-        metrics::histogram!("pict-rs.job.duration", self.start.elapsed().as_secs_f64(), "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string());
-        metrics::increment_counter!("pict-rs.job.end", "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string());
+        metrics::histogram!("pict-rs.job.duration", "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_secs_f64());
+        metrics::counter!("pict-rs.job.end", "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string()).increment(1);
     }
 }
 

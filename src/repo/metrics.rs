@@ -55,20 +55,21 @@ impl WaitMetricsGuard {
 
 impl Drop for PushMetricsGuard {
     fn drop(&mut self) {
-        metrics::increment_counter!("pict-rs.queue.push", "completed" => (!self.armed).to_string(), "queue" => self.queue);
+        metrics::counter!("pict-rs.queue.push", "completed" => (!self.armed).to_string(), "queue" => self.queue).increment(1);
     }
 }
 
 impl Drop for PopMetricsGuard {
     fn drop(&mut self) {
-        metrics::histogram!("pict-rs.queue.pop.duration", self.start.elapsed().as_secs_f64(), "completed" => (!self.armed).to_string(), "queue" => self.queue);
-        metrics::increment_counter!("pict-rs.queue.pop", "completed" => (!self.armed).to_string(), "queue" => self.queue);
+        metrics::histogram!("pict-rs.queue.pop.duration", "completed" => (!self.armed).to_string(), "queue" => self.queue).record(self.start.elapsed().as_secs_f64());
+        metrics::counter!("pict-rs.queue.pop", "completed" => (!self.armed).to_string(), "queue" => self.queue).increment(1);
     }
 }
 
 impl Drop for WaitMetricsGuard {
     fn drop(&mut self) {
-        metrics::histogram!("pict-rs.upload.wait.duration", self.start.elapsed().as_secs_f64(), "completed" => (!self.armed).to_string());
-        metrics::increment_counter!("pict-rs.upload.wait", "completed" => (!self.armed).to_string());
+        metrics::histogram!("pict-rs.upload.wait.duration", "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_secs_f64());
+        metrics::counter!("pict-rs.upload.wait", "completed" => (!self.armed).to_string())
+            .increment(1);
     }
 }

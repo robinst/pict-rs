@@ -70,7 +70,8 @@ impl Drop for Backgrounded {
     fn drop(&mut self) {
         let any_items = self.identifier.is_some() || self.upload_id.is_some();
 
-        metrics::increment_counter!("pict-rs.background.upload", "completed" => (!any_items).to_string());
+        metrics::counter!("pict-rs.background.upload", "completed" => (!any_items).to_string())
+            .increment(1);
 
         if any_items {
             let cleanup_parent_span =

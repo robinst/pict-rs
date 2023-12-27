@@ -291,7 +291,8 @@ impl Drop for Session {
     fn drop(&mut self) {
         let any_items = self.hash.is_some() || self.alias.is_some() || self.identifier.is_some();
 
-        metrics::increment_counter!("pict-rs.ingest.end", "completed" => (!any_items).to_string());
+        metrics::counter!("pict-rs.ingest.end", "completed" => (!any_items).to_string())
+            .increment(1);
 
         if self.hash.is_some() || self.alias.is_some() | self.identifier.is_some() {
             let cleanup_parent_span = tracing::info_span!(parent: None, "Dropped session cleanup");
