@@ -73,6 +73,18 @@ pub(crate) fn configure_without_clap<P: AsRef<Path>, T: serde::Serialize, Q: AsR
         ConfigSource::Memory { values } => config.add_source(config::Config::try_from(&values)?),
     };
 
+    let config = if let Ok(targets) = std::env::var("RUST_LOG") {
+        config.add_source(config::Config::try_from(&serde_json::json!({
+            "tracing": {
+                "logging": {
+                    "targets": targets,
+                }
+            }
+        }))?)
+    } else {
+        config
+    };
+
     let built = config
         .add_source(
             config::Environment::with_prefix("PICTRS")
@@ -105,6 +117,18 @@ pub(crate) fn configure() -> color_eyre::Result<PictRsConfiguration> {
 
     let config = if let Some(config_file) = config_file {
         config.add_source(config::File::from(config_file))
+    } else {
+        config
+    };
+
+    let config = if let Ok(targets) = std::env::var("RUST_LOG") {
+        config.add_source(config::Config::try_from(&serde_json::json!({
+            "tracing": {
+                "logging": {
+                    "targets": targets,
+                }
+            }
+        }))?)
     } else {
         config
     };
