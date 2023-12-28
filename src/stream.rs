@@ -16,6 +16,8 @@ where
             let mut streamer = stream.into_streamer();
 
             while let Some(item) = streamer.next().await {
+                tracing::trace!("metrics: looping");
+
                 yielder.yield_(item).await;
             }
         }
@@ -35,6 +37,8 @@ where
         let mut streamer = stream.into_streamer();
 
         while let Some(res) = streamer.next().await {
+            tracing::trace!("make send tx: looping");
+
             if tx.send_async(res).await.is_err() {
                 break;
             }
@@ -45,6 +49,8 @@ where
         let mut stream = rx.into_stream().into_streamer();
 
         while let Some(res) = stream.next().await {
+            tracing::trace!("make send rx: looping");
+
             yiedler.yield_(res).await;
         }
 
@@ -71,6 +77,8 @@ where
         let mut stream = rx.into_stream().into_streamer();
 
         while let Some(res) = stream.next().await {
+            tracing::trace!("from_iterator: looping");
+
             yielder.yield_(res).await;
         }
 
@@ -89,6 +97,8 @@ where
         let mut streamer = stream.into_streamer();
 
         while let Some(res) = streamer.next().await {
+            tracing::trace!("map: looping");
+
             yielder.yield_((f)(res)).await;
         }
     })
@@ -153,6 +163,8 @@ where
             let mut streamer = stream.into_streamer();
 
             while let Some(res) = streamer.next().await {
+                tracing::trace!("timeout: looping");
+
                 yielder.yield_ok(res).await;
             }
         })
@@ -173,6 +185,8 @@ where
         let mut count = 0;
 
         while let Some(bytes) = streamer.try_next().await? {
+            tracing::trace!("limit: looping");
+
             count += bytes.len();
 
             if count > limit {

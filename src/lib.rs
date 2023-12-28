@@ -1418,6 +1418,8 @@ where
         let mut streamer = stream.into_streamer();
 
         while let Some(res) = streamer.next().await {
+            tracing::trace!("srv_response: looping");
+
             let item = res.map_err(Error::from)??;
             yielder.yield_ok(item).await;
         }
@@ -1790,6 +1792,8 @@ fn spawn_cleanup(repo: ArcRepo, config: &Configuration) {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
 
         loop {
+            tracing::trace!("queue_cleanup: looping");
+
             interval.tick().await;
 
             if let Err(e) = queue::cleanup_outdated_variants(&repo).await {

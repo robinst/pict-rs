@@ -40,6 +40,8 @@ where
     let mut stream = stream.into_streamer();
 
     while let Some(res) = stream.next().await {
+        tracing::trace!("aggregate: looping");
+
         buf.add_bytes(res?);
     }
 
@@ -269,6 +271,8 @@ impl Session {
     #[tracing::instrument(level = "debug", skip(self, hash))]
     async fn create_alias(&mut self, hash: Hash, input_type: InternalFormat) -> Result<(), Error> {
         loop {
+            tracing::trace!("create_alias: looping");
+
             let alias = Alias::generate(input_type.file_extension().to_string());
 
             if self
@@ -281,8 +285,6 @@ impl Session {
 
                 return Ok(());
             }
-
-            tracing::trace!("Alias exists, regenerating");
         }
     }
 }

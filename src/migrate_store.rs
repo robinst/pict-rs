@@ -136,6 +136,8 @@ where
     let mut joinset = tokio::task::JoinSet::new();
 
     while let Some(hash) = stream.next().await {
+        tracing::trace!("do_migrate_store: looping");
+
         let hash = hash?;
 
         if joinset.len() >= concurrency {
@@ -149,6 +151,8 @@ where
     }
 
     while let Some(res) = joinset.join_next().await {
+        tracing::trace!("do_migrate_store: join looping");
+
         res.map_err(|_| UploadError::Canceled)??;
     }
 
@@ -383,6 +387,8 @@ where
     let mut failure_count = 0;
 
     loop {
+        tracing::trace!("migrate_file: looping");
+
         match do_migrate_file(tmp_dir, repo, from, to, identifier, timeout).await {
             Ok(identifier) => return Ok(identifier),
             Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {

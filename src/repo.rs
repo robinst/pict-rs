@@ -558,6 +558,8 @@ impl dyn FullRepo {
             let mut slug = None;
 
             loop {
+                tracing::trace!("hashes_stream: looping");
+
                 let page = repo.hash_page(slug, 100).await?;
 
                 slug = page.next();

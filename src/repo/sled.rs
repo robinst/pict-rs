@@ -522,6 +522,8 @@ impl UploadRepo for SledRepo {
         }
 
         while let Some(event) = (&mut subscriber).await {
+            tracing::trace!("wait: looping");
+
             match event {
                 sled::Event::Remove { .. } => {
                     return Err(RepoError::AlreadyClaimed);
@@ -679,6 +681,8 @@ impl QueueRepo for SledRepo {
         let now = time::OffsetDateTime::now_utc();
 
         loop {
+            tracing::trace!("pop: looping");
+
             let queue = self.queue.clone();
             let job_state = self.job_state.clone();
 

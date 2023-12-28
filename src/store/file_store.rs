@@ -236,6 +236,8 @@ impl FileStore {
 
     async fn try_remove_parents(&self, mut path: &Path) {
         while let Some(parent) = path.parent() {
+            tracing::trace!("try_remove_parents: looping");
+
             if parent.ends_with(&self.root_dir) {
                 return;
             }

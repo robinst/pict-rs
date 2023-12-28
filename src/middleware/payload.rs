@@ -19,21 +19,29 @@ async fn drain(rx: flume::Receiver<actix_web::dev::Payload>) {
     let mut set = JoinSet::new();
 
     while let Ok(payload) = rx.recv_async().await {
+        tracing::trace!("drain: looping");
+
         // draining a payload is a best-effort task - if we can't collect in 2 minutes we bail
         set.spawn_local(tokio::time::timeout(Duration::from_secs(120), async move {
             let mut streamer = payload.into_streamer();
-            while streamer.next().await.is_some() {}
+            while streamer.next().await.is_some() {
+                tracing::trace!("drain drop bytes: looping");
+            }
         }));
 
         let mut count = 0;
 
         // drain completed tasks
         while set.join_next().now_or_never().is_some() {
+            tracing::trace!("drain join now: looping");
+
             count += 1;
         }
 
         // if we're past the limit, wait for completions
         while set.len() > LIMIT {
+            tracing::trace!("drain join await: looping");
+
             if set.join_next().await.is_some() {
                 count += 1;
             }
@@ -45,7 +53,9 @@ async fn drain(rx: flume::Receiver<actix_web::dev::Payload>) {
     }
 
     // drain set
-    while set.join_next().await.is_some() {}
+    while set.join_next().await.is_some() {
+        tracing::trace!("drain join await cleanup: looping");
+    }
 }
 
 #[derive(Clone)]

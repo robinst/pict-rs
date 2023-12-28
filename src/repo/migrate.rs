@@ -43,6 +43,8 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
 
     let mut index = 0;
     while let Some(res) = hash_stream.next().await {
+        tracing::trace!("migrate_repo: looping");
+
         if let Ok(hash) = res {
             migrate_hash(old_repo.clone(), new_repo.clone(), hash).await;
         } else {
@@ -108,6 +110,8 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
 
     let mut index = 0;
     while let Some(res) = hash_stream.next().await {
+        tracing::trace!("migrate_04: looping");
+
         if let Ok(hash) = res {
             set.spawn_local(migrate_hash_04(
                 tmp_dir.clone(),
@@ -122,6 +126,8 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
         }
 
         while set.len() >= config.upgrade.concurrency {
+            tracing::trace!("migrate_04: join looping");
+
             if set.join_next().await.is_some() {
                 index += 1;
 
@@ -135,6 +141,8 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
     }
 
     while set.join_next().await.is_some() {
+        tracing::trace!("migrate_04: cleanup join looping");
+
         index += 1;
 
         if index % pct == 0 {
@@ -165,6 +173,8 @@ async fn migrate_hash(old_repo: ArcRepo, new_repo: ArcRepo, hash: Hash) {
     let mut hash_failures = 0;
 
     while let Err(e) = do_migrate_hash(&old_repo, &new_repo, hash.clone()).await {
+        tracing::trace!("migrate_hash: looping");
+
         hash_failures += 1;
 
         if hash_failures > 10 {

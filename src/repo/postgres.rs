@@ -364,6 +364,7 @@ async fn delegate_notifications(
     let upload_notifier_state = UploadNotifierState { inner: &inner };
 
     while let Ok(notification) = receiver.recv_async().await {
+        tracing::trace!("delegate_notifications: looping");
         metrics::counter!("pict-rs.postgres.notification").increment(1);
 
         match notification.channel() {
@@ -418,6 +419,8 @@ fn spawn_db_notification_task(
 ) {
     crate::sync::spawn("postgres-notifications", async move {
         while let Some(res) = std::future::poll_fn(|cx| conn.poll_message(cx)).await {
+            tracing::trace!("db_notification_task: looping");
+
             match res {
                 Err(e) => {
                     tracing::error!("Database Connection {e:?}");
@@ -1138,6 +1141,8 @@ impl QueueRepo for PostgresRepo {
         use schema::job_queue::dsl::*;
 
         loop {
+            tracing::trace!("pop: looping");
+
             let mut conn = self.get_connection().await?;
 
             let notifier: Arc<Notify> = self
@@ -1667,6 +1672,8 @@ impl UploadRepo for PostgresRepo {
         let interest = self.inner.interest(upload_id);
 
         loop {
+            tracing::trace!("wait: looping");
+
             let interest_future = interest.notified_timeout(Duration::from_secs(5));
 
             let mut conn = self.get_connection().await?;
@@ -1788,6 +1795,8 @@ where
 {
     streem::try_from_fn(|yielder| async move {
         loop {
+            tracing::trace!("page_stream: looping");
+
             let mut page = (next)(inner.clone(), older_than).await?;
 
             if let Some((last_time, last_item)) = page.pop() {

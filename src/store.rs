@@ -132,6 +132,8 @@ pub(crate) trait Store: Clone + Debug {
             .into_streamer();
 
         while let Some(bytes) = streamer.try_next().await.map_err(StoreError::ReadStream)? {
+            tracing::trace!("to_bytes: looping");
+
             buf.add_bytes(bytes);
         }
 

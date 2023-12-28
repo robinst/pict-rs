@@ -48,6 +48,8 @@ mod tokio_file {
             let mut stream = stream.into_streamer();
 
             while let Some(res) = stream.next().await {
+                tracing::trace!("write_from_stream: looping");
+
                 let mut bytes = res?;
 
                 self.inner.write_all_buf(&mut bytes).await?;
@@ -158,6 +160,8 @@ mod io_uring {
             let mut cursor: u64 = 0;
 
             loop {
+                tracing::trace!("write_from_bytes: looping");
+
                 if cursor == len {
                     break;
                 }
@@ -189,12 +193,16 @@ mod io_uring {
             let mut cursor: u64 = 0;
 
             while let Some(res) = stream.next().await {
+                tracing::trace!("write_from_stream while: looping");
+
                 let mut buf = res?;
 
                 let len = buf.len();
                 let mut position = 0;
 
                 loop {
+                    tracing::trace!("write_from_stream: looping");
+
                     if position == len {
                         break;
                     }
@@ -234,6 +242,8 @@ mod io_uring {
             let mut cursor: u64 = 0;
 
             loop {
+                tracing::trace!("write_from_async_read: looping");
+
                 let max_size = 65_536;
                 let mut buf = Vec::with_capacity(max_size.try_into().unwrap());
 
@@ -246,6 +256,8 @@ mod io_uring {
                 let mut position = 0;
 
                 loop {
+                    tracing::trace!("write_from_async_read: looping inner");
+
                     if position == n {
                         break;
                     }
@@ -288,6 +300,8 @@ mod io_uring {
             let mut cursor: u64 = 0;
 
             loop {
+                tracing::trace!("read_to_async_write: looping");
+
                 if cursor == size {
                     break;
                 }
@@ -343,6 +357,8 @@ mod io_uring {
             let mut bytes = BytesMut::new();
 
             loop {
+                tracing::trace!("bytes_stream: looping");
+
                 let max_size = read_until.saturating_sub(cursor);
 
                 if max_size == 0 {

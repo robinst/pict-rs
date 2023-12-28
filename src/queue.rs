@@ -207,6 +207,8 @@ async fn process_jobs<S, F>(
     let worker_id = uuid::Uuid::new_v4();
 
     loop {
+        tracing::trace!("process_jobs: looping");
+
         let res = job_loop(repo, store, config, worker_id, queue, callback).await;
 
         if let Err(e) = res {
@@ -274,6 +276,8 @@ where
         + Copy,
 {
     loop {
+        tracing::trace!("job_loop: looping");
+
         let fut = async {
             let (job_id, job) = repo.pop(queue, worker_id).await?;
 
@@ -334,6 +338,8 @@ async fn process_image_jobs<S, F>(
     let worker_id = uuid::Uuid::new_v4();
 
     loop {
+        tracing::trace!("process_image_jobs: looping");
+
         let res = image_job_loop(
             tmp_dir,
             repo,
@@ -388,6 +394,8 @@ where
         + Copy,
 {
     loop {
+        tracing::trace!("image_job_loop: looping");
+
         let fut = async {
             let (job_id, job) = repo.pop(queue, worker_id).await?;
 
@@ -439,6 +447,8 @@ where
     let mut hb = None;
 
     loop {
+        tracing::trace!("heartbeat: looping");
+
         tokio::select! {
             output = &mut fut => {
                 return output;

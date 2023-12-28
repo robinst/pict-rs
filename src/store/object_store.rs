@@ -177,6 +177,8 @@ where
     let mut stream = stream.into_streamer();
 
     while buf.len() < CHUNK_SIZE {
+        tracing::trace!("read_chunk: looping");
+
         if let Some(bytes) = stream.try_next().await? {
             buf.add_bytes(bytes)
         } else {
@@ -284,6 +286,8 @@ impl Store for ObjectStore {
             let mut futures = Vec::new();
 
             while !complete {
+                tracing::trace!("save_stream: looping");
+
                 part_number += 1;
 
                 let buf = if let Some(buf) = first_chunk.take() {
@@ -459,6 +463,8 @@ impl Store for ObjectStore {
         let mut stream = stream.into_streamer();
 
         while let Some(res) = stream.next().await {
+            tracing::trace!("read_into: looping");
+
             let mut bytes = res.map_err(payload_to_io_error)?;
             writer.write_all_buf(&mut bytes).await?;
         }

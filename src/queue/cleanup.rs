@@ -144,6 +144,8 @@ async fn all_variants(repo: &ArcRepo) -> Result<(), Error> {
     let mut hash_stream = hash_stream.into_streamer();
 
     while let Some(res) = hash_stream.next().await {
+        tracing::trace!("all_variants: looping");
+
         let hash = res?;
         super::cleanup_variants(repo, hash, None).await?;
     }
@@ -159,6 +161,8 @@ async fn outdated_variants(repo: &ArcRepo, config: &Configuration) -> Result<(),
     let mut variant_stream = repo.older_variants(since).await?.into_streamer();
 
     while let Some(res) = variant_stream.next().await {
+        tracing::trace!("outdated_variants: looping");
+
         let (hash, variant) = res?;
         super::cleanup_variants(repo, hash, Some(variant)).await?;
     }
@@ -174,6 +178,8 @@ async fn outdated_proxies(repo: &ArcRepo, config: &Configuration) -> Result<(), 
     let mut alias_stream = repo.older_aliases(since).await?.into_streamer();
 
     while let Some(res) = alias_stream.next().await {
+        tracing::trace!("outdated_proxies: looping");
+
         let alias = res?;
         if let Some(token) = repo.delete_token(&alias).await? {
             super::cleanup_alias(repo, alias, token).await?;
@@ -229,6 +235,8 @@ where
     let mut count: u64 = 0;
 
     while let Some(hash) = hash_stream.try_next().await? {
+        tracing::trace!("prune: looping");
+
         let repo = repo.clone();
         let store = store.clone();
 
