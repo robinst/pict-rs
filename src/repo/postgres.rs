@@ -1167,6 +1167,7 @@ impl QueueRepo for PostgresRepo {
                 .set((
                     heartbeat.eq(Option::<time::PrimitiveDateTime>::None),
                     status.eq(JobStatus::New),
+                    worker.eq(Option::<Uuid>::None),
                 ))
                 .execute(&mut conn)
                 .with_metrics("pict-rs.postgres.queue.requeue")
