@@ -46,7 +46,7 @@ pub(crate) async fn chop_store<S: Store>(
 pub(crate) fn single_bytes_range(range: &Range) -> Option<&ByteRangeSpec> {
     if let Range::Bytes(ranges) = range {
         if ranges.len() == 1 {
-            return ranges.get(0);
+            return ranges.first();
         }
     }
 

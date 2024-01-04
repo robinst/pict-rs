@@ -1146,7 +1146,7 @@ impl HashRepo for SledRepo {
                 None
             };
 
-            let prev = if prev.as_ref() == hashes.get(0) {
+            let prev = if prev.as_ref() == hashes.first() {
                 None
             } else {
                 prev
