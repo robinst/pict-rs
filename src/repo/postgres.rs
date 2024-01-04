@@ -1191,7 +1191,6 @@ impl QueueRepo for PostgresRepo {
                         .and(queue_alias.field(queue).eq(queue_name)),
                 )
                 .order(queue_alias.field(queue_time))
-                .limit(10)
                 .for_update()
                 .skip_locked()
                 .single_value();
