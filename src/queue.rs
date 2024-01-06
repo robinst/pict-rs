@@ -446,8 +446,18 @@ where
 
     let mut hb = None;
 
+    let yield_limit = 8;
+    let mut count = 0;
+
     loop {
         tracing::trace!("heartbeat: looping");
+        count += 1;
+        count = count % yield_limit;
+
+        // yield every 8 iterations to be kind to other tasks
+        if count == 0 {
+            tokio::task::yield_now().await;
+        }
 
         tokio::select! {
             output = &mut fut => {
