@@ -1,7 +1,7 @@
 use std::{
     future::{ready, Ready},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use actix_web::{
@@ -15,6 +15,36 @@ use crate::{future::NowOrNever, stream::LocalBoxStream};
 
 const LIMIT: usize = 256;
 
+struct MetricsGuard {
+    start: Instant,
+    armed: bool,
+}
+
+impl MetricsGuard {
+    fn guard() -> Self {
+        metrics::counter!("pict-rs.payload.drain.start").increment(1);
+
+        MetricsGuard {
+            start: Instant::now(),
+            armed: true,
+        }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for MetricsGuard {
+    fn drop(&mut self) {
+        metrics::counter!("pict-rs.payload.drain.end", "completed" => (!self.armed).to_string())
+            .increment(1);
+
+        metrics::histogram!("pict-rs.payload.drain.duration", "completed" => (!self.armed).to_string())
+            .record(self.start.elapsed().as_secs_f64());
+    }
+}
+
 async fn drain(rx: flume::Receiver<actix_web::dev::Payload>) {
     let mut set = JoinSet::new();
 
@@ -22,11 +52,13 @@ async fn drain(rx: flume::Receiver<actix_web::dev::Payload>) {
         tracing::trace!("drain: looping");
 
         // draining a payload is a best-effort task - if we can't collect in 2 minutes we bail
+        let guard = MetricsGuard::guard();
         set.spawn_local(tokio::time::timeout(Duration::from_secs(120), async move {
             let mut streamer = payload.into_streamer();
             while streamer.next().await.is_some() {
                 tracing::trace!("drain drop bytes: looping");
             }
+            guard.disarm();
         }));
 
         let mut count = 0;
@@ -105,6 +137,7 @@ impl Drop for PayloadStream {
         if let Some(payload) = self.inner.take() {
             tracing::warn!("Dropped unclosed payload, draining");
             if self.sender.try_send(payload).is_err() {
+                metrics::counter!("pict-rs.payload.drain.fail-send").increment(1);
                 tracing::error!("Failed to send unclosed payload for draining");
             }
         }

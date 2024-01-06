@@ -161,6 +161,7 @@ async fn outdated_variants(repo: &ArcRepo, config: &Configuration) -> Result<(),
     let mut variant_stream = repo.older_variants(since).await?.into_streamer();
 
     while let Some(res) = variant_stream.next().await {
+        metrics::counter!("pict-rs.cleanup.outdated-variant").increment(1);
         tracing::trace!("outdated_variants: looping");
 
         let (hash, variant) = res?;
@@ -178,6 +179,7 @@ async fn outdated_proxies(repo: &ArcRepo, config: &Configuration) -> Result<(), 
     let mut alias_stream = repo.older_aliases(since).await?.into_streamer();
 
     while let Some(res) = alias_stream.next().await {
+        metrics::counter!("pict-rs.cleanup.outdated-proxy").increment(1);
         tracing::trace!("outdated_proxies: looping");
 
         let alias = res?;

@@ -358,7 +358,7 @@ async fn process_image_jobs<S, F>(
             tracing::warn!("{}", format!("{e:?}"));
 
             if e.is_disconnected() {
-                tokio::time::sleep(Duration::from_secs(3)).await;
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
 
             continue;
