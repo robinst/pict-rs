@@ -156,10 +156,13 @@ const fn webm_audio(
                 Some(WebmAudioCodec::Vorbis),
                 !matches!(provided, Some(WebmAudioCodec::Vorbis)),
             ),
-            _ => (provided, false),
+            _ => match provided {
+                Some(codec) => (Some(codec), false),
+                None => (Some(WebmAudioCodec::Opus), true),
+            },
         }
     } else {
-        (None, false)
+        (None, true)
     }
 }
 
@@ -175,10 +178,13 @@ const fn mp4_audio(
                 Some(Mp4AudioCodec::Aac),
                 !matches!(provided, Some(Mp4AudioCodec::Aac)),
             ),
-            _ => (provided, false),
+            _ => match provided {
+                Some(codec) => (Some(codec), false),
+                None => (Some(Mp4AudioCodec::Aac), true),
+            },
         }
     } else {
-        (None, false)
+        (None, true)
     }
 }
 
