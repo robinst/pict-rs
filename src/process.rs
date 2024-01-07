@@ -156,9 +156,11 @@ impl Process {
         timeout: u64,
     ) -> Result<Self, ProcessError>
     where
-        T: AsRef<OsStr>,
+        T: AsRef<OsStr> + std::fmt::Debug,
     {
         let command: Arc<str> = Arc::from(String::from(command));
+
+        tracing::debug!("{envs:?} {command} {args:?}");
 
         let res = tracing::trace_span!(parent: None, "Create command", %command).in_scope(|| {
             Self::spawn(
