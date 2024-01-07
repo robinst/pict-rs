@@ -83,7 +83,7 @@ where
             tracing::trace!("from_iterator: looping");
 
             count += 1;
-            count = count % yield_count;
+            count %= yield_count;
 
             yielder.yield_(res).await;
 

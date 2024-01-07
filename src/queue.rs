@@ -452,7 +452,7 @@ where
     loop {
         tracing::trace!("heartbeat: looping");
         count += 1;
-        count = count % yield_limit;
+        count %= yield_limit;
 
         // yield every 8 iterations to be kind to other tasks
         if count == 0 {
