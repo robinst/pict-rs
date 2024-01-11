@@ -403,9 +403,14 @@ impl Store for ObjectStore {
     }
 
     fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
-        self.public_endpoint
-            .as_ref()
-            .and_then(|endpoint| endpoint.join(identifier.as_ref()).ok())
+        self.public_endpoint.clone().and_then(|mut endpoint| {
+            endpoint
+                .path_segments_mut()
+                .ok()?
+                .pop_if_empty()
+                .extend(identifier.as_ref().split('/'));
+            Some(endpoint)
+        })
     }
 
     #[tracing::instrument(skip(self))]
