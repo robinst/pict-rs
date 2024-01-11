@@ -403,10 +403,9 @@ impl Store for ObjectStore {
     }
 
     fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
-        self.public_endpoint.clone().map(|mut endpoint| {
-            endpoint.set_path(identifier.as_ref());
-            endpoint
-        })
+        self.public_endpoint
+            .as_ref()
+            .and_then(|endpoint| endpoint.join(identifier.as_ref()).ok())
     }
 
     #[tracing::instrument(skip(self))]
