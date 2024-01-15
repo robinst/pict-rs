@@ -389,7 +389,11 @@ impl From<crate::config::commandline::Sled> for crate::config::file::Sled {
 
 impl From<crate::config::commandline::Postgres> for crate::config::file::Postgres {
     fn from(value: crate::config::commandline::Postgres) -> Self {
-        crate::config::file::Postgres { url: value.url }
+        crate::config::file::Postgres {
+            url: value.url,
+            use_tls: value.use_tls,
+            certificate_file: value.certificate_file,
+        }
     }
 }
 

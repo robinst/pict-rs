@@ -458,4 +458,6 @@ pub(crate) struct Sled {
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Postgres {
     pub(crate) url: Url,
+    pub(crate) use_tls: bool,
+    pub(crate) certificate_file: Option<PathBuf>,
 }

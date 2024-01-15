@@ -802,8 +802,13 @@ impl Repo {
 
                 Ok(Self::Sled(repo))
             }
-            config::Repo::Postgres(config::Postgres { url }) => {
-                let repo = self::postgres::PostgresRepo::connect(url).await?;
+            config::Repo::Postgres(config::Postgres {
+                url,
+                use_tls,
+                certificate_file,
+            }) => {
+                let repo =
+                    self::postgres::PostgresRepo::connect(url, use_tls, certificate_file).await?;
 
                 Ok(Self::Postgres(repo))
             }

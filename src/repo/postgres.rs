@@ -4,6 +4,7 @@ mod schema;
 
 use std::{
     collections::{BTreeSet, VecDeque},
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Weak,
@@ -22,7 +23,8 @@ use diesel_async::{
 };
 use futures_core::Stream;
 use tokio::sync::Notify;
-use tokio_postgres::{tls::NoTlsStream, AsyncMessage, Connection, NoTls, Notification, Socket};
+use tokio_postgres::{AsyncMessage, Connection, NoTls, Notification, Socket};
+use tokio_postgres_rustls::MakeRustlsConnect;
 use tracing::Instrument;
 use url::Url;
 use uuid::Uuid;
@@ -82,6 +84,9 @@ pub(crate) enum ConnectPostgresError {
     #[error("Failed to connect to postgres for migrations")]
     ConnectForMigration(#[source] tokio_postgres::Error),
 
+    #[error("Failed to build TLS configuration")]
+    Tls(#[source] TlsError),
+
     #[error("Failed to run migrations")]
     Migration(#[source] refinery::Error),
 
@@ -116,6 +121,21 @@ pub(crate) enum PostgresError {
     DbTimeout,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum TlsError {
+    #[error("Couldn't read configured certificate file")]
+    ReadCertificate(#[source] std::io::Error),
+
+    #[error("Couldn't parse configured certificate file: {0:?}")]
+    ParseCertificate(rustls_pemfile::Error),
+
+    #[error("Configured certificate file is not a certificate")]
+    NotCertificate,
+
+    #[error("Couldn't add certificate to root store")]
+    AddCertificate(#[source] rustls::Error),
+}
+
 impl PostgresError {
     pub(super) const fn error_code(&self) -> ErrorCode {
         match self {
@@ -146,13 +166,90 @@ impl PostgresError {
     }
 }
 
-impl PostgresRepo {
-    pub(crate) async fn connect(postgres_url: Url) -> Result<Self, ConnectPostgresError> {
-        let (mut client, conn) = tokio_postgres::connect(postgres_url.as_str(), NoTls)
+async fn build_tls_connector(
+    certificate_file: Option<PathBuf>,
+) -> Result<MakeRustlsConnect, TlsError> {
+    let mut cert_store = rustls::RootCertStore {
+        roots: Vec::from(webpki_roots::TLS_SERVER_ROOTS),
+    };
+
+    if let Some(certificate_file) = certificate_file {
+        let bytes = tokio::fs::read(certificate_file)
+            .await
+            .map_err(TlsError::ReadCertificate)?;
+
+        let opt =
+            rustls_pemfile::read_one_from_slice(&bytes).map_err(TlsError::ParseCertificate)?;
+        let (item, _remainder) = opt.ok_or(TlsError::NotCertificate)?;
+
+        let cert = if let rustls_pemfile::Item::X509Certificate(cert) = item {
+            cert
+        } else {
+            return Err(TlsError::NotCertificate);
+        };
+
+        cert_store.add(cert).map_err(TlsError::AddCertificate)?;
+    }
+
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(cert_store)
+        .with_no_client_auth();
+
+    let tls = MakeRustlsConnect::new(config);
+
+    Ok(tls)
+}
+
+async fn connect_for_migrations(
+    postgres_url: &Url,
+    tls_connector: Option<MakeRustlsConnect>,
+) -> Result<
+    (
+        tokio_postgres::Client,
+        DropHandle<Result<(), tokio_postgres::Error>>,
+    ),
+    ConnectPostgresError,
+> {
+    let tup = if let Some(connector) = tls_connector {
+        let (client, conn) = tokio_postgres::connect(postgres_url.as_str(), connector)
             .await
             .map_err(ConnectPostgresError::ConnectForMigration)?;
 
-        let handle = crate::sync::abort_on_drop(crate::sync::spawn("postgres-migrations", conn));
+        (
+            client,
+            crate::sync::abort_on_drop(crate::sync::spawn("postgres-connection", conn)),
+        )
+    } else {
+        let (client, conn) = tokio_postgres::connect(postgres_url.as_str(), NoTls)
+            .await
+            .map_err(ConnectPostgresError::ConnectForMigration)?;
+
+        (
+            client,
+            crate::sync::abort_on_drop(crate::sync::spawn("postgres-connection", conn)),
+        )
+    };
+
+    Ok(tup)
+}
+
+impl PostgresRepo {
+    pub(crate) async fn connect(
+        postgres_url: Url,
+        use_tls: bool,
+        certificate_file: Option<PathBuf>,
+    ) -> Result<Self, ConnectPostgresError> {
+        let connector = if use_tls {
+            Some(
+                build_tls_connector(certificate_file)
+                    .await
+                    .map_err(ConnectPostgresError::Tls)?,
+            )
+        } else {
+            None
+        };
+
+        let (mut client, handle) = connect_for_migrations(&postgres_url, connector.clone()).await?;
 
         embedded::migrations::runner()
             .run_async(&mut client)
@@ -169,7 +266,7 @@ impl PostgresRepo {
         let (tx, rx) = flume::bounded(10);
 
         let mut config = ManagerConfig::default();
-        config.custom_setup = build_handler(tx);
+        config.custom_setup = build_handler(tx, connector);
 
         let mgr = AsyncDieselConnectionManager::<AsyncPgConnection>::new_with_config(
             postgres_url,
@@ -388,22 +485,39 @@ async fn delegate_notifications(
     tracing::warn!("Notification delegator shutting down");
 }
 
-fn build_handler(sender: flume::Sender<Notification>) -> ConfigFn {
+fn build_handler(
+    sender: flume::Sender<Notification>,
+    connector: Option<MakeRustlsConnect>,
+) -> ConfigFn {
     Box::new(
         move |config: &str| -> BoxFuture<'_, ConnectionResult<AsyncPgConnection>> {
             let sender = sender.clone();
+            let connector = connector.clone();
 
             let connect_span = tracing::trace_span!(parent: None, "connect future");
 
             Box::pin(
                 async move {
-                    let (client, conn) =
-                        tokio_postgres::connect(config, tokio_postgres::tls::NoTls)
+                    let client = if let Some(connector) = connector {
+                        let (client, conn) = tokio_postgres::connect(config, connector)
                             .await
                             .map_err(|e| ConnectionError::BadConnection(e.to_string()))?;
 
-                    // not very cash money (structured concurrency) of me
-                    spawn_db_notification_task(sender, conn);
+                        // not very cash money (structured concurrency) of me
+                        spawn_db_notification_task(sender, conn);
+
+                        client
+                    } else {
+                        let (client, conn) =
+                            tokio_postgres::connect(config, tokio_postgres::tls::NoTls)
+                                .await
+                                .map_err(|e| ConnectionError::BadConnection(e.to_string()))?;
+
+                        // not very cash money (structured concurrency) of me
+                        spawn_db_notification_task(sender, conn);
+
+                        client
+                    };
 
                     AsyncPgConnection::try_from(client).await
                 }
@@ -413,10 +527,12 @@ fn build_handler(sender: flume::Sender<Notification>) -> ConfigFn {
     )
 }
 
-fn spawn_db_notification_task(
+fn spawn_db_notification_task<S>(
     sender: flume::Sender<Notification>,
-    mut conn: Connection<Socket, NoTlsStream>,
-) {
+    mut conn: Connection<Socket, S>,
+) where
+    S: tokio_postgres::tls::TlsStream + Unpin + 'static,
+{
     crate::sync::spawn("postgres-notifications", async move {
         while let Some(res) = std::future::poll_fn(|cx| conn.poll_message(cx)).await {
             tracing::trace!("db_notification_task: looping");

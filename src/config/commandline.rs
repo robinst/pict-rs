@@ -1415,6 +1415,14 @@ pub(super) struct Postgres {
     /// The URL of the postgres database
     #[arg(short, long)]
     pub(super) url: Url,
+
+    /// whether to connect to postgres via TLS
+    #[arg(short, long)]
+    pub(super) use_tls: bool,
+
+    /// The path to the root certificate for postgres' CA
+    #[arg(short, long)]
+    pub(super) certificate_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser, serde::Serialize)]
