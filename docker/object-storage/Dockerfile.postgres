@@ -1,0 +1,9 @@
+FROM postgres:15-alpine
+
+COPY --chown=0:70 --chmod=640 ./out/postgres.key ./etc/
+COPY --chown=0:70 --chmod=640 ./out/postgres.crt ./etc/
+
+COPY --chown=0:70 --chmod=640 ./out/pictrsCA.crt ./etc/
+COPY --chown=0:70 --chmod=640 ./out/pictrsCA.crl ./etc/
+
+CMD ["-c", "ssl=on", "-c", "ssl_cert_file=/etc/postgres.crt", "-c", "ssl_key_file=/etc/postgres.key", "-c", "ssl_ca_file=/etc/pictrsCA.crt", "-c", "ssl_crl_file=/etc/pictrsCA.crl"]

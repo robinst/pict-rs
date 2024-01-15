@@ -53,7 +53,9 @@ services:
       - ./garage.toml:/etc/garage.toml
 
   postgres:
-    image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: ./Dockerfile.postgres
     ports:
       - "5432:5432"
     environment:
