@@ -31,6 +31,7 @@
           nativeBuildInputs = [
             cargo
             cargo-outdated
+            certstrap
             clippy
             diesel-cli
             exiftool
