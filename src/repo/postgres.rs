@@ -124,16 +124,16 @@ pub(crate) enum PostgresError {
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum TlsError {
     #[error("Couldn't read configured certificate file")]
-    ReadCertificate(#[source] std::io::Error),
+    Read(#[source] std::io::Error),
 
     #[error("Couldn't parse configured certificate file: {0:?}")]
-    ParseCertificate(rustls_pemfile::Error),
+    Parse(rustls_pemfile::Error),
 
     #[error("Configured certificate file is not a certificate")]
-    NotCertificate,
+    Invalid,
 
     #[error("Couldn't add certificate to root store")]
-    AddCertificate(#[source] rustls::Error),
+    Add(#[source] rustls::Error),
 }
 
 impl PostgresError {
@@ -176,19 +176,18 @@ async fn build_tls_connector(
     if let Some(certificate_file) = certificate_file {
         let bytes = tokio::fs::read(certificate_file)
             .await
-            .map_err(TlsError::ReadCertificate)?;
+            .map_err(TlsError::Read)?;
 
-        let opt =
-            rustls_pemfile::read_one_from_slice(&bytes).map_err(TlsError::ParseCertificate)?;
-        let (item, _remainder) = opt.ok_or(TlsError::NotCertificate)?;
+        let opt = rustls_pemfile::read_one_from_slice(&bytes).map_err(TlsError::Parse)?;
+        let (item, _remainder) = opt.ok_or(TlsError::Invalid)?;
 
         let cert = if let rustls_pemfile::Item::X509Certificate(cert) = item {
             cert
         } else {
-            return Err(TlsError::NotCertificate);
+            return Err(TlsError::Invalid);
         };
 
-        cert_store.add(cert).map_err(TlsError::AddCertificate)?;
+        cert_store.add(cert).map_err(TlsError::Add)?;
     }
 
     let config = rustls::ClientConfig::builder()
