@@ -83,7 +83,6 @@ impl From<crate::store::object_store::ObjectError> for StoreError {
     }
 }
 
-#[async_trait::async_trait(?Send)]
 pub(crate) trait Store: Clone + Debug {
     async fn health_check(&self) -> Result<(), StoreError>;
 
@@ -153,7 +152,6 @@ pub(crate) trait Store: Clone + Debug {
     async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError>;
 }
 
-#[async_trait::async_trait(?Send)]
 impl<T> Store for actix_web::web::Data<T>
 where
     T: Store,
@@ -225,7 +223,6 @@ where
     }
 }
 
-#[async_trait::async_trait(?Send)]
 impl<T> Store for Arc<T>
 where
     T: Store,
@@ -297,7 +294,6 @@ where
     }
 }
 
-#[async_trait::async_trait(?Send)]
 impl<'a, T> Store for &'a T
 where
     T: Store,

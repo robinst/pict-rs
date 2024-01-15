@@ -55,7 +55,6 @@ pub(crate) struct FileStore {
     repo: ArcRepo,
 }
 
-#[async_trait::async_trait(?Send)]
 impl Store for FileStore {
     #[tracing::instrument(level = "debug", skip(self))]
     async fn health_check(&self) -> Result<(), StoreError> {

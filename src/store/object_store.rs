@@ -200,7 +200,6 @@ async fn status_error(response: Response, object: Option<Arc<str>>) -> StoreErro
     ObjectError::Status(status, body, object).into()
 }
 
-#[async_trait::async_trait(?Send)]
 impl Store for ObjectStore {
     async fn health_check(&self) -> Result<(), StoreError> {
         let response = self
