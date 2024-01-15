@@ -70,6 +70,8 @@ crf_max = 12
 [repo]
 type = 'postgres'
 url = 'postgres://pictrs:1234@localhost:5432/pictrs'
+use_tls = true
+certificate_file = "./docker/object-storage/out/pictrsCA.crt"
 
 # [repo]
 # type = 'sled'
