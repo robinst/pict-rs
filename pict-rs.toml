@@ -574,6 +574,16 @@ type = 'postgres'
 # default: empty
 url = 'postgres://user:password@host:5432/db'
 
+## Optional: Whether to use TLS when connecting to postgres
+# environment variable: PICTRS__REPO__USE_TLS
+# default: false
+use_tls = false
+
+## Optional: The CA Certificate used to verify the postgres TLS certificate
+# environment variable: PICTRS__REPO__CERTIFICATE_FILE
+# default: empty
+certificate_file = '/etc/ca-certificate.crt'
+
 
 ### Media storage configuration
 
