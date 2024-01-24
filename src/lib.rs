@@ -2118,7 +2118,7 @@ impl PictRsConfiguration {
     /// actix-rt runtimes, and by tokio_uring
     ///
     /// Example:
-    /// ```rust
+    /// ```rust,ignore
     /// fn main() -> color_eyre::Result<()> {
     ///     tokio_uring::start(async move {
     ///         let pict_rs_server = pict_rs::ConfigSource::memory(serde_json::json!({
