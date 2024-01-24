@@ -42,6 +42,7 @@ diesel::table! {
         status -> JobStatus,
         queue_time -> Timestamp,
         heartbeat -> Nullable<Timestamp>,
+        unique_key -> Nullable<Text>,
     }
 }
 

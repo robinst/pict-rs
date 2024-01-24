@@ -353,7 +353,12 @@ impl JobId {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
-    async fn push(&self, queue: &'static str, job: serde_json::Value) -> Result<JobId, RepoError>;
+    async fn push(
+        &self,
+        queue: &'static str,
+        job: serde_json::Value,
+        unique_key: Option<&'static str>,
+    ) -> Result<Option<JobId>, RepoError>;
 
     async fn pop(
         &self,
@@ -381,8 +386,13 @@ impl<T> QueueRepo for Arc<T>
 where
     T: QueueRepo,
 {
-    async fn push(&self, queue: &'static str, job: serde_json::Value) -> Result<JobId, RepoError> {
-        T::push(self, queue, job).await
+    async fn push(
+        &self,
+        queue: &'static str,
+        job: serde_json::Value,
+        unique_key: Option<&'static str>,
+    ) -> Result<Option<JobId>, RepoError> {
+        T::push(self, queue, job, unique_key).await
     }
 
     async fn pop(

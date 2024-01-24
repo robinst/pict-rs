@@ -1223,26 +1223,41 @@ impl QueueRepo for PostgresRepo {
         &self,
         queue_name: &'static str,
         job_json: serde_json::Value,
-    ) -> Result<JobId, RepoError> {
+        in_unique_key: Option<&'static str>,
+    ) -> Result<Option<JobId>, RepoError> {
         let guard = PushMetricsGuard::guard(queue_name);
 
         use schema::job_queue::dsl::*;
 
         let mut conn = self.get_connection().await?;
 
-        let job_id = diesel::insert_into(job_queue)
-            .values((queue.eq(queue_name), job.eq(job_json)))
+        let res = diesel::insert_into(job_queue)
+            .values((
+                queue.eq(queue_name),
+                job.eq(job_json),
+                unique_key.eq(in_unique_key),
+            ))
             .returning(id)
             .get_result::<Uuid>(&mut conn)
             .with_metrics("pict-rs.postgres.queue.push")
             .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?
-            .map_err(PostgresError::Diesel)?;
+            .map(JobId)
+            .map(Some);
 
-        guard.disarm();
+        match res {
+            Ok(job_id) => {
+                guard.disarm();
 
-        Ok(JobId(job_id))
+                Ok(job_id)
+            }
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => Ok(None),
+            Err(e) => Err(RepoError::from(PostgresError::Diesel(e))),
+        }
     }
 
     #[tracing::instrument(level = "debug", skip(self))]

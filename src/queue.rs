@@ -22,6 +22,10 @@ mod process;
 
 const CLEANUP_QUEUE: &str = "cleanup";
 const PROCESS_QUEUE: &str = "process";
+const OUTDATED_PROXIES_UNIQUE_KEY: &str = "outdated-proxies";
+const OUTDATED_VARIANTS_UNIQUE_KEY: &str = "outdated-variants";
+const ALL_VARIANTS_UNIQUE_KEY: &str = "all-variants";
+const PRUNE_MISSING_UNIQUE_KEY: &str = "prune-missing";
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 enum Cleanup {
@@ -71,13 +75,13 @@ pub(crate) async fn cleanup_alias(
         token: Serde::new(token),
     })
     .map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job).await?;
+    repo.push(CLEANUP_QUEUE, job, None).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_hash(repo: &ArcRepo, hash: Hash) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::Hash { hash }).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job).await?;
+    repo.push(CLEANUP_QUEUE, job, None).await?;
     Ok(())
 }
 
@@ -86,7 +90,7 @@ pub(crate) async fn cleanup_identifier(repo: &ArcRepo, identifier: &Arc<str>) ->
         identifier: identifier.to_string(),
     })
     .map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job).await?;
+    repo.push(CLEANUP_QUEUE, job, None).await?;
     Ok(())
 }
 
@@ -97,31 +101,55 @@ async fn cleanup_variants(
 ) -> Result<(), Error> {
     let job =
         serde_json::to_value(Cleanup::Variant { hash, variant }).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job).await?;
+    repo.push(CLEANUP_QUEUE, job, None).await?;
     Ok(())
 }
 
 pub(crate) async fn cleanup_outdated_proxies(repo: &ArcRepo) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::OutdatedProxies).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job).await?;
+    if repo
+        .push(CLEANUP_QUEUE, job, Some(OUTDATED_PROXIES_UNIQUE_KEY))
+        .await?
+        .is_none()
+    {
+        tracing::debug!("outdated proxies conflict");
+    }
     Ok(())
 }
 
 pub(crate) async fn cleanup_outdated_variants(repo: &ArcRepo) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::OutdatedVariants).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job).await?;
+    if repo
+        .push(CLEANUP_QUEUE, job, Some(OUTDATED_VARIANTS_UNIQUE_KEY))
+        .await?
+        .is_none()
+    {
+        tracing::debug!("outdated variants conflict");
+    }
     Ok(())
 }
 
 pub(crate) async fn cleanup_all_variants(repo: &ArcRepo) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::AllVariants).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job).await?;
+    if repo
+        .push(CLEANUP_QUEUE, job, Some(ALL_VARIANTS_UNIQUE_KEY))
+        .await?
+        .is_none()
+    {
+        tracing::debug!("all variants conflict");
+    }
     Ok(())
 }
 
 pub(crate) async fn prune_missing(repo: &ArcRepo) -> Result<(), Error> {
     let job = serde_json::to_value(Cleanup::Prune).map_err(UploadError::PushJob)?;
-    repo.push(CLEANUP_QUEUE, job).await?;
+    if repo
+        .push(CLEANUP_QUEUE, job, Some(PRUNE_MISSING_UNIQUE_KEY))
+        .await?
+        .is_none()
+    {
+        tracing::debug!("prune missing conflict");
+    }
     Ok(())
 }
 
@@ -137,7 +165,7 @@ pub(crate) async fn queue_ingest(
         upload_id: Serde::new(upload_id),
     })
     .map_err(UploadError::PushJob)?;
-    repo.push(PROCESS_QUEUE, job).await?;
+    repo.push(PROCESS_QUEUE, job, None).await?;
     Ok(())
 }
 
@@ -155,7 +183,7 @@ pub(crate) async fn queue_generate(
         process_args,
     })
     .map_err(UploadError::PushJob)?;
-    repo.push(PROCESS_QUEUE, job).await?;
+    repo.push(PROCESS_QUEUE, job, None).await?;
     Ok(())
 }
 

@@ -95,6 +95,8 @@ pub(crate) struct SledRepo {
     alias_hashes: Tree,
     alias_delete_tokens: Tree,
     queue: Tree,
+    unique_jobs: Tree,
+    unique_jobs_inverse: Tree,
     job_state: Tree,
     alias_access: Tree,
     inverse_alias_access: Tree,
@@ -134,6 +136,8 @@ impl SledRepo {
             alias_hashes: db.open_tree("pict-rs-alias-hashes-tree")?,
             alias_delete_tokens: db.open_tree("pict-rs-alias-delete-tokens-tree")?,
             queue: db.open_tree("pict-rs-queue-tree")?,
+            unique_jobs: db.open_tree("pict-rs-unique-jobs-tree")?,
+            unique_jobs_inverse: db.open_tree("pict-rs-unique-jobs-inverse-tree")?,
             job_state: db.open_tree("pict-rs-job-state-tree")?,
             alias_access: db.open_tree("pict-rs-alias-access-tree")?,
             inverse_alias_access: db.open_tree("pict-rs-inverse-alias-access-tree")?,
@@ -625,7 +629,8 @@ impl QueueRepo for SledRepo {
         &self,
         queue_name: &'static str,
         job: serde_json::Value,
-    ) -> Result<JobId, RepoError> {
+        unique_key: Option<&'static str>,
+    ) -> Result<Option<JobId>, RepoError> {
         let metrics_guard = PushMetricsGuard::guard(queue_name);
 
         let id = JobId::gen();
@@ -633,29 +638,45 @@ impl QueueRepo for SledRepo {
         let job = serde_json::to_vec(&job).map_err(SledError::Job)?;
 
         let queue = self.queue.clone();
+        let unique_jobs = self.unique_jobs.clone();
+        let unique_jobs_inverse = self.unique_jobs_inverse.clone();
         let job_state = self.job_state.clone();
 
         let res = crate::sync::spawn_blocking("sled-io", move || {
-            (&queue, &job_state).transaction(|(queue, job_state)| {
-                let state = JobState::pending();
+            (&queue, &unique_jobs, &unique_jobs_inverse, &job_state).transaction(
+                |(queue, unique_jobs, unique_jobs_inverse, job_state)| {
+                    let state = JobState::pending();
 
-                queue.insert(&key[..], &job[..])?;
-                job_state.insert(&key[..], state.as_bytes())?;
+                    queue.insert(&key[..], &job[..])?;
+                    if let Some(unique_key) = unique_key {
+                        if unique_jobs
+                            .insert(unique_key.as_bytes(), &key[..])?
+                            .is_some()
+                        {
+                            return sled::transaction::abort(());
+                        }
 
-                Ok(())
-            })
+                        unique_jobs_inverse.insert(&key[..], unique_key.as_bytes())?;
+                    }
+                    job_state.insert(&key[..], state.as_bytes())?;
+
+                    Ok(())
+                },
+            )
         })
         .await
         .map_err(|_| RepoError::Canceled)?;
 
-        if let Err(TransactionError::Abort(e) | TransactionError::Storage(e)) = res {
-            return Err(RepoError::from(SledError::from(e)));
+        match res {
+            Err(TransactionError::Abort(())) => return Ok(None),
+            Err(TransactionError::Storage(e)) => return Err(RepoError::from(SledError::from(e))),
+            Ok(()) => (),
         }
 
         if let Some(notifier) = self.queue_notifier.read().unwrap().get(&queue_name) {
             notifier.notify_one();
             metrics_guard.disarm();
-            return Ok(id);
+            return Ok(Some(id));
         }
 
         self.queue_notifier
@@ -667,7 +688,7 @@ impl QueueRepo for SledRepo {
 
         metrics_guard.disarm();
 
-        Ok(id)
+        Ok(Some(id))
     }
 
     #[tracing::instrument(skip(self, worker_id), fields(job_id))]
@@ -808,14 +829,21 @@ impl QueueRepo for SledRepo {
         let key = job_key(queue_name, job_id);
 
         let queue = self.queue.clone();
+        let unique_jobs = self.unique_jobs.clone();
+        let unique_jobs_inverse = self.unique_jobs_inverse.clone();
         let job_state = self.job_state.clone();
 
         let res = crate::sync::spawn_blocking("sled-io", move || {
-            (&queue, &job_state).transaction(|(queue, job_state)| {
-                queue.remove(&key[..])?;
-                job_state.remove(&key[..])?;
-                Ok(())
-            })
+            (&queue, &unique_jobs, &unique_jobs_inverse, &job_state).transaction(
+                |(queue, unique_jobs, unique_jobs_inverse, job_state)| {
+                    queue.remove(&key[..])?;
+                    if let Some(unique_key) = unique_jobs_inverse.remove(&key[..])? {
+                        unique_jobs.remove(unique_key)?;
+                    }
+                    job_state.remove(&key[..])?;
+                    Ok(())
+                },
+            )
         })
         .await
         .map_err(|_| RepoError::Canceled)?;
