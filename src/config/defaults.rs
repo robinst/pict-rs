@@ -139,9 +139,15 @@ struct VideoQualityDefaults {
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-#[serde(tag = "type")]
-enum RepoDefaults {
-    Sled(SledDefaults),
+struct RepoDefaults {
+    #[serde(rename = "type")]
+    type_: String,
+
+    #[serde(flatten)]
+    sled_defaults: SledDefaults,
+
+    #[serde(flatten)]
+    postgres_defaults: PostgresDefaults,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -150,6 +156,12 @@ pub(super) struct SledDefaults {
     path: PathBuf,
     cache_capacity: u64,
     export_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) struct PostgresDefaults {
+    use_tls: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -181,7 +193,7 @@ pub(super) struct ObjectStorageDefaults {
 
 impl Default for ServerDefaults {
     fn default() -> Self {
-        ServerDefaults {
+        Self {
             address: "0.0.0.0:8080".parse().expect("Valid address string"),
             read_only: false,
             danger_dummy_mode: false,
@@ -193,19 +205,19 @@ impl Default for ServerDefaults {
 
 impl Default for ClientDefaults {
     fn default() -> Self {
-        ClientDefaults { timeout: 30 }
+        Self { timeout: 30 }
     }
 }
 
 impl Default for UpgradeDefaults {
     fn default() -> Self {
-        UpgradeDefaults { concurrency: 32 }
+        Self { concurrency: 32 }
     }
 }
 
 impl Default for LoggingDefaults {
     fn default() -> Self {
-        LoggingDefaults {
+        Self {
             format: LogFormat::Normal,
             targets: "info".parse().expect("Valid targets string"),
             log_spans: false,
@@ -215,7 +227,7 @@ impl Default for LoggingDefaults {
 
 impl Default for ConsoleDefaults {
     fn default() -> Self {
-        ConsoleDefaults {
+        Self {
             buffer_capacity: 1024 * 100,
         }
     }
@@ -223,7 +235,7 @@ impl Default for ConsoleDefaults {
 
 impl Default for OpenTelemetryDefaults {
     fn default() -> Self {
-        OpenTelemetryDefaults {
+        Self {
             service_name: String::from("pict-rs"),
             targets: "info".parse().expect("Valid targets string"),
         }
@@ -232,7 +244,7 @@ impl Default for OpenTelemetryDefaults {
 
 impl Default for MediaDefaults {
     fn default() -> Self {
-        MediaDefaults {
+        Self {
             external_validation_timeout: 30,
             max_file_size: 40,
             process_timeout: 30,
@@ -253,7 +265,7 @@ impl Default for MediaDefaults {
 
 impl Default for RetentionDefaults {
     fn default() -> Self {
-        RetentionDefaults {
+        Self {
             variants: "7d",
             proxy: "7d",
         }
@@ -262,7 +274,7 @@ impl Default for RetentionDefaults {
 
 impl Default for ImageDefaults {
     fn default() -> Self {
-        ImageDefaults {
+        Self {
             max_width: 10_000,
             max_height: 10_000,
             max_area: 40_000_000,
@@ -274,7 +286,7 @@ impl Default for ImageDefaults {
 
 impl Default for AnimationDefaults {
     fn default() -> Self {
-        AnimationDefaults {
+        Self {
             max_height: 1920,
             max_width: 1920,
             max_area: 2_073_600,
@@ -287,7 +299,7 @@ impl Default for AnimationDefaults {
 
 impl Default for VideoDefaults {
     fn default() -> Self {
-        VideoDefaults {
+        Self {
             enable: true,
             allow_audio: false,
             max_height: 3_840,
@@ -302,19 +314,23 @@ impl Default for VideoDefaults {
 
 impl Default for VideoQualityDefaults {
     fn default() -> Self {
-        VideoQualityDefaults { crf_max: 32 }
+        Self { crf_max: 32 }
     }
 }
 
 impl Default for RepoDefaults {
     fn default() -> Self {
-        Self::Sled(SledDefaults::default())
+        Self {
+            type_: String::from("sled"),
+            sled_defaults: SledDefaults::default(),
+            postgres_defaults: PostgresDefaults::default(),
+        }
     }
 }
 
 impl Default for SledDefaults {
     fn default() -> Self {
-        SledDefaults {
+        Self {
             path: PathBuf::from(String::from("/mnt/sled-repo")),
             cache_capacity: 1024 * 1024 * 64,
             export_path: PathBuf::from(String::from("/mnt/exports")),
@@ -361,13 +377,13 @@ impl From<crate::config::commandline::Filesystem> for crate::config::primitives:
 
 impl From<crate::config::commandline::Filesystem> for crate::config::primitives::Store {
     fn from(value: crate::config::commandline::Filesystem) -> Self {
-        crate::config::primitives::Store::Filesystem(value.into())
+        Self::Filesystem(value.into())
     }
 }
 
 impl From<SledDefaults> for crate::config::file::Sled {
     fn from(defaults: SledDefaults) -> Self {
-        crate::config::file::Sled {
+        Self {
             path: defaults.path,
             cache_capacity: defaults.cache_capacity,
             export_path: defaults.export_path,
@@ -379,7 +395,7 @@ impl From<crate::config::commandline::Sled> for crate::config::file::Sled {
     fn from(value: crate::config::commandline::Sled) -> Self {
         let defaults = SledDefaults::default();
 
-        crate::config::file::Sled {
+        Self {
             path: value.path.unwrap_or(defaults.path),
             cache_capacity: value.cache_capacity.unwrap_or(defaults.cache_capacity),
             export_path: defaults.export_path,
@@ -389,7 +405,7 @@ impl From<crate::config::commandline::Sled> for crate::config::file::Sled {
 
 impl From<crate::config::commandline::Postgres> for crate::config::file::Postgres {
     fn from(value: crate::config::commandline::Postgres) -> Self {
-        crate::config::file::Postgres {
+        Self {
             url: value.url,
             use_tls: value.use_tls,
             certificate_file: value.certificate_file,
@@ -399,12 +415,12 @@ impl From<crate::config::commandline::Postgres> for crate::config::file::Postgre
 
 impl From<crate::config::commandline::Sled> for crate::config::file::Repo {
     fn from(value: crate::config::commandline::Sled) -> Self {
-        crate::config::file::Repo::Sled(value.into())
+        Self::Sled(value.into())
     }
 }
 
 impl From<crate::config::commandline::Postgres> for crate::config::file::Repo {
     fn from(value: crate::config::commandline::Postgres) -> Self {
-        crate::config::file::Repo::Postgres(value.into())
+        Self::Postgres(value.into())
     }
 }

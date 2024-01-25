@@ -1325,6 +1325,7 @@ enum Repo {
 pub(super) struct Filesystem {
     /// The path to store uploaded media
     #[arg(short, long)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) path: Option<PathBuf>,
 }
 
@@ -1417,7 +1418,8 @@ pub(super) struct Postgres {
     pub(super) url: Url,
 
     /// whether to connect to postgres via TLS
-    #[arg(short, long)]
+    #[arg(short = 't', long)]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub(super) use_tls: bool,
 
     /// The path to the root certificate for postgres' CA
