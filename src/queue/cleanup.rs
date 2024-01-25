@@ -158,7 +158,9 @@ async fn outdated_variants(repo: &ArcRepo, config: &Configuration) -> Result<(),
     let now = time::OffsetDateTime::now_utc();
     let since = now.saturating_sub(config.media.retention.variants.to_duration());
 
-    let mut variant_stream = repo.older_variants(since).await?.into_streamer();
+    let variant_stream = repo.older_variants(since).await?;
+    let variant_stream = std::pin::pin!(crate::stream::take(variant_stream, 2048));
+    let mut variant_stream = variant_stream.into_streamer();
 
     while let Some(res) = variant_stream.next().await {
         metrics::counter!("pict-rs.cleanup.outdated-variant").increment(1);
@@ -176,7 +178,9 @@ async fn outdated_proxies(repo: &ArcRepo, config: &Configuration) -> Result<(), 
     let now = time::OffsetDateTime::now_utc();
     let since = now.saturating_sub(config.media.retention.proxy.to_duration());
 
-    let mut alias_stream = repo.older_aliases(since).await?.into_streamer();
+    let alias_stream = repo.older_aliases(since).await?;
+    let alias_stream = std::pin::pin!(crate::stream::take(alias_stream, 2048));
+    let mut alias_stream = alias_stream.into_streamer();
 
     while let Some(res) = alias_stream.next().await {
         metrics::counter!("pict-rs.cleanup.outdated-proxy").increment(1);

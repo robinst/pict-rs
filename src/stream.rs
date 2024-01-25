@@ -5,6 +5,35 @@ use streem::IntoStreamer;
 
 use crate::future::WithMetrics;
 
+pub(crate) fn take<S>(stream: S, amount: usize) -> impl Stream<Item = S::Item>
+where
+    S: Stream,
+    S::Item: 'static,
+{
+    streem::from_fn(|yielder| async move {
+        let stream = std::pin::pin!(stream);
+        let mut streamer = stream.into_streamer();
+
+        let mut count = 0;
+
+        if count == amount {
+            return;
+        }
+
+        while let Some(item) = streamer.next().await {
+            tracing::trace!("take: looping");
+
+            yielder.yield_(item).await;
+
+            count += 1;
+
+            if count == amount {
+                break;
+            }
+        }
+    })
+}
+
 pub(crate) fn metrics<S>(name: &'static str, stream: S) -> impl Stream<Item = S::Item>
 where
     S: Stream,
