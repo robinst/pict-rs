@@ -2077,6 +2077,7 @@ impl PictRsConfiguration {
             PrometheusBuilder::new()
                 .with_http_listener(addr)
                 .install()?;
+            tracing::info!("Starting prometheus endpoint on {addr}");
         }
 
         Ok(self)
