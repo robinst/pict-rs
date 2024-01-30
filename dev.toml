@@ -1,5 +1,5 @@
 [server]
-address = '0.0.0.0:8080'
+address = '[::]:8080'
 api_key = 'api-key'
 max_file_count = 10
 
@@ -11,15 +11,16 @@ format = 'normal'
 targets = 'info'
 
 [tracing.console]
+address = '[::]:6969'
 buffer_capacity = 102400
 
 [tracing.opentelemetry]
-url = 'http://127.0.0.1:4317'
+# url = 'http://127.0.0.1:4317'
 service_name = 'pict-rs'
 targets = 'info,pict_rs=debug'
 
 [metrics]
-prometheus_address = "127.0.0.1:8070"
+prometheus_address = "[::]:9000"
 
 [old_repo]
 path = 'data/sled-repo-local'
@@ -67,25 +68,25 @@ crf_1440 = 24
 crf_2160 = 15
 crf_max = 12
 
-[repo]
-type = 'postgres'
-url = 'postgres://pictrs:1234@localhost:5432/pictrs'
-use_tls = true
-certificate_file = "./docker/object-storage/out/pictrsCA.crt"
-
 # [repo]
-# type = 'sled'
-# path = 'data/sled-repo-local'
+# type = 'postgres'
+# url = 'postgres://pictrs:1234@localhost:5432/pictrs'
+# use_tls = true
+# certificate_file = "./docker/object-storage/out/pictrsCA.crt"
 
-# [store]
-# type = 'filesystem'
-# path = 'data/files-local'
+[repo]
+type = 'sled'
+path = 'data/sled-repo-local'
 
 [store]
-type = 'object_storage'
-endpoint = 'http://localhost:3900'
-use_path_style = true
-bucket_name = 'pict-rs'
-region = 'garage'
-access_key = 'GK2182acf19c2bdb8b9c20e16e'
-secret_key = '0072105b8659adc02cce21d9135a88ebc279b3a35e170d23d31c63fb9307a168'
+type = 'filesystem'
+path = 'data/files-local'
+
+# [store]
+# type = 'object_storage'
+# endpoint = 'http://localhost:3900'
+# use_path_style = true
+# bucket_name = 'pict-rs'
+# region = 'garage'
+# access_key = 'GK2182acf19c2bdb8b9c20e16e'
+# secret_key = '0072105b8659adc02cce21d9135a88ebc279b3a35e170d23d31c63fb9307a168'
