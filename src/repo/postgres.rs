@@ -1254,6 +1254,23 @@ impl DetailsRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for PostgresRepo {
+    async fn queue_length(&self) -> Result<u64, RepoError> {
+        use schema::job_queue::dsl::*;
+
+        let mut conn = self.get_connection().await?;
+
+        let count = job_queue
+            .count()
+            .get_result::<i64>(&mut conn)
+            .with_metrics("pict-rs.postgres.job_queue.count")
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)?
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(count.try_into().expect("non-negative count"))
+    }
+
     #[tracing::instrument(level = "debug", skip(self, job_json))]
     async fn push(
         &self,

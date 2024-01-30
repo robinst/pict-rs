@@ -624,6 +624,16 @@ fn try_into_arc_str(ivec: IVec) -> Result<Arc<str>, SledError> {
 
 #[async_trait::async_trait(?Send)]
 impl QueueRepo for SledRepo {
+    async fn queue_length(&self) -> Result<u64, RepoError> {
+        let queue = self.queue.clone();
+
+        let size = crate::sync::spawn_blocking("sled-io", move || queue.len())
+            .await
+            .map_err(|_| RepoError::Canceled)?;
+
+        Ok(size as u64)
+    }
+
     #[tracing::instrument(skip(self))]
     async fn push(
         &self,

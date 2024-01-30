@@ -162,13 +162,20 @@ async fn outdated_variants(repo: &ArcRepo, config: &Configuration) -> Result<(),
     let variant_stream = std::pin::pin!(crate::stream::take(variant_stream, 2048));
     let mut variant_stream = variant_stream.into_streamer();
 
+    let mut count = 0;
+
     while let Some(res) = variant_stream.next().await {
         metrics::counter!("pict-rs.cleanup.outdated-variant").increment(1);
         tracing::trace!("outdated_variants: looping");
 
         let (hash, variant) = res?;
         super::cleanup_variants(repo, hash, Some(variant)).await?;
+        count += 1;
     }
+
+    tracing::debug!("Queued {count} variant cleanup jobs");
+    let queue_length = repo.queue_length().await?;
+    tracing::debug!("Total queue length: {queue_length}");
 
     Ok(())
 }
@@ -182,6 +189,8 @@ async fn outdated_proxies(repo: &ArcRepo, config: &Configuration) -> Result<(), 
     let alias_stream = std::pin::pin!(crate::stream::take(alias_stream, 2048));
     let mut alias_stream = alias_stream.into_streamer();
 
+    let mut count = 0;
+
     while let Some(res) = alias_stream.next().await {
         metrics::counter!("pict-rs.cleanup.outdated-proxy").increment(1);
         tracing::trace!("outdated_proxies: looping");
@@ -189,12 +198,17 @@ async fn outdated_proxies(repo: &ArcRepo, config: &Configuration) -> Result<(), 
         let alias = res?;
         if let Some(token) = repo.delete_token(&alias).await? {
             super::cleanup_alias(repo, alias, token).await?;
+            count += 1;
         } else {
             tracing::warn!("Skipping alias cleanup - no delete token");
             repo.remove_relation(alias.clone()).await?;
             repo.remove_alias_access(alias).await?;
         }
     }
+
+    tracing::debug!("Queued {count} alias cleanup jobs");
+    let queue_length = repo.queue_length().await?;
+    tracing::debug!("Total queue length: {queue_length}");
 
     Ok(())
 }

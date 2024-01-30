@@ -353,6 +353,8 @@ impl JobId {
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait QueueRepo: BaseRepo {
+    async fn queue_length(&self) -> Result<u64, RepoError>;
+
     async fn push(
         &self,
         queue: &'static str,
@@ -386,6 +388,10 @@ impl<T> QueueRepo for Arc<T>
 where
     T: QueueRepo,
 {
+    async fn queue_length(&self) -> Result<u64, RepoError> {
+        T::queue_length(self).await
+    }
+
     async fn push(
         &self,
         queue: &'static str,
