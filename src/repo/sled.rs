@@ -210,7 +210,7 @@ impl ProxyRepo for SledRepo {
         let proxy = self.proxy.clone();
         let inverse_proxy = self.inverse_proxy.clone();
 
-        actix_web::web::block(move || {
+        crate::sync::spawn_blocking("sled-io", move || {
             proxy.insert(url.as_str().as_bytes(), alias.to_bytes())?;
             inverse_proxy.insert(alias.to_bytes(), url.as_str().as_bytes())?;
 
@@ -232,7 +232,7 @@ impl ProxyRepo for SledRepo {
         let proxy = self.proxy.clone();
         let inverse_proxy = self.inverse_proxy.clone();
 
-        actix_web::web::block(move || {
+        crate::sync::spawn_blocking("sled-io", move || {
             if let Some(url) = inverse_proxy.remove(alias.to_bytes())? {
                 proxy.remove(url)?;
             }
@@ -1215,7 +1215,7 @@ impl HashRepo for SledRepo {
 
         let hash = hash.to_ivec();
 
-        let res = actix_web::web::block(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (&hashes, &hashes_inverse, &hash_identifiers).transaction(
                 |(hashes, hashes_inverse, hash_identifiers)| {
                     if hashes.get(hash.clone())?.is_some() {
@@ -1395,7 +1395,7 @@ impl HashRepo for SledRepo {
             Ok(v) as Result<Vec<_>, SledError>
         });
 
-        let res = actix_web::web::block(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (
                 &hashes,
                 &hashes_inverse,
@@ -1462,7 +1462,7 @@ impl AliasRepo for SledRepo {
         let hash_aliases = self.hash_aliases.clone();
         let alias_delete_tokens = self.alias_delete_tokens.clone();
 
-        let res = actix_web::web::block(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (&aliases, &alias_hashes, &hash_aliases, &alias_delete_tokens).transaction(
                 |(aliases, alias_hashes, hash_aliases, alias_delete_tokens)| {
                     if aliases.get(&alias)?.is_some() {
@@ -1539,7 +1539,7 @@ impl AliasRepo for SledRepo {
         let hash_aliases = self.hash_aliases.clone();
         let alias_delete_tokens = self.alias_delete_tokens.clone();
 
-        let res = actix_web::web::block(move || {
+        let res = crate::sync::spawn_blocking("sled-io", move || {
             (&aliases, &alias_hashes, &hash_aliases, &alias_delete_tokens).transaction(
                 |(aliases, alias_hashes, hash_aliases, alias_delete_tokens)| {
                     aliases.remove(&alias)?;

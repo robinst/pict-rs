@@ -613,7 +613,7 @@ impl ObjectStore {
         let length = buf.len();
 
         let hashing_span = tracing::debug_span!("Hashing request body");
-        let hash_string = actix_web::web::block(move || {
+        let hash_string = crate::sync::spawn_blocking("hash-buf", move || {
             let guard = hashing_span.enter();
             let mut hasher = md5::Md5::new();
             for bytes in buf {
