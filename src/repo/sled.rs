@@ -709,7 +709,6 @@ impl QueueRepo for SledRepo {
 
             let span = tracing::Span::current();
             let opt = crate::sync::spawn_blocking("sled-io", move || {
-                let _guard = span.enter();
                 // Job IDs are generated with Uuid version 7 - defining their first bits as a
                 // timestamp. Scanning a prefix should give us jobs in the order they were queued.
                 for res in job_state.scan_prefix(queue_name) {
@@ -749,7 +748,7 @@ impl QueueRepo for SledRepo {
 
                     let job_id = JobId::from_bytes(id_bytes);
 
-                    tracing::Span::current().record("job_id", &format!("{job_id:?}"));
+                    span.record("job_id", &format!("{job_id:?}"));
 
                     let opt = queue
                         .get(&key)?
