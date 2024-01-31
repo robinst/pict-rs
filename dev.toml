@@ -2,6 +2,8 @@
 address = '[::]:8080'
 api_key = 'api-key'
 max_file_count = 10
+certificate = "./data/pictrs.crt"
+private_key = "./data/pictrs.key"
 
 [upgrade]
 concurrency = 512

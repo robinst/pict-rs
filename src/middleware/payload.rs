@@ -80,7 +80,7 @@ async fn drain(rx: flume::Receiver<actix_web::dev::Payload>) {
         }
 
         if count > 0 {
-            tracing::info!("Drained {count} dropped payloads");
+            tracing::debug!("Drained {count} dropped payloads");
         }
     }
 
@@ -135,7 +135,7 @@ impl Drop for DrainHandle {
 impl Drop for PayloadStream {
     fn drop(&mut self) {
         if let Some(payload) = self.inner.take() {
-            tracing::warn!("Dropped unclosed payload, draining");
+            tracing::debug!("Dropped unclosed payload, draining");
             if self.sender.try_send(payload).is_err() {
                 metrics::counter!("pict-rs.payload.drain.fail-send").increment(1);
                 tracing::error!("Failed to send unclosed payload for draining");

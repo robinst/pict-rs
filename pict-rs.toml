@@ -37,6 +37,20 @@ max_file_count = 1
 # default: The system's advertised temporary directory ("/tmp" on most linuxes)
 temporary_directory = "/tmp"
 
+## Optional: path to server certificate to enable TLS
+# environment variable: PICTRS__SERVER__CERTIFICATE
+# default: empty
+#
+# Note that both certificate and private_key must be set to enable TLS
+certificate = "/path/to/server.crt"
+
+## Optional: path to server key to enable TLS
+# environment variable: PICTRS__SERVER__PRIVATE_KEY
+# default: empty
+#
+# Note that both private_key and certificate must be set to enable TLS
+private_key = "/path/to/server.key"
+
 ## Client configuration
 [client]
 ## Optional: time (in seconds) the client will wait for a response before giving up

@@ -118,6 +118,12 @@ pub(crate) struct Server {
     pub(crate) max_file_count: u32,
 
     pub(crate) temporary_directory: PathBuf,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) certificate: Option<PathBuf>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) private_key: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

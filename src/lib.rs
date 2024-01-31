@@ -29,6 +29,7 @@ mod serde_str;
 mod store;
 mod stream;
 mod sync;
+mod tls;
 mod tmp_file;
 mod validate;
 
@@ -77,6 +78,7 @@ use self::{
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Store},
     stream::{empty, once},
+    tls::Tls,
 };
 
 pub use self::config::{ConfigSource, PictRsConfiguration};
@@ -1840,14 +1842,16 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
     client: ClientWithMiddleware,
     config: Configuration,
     extra_config: F,
-) -> std::io::Result<()> {
+) -> color_eyre::Result<()> {
     let process_map = ProcessMap::new();
 
     let address = config.server.address;
 
     spawn_cleanup(repo.clone(), &config);
 
-    HttpServer::new(move || {
+    let tls = Tls::from_config(&config);
+
+    let server = HttpServer::new(move || {
         let tmp_dir = tmp_dir.clone();
         let client = client.clone();
         let store = store.clone();
@@ -1872,10 +1876,41 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
             .app_data(web::Data::new(process_map.clone()))
             .app_data(web::Data::new(tmp_dir))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
-    })
-    .bind(address)?
-    .run()
-    .await
+    });
+
+    if let Some(tls) = tls {
+        let certified_key = tls.open_keys().await?;
+
+        let (tx, rx) = rustls_channel_resolver::channel::<32>(certified_key);
+
+        let handle = crate::sync::abort_on_drop(crate::sync::spawn("cert-reader", async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            interval.tick().await;
+
+            loop {
+                interval.tick().await;
+
+                match tls.open_keys().await {
+                    Ok(certified_key) => tx.update(certified_key),
+                    Err(e) => tracing::error!("Failed to open keys {}", format!("{e}")),
+                }
+            }
+        }));
+
+        let config = rustls_021::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_cert_resolver(rx);
+
+        server.bind_rustls_021(address, config)?.run().await?;
+
+        handle.abort();
+        let _ = handle.await;
+    } else {
+        server.bind(address)?.run().await?;
+    }
+
+    Ok(())
 }
 
 async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(
@@ -1885,14 +1920,16 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
     client: ClientWithMiddleware,
     config: Configuration,
     extra_config: F,
-) -> std::io::Result<()> {
+) -> color_eyre::Result<()> {
     let process_map = ProcessMap::new();
 
     let address = config.server.address;
 
     spawn_cleanup(repo.clone(), &config);
 
-    HttpServer::new(move || {
+    let tls = Tls::from_config(&config);
+
+    let server = HttpServer::new(move || {
         let tmp_dir = tmp_dir.clone();
         let client = client.clone();
         let store = store.clone();
@@ -1917,10 +1954,41 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
             .app_data(web::Data::new(process_map.clone()))
             .app_data(web::Data::new(tmp_dir))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
-    })
-    .bind(address)?
-    .run()
-    .await
+    });
+
+    if let Some(tls) = tls {
+        let certified_key = tls.open_keys().await?;
+
+        let (tx, rx) = rustls_channel_resolver::channel::<32>(certified_key);
+
+        let handle = crate::sync::abort_on_drop(crate::sync::spawn("cert-reader", async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            interval.tick().await;
+
+            loop {
+                interval.tick().await;
+
+                match tls.open_keys().await {
+                    Ok(certified_key) => tx.update(certified_key),
+                    Err(e) => tracing::error!("Failed to open keys {}", format!("{e}")),
+                }
+            }
+        }));
+
+        let config = rustls_021::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_cert_resolver(rx);
+
+        server.bind_rustls_021(address, config)?.run().await?;
+
+        handle.abort();
+        let _ = handle.await;
+    } else {
+        server.bind(address)?.run().await?;
+    }
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

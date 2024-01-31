@@ -55,6 +55,8 @@ impl Args {
                 address,
                 api_key,
                 temporary_directory,
+                certificate,
+                private_key,
                 client_timeout,
                 upgrade_concurrency,
                 metrics_prometheus_address,
@@ -114,6 +116,8 @@ impl Args {
                     danger_dummy_mode,
                     max_file_count,
                     temporary_directory,
+                    certificate,
+                    private_key,
                 };
 
                 let client = Client {
@@ -521,6 +525,10 @@ struct Server {
     max_file_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temporary_directory: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    certificate: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    private_key: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -912,6 +920,16 @@ struct Run {
     /// The temporary directory pict-rs should use when processing media
     #[arg(long)]
     temporary_directory: Option<PathBuf>,
+
+    /// The path to the TLS certificate. Both the certificate and the private_key must be specified
+    /// to enable TLS
+    #[arg(long)]
+    certificate: Option<PathBuf>,
+
+    /// The path to the private key used to negotiate TLS. Both the private_key and the certificate
+    /// must be specified to enable TLS
+    #[arg(long)]
+    private_key: Option<PathBuf>,
 
     /// How long (in seconds) the internel HTTP client should wait for responses
     ///
