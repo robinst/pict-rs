@@ -67,6 +67,9 @@ impl Args {
                 media_process_timeout,
                 media_retention_variants,
                 media_retention_proxy,
+                media_magick_max_width,
+                media_magick_max_height,
+                media_magick_max_area,
                 media_image_max_width,
                 media_image_max_height,
                 media_image_max_area,
@@ -137,6 +140,12 @@ impl Args {
                     proxy: media_retention_proxy,
                 };
 
+                let magick = Magick {
+                    max_width: media_magick_max_width,
+                    max_height: media_magick_max_height,
+                    max_area: media_magick_max_area,
+                };
+
                 let image_quality = ImageQuality {
                     avif: media_image_quality_avif,
                     jpeg: media_image_quality_jpeg,
@@ -202,6 +211,7 @@ impl Args {
                     external_validation_timeout: media_external_validation_timeout,
                     filters: media_filters,
                     retention: retention.set(),
+                    magick: magick.set(),
                     image: image.set(),
                     animation: animation.set(),
                     video: video.set(),
@@ -609,6 +619,8 @@ struct Media {
     #[serde(skip_serializing_if = "Option::is_none")]
     retention: Option<Retention>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    magick: Option<Magick>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     image: Option<Image>,
     #[serde(skip_serializing_if = "Option::is_none")]
     animation: Option<Animation>,
@@ -628,6 +640,30 @@ struct Retention {
 impl Retention {
     fn set(self) -> Option<Self> {
         let any_set = self.variants.is_some() || self.proxy.is_some();
+
+        if any_set {
+            Some(self)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct Magick {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_width: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_height: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_area: Option<u32>,
+}
+
+impl Magick {
+    fn set(self) -> Option<Self> {
+        let any_set =
+            self.max_width.is_some() || self.max_height.is_some() || self.max_area.is_some();
 
         if any_set {
             Some(self)
@@ -990,6 +1026,16 @@ struct Run {
     /// Proxied images are any images ingested using the media proxy functionality
     #[arg(long)]
     media_retention_proxy: Option<RetentionValue>,
+
+    /// The maximum width, in pixels, for uploaded media that imagemagick will attempt to process
+    #[arg(long)]
+    media_magick_max_width: Option<u16>,
+    /// The maximum height, in pixels, for uploaded media that imagemagick will attempt to process
+    #[arg(long)]
+    media_magick_max_height: Option<u16>,
+    /// The maximum area, in pixels, for uploaded media that imagemagick will attempt to process
+    #[arg(long)]
+    media_magick_max_area: Option<u32>,
 
     /// The maximum width, in pixels, for uploaded images
     #[arg(long)]

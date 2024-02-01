@@ -10,6 +10,7 @@ use crate::{
         AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InputVideoFormat,
         InternalFormat, Validations,
     },
+    magick::PolicyDir,
     process::ProcessRead,
     tmp_file::TmpDir,
 };
@@ -58,6 +59,7 @@ const MEGABYTES: usize = 1024 * 1024;
 #[tracing::instrument(skip_all)]
 pub(crate) async fn validate_bytes(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     bytes: Bytes,
     validations: Validations<'_>,
     timeout: u64,
@@ -71,12 +73,13 @@ pub(crate) async fn validate_bytes(
         width,
         height,
         frames,
-    } = crate::discover::discover_bytes(tmp_dir, timeout, bytes.clone()).await?;
+    } = crate::discover::discover_bytes(tmp_dir, policy_dir, timeout, bytes.clone()).await?;
 
     match &input {
         InputFile::Image(input) => {
             let (format, process_read) = process_image(
                 tmp_dir,
+                policy_dir,
                 bytes,
                 *input,
                 width,
@@ -91,6 +94,7 @@ pub(crate) async fn validate_bytes(
         InputFile::Animation(input) => {
             let (format, process_read) = process_animation(
                 tmp_dir,
+                policy_dir,
                 bytes,
                 *input,
                 width,
@@ -121,9 +125,11 @@ pub(crate) async fn validate_bytes(
     }
 }
 
-#[tracing::instrument(skip(tmp_dir, bytes, validations))]
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(tmp_dir, policy_dir, bytes, validations))]
 async fn process_image(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     bytes: Bytes,
     input: ImageInput,
     width: u16,
@@ -152,7 +158,16 @@ async fn process_image(
     let process_read = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        magick::convert_image(tmp_dir, input.format, format, quality, timeout, bytes).await?
+        magick::convert_image(
+            tmp_dir,
+            policy_dir,
+            input.format,
+            format,
+            quality,
+            timeout,
+            bytes,
+        )
+        .await?
     } else {
         exiftool::clear_metadata_bytes_read(bytes, timeout)?
     };
@@ -187,9 +202,10 @@ fn validate_animation(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, bytes, validations))]
+#[tracing::instrument(skip(tmp_dir, policy_dir, bytes, validations))]
 async fn process_animation(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     bytes: Bytes,
     input: AnimationFormat,
     width: u16,
@@ -208,7 +224,8 @@ async fn process_animation(
     let process_read = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        magick::convert_animation(tmp_dir, input, format, quality, timeout, bytes).await?
+        magick::convert_animation(tmp_dir, policy_dir, input, format, quality, timeout, bytes)
+            .await?
     } else {
         exiftool::clear_metadata_bytes_read(bytes, timeout)?
     };

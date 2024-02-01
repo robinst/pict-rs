@@ -10,6 +10,7 @@ use crate::{
     config::Configuration,
     details::Details,
     error::{Error, UploadError},
+    magick::{ArcPolicyDir, PolicyDir},
     repo::{ArcRepo, DeleteToken, Hash},
     repo_04::{
         AliasRepo as _, HashRepo as _, IdentifierRepo as _, SettingsRepo as _,
@@ -80,6 +81,7 @@ pub(crate) async fn migrate_repo(old_repo: ArcRepo, new_repo: ArcRepo) -> Result
 #[tracing::instrument(skip_all)]
 pub(crate) async fn migrate_04<S: Store + 'static>(
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     old_repo: OldSledRepo,
     new_repo: ArcRepo,
     store: S,
@@ -115,6 +117,7 @@ pub(crate) async fn migrate_04<S: Store + 'static>(
         if let Ok(hash) = res {
             set.spawn_local(migrate_hash_04(
                 tmp_dir.clone(),
+                policy_dir.clone(),
                 old_repo.clone(),
                 new_repo.clone(),
                 store.clone(),
@@ -192,6 +195,7 @@ async fn migrate_hash(old_repo: ArcRepo, new_repo: ArcRepo, hash: Hash) {
 
 async fn migrate_hash_04<S: Store>(
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     old_repo: OldSledRepo,
     new_repo: ArcRepo,
     store: S,
@@ -202,6 +206,7 @@ async fn migrate_hash_04<S: Store>(
 
     while let Err(e) = timed_migrate_hash_04(
         &tmp_dir,
+        &policy_dir,
         &old_repo,
         &new_repo,
         &store,
@@ -296,6 +301,7 @@ async fn do_migrate_hash(old_repo: &ArcRepo, new_repo: &ArcRepo, hash: Hash) -> 
 
 async fn timed_migrate_hash_04<S: Store>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     old_repo: &OldSledRepo,
     new_repo: &ArcRepo,
     store: &S,
@@ -304,7 +310,9 @@ async fn timed_migrate_hash_04<S: Store>(
 ) -> Result<(), Error> {
     tokio::time::timeout(
         Duration::from_secs(config.media.external_validation_timeout * 6),
-        do_migrate_hash_04(tmp_dir, old_repo, new_repo, store, config, old_hash),
+        do_migrate_hash_04(
+            tmp_dir, policy_dir, old_repo, new_repo, store, config, old_hash,
+        ),
     )
     .await
     .map_err(|_| UploadError::ProcessTimeout)?
@@ -313,6 +321,7 @@ async fn timed_migrate_hash_04<S: Store>(
 #[tracing::instrument(skip_all)]
 async fn do_migrate_hash_04<S: Store>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     old_repo: &OldSledRepo,
     new_repo: &ArcRepo,
     store: &S,
@@ -326,7 +335,16 @@ async fn do_migrate_hash_04<S: Store>(
 
     let size = store.len(&identifier).await?;
 
-    let hash_details = set_details(tmp_dir, old_repo, new_repo, store, config, &identifier).await?;
+    let hash_details = set_details(
+        tmp_dir,
+        policy_dir,
+        old_repo,
+        new_repo,
+        store,
+        config,
+        &identifier,
+    )
+    .await?;
 
     let aliases = old_repo.aliases_for_hash(old_hash.clone()).await?;
     let variants = old_repo.variants(old_hash.clone()).await?;
@@ -356,7 +374,16 @@ async fn do_migrate_hash_04<S: Store>(
             .relate_motion_identifier(hash.clone(), &identifier)
             .await?;
 
-        set_details(tmp_dir, old_repo, new_repo, store, config, &identifier).await?;
+        set_details(
+            tmp_dir,
+            policy_dir,
+            old_repo,
+            new_repo,
+            store,
+            config,
+            &identifier,
+        )
+        .await?;
     }
 
     for (variant, identifier) in variants {
@@ -364,7 +391,16 @@ async fn do_migrate_hash_04<S: Store>(
             .relate_variant_identifier(hash.clone(), variant.clone(), &identifier)
             .await?;
 
-        set_details(tmp_dir, old_repo, new_repo, store, config, &identifier).await?;
+        set_details(
+            tmp_dir,
+            policy_dir,
+            old_repo,
+            new_repo,
+            store,
+            config,
+            &identifier,
+        )
+        .await?;
 
         new_repo.accessed_variant(hash.clone(), variant).await?;
     }
@@ -374,6 +410,7 @@ async fn do_migrate_hash_04<S: Store>(
 
 async fn set_details<S: Store>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     old_repo: &OldSledRepo,
     new_repo: &ArcRepo,
     store: &S,
@@ -384,7 +421,8 @@ async fn set_details<S: Store>(
         Ok(details)
     } else {
         let details =
-            fetch_or_generate_details(tmp_dir, old_repo, store, config, identifier).await?;
+            fetch_or_generate_details(tmp_dir, policy_dir, old_repo, store, config, identifier)
+                .await?;
         new_repo.relate_details(identifier, &details).await?;
         Ok(details)
     }
@@ -405,6 +443,7 @@ fn details_semaphore() -> &'static Semaphore {
 #[tracing::instrument(skip_all)]
 async fn fetch_or_generate_details<S: Store>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     old_repo: &OldSledRepo,
     store: &S,
     config: &Configuration,
@@ -419,7 +458,8 @@ async fn fetch_or_generate_details<S: Store>(
         let bytes = bytes_stream.into_bytes();
 
         let guard = details_semaphore().acquire().await?;
-        let details = Details::from_bytes(tmp_dir, config.media.process_timeout, bytes).await?;
+        let details =
+            Details::from_bytes(tmp_dir, policy_dir, config.media.process_timeout, bytes).await?;
         drop(guard);
 
         Ok(details)

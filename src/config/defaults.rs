@@ -77,6 +77,7 @@ struct MediaDefaults {
     process_timeout: u64,
     filters: Vec<String>,
     retention: RetentionDefaults,
+    magick: MagickDefaults,
     image: ImageDefaults,
     animation: AnimationDefaults,
     video: VideoDefaults,
@@ -87,6 +88,14 @@ struct MediaDefaults {
 struct RetentionDefaults {
     variants: &'static str,
     proxy: &'static str,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+struct MagickDefaults {
+    max_width: u16,
+    max_height: u16,
+    max_area: u32,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -256,6 +265,7 @@ impl Default for MediaDefaults {
                 "thumbnail".into(),
             ],
             retention: Default::default(),
+            magick: Default::default(),
             image: Default::default(),
             animation: Default::default(),
             video: Default::default(),
@@ -268,6 +278,16 @@ impl Default for RetentionDefaults {
         Self {
             variants: "7d",
             proxy: "7d",
+        }
+    }
+}
+
+impl Default for MagickDefaults {
+    fn default() -> Self {
+        Self {
+            max_width: 10_000,
+            max_height: 10_000,
+            max_area: 40_000_000,
         }
     }
 }

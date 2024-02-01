@@ -6,7 +6,7 @@ use actix_web::web::Bytes;
 use crate::{
     discover::DiscoverError,
     formats::{AnimationFormat, ImageFormat, ImageInput, InputFile},
-    magick::{MagickError, MAGICK_TEMPORARY_PATH},
+    magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::Process,
     tmp_file::TmpDir,
 };
@@ -33,6 +33,7 @@ struct Geometry {
 #[tracing::instrument(skip_all)]
 pub(super) async fn confirm_bytes(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     discovery: Option<Discovery>,
     timeout: u64,
     bytes: Bytes,
@@ -50,7 +51,7 @@ pub(super) async fn confirm_bytes(
         }
     }
 
-    discover_file(tmp_dir, timeout, move |mut file| async move {
+    discover_file(tmp_dir, policy_dir, timeout, move |mut file| async move {
         file.write_from_bytes(bytes)
             .await
             .map_err(MagickError::Write)?;
@@ -63,6 +64,7 @@ pub(super) async fn confirm_bytes(
 #[tracing::instrument(level = "debug", skip_all)]
 async fn discover_file<F, Fut>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     timeout: u64,
     f: F,
 ) -> Result<Discovery, MagickError>
@@ -86,7 +88,10 @@ where
     let tmp_one = (f)(tmp_one).await?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
-    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
+    let envs = [
+        (MAGICK_TEMPORARY_PATH, temporary_path.as_os_str()),
+        (MAGICK_CONFIGURE_PATH, policy_dir.as_os_str()),
+    ];
 
     let res = Process::run(
         "magick",

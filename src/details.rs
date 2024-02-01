@@ -2,6 +2,7 @@ use crate::{
     discover::Discovery,
     error::Error,
     formats::{InternalFormat, InternalVideoFormat},
+    magick::PolicyDir,
     serde_str::Serde,
     tmp_file::TmpDir,
 };
@@ -82,6 +83,7 @@ impl Details {
     #[tracing::instrument(level = "debug", skip_all)]
     pub(crate) async fn from_bytes(
         tmp_dir: &TmpDir,
+        policy_dir: &PolicyDir,
         timeout: u64,
         input: web::Bytes,
     ) -> Result<Self, Error> {
@@ -90,7 +92,7 @@ impl Details {
             width,
             height,
             frames,
-        } = crate::discover::discover_bytes(tmp_dir, timeout, input).await?;
+        } = crate::discover::discover_bytes(tmp_dir, policy_dir, timeout, input).await?;
 
         Ok(Details::from_parts(
             input.internal_format(),

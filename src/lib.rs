@@ -42,6 +42,7 @@ use actix_web::{
 use details::{ApiDetails, HumanDate};
 use future::WithTimeout;
 use futures_core::Stream;
+use magick::{ArcPolicyDir, PolicyDir};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::{Metrics, Payload};
 use repo::ArcRepo;
@@ -106,6 +107,7 @@ fn process_semaphore() -> &'static Semaphore {
 
 async fn ensure_details<S: Store + 'static>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     store: &S,
     config: &Configuration,
@@ -115,11 +117,12 @@ async fn ensure_details<S: Store + 'static>(
         return Err(UploadError::MissingAlias.into());
     };
 
-    ensure_details_identifier(tmp_dir, repo, store, config, &identifier).await
+    ensure_details_identifier(tmp_dir, policy_dir, repo, store, config, &identifier).await
 }
 
 async fn ensure_details_identifier<S: Store + 'static>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     store: &S,
     config: &Configuration,
@@ -143,6 +146,7 @@ async fn ensure_details_identifier<S: Store + 'static>(
         let bytes_stream = store.to_bytes(identifier, None, None).await?;
         let new_details = Details::from_bytes(
             tmp_dir,
+            policy_dir,
             config.media.process_timeout,
             bytes_stream.into_bytes(),
         )
@@ -163,6 +167,10 @@ impl<S: Store + 'static> FormData for Upload<S> {
     fn form(req: &HttpRequest) -> Form<Self::Item, Self::Error> {
         let tmp_dir = req
             .app_data::<web::Data<ArcTmpDir>>()
+            .expect("No TmpDir in request")
+            .clone();
+        let policy_dir = req
+            .app_data::<web::Data<ArcPolicyDir>>()
             .expect("No TmpDir in request")
             .clone();
         let repo = req
@@ -193,6 +201,7 @@ impl<S: Store + 'static> FormData for Upload<S> {
                 "images",
                 Field::array(Field::file(move |filename, _, stream| {
                     let tmp_dir = tmp_dir.clone();
+                    let policy_dir = policy_dir.clone();
                     let repo = repo.clone();
                     let store = store.clone();
                     let client = client.clone();
@@ -211,7 +220,14 @@ impl<S: Store + 'static> FormData for Upload<S> {
                             let stream = crate::stream::from_err(stream);
 
                             ingest::ingest(
-                                &tmp_dir, &repo, &**store, &client, stream, None, &config,
+                                &tmp_dir,
+                                &policy_dir,
+                                &repo,
+                                &**store,
+                                &client,
+                                stream,
+                                None,
+                                &config,
                             )
                             .await
                         }
@@ -235,6 +251,10 @@ impl<S: Store + 'static> FormData for Import<S> {
     fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
         let tmp_dir = req
             .app_data::<web::Data<ArcTmpDir>>()
+            .expect("No TmpDir in request")
+            .clone();
+        let policy_dir = req
+            .app_data::<web::Data<ArcPolicyDir>>()
             .expect("No TmpDir in request")
             .clone();
         let repo = req
@@ -265,6 +285,7 @@ impl<S: Store + 'static> FormData for Import<S> {
                 "images",
                 Field::array(Field::file(move |filename, _, stream| {
                     let tmp_dir = tmp_dir.clone();
+                    let policy_dir = policy_dir.clone();
                     let repo = repo.clone();
                     let store = store.clone();
                     let client = client.clone();
@@ -284,6 +305,7 @@ impl<S: Store + 'static> FormData for Import<S> {
 
                             ingest::ingest(
                                 &tmp_dir,
+                                &policy_dir,
                                 &repo,
                                 &**store,
                                 &client,
@@ -308,34 +330,46 @@ impl<S: Store + 'static> FormData for Import<S> {
 }
 
 /// Handle responding to successful uploads
-#[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
+#[tracing::instrument(
+    name = "Uploaded files",
+    skip(value, tmp_dir, policy_dir, repo, store, config)
+)]
 async fn upload<S: Store + 'static>(
     Multipart(Upload(value, _)): Multipart<Upload<S>>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    handle_upload(value, tmp_dir, repo, store, config).await
+    handle_upload(value, tmp_dir, policy_dir, repo, store, config).await
 }
 
 /// Handle responding to successful uploads
-#[tracing::instrument(name = "Imported files", skip(value, repo, store, config))]
+#[tracing::instrument(
+    name = "Imported files",
+    skip(value, tmp_dir, policy_dir, repo, store, config)
+)]
 async fn import<S: Store + 'static>(
     Multipart(Import(value, _)): Multipart<Import<S>>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    handle_upload(value, tmp_dir, repo, store, config).await
+    handle_upload(value, tmp_dir, policy_dir, repo, store, config).await
 }
 
 /// Handle responding to successful uploads
-#[tracing::instrument(name = "Uploaded files", skip(value, repo, store, config))]
+#[tracing::instrument(
+    name = "Uploaded files",
+    skip(value, tmp_dir, policy_dir, repo, store, config)
+)]
 async fn handle_upload<S: Store + 'static>(
     value: Value<Session>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -357,7 +391,8 @@ async fn handle_upload<S: Store + 'static>(
             tracing::debug!("Uploaded {} as {:?}", image.filename, alias);
             let delete_token = image.result.delete_token();
 
-            let details = ensure_details(&tmp_dir, &repo, &store, &config, alias).await?;
+            let details =
+                ensure_details(&tmp_dir, &policy_dir, &repo, &store, &config, alias).await?;
 
             files.push(serde_json::json!({
                 "file": alias.to_string(),
@@ -487,6 +522,7 @@ struct ClaimQuery {
 #[tracing::instrument(name = "Waiting on upload", skip_all)]
 async fn claim_upload<S: Store + 'static>(
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -506,7 +542,9 @@ async fn claim_upload<S: Store + 'static>(
 
             match upload_result {
                 UploadResult::Success { alias, token } => {
-                    let details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
+                    let details =
+                        ensure_details(&tmp_dir, &policy_dir, &repo, &store, &config, &alias)
+                            .await?;
 
                     Ok(HttpResponse::Ok().json(&serde_json::json!({
                         "msg": "ok",
@@ -539,16 +577,20 @@ struct UrlQuery {
 async fn ingest_inline<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
     config: &Configuration,
 ) -> Result<(Alias, DeleteToken, Details), Error> {
-    let session = ingest::ingest(tmp_dir, repo, store, client, stream, None, config).await?;
+    let session = ingest::ingest(
+        tmp_dir, policy_dir, repo, store, client, stream, None, config,
+    )
+    .await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
 
-    let details = ensure_details(tmp_dir, repo, store, config, &alias).await?;
+    let details = ensure_details(tmp_dir, policy_dir, repo, store, config, &alias).await?;
 
     let delete_token = session.disarm();
 
@@ -556,10 +598,14 @@ async fn ingest_inline<S: Store + 'static>(
 }
 
 /// download an image from a URL
-#[tracing::instrument(name = "Downloading file", skip(client, repo, store, config))]
+#[tracing::instrument(
+    name = "Downloading file",
+    skip(client, tmp_dir, policy_dir, repo, store, config)
+)]
 async fn download<S: Store + 'static>(
     client: web::Data<ClientWithMiddleware>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -570,7 +616,7 @@ async fn download<S: Store + 'static>(
     if query.backgrounded {
         do_download_backgrounded(stream, repo, store).await
     } else {
-        do_download_inline(stream, &tmp_dir, repo, store, &client, config).await
+        do_download_inline(stream, &tmp_dir, &policy_dir, repo, store, &client, config).await
     }
 }
 
@@ -599,11 +645,12 @@ async fn download_stream(
 
 #[tracing::instrument(
     name = "Downloading file inline",
-    skip(stream, repo, store, client, config)
+    skip(stream, tmp_dir, policy_dir, repo, store, client, config)
 )]
 async fn do_download_inline<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     client: &ClientWithMiddleware,
@@ -612,7 +659,7 @@ async fn do_download_inline<S: Store + 'static>(
     metrics::counter!("pict-rs.files", "download" => "inline").increment(1);
 
     let (alias, delete_token, details) =
-        ingest_inline(stream, tmp_dir, &repo, &store, client, &config).await?;
+        ingest_inline(stream, tmp_dir, policy_dir, &repo, &store, client, &config).await?;
 
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
@@ -868,13 +915,14 @@ async fn not_found_hash(repo: &ArcRepo) -> Result<Option<(Alias, Hash)>, Error> 
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(
     name = "Serving processed image",
-    skip(tmp_dir, repo, store, client, config, process_map)
+    skip(tmp_dir, policy_dir, repo, store, client, config, process_map)
 )]
 async fn process<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     client: web::Data<ClientWithMiddleware>,
@@ -891,8 +939,16 @@ async fn process<S: Store + 'static>(
             } else if !config.server.read_only {
                 let stream = download_stream(&client, proxy.as_str(), &config).await?;
 
-                let (alias, _, _) =
-                    ingest_inline(stream, &tmp_dir, &repo, &store, &client, &config).await?;
+                let (alias, _, _) = ingest_inline(
+                    stream,
+                    &tmp_dir,
+                    &policy_dir,
+                    &repo,
+                    &store,
+                    &client,
+                    &config,
+                )
+                .await?;
 
                 repo.relate_url(proxy, alias.clone()).await?;
 
@@ -933,7 +989,8 @@ async fn process<S: Store + 'static>(
 
     if let Some(identifier) = identifier_opt {
         let details =
-            ensure_details_identifier(&tmp_dir, &repo, &store, &config, &identifier).await?;
+            ensure_details_identifier(&tmp_dir, &policy_dir, &repo, &store, &config, &identifier)
+                .await?;
 
         if let Some(public_url) = store.public_url(&identifier) {
             return Ok(HttpResponse::SeeOther()
@@ -948,10 +1005,12 @@ async fn process<S: Store + 'static>(
         return Err(UploadError::ReadOnly.into());
     }
 
-    let original_details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
+    let original_details =
+        ensure_details(&tmp_dir, &policy_dir, &repo, &store, &config, &alias).await?;
 
     let (details, bytes) = generate::generate(
         &tmp_dir,
+        &policy_dir,
         &repo,
         &store,
         &process_map,
@@ -998,15 +1057,17 @@ async fn process<S: Store + 'static>(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(
     name = "Serving processed image headers",
-    skip(tmp_dir, repo, store, config)
+    skip(tmp_dir, policy_dir, repo, store, config)
 )]
 async fn process_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1040,7 +1101,8 @@ async fn process_head<S: Store + 'static>(
 
     if let Some(identifier) = identifier_opt {
         let details =
-            ensure_details_identifier(&tmp_dir, &repo, &store, &config, &identifier).await?;
+            ensure_details_identifier(&tmp_dir, &policy_dir, &repo, &store, &config, &identifier)
+                .await?;
 
         if let Some(public_url) = store.public_url(&identifier) {
             return Ok(HttpResponse::SeeOther()
@@ -1099,10 +1161,14 @@ async fn process_backgrounded<S: Store>(
 }
 
 /// Fetch file details
-#[tracing::instrument(name = "Fetching query details", skip(repo, store, config))]
+#[tracing::instrument(
+    name = "Fetching query details",
+    skip(tmp_dir, policy_dir, repo, store, config)
+)]
 async fn details_query<S: Store + 'static>(
     web::Query(alias_query): web::Query<AliasQuery>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1119,14 +1185,18 @@ async fn details_query<S: Store + 'static>(
         }
     };
 
-    do_details(alias, tmp_dir, repo, store, config).await
+    do_details(alias, tmp_dir, policy_dir, repo, store, config).await
 }
 
 /// Fetch file details
-#[tracing::instrument(name = "Fetching details", skip(tmp_dir, repo, store, config))]
+#[tracing::instrument(
+    name = "Fetching details",
+    skip(tmp_dir, policy_dir, repo, store, config)
+)]
 async fn details<S: Store + 'static>(
     alias: web::Path<Serde<Alias>>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1134,6 +1204,7 @@ async fn details<S: Store + 'static>(
     do_details(
         Serde::into_inner(alias.into_inner()),
         tmp_dir,
+        policy_dir,
         repo,
         store,
         config,
@@ -1144,21 +1215,27 @@ async fn details<S: Store + 'static>(
 async fn do_details<S: Store + 'static>(
     alias: Alias,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
 ) -> Result<HttpResponse, Error> {
-    let details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
+    let details = ensure_details(&tmp_dir, &policy_dir, &repo, &store, &config, &alias).await?;
 
     Ok(HttpResponse::Ok().json(&details.into_api_details()))
 }
 
 /// Serve files based on alias query
-#[tracing::instrument(name = "Serving file query", skip(repo, store, client, config))]
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(
+    name = "Serving file query",
+    skip(tmp_dir, policy_dir, repo, store, client, config)
+)]
 async fn serve_query<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(alias_query): web::Query<AliasQuery>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     client: web::Data<ClientWithMiddleware>,
@@ -1172,8 +1249,16 @@ async fn serve_query<S: Store + 'static>(
             } else if !config.server.read_only {
                 let stream = download_stream(&client, proxy.as_str(), &config).await?;
 
-                let (alias, _, _) =
-                    ingest_inline(stream, &tmp_dir, &repo, &store, &client, &config).await?;
+                let (alias, _, _) = ingest_inline(
+                    stream,
+                    &tmp_dir,
+                    &policy_dir,
+                    &repo,
+                    &store,
+                    &client,
+                    &config,
+                )
+                .await?;
 
                 repo.relate_url(proxy, alias.clone()).await?;
 
@@ -1190,15 +1275,16 @@ async fn serve_query<S: Store + 'static>(
         }
     };
 
-    do_serve(range, alias, tmp_dir, repo, store, config).await
+    do_serve(range, alias, tmp_dir, policy_dir, repo, store, config).await
 }
 
 /// Serve files
-#[tracing::instrument(name = "Serving file", skip(repo, store, config))]
+#[tracing::instrument(name = "Serving file", skip(tmp_dir, policy_dir, repo, store, config))]
 async fn serve<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1207,6 +1293,7 @@ async fn serve<S: Store + 'static>(
         range,
         Serde::into_inner(alias.into_inner()),
         tmp_dir,
+        policy_dir,
         repo,
         store,
         config,
@@ -1218,6 +1305,7 @@ async fn do_serve<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: Alias,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1238,7 +1326,7 @@ async fn do_serve<S: Store + 'static>(
         return Ok(HttpResponse::NotFound().finish());
     };
 
-    let details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
+    let details = ensure_details(&tmp_dir, &policy_dir, &repo, &store, &config, &alias).await?;
 
     if let Some(public_url) = store.public_url(&identifier) {
         return Ok(HttpResponse::SeeOther()
@@ -1249,11 +1337,15 @@ async fn do_serve<S: Store + 'static>(
     ranged_file_resp(&store, identifier, range, details, not_found).await
 }
 
-#[tracing::instrument(name = "Serving query file headers", skip(repo, store, config))]
+#[tracing::instrument(
+    name = "Serving query file headers",
+    skip(repo, tmp_dir, policy_dir, store, config)
+)]
 async fn serve_query_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(alias_query): web::Query<AliasQuery>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1268,14 +1360,18 @@ async fn serve_query_head<S: Store + 'static>(
         }
     };
 
-    do_serve_head(range, alias, tmp_dir, repo, store, config).await
+    do_serve_head(range, alias, tmp_dir, policy_dir, repo, store, config).await
 }
 
-#[tracing::instrument(name = "Serving file headers", skip(repo, store, config))]
+#[tracing::instrument(
+    name = "Serving file headers",
+    skip(tmp_dir, policy_dir, repo, store, config)
+)]
 async fn serve_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: web::Path<Serde<Alias>>,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1284,6 +1380,7 @@ async fn serve_head<S: Store + 'static>(
         range,
         Serde::into_inner(alias.into_inner()),
         tmp_dir,
+        policy_dir,
         repo,
         store,
         config,
@@ -1295,6 +1392,7 @@ async fn do_serve_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     alias: Alias,
     tmp_dir: web::Data<ArcTmpDir>,
+    policy_dir: web::Data<ArcPolicyDir>,
     repo: web::Data<ArcRepo>,
     store: web::Data<S>,
     config: web::Data<Configuration>,
@@ -1304,7 +1402,7 @@ async fn do_serve_head<S: Store + 'static>(
         return Ok(HttpResponse::NotFound().finish());
     };
 
-    let details = ensure_details(&tmp_dir, &repo, &store, &config, &alias).await?;
+    let details = ensure_details(&tmp_dir, &policy_dir, &repo, &store, &config, &alias).await?;
 
     if let Some(public_url) = store.public_url(&identifier) {
         return Ok(HttpResponse::SeeOther()
@@ -1817,6 +1915,7 @@ fn spawn_cleanup(repo: ArcRepo, config: &Configuration) {
 
 fn spawn_workers<S>(
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     repo: ArcRepo,
     store: S,
     client: ClientWithMiddleware,
@@ -1831,12 +1930,21 @@ fn spawn_workers<S>(
     );
     crate::sync::spawn(
         "process-worker",
-        queue::process_images(tmp_dir, repo, store, client, process_map, config),
+        queue::process_images(
+            tmp_dir,
+            policy_dir,
+            repo,
+            store,
+            client,
+            process_map,
+            config,
+        ),
     );
 }
 
 async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     repo: ArcRepo,
     store: FileStore,
     client: ClientWithMiddleware,
@@ -1853,6 +1961,7 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
 
     let server = HttpServer::new(move || {
         let tmp_dir = tmp_dir.clone();
+        let policy_dir = policy_dir.clone();
         let client = client.clone();
         let store = store.clone();
         let repo = repo.clone();
@@ -1861,6 +1970,7 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
 
         spawn_workers(
             tmp_dir.clone(),
+            policy_dir.clone(),
             repo.clone(),
             store.clone(),
             client.clone(),
@@ -1875,6 +1985,7 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
             .wrap(Payload::new())
             .app_data(web::Data::new(process_map.clone()))
             .app_data(web::Data::new(tmp_dir))
+            .app_data(web::Data::new(policy_dir))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     });
 
@@ -1915,6 +2026,7 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
 
 async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     repo: ArcRepo,
     store: ObjectStore,
     client: ClientWithMiddleware,
@@ -1931,6 +2043,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
 
     let server = HttpServer::new(move || {
         let tmp_dir = tmp_dir.clone();
+        let policy_dir = policy_dir.clone();
         let client = client.clone();
         let store = store.clone();
         let repo = repo.clone();
@@ -1939,6 +2052,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
 
         spawn_workers(
             tmp_dir.clone(),
+            policy_dir.clone(),
             repo.clone(),
             store.clone(),
             client.clone(),
@@ -1953,6 +2067,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
             .wrap(Payload::new())
             .app_data(web::Data::new(process_map.clone()))
             .app_data(web::Data::new(tmp_dir))
+            .app_data(web::Data::new(policy_dir))
             .configure(move |sc| configure_endpoints(sc, repo, store, config, client, extra_config))
     });
 
@@ -1994,6 +2109,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
 #[allow(clippy::too_many_arguments)]
 async fn migrate_inner<S1>(
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     repo: ArcRepo,
     client: ClientWithMiddleware,
     from: S1,
@@ -2011,6 +2127,7 @@ where
 
             migrate_store(
                 tmp_dir,
+                policy_dir,
                 repo,
                 from,
                 to,
@@ -2054,6 +2171,7 @@ where
 
             migrate_store(
                 tmp_dir,
+                policy_dir,
                 repo,
                 from,
                 to,
@@ -2213,6 +2331,7 @@ impl PictRsConfiguration {
         let PictRsConfiguration { config, operation } = self;
 
         let tmp_dir = TmpDir::init(&config.server.temporary_directory).await?;
+        let policy_dir = magick::write_magick_policy(&config.media, &tmp_dir).await?;
 
         let client = build_client()?;
 
@@ -2231,6 +2350,7 @@ impl PictRsConfiguration {
                         let from = FileStore::build(path.clone(), repo.clone()).await?;
                         migrate_inner(
                             tmp_dir,
+                            policy_dir,
                             repo,
                             client,
                             from,
@@ -2277,6 +2397,7 @@ impl PictRsConfiguration {
 
                         migrate_inner(
                             tmp_dir,
+                            policy_dir,
                             repo,
                             client,
                             from,
@@ -2317,6 +2438,7 @@ impl PictRsConfiguration {
                         if let Some(old_repo) = repo_04::open(path)? {
                             repo::migrate_04(
                                 tmp_dir.clone(),
+                                policy_dir.clone(),
                                 old_repo,
                                 arc_repo.clone(),
                                 store.clone(),
@@ -2334,6 +2456,7 @@ impl PictRsConfiguration {
                     Repo::Sled(sled_repo) => {
                         launch_file_store(
                             tmp_dir.clone(),
+                            policy_dir.clone(),
                             arc_repo,
                             store,
                             client,
@@ -2343,8 +2466,16 @@ impl PictRsConfiguration {
                         .await?;
                     }
                     Repo::Postgres(_) => {
-                        launch_file_store(tmp_dir.clone(), arc_repo, store, client, config, |_| {})
-                            .await?;
+                        launch_file_store(
+                            tmp_dir.clone(),
+                            policy_dir.clone(),
+                            arc_repo,
+                            store,
+                            client,
+                            config,
+                            |_| {},
+                        )
+                        .await?;
                     }
                 }
             }
@@ -2387,6 +2518,7 @@ impl PictRsConfiguration {
                         if let Some(old_repo) = repo_04::open(path)? {
                             repo::migrate_04(
                                 tmp_dir.clone(),
+                                policy_dir.clone(),
                                 old_repo,
                                 arc_repo.clone(),
                                 store.clone(),
@@ -2404,6 +2536,7 @@ impl PictRsConfiguration {
                     Repo::Sled(sled_repo) => {
                         launch_object_store(
                             tmp_dir.clone(),
+                            policy_dir.clone(),
                             arc_repo,
                             store,
                             client,
@@ -2415,6 +2548,7 @@ impl PictRsConfiguration {
                     Repo::Postgres(_) => {
                         launch_object_store(
                             tmp_dir.clone(),
+                            policy_dir.clone(),
                             arc_repo,
                             store,
                             client,
@@ -2427,6 +2561,7 @@ impl PictRsConfiguration {
             }
         }
 
+        policy_dir.cleanup().await?;
         tmp_dir.cleanup().await?;
 
         Ok(())

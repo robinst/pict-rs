@@ -6,6 +6,7 @@ use crate::{
     error::{Error, UploadError},
     formats::{InternalFormat, Validations},
     future::WithMetrics,
+    magick::PolicyDir,
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     store::Store,
     tmp_file::TmpDir,
@@ -50,6 +51,7 @@ where
 
 async fn process_ingest<S>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     store: &S,
     stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
     media: &crate::config::Media,
@@ -70,8 +72,14 @@ where
     };
 
     tracing::trace!("Validating bytes");
-    let (input_type, process_read) =
-        crate::validate::validate_bytes(tmp_dir, bytes, prescribed, media.process_timeout).await?;
+    let (input_type, process_read) = crate::validate::validate_bytes(
+        tmp_dir,
+        policy_dir,
+        bytes,
+        prescribed,
+        media.process_timeout,
+    )
+    .await?;
 
     let process_read = if let Some(operations) = media.preprocess_steps() {
         if let Some(format) = input_type.processable_format() {
@@ -87,6 +95,7 @@ where
 
             crate::magick::process_image_process_read(
                 tmp_dir,
+                policy_dir,
                 process_read,
                 magick_args,
                 format,
@@ -115,8 +124,13 @@ where
         .await??;
 
     let bytes_stream = store.to_bytes(&identifier, None, None).await?;
-    let details =
-        Details::from_bytes(tmp_dir, media.process_timeout, bytes_stream.into_bytes()).await?;
+    let details = Details::from_bytes(
+        tmp_dir,
+        policy_dir,
+        media.process_timeout,
+        bytes_stream.into_bytes(),
+    )
+    .await?;
 
     drop(permit);
 
@@ -151,9 +165,11 @@ where
     Ok((input_type, identifier, details, state))
 }
 
-#[tracing::instrument(skip(tmp_dir, repo, store, client, stream, config))]
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(tmp_dir, policy_dir, repo, store, client, stream, config))]
 pub(crate) async fn ingest<S>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
@@ -167,7 +183,7 @@ where
     let (input_type, identifier, details, state) = if config.server.danger_dummy_mode {
         dummy_ingest(store, stream).await?
     } else {
-        process_ingest(tmp_dir, store, stream, &config.media).await?
+        process_ingest(tmp_dir, policy_dir, store, stream, &config.media).await?
     };
 
     let mut session = Session {

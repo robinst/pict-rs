@@ -4,13 +4,14 @@ use actix_web::web::Bytes;
 
 use crate::{
     formats::{AnimationFormat, ImageFormat},
-    magick::{MagickError, MAGICK_TEMPORARY_PATH},
+    magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
     tmp_file::TmpDir,
 };
 
 pub(super) async fn convert_image(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     input: ImageFormat,
     output: ImageFormat,
     quality: Option<u8>,
@@ -19,6 +20,7 @@ pub(super) async fn convert_image(
 ) -> Result<ProcessRead, MagickError> {
     convert(
         tmp_dir,
+        policy_dir,
         input.magick_format(),
         output.magick_format(),
         false,
@@ -31,6 +33,7 @@ pub(super) async fn convert_image(
 
 pub(super) async fn convert_animation(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     input: AnimationFormat,
     output: AnimationFormat,
     quality: Option<u8>,
@@ -39,6 +42,7 @@ pub(super) async fn convert_animation(
 ) -> Result<ProcessRead, MagickError> {
     convert(
         tmp_dir,
+        policy_dir,
         input.magick_format(),
         output.magick_format(),
         true,
@@ -49,8 +53,10 @@ pub(super) async fn convert_animation(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn convert(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     input: &'static str,
     output: &'static str,
     coalesce: bool,
@@ -96,7 +102,10 @@ async fn convert(
 
     args.push(output_arg.as_ref());
 
-    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
+    let envs = [
+        (MAGICK_TEMPORARY_PATH, temporary_path.as_os_str()),
+        (MAGICK_CONFIGURE_PATH, policy_dir.as_os_str()),
+    ];
 
     let reader = Process::run("magick", &args, &envs, timeout)?.read();
 

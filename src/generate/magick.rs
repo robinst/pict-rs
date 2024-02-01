@@ -4,7 +4,7 @@ use actix_web::web::Bytes;
 
 use crate::{
     formats::ProcessableFormat,
-    magick::{MagickError, MAGICK_TEMPORARY_PATH},
+    magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
     stream::LocalBoxStream,
     tmp_file::TmpDir,
@@ -12,6 +12,7 @@ use crate::{
 
 async fn thumbnail_animation<F, Fut>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
@@ -59,7 +60,10 @@ where
     }
     args.push(output_arg.as_ref());
 
-    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
+    let envs = [
+        (MAGICK_TEMPORARY_PATH, temporary_path.as_os_str()),
+        (MAGICK_CONFIGURE_PATH, policy_dir.as_os_str()),
+    ];
 
     let reader = Process::run("magick", &args, &envs, timeout)?
         .read()
@@ -71,6 +75,7 @@ where
 
 pub(super) async fn thumbnail(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     stream: LocalBoxStream<'static, std::io::Result<Bytes>>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
@@ -79,6 +84,7 @@ pub(super) async fn thumbnail(
 ) -> Result<ProcessRead, MagickError> {
     thumbnail_animation(
         tmp_dir,
+        policy_dir,
         input_format,
         format,
         quality,

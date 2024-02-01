@@ -7,6 +7,7 @@ use crate::{
     error::{Error, UploadError},
     formats::{ImageFormat, InputProcessableFormat, InternalVideoFormat, ProcessableFormat},
     future::{WithMetrics, WithTimeout},
+    magick::PolicyDir,
     repo::{ArcRepo, Hash, VariantAlreadyExists},
     store::Store,
     tmp_file::TmpDir,
@@ -49,9 +50,10 @@ impl Drop for MetricsGuard {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, repo, store, hash, process_map, config))]
+#[tracing::instrument(skip(tmp_dir, policy_dir, repo, store, hash, process_map, config))]
 pub(crate) async fn generate<S: Store + 'static>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     store: &S,
     process_map: &ProcessMap,
@@ -74,6 +76,7 @@ pub(crate) async fn generate<S: Store + 'static>(
     } else {
         let process_fut = process(
             tmp_dir,
+            policy_dir,
             repo,
             store,
             format,
@@ -96,9 +99,10 @@ pub(crate) async fn generate<S: Store + 'static>(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, repo, store, hash, config))]
+#[tracing::instrument(skip(tmp_dir, policy_dir, repo, store, hash, config))]
 async fn process<S: Store + 'static>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     store: &S,
     output_format: InputProcessableFormat,
@@ -113,6 +117,7 @@ async fn process<S: Store + 'static>(
 
     let identifier = input_identifier(
         tmp_dir,
+        policy_dir,
         repo,
         store,
         output_format,
@@ -123,7 +128,8 @@ async fn process<S: Store + 'static>(
     .await?;
 
     let input_details =
-        crate::ensure_details_identifier(tmp_dir, repo, store, config, &identifier).await?;
+        crate::ensure_details_identifier(tmp_dir, policy_dir, repo, store, config, &identifier)
+            .await?;
 
     let input_format = input_details
         .internal_format()
@@ -141,6 +147,7 @@ async fn process<S: Store + 'static>(
 
     let vec = crate::magick::process_image_stream_read(
         tmp_dir,
+        policy_dir,
         stream,
         thumbnail_args,
         input_format,
@@ -157,7 +164,13 @@ async fn process<S: Store + 'static>(
 
     drop(permit);
 
-    let details = Details::from_bytes(tmp_dir, config.media.process_timeout, bytes.clone()).await?;
+    let details = Details::from_bytes(
+        tmp_dir,
+        policy_dir,
+        config.media.process_timeout,
+        bytes.clone(),
+    )
+    .await?;
 
     let identifier = store
         .save_bytes(bytes.clone(), details.media_type())
@@ -181,9 +194,11 @@ async fn process<S: Store + 'static>(
     Ok((details, bytes)) as Result<(Details, Bytes), Error>
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all)]
 async fn input_identifier<S>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     store: &S,
     output_format: InputProcessableFormat,
@@ -223,6 +238,7 @@ where
 
             let reader = magick::thumbnail(
                 tmp_dir,
+                policy_dir,
                 stream,
                 processable_format,
                 ProcessableFormat::Image(thumbnail_format),

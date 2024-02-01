@@ -9,6 +9,7 @@ use crate::{
     formats::InputProcessableFormat,
     future::LocalBoxFuture,
     ingest::Session,
+    magick::{ArcPolicyDir, PolicyDir},
     queue::Process,
     repo::{Alias, ArcRepo, UploadId, UploadResult},
     serde_str::Serde,
@@ -17,8 +18,10 @@ use crate::{
 };
 use std::{path::PathBuf, sync::Arc};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn perform<'a, S>(
     tmp_dir: &'a ArcTmpDir,
+    policy_dir: &'a ArcPolicyDir,
     repo: &'a ArcRepo,
     store: &'a S,
     client: &'a ClientWithMiddleware,
@@ -39,6 +42,7 @@ where
                 } => {
                     process_ingest(
                         tmp_dir,
+                        policy_dir,
                         repo,
                         store,
                         client,
@@ -57,6 +61,7 @@ where
                 } => {
                     generate(
                         tmp_dir,
+                        policy_dir,
                         repo,
                         store,
                         process_map,
@@ -113,9 +118,10 @@ impl Drop for UploadGuard {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, repo, store, client, config))]
+#[tracing::instrument(skip(tmp_dir, policy_dir, repo, store, client, config))]
 async fn process_ingest<S>(
     tmp_dir: &ArcTmpDir,
+    policy_dir: &ArcPolicyDir,
     repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
@@ -131,6 +137,7 @@ where
 
     let fut = async {
         let tmp_dir = tmp_dir.clone();
+        let policy_dir = policy_dir.clone();
         let ident = unprocessed_identifier.clone();
         let store2 = store.clone();
         let repo = repo.clone();
@@ -147,6 +154,7 @@ where
 
                 let session = crate::ingest::ingest(
                     &tmp_dir,
+                    &policy_dir,
                     &repo,
                     &store2,
                     &client,
@@ -191,9 +199,19 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(repo, store, process_map, process_path, process_args, config))]
+#[tracing::instrument(skip(
+    tmp_dir,
+    policy_dir,
+    repo,
+    store,
+    process_map,
+    process_path,
+    process_args,
+    config
+))]
 async fn generate<S: Store + 'static>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     store: &S,
     process_map: &ProcessMap,
@@ -215,10 +233,12 @@ async fn generate<S: Store + 'static>(
         return Ok(());
     }
 
-    let original_details = crate::ensure_details(tmp_dir, repo, store, config, &source).await?;
+    let original_details =
+        crate::ensure_details(tmp_dir, policy_dir, repo, store, config, &source).await?;
 
     crate::generate::generate(
         tmp_dir,
+        policy_dir,
         repo,
         store,
         process_map,

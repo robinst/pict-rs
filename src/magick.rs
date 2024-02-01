@@ -1,16 +1,18 @@
-use std::ffi::OsStr;
+use std::{ffi::OsStr, ops::Deref, path::Path, sync::Arc};
 
 use actix_web::web::Bytes;
 
 use crate::{
+    config::Media,
     error_code::ErrorCode,
     formats::ProcessableFormat,
     process::{Process, ProcessError, ProcessRead},
     stream::LocalBoxStream,
-    tmp_file::TmpDir,
+    tmp_file::{TmpDir, TmpFolder},
 };
 
 pub(crate) const MAGICK_TEMPORARY_PATH: &str = "MAGICK_TEMPORARY_PATH";
+pub(crate) const MAGICK_CONFIGURE_PATH: &str = "MAGICK_CONFIGURE_PATH";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum MagickError {
@@ -83,8 +85,10 @@ impl MagickError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_image<F, Fut>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     process_args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
@@ -137,7 +141,10 @@ where
     }
     args.push(output_arg.as_ref());
 
-    let envs = [(MAGICK_TEMPORARY_PATH, temporary_path.as_os_str())];
+    let envs = [
+        (MAGICK_TEMPORARY_PATH, temporary_path.as_os_str()),
+        (MAGICK_CONFIGURE_PATH, policy_dir.as_os_str()),
+    ];
 
     let reader = Process::run("magick", &args, &envs, timeout)?
         .read()
@@ -150,6 +157,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn process_image_stream_read(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     stream: LocalBoxStream<'static, std::io::Result<Bytes>>,
     args: Vec<String>,
     input_format: ProcessableFormat,
@@ -159,6 +167,7 @@ pub(crate) async fn process_image_stream_read(
 ) -> Result<ProcessRead, MagickError> {
     process_image(
         tmp_dir,
+        policy_dir,
         args,
         input_format,
         format,
@@ -175,8 +184,10 @@ pub(crate) async fn process_image_stream_read(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn process_image_process_read(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     process_read: ProcessRead,
     args: Vec<String>,
     input_format: ProcessableFormat,
@@ -186,6 +197,7 @@ pub(crate) async fn process_image_process_read(
 ) -> Result<ProcessRead, MagickError> {
     process_image(
         tmp_dir,
+        policy_dir,
         args,
         input_format,
         format,
@@ -205,4 +217,82 @@ pub(crate) async fn process_image_process_read(
         },
     )
     .await
+}
+
+pub(crate) type ArcPolicyDir = Arc<PolicyDir>;
+
+pub(crate) struct PolicyDir {
+    folder: TmpFolder,
+}
+
+impl PolicyDir {
+    pub(crate) async fn cleanup(self: Arc<Self>) -> std::io::Result<()> {
+        if let Some(this) = Arc::into_inner(self) {
+            this.folder.cleanup().await?;
+        }
+        Ok(())
+    }
+}
+
+impl AsRef<Path> for PolicyDir {
+    fn as_ref(&self) -> &Path {
+        &self.folder
+    }
+}
+
+impl Deref for PolicyDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.folder
+    }
+}
+
+pub(super) async fn write_magick_policy(
+    media: &Media,
+    tmp_dir: &TmpDir,
+) -> std::io::Result<ArcPolicyDir> {
+    let folder = tmp_dir.tmp_folder().await?;
+    let file = folder.join("policy.xml");
+
+    let res = tokio::fs::write(&file, generate_policy(media)).await;
+
+    if let Err(e) = res {
+        folder.cleanup().await?;
+        return Err(e);
+    }
+
+    Ok(Arc::new(PolicyDir { folder }))
+}
+
+fn generate_policy(media: &Media) -> String {
+    let width = media.magick.max_width;
+    let height = media.magick.max_height;
+    let area = media.magick.max_area;
+    let timeout = media.process_timeout;
+
+    format!(
+        r#"<policymap>
+    <policy domain="resource" name="width" value="{width}" />
+    <policy domain="resource" name="height" value="{height}" />
+    <policy domain="resource" name="area" value="{area}" />
+    <policy domain="resource" name="time" value="{timeout}" />
+    <policy domain="resource" name="memory" value="256MiB" />
+    <policy domain="resource" name="list-length" value="128" />
+    <policy domain="resource" name="map" value="512MiB" />
+    <policy domain="resource" name="disk" value="1GiB" />
+    <policy domain="resource" name="file" value="768" />
+    <policy domain="resource" name="thread" value="2" />
+    <policy domain="path" rights="none" pattern="@*" />
+    <policy domain="coder" rights="none" pattern="*" />
+    <policy domain="coder" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,WEBP,MP4,WEBM,TMP,PAM}}" />
+    <policy domain="delegate" rights="none" pattern="*" />
+    <policy domain="delegate" rights="execute" pattern="ffmpeg" />
+    <policy domain="filter" rights="none" pattern="*" />
+    <policy domain="module" rights="none" pattern="*" />
+    <policy domain="module" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,WEBP,TMP,PAM,PNM,VIDEO}}" />
+        <!-- indirect reads not permitted -->
+    <policy domain="system" name="precision" value="6" />
+</policymap>"#
+    )
 }

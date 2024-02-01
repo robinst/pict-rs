@@ -43,6 +43,11 @@ filters = [
 variants = "7d"
 proxy = "7d"
 
+[media.magick]
+max_width = 10000
+max_height = 10000
+max_area = 40000000
+
 [media.image]
 max_width = 10000
 max_height = 10000

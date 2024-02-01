@@ -207,6 +207,8 @@ pub(crate) struct Media {
 
     pub(crate) retention: Retention,
 
+    pub(crate) magick: Magick,
+
     pub(crate) image: Image,
 
     pub(crate) animation: Animation,
@@ -219,6 +221,15 @@ pub(crate) struct Retention {
     pub(crate) variants: RetentionValue,
 
     pub(crate) proxy: RetentionValue,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Magick {
+    pub(crate) max_width: u16,
+
+    pub(crate) max_height: u16,
+
+    pub(crate) max_area: u32,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

@@ -244,6 +244,41 @@ variants = "7d"
 proxy = "7d"
 
 
+[media.magick]
+## Optional: maximum width, in pixels, of media that imagemagick will attempt to process
+# environment variable: PICTRS__MEDIA__MAGICK__MAX_WIDTH
+# default: 10_000
+#
+# This value should be at least as large as the greatest max_width set for images, animations, and
+# videos. Any image that exceeds this limit will cause imagemagick to abort processing, which could
+# lead to less clear errors, especially on image upload. In order for pict-rs to return helpful
+# validation errors for images that don't meet other requirements, imagemagick must be allowed to
+# process the image.
+max_width = 10000
+
+## Optional: maximum height, in pixels, of media that imagemagick will attempt to process
+# environment variable: PICTRS__MEDIA__MAGICK__MAX_HEIGHT
+# default: 10_000
+#
+# This value should be at least as large as the greatest max_height set for images, animations, and
+# videos. Any image that exceeds this limit will cause imagemagick to abort processing, which could
+# lead to less clear errors, especially on image upload. In order for pict-rs to return helpful
+# validation errors for images that don't meet other requirements, imagemagick must be allowed to
+# process the image.
+max_height = 10000
+
+## Optional: maximum area, in pixels, of media that imagemagick will attempt to process
+# environment variable: PICTRS__MEDIA__MAGICK__MAX_HEIGHT
+# default: 40_000_000
+#
+# This value should be at least as large as the greatest max_area set for images, animations, and
+# videos. Any image that exceeds this limit will cause imagemagick to abort processing, which could
+# lead to less clear errors, especially on image upload. In order for pict-rs to return helpful
+# validation errors for images that don't meet other requirements, imagemagick must be allowed to
+# process the image.
+max_area = 40000000
+
+
 [media.image]
 ## Optional: max media width (in pixels)
 # environment variable: PICTRS__MEDIA__IMAGE__MAX_WIDTH

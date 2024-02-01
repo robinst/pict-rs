@@ -12,13 +12,16 @@ use streem::IntoStreamer;
 use crate::{
     details::Details,
     error::{Error, UploadError},
+    magick::{ArcPolicyDir, PolicyDir},
     repo::{ArcRepo, Hash},
     store::Store,
     tmp_file::{ArcTmpDir, TmpDir},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn migrate_store<S1, S2>(
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     repo: ArcRepo,
     from: S1,
     to: S2,
@@ -47,6 +50,7 @@ where
 
     while let Err(e) = do_migrate_store(
         tmp_dir.clone(),
+        policy_dir.clone(),
         repo.clone(),
         from.clone(),
         to.clone(),
@@ -75,6 +79,7 @@ where
 
 struct MigrateState<S1, S2> {
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     repo: ArcRepo,
     from: S1,
     to: S2,
@@ -88,8 +93,10 @@ struct MigrateState<S1, S2> {
     timeout: u64,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn do_migrate_store<S1, S2>(
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     repo: ArcRepo,
     from: S1,
     to: S2,
@@ -120,6 +127,7 @@ where
 
     let state = Rc::new(MigrateState {
         tmp_dir: tmp_dir.clone(),
+        policy_dir: policy_dir.clone(),
         repo: repo.clone(),
         from,
         to,
@@ -172,6 +180,7 @@ where
 {
     let MigrateState {
         tmp_dir,
+        policy_dir,
         repo,
         from,
         to,
@@ -236,6 +245,7 @@ where
         if !repo.is_migrated(&identifier).await? {
             match migrate_file(
                 tmp_dir,
+                policy_dir,
                 repo,
                 from,
                 to,
@@ -275,6 +285,7 @@ where
         if !repo.is_migrated(&identifier).await? {
             match migrate_file(
                 tmp_dir,
+                policy_dir,
                 repo,
                 from,
                 to,
@@ -314,6 +325,7 @@ where
 
     match migrate_file(
         tmp_dir,
+        policy_dir,
         repo,
         from,
         to,
@@ -371,8 +383,10 @@ where
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn migrate_file<S1, S2>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     from: &S1,
     to: &S2,
@@ -389,7 +403,7 @@ where
     loop {
         tracing::trace!("migrate_file: looping");
 
-        match do_migrate_file(tmp_dir, repo, from, to, identifier, timeout).await {
+        match do_migrate_file(tmp_dir, policy_dir, repo, from, to, identifier, timeout).await {
             Ok(identifier) => return Ok(identifier),
             Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                 return Err(MigrateError::From(e));
@@ -419,6 +433,7 @@ enum MigrateError {
 
 async fn do_migrate_file<S1, S2>(
     tmp_dir: &TmpDir,
+    policy_dir: &PolicyDir,
     repo: &ArcRepo,
     from: &S1,
     to: &S2,
@@ -448,9 +463,10 @@ where
             .await
             .map_err(From::from)
             .map_err(MigrateError::Details)?;
-        let new_details = Details::from_bytes(tmp_dir, timeout, bytes_stream.into_bytes())
-            .await
-            .map_err(MigrateError::Details)?;
+        let new_details =
+            Details::from_bytes(tmp_dir, policy_dir, timeout, bytes_stream.into_bytes())
+                .await
+                .map_err(MigrateError::Details)?;
         repo.relate_details(identifier, &new_details)
             .await
             .map_err(Error::from)

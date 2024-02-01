@@ -4,6 +4,7 @@ use crate::{
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     future::LocalBoxFuture,
+    magick::ArcPolicyDir,
     repo::{Alias, ArcRepo, DeleteToken, Hash, JobId, UploadId},
     serde_str::Serde,
     store::Store,
@@ -197,6 +198,7 @@ pub(crate) async fn process_cleanup<S: Store + 'static>(
 
 pub(crate) async fn process_images<S: Store + 'static>(
     tmp_dir: ArcTmpDir,
+    policy_dir: ArcPolicyDir,
     repo: ArcRepo,
     store: S,
     client: ClientWithMiddleware,
@@ -205,6 +207,7 @@ pub(crate) async fn process_images<S: Store + 'static>(
 ) {
     process_image_jobs(
         &tmp_dir,
+        &policy_dir,
         &repo,
         &store,
         &client,
@@ -340,6 +343,7 @@ where
 #[allow(clippy::too_many_arguments)]
 async fn process_image_jobs<S, F>(
     tmp_dir: &ArcTmpDir,
+    policy_dir: &ArcPolicyDir,
     repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
@@ -351,6 +355,7 @@ async fn process_image_jobs<S, F>(
     S: Store,
     for<'a> F: Fn(
             &'a ArcTmpDir,
+            &'a ArcPolicyDir,
             &'a ArcRepo,
             &'a S,
             &'a ClientWithMiddleware,
@@ -369,6 +374,7 @@ async fn process_image_jobs<S, F>(
 
         let res = image_job_loop(
             tmp_dir,
+            policy_dir,
             repo,
             store,
             client,
@@ -398,6 +404,7 @@ async fn process_image_jobs<S, F>(
 #[allow(clippy::too_many_arguments)]
 async fn image_job_loop<S, F>(
     tmp_dir: &ArcTmpDir,
+    policy_dir: &ArcPolicyDir,
     repo: &ArcRepo,
     store: &S,
     client: &ClientWithMiddleware,
@@ -411,6 +418,7 @@ where
     S: Store,
     for<'a> F: Fn(
             &'a ArcTmpDir,
+            &'a ArcPolicyDir,
             &'a ArcRepo,
             &'a S,
             &'a ClientWithMiddleware,
@@ -435,7 +443,16 @@ where
                 queue,
                 worker_id,
                 job_id,
-                (callback)(tmp_dir, repo, store, client, process_map, config, job),
+                (callback)(
+                    tmp_dir,
+                    policy_dir,
+                    repo,
+                    store,
+                    client,
+                    process_map,
+                    config,
+                    job,
+                ),
             )
             .await;
 
