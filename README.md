@@ -648,14 +648,17 @@ If you can't stop pict-rs, but would like to back up the database, there is an i
 database for easy backups.
 
 ### 0.4 to 0.5 Migration Guide
+#### Note
+If you're running an older release of pict-rs, you'll first need to update to 0.4 before continuing
+on to 0.5. See the
+[0.3 to 0.4 migration guide](https://git.asonix.dog/asonix/pict-rs/src/branch/v0.4.x#user-content-0-3-to-0-4-migration-guide).
+
 #### Overview
 pict-rs will automatically migrate from the 0.4 db format to the 0.5 db format on the first launch
 of 0.5. This process might take a while, especially if you've been running pict-rs since before 0.3.
 The reason for this is pict-rs now requires original files to have associated details records stored
 in the database, and while generating these records happened by default for 0.3 and 0.4, images
 uploaded before this was standard may not have ever had their details records generated.
-
-_This upgrade must be performed while pict-rs is offline._
 
 #### Upgrade Configuration
 Because upgrades may take so long, there is a new configuration option introduced to attempt to
