@@ -2013,11 +2013,15 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
             .with_no_client_auth()
             .with_cert_resolver(rx);
 
+        tracing::info!("Staring pict-rs with TLS on {address}");
+
         server.bind_rustls_021(address, config)?.run().await?;
 
         handle.abort();
         let _ = handle.await;
     } else {
+        tracing::info!("Staring pict-rs on {address}");
+
         server.bind(address)?.run().await?;
     }
 
