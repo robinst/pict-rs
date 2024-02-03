@@ -7,6 +7,7 @@ use crate::{
     magick::ArcPolicyDir,
     repo::{Alias, ArcRepo, DeleteToken, Hash, JobId, UploadId},
     serde_str::Serde,
+    state::State,
     store::Store,
     tmp_file::ArcTmpDir,
 };
