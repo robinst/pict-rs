@@ -10,13 +10,12 @@ use crate::{
     queue::Cleanup,
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     serde_str::Serde,
+    state::State,
     store::Store,
 };
 
 pub(super) fn perform<'a, S>(
-    repo: &'a ArcRepo,
-    store: &'a S,
-    configuration: &'a Configuration,
+    state: &'a State<S>,
     job: serde_json::Value,
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
@@ -25,26 +24,28 @@ where
     Box::pin(async move {
         match serde_json::from_value(job) {
             Ok(job) => match job {
-                Cleanup::Hash { hash: in_hash } => hash(repo, in_hash).await?,
+                Cleanup::Hash { hash: in_hash } => hash(&state.repo, in_hash).await?,
                 Cleanup::Identifier {
                     identifier: in_identifier,
-                } => identifier(repo, store, Arc::from(in_identifier)).await?,
+                } => identifier(&state.repo, &state.store, Arc::from(in_identifier)).await?,
                 Cleanup::Alias {
                     alias: stored_alias,
                     token,
                 } => {
                     alias(
-                        repo,
+                        &state.repo,
                         Serde::into_inner(stored_alias),
                         Serde::into_inner(token),
                     )
                     .await?
                 }
-                Cleanup::Variant { hash, variant } => hash_variant(repo, hash, variant).await?,
-                Cleanup::AllVariants => all_variants(repo).await?,
-                Cleanup::OutdatedVariants => outdated_variants(repo, configuration).await?,
-                Cleanup::OutdatedProxies => outdated_proxies(repo, configuration).await?,
-                Cleanup::Prune => prune(repo, store).await?,
+                Cleanup::Variant { hash, variant } => {
+                    hash_variant(&state.repo, hash, variant).await?
+                }
+                Cleanup::AllVariants => all_variants(&state.repo).await?,
+                Cleanup::OutdatedVariants => outdated_variants(&state.repo, &state.config).await?,
+                Cleanup::OutdatedProxies => outdated_proxies(&state.repo, &state.config).await?,
+                Cleanup::Prune => prune(&state.repo, &state.store).await?,
             },
             Err(e) => {
                 tracing::warn!("Invalid job: {}", format!("{e}"));

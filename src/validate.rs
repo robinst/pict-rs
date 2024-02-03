@@ -8,10 +8,11 @@ use crate::{
     error_code::ErrorCode,
     formats::{
         AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InputVideoFormat,
-        InternalFormat, Validations,
+        InternalFormat,
     },
     magick::PolicyDir,
     process::ProcessRead,
+    state::State,
     tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
@@ -57,12 +58,9 @@ impl ValidationError {
 const MEGABYTES: usize = 1024 * 1024;
 
 #[tracing::instrument(skip_all)]
-pub(crate) async fn validate_bytes(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+pub(crate) async fn validate_bytes<S>(
+    state: &State<S>,
     bytes: Bytes,
-    validations: Validations<'_>,
-    timeout: u64,
 ) -> Result<(InternalFormat, ProcessRead), Error> {
     if bytes.is_empty() {
         return Err(ValidationError::Empty.into());
@@ -77,66 +75,35 @@ pub(crate) async fn validate_bytes(
 
     match &input {
         InputFile::Image(input) => {
-            let (format, process_read) = process_image(
-                tmp_dir,
-                policy_dir,
-                bytes,
-                *input,
-                width,
-                height,
-                validations.image,
-                timeout,
-            )
-            .await?;
+            let (format, process_read) = process_image(state, bytes, *input, width, height).await?;
 
             Ok((format, process_read))
         }
         InputFile::Animation(input) => {
-            let (format, process_read) = process_animation(
-                tmp_dir,
-                policy_dir,
-                bytes,
-                *input,
-                width,
-                height,
-                frames.unwrap_or(1),
-                validations.animation,
-                timeout,
-            )
-            .await?;
+            let (format, process_read) =
+                process_animation(state, bytes, *input, width, height, frames.unwrap_or(1)).await?;
 
             Ok((format, process_read))
         }
         InputFile::Video(input) => {
-            let (format, process_read) = process_video(
-                tmp_dir,
-                bytes,
-                *input,
-                width,
-                height,
-                frames.unwrap_or(1),
-                validations.video,
-                timeout,
-            )
-            .await?;
+            let (format, process_read) =
+                process_video(state, bytes, *input, width, height, frames.unwrap_or(1)).await?;
 
             Ok((format, process_read))
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, policy_dir, bytes, validations))]
-async fn process_image(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+#[tracing::instrument(skip(state, bytes))]
+async fn process_image<S>(
+    state: &State<S>,
     bytes: Bytes,
     input: ImageInput,
     width: u16,
     height: u16,
-    validations: &crate::config::Image,
-    timeout: u64,
 ) -> Result<(InternalFormat, ProcessRead), Error> {
+    let validations = &state.config.media.image;
+
     if width > validations.max_width {
         return Err(ValidationError::Width.into());
     }
@@ -158,16 +125,7 @@ async fn process_image(
     let process_read = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        magick::convert_image(
-            tmp_dir,
-            policy_dir,
-            input.format,
-            format,
-            quality,
-            timeout,
-            bytes,
-        )
-        .await?
+        magick::convert_image(state, input.format, format, quality, bytes).await?
     } else {
         exiftool::clear_metadata_bytes_read(bytes, timeout)?
     };
@@ -201,19 +159,17 @@ fn validate_animation(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, policy_dir, bytes, validations))]
+#[tracing::instrument(skip(state, bytes))]
 async fn process_animation(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+    state: &State<S>,
     bytes: Bytes,
     input: AnimationFormat,
     width: u16,
     height: u16,
     frames: u32,
-    validations: &crate::config::Animation,
-    timeout: u64,
 ) -> Result<(InternalFormat, ProcessRead), Error> {
+    let validations = &state.config.media.animation;
+
     validate_animation(bytes.len(), width, height, frames, validations)?;
 
     let AnimationOutput {
@@ -224,10 +180,9 @@ async fn process_animation(
     let process_read = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        magick::convert_animation(tmp_dir, policy_dir, input, format, quality, timeout, bytes)
-            .await?
+        magick::convert_animation(state, input, format, quality, bytes).await?
     } else {
-        exiftool::clear_metadata_bytes_read(bytes, timeout)?
+        exiftool::clear_metadata_bytes_read(bytes, state.config.media.process_timeout)?
     };
 
     Ok((InternalFormat::Animation(format), process_read))
@@ -262,18 +217,17 @@ fn validate_video(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, bytes, validations))]
-async fn process_video(
-    tmp_dir: &TmpDir,
+#[tracing::instrument(skip(state, bytes))]
+async fn process_video<S>(
+    state: &State<S>,
     bytes: Bytes,
     input: InputVideoFormat,
     width: u16,
     height: u16,
     frames: u32,
-    validations: &crate::config::Video,
-    timeout: u64,
 ) -> Result<(InternalFormat, ProcessRead), Error> {
+    let validations = &state.config.media.video;
+
     validate_video(bytes.len(), width, height, frames, validations)?;
 
     let output = input.build_output(
@@ -284,7 +238,15 @@ async fn process_video(
 
     let crf = validations.crf_for(width, height);
 
-    let process_read = ffmpeg::transcode_bytes(tmp_dir, input, output, crf, timeout, bytes).await?;
+    let process_read = ffmpeg::transcode_bytes(
+        &state.tmp_dir,
+        input,
+        output,
+        crf,
+        state.config.media.process_timeout,
+        bytes,
+    )
+    .await?;
 
     Ok((
         InternalFormat::Video(output.format.internal_format()),

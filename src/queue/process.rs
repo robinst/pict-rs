@@ -13,20 +13,15 @@ use crate::{
     queue::Process,
     repo::{Alias, ArcRepo, UploadId, UploadResult},
     serde_str::Serde,
+    state::State,
     store::Store,
     tmp_file::{ArcTmpDir, TmpDir},
 };
 use std::{path::PathBuf, sync::Arc};
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn perform<'a, S>(
-    tmp_dir: &'a ArcTmpDir,
-    policy_dir: &'a ArcPolicyDir,
-    repo: &'a ArcRepo,
-    store: &'a S,
-    client: &'a ClientWithMiddleware,
+    state: &'a State<S>,
     process_map: &'a ProcessMap,
-    config: &'a Configuration,
     job: serde_json::Value,
 ) -> LocalBoxFuture<'a, Result<(), Error>>
 where
@@ -41,15 +36,10 @@ where
                     declared_alias,
                 } => {
                     process_ingest(
-                        tmp_dir,
-                        policy_dir,
-                        repo,
-                        store,
-                        client,
+                        state,
                         Arc::from(identifier),
                         Serde::into_inner(upload_id),
                         declared_alias.map(Serde::into_inner),
-                        config,
                     )
                     .await?
                 }
@@ -60,16 +50,12 @@ where
                     process_args,
                 } => {
                     generate(
-                        tmp_dir,
-                        policy_dir,
-                        repo,
-                        store,
+                        state,
                         process_map,
                         target_format,
                         Serde::into_inner(source),
                         process_path,
                         process_args,
-                        config,
                     )
                     .await?
                 }
@@ -117,18 +103,12 @@ impl Drop for UploadGuard {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, policy_dir, repo, store, client, config))]
+#[tracing::instrument(skip(state))]
 async fn process_ingest<S>(
-    tmp_dir: &ArcTmpDir,
-    policy_dir: &ArcPolicyDir,
-    repo: &ArcRepo,
-    store: &S,
-    client: &ClientWithMiddleware,
+    state: &State<S>,
     unprocessed_identifier: Arc<str>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
-    config: &Configuration,
 ) -> Result<(), Error>
 where
     S: Store + 'static,
@@ -136,33 +116,18 @@ where
     let guard = UploadGuard::guard(upload_id);
 
     let fut = async {
-        let tmp_dir = tmp_dir.clone();
-        let policy_dir = policy_dir.clone();
-        let ident = unprocessed_identifier.clone();
-        let store2 = store.clone();
-        let repo = repo.clone();
-        let client = client.clone();
+        let state2 = state.clone();
 
         let current_span = Span::current();
         let span = tracing::info_span!(parent: current_span, "error_boundary");
 
-        let config = config.clone();
         let error_boundary = crate::sync::abort_on_drop(crate::sync::spawn(
             "ingest-media",
             async move {
-                let stream = crate::stream::from_err(store2.to_stream(&ident, None, None).await?);
+                let stream =
+                    crate::stream::from_err(state2.store.to_stream(&ident, None, None).await?);
 
-                let session = crate::ingest::ingest(
-                    &tmp_dir,
-                    &policy_dir,
-                    &repo,
-                    &store2,
-                    &client,
-                    stream,
-                    declared_alias,
-                    &config,
-                )
-                .await?;
+                let session = crate::ingest::ingest(&state2, stream, declared_alias).await?;
 
                 Ok(session) as Result<Session, Error>
             }
@@ -170,7 +135,7 @@ where
         ))
         .await;
 
-        store.remove(&unprocessed_identifier).await?;
+        state.store.remove(&unprocessed_identifier).await?;
 
         error_boundary.map_err(|_| UploadError::Canceled)?
     };
@@ -191,62 +156,46 @@ where
         }
     };
 
-    repo.complete_upload(upload_id, result).await?;
+    state.repo.complete_upload(upload_id, result).await?;
 
     guard.disarm();
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(
-    tmp_dir,
-    policy_dir,
-    repo,
-    store,
-    process_map,
-    process_path,
-    process_args,
-    config
-))]
+#[tracing::instrument(skip(state, process_map, process_path, process_args))]
 async fn generate<S: Store + 'static>(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
-    repo: &ArcRepo,
-    store: &S,
+    state: &State<S>,
     process_map: &ProcessMap,
     target_format: InputProcessableFormat,
     source: Alias,
     process_path: PathBuf,
     process_args: Vec<String>,
-    config: &Configuration,
 ) -> Result<(), Error> {
-    let Some(hash) = repo.hash(&source).await? else {
+    let Some(hash) = state.repo.hash(&source).await? else {
         // Nothing to do
         return Ok(());
     };
 
     let path_string = process_path.to_string_lossy().to_string();
-    let identifier_opt = repo.variant_identifier(hash.clone(), path_string).await?;
+    let identifier_opt = state
+        .repo
+        .variant_identifier(hash.clone(), path_string)
+        .await?;
 
     if identifier_opt.is_some() {
         return Ok(());
     }
 
-    let original_details =
-        crate::ensure_details(tmp_dir, policy_dir, repo, store, config, &source).await?;
+    let original_details = crate::ensure_details(state, &source).await?;
 
     crate::generate::generate(
-        tmp_dir,
-        policy_dir,
-        repo,
-        store,
+        state,
         process_map,
         target_format,
         process_path,
         process_args,
         &original_details,
-        config,
         hash,
     )
     .await?;

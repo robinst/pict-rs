@@ -188,35 +188,12 @@ pub(crate) async fn queue_generate(
     Ok(())
 }
 
-pub(crate) async fn process_cleanup<S: Store + 'static>(
-    repo: ArcRepo,
-    store: S,
-    config: Configuration,
-) {
-    process_jobs(&repo, &store, &config, CLEANUP_QUEUE, cleanup::perform).await
+pub(crate) async fn process_cleanup<S: Store + 'static>(state: State<S>) {
+    process_jobs(state, CLEANUP_QUEUE, cleanup::perform).await
 }
 
-pub(crate) async fn process_images<S: Store + 'static>(
-    tmp_dir: ArcTmpDir,
-    policy_dir: ArcPolicyDir,
-    repo: ArcRepo,
-    store: S,
-    client: ClientWithMiddleware,
-    process_map: ProcessMap,
-    config: Configuration,
-) {
-    process_image_jobs(
-        &tmp_dir,
-        &policy_dir,
-        &repo,
-        &store,
-        &client,
-        &process_map,
-        &config,
-        PROCESS_QUEUE,
-        process::perform,
-    )
-    .await
+pub(crate) async fn process_images<S: Store + 'static>(state: State<S>, process_map: ProcessMap) {
+    process_image_jobs(state, process_map, PROCESS_QUEUE, process::perform).await
 }
 
 struct MetricsGuard {
@@ -250,21 +227,10 @@ impl Drop for MetricsGuard {
     }
 }
 
-async fn process_jobs<S, F>(
-    repo: &ArcRepo,
-    store: &S,
-    config: &Configuration,
-    queue: &'static str,
-    callback: F,
-) where
+async fn process_jobs<S, F>(state: State<S>, queue: &'static str, callback: F)
+where
     S: Store,
-    for<'a> F: Fn(
-            &'a ArcRepo,
-            &'a S,
-            &'a Configuration,
-            serde_json::Value,
-        ) -> LocalBoxFuture<'a, Result<(), Error>>
-        + Copy,
+    for<'a> F: Fn(&'a State<S>, serde_json::Value) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
 {
     let worker_id = uuid::Uuid::new_v4();
 
@@ -273,7 +239,7 @@ async fn process_jobs<S, F>(
 
         tokio::task::yield_now().await;
 
-        let res = job_loop(repo, store, config, worker_id, queue, callback).await;
+        let res = job_loop(&state, worker_id, queue, callback).await;
 
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
@@ -291,22 +257,14 @@ async fn process_jobs<S, F>(
 }
 
 async fn job_loop<S, F>(
-    repo: &ArcRepo,
-    store: &S,
-    config: &Configuration,
+    state: &State<S>,
     worker_id: uuid::Uuid,
     queue: &'static str,
     callback: F,
 ) -> Result<(), Error>
 where
     S: Store,
-    for<'a> F: Fn(
-            &'a ArcRepo,
-            &'a S,
-            &'a Configuration,
-            serde_json::Value,
-        ) -> LocalBoxFuture<'a, Result<(), Error>>
-        + Copy,
+    for<'a> F: Fn(&'a State<S>, serde_json::Value) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
 {
     loop {
         tracing::trace!("job_loop: looping");
@@ -314,20 +272,20 @@ where
         tokio::task::yield_now().await;
 
         async {
-            let (job_id, job) = repo.pop(queue, worker_id).await?;
+            let (job_id, job) = state.repo.pop(queue, worker_id).await?;
 
             let guard = MetricsGuard::guard(worker_id, queue);
 
             let res = heartbeat(
-                repo,
+                &state.repo,
                 queue,
                 worker_id,
                 job_id,
-                (callback)(repo, store, config, job),
+                (callback)(state, job),
             )
             .await;
 
-            repo.complete_job(queue, worker_id, job_id).await?;
+            state.repo.complete_job(queue, worker_id, job_id).await?;
 
             res?;
 
@@ -340,29 +298,14 @@ where
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn process_image_jobs<S, F>(
-    tmp_dir: &ArcTmpDir,
-    policy_dir: &ArcPolicyDir,
-    repo: &ArcRepo,
-    store: &S,
-    client: &ClientWithMiddleware,
-    process_map: &ProcessMap,
-    config: &Configuration,
+    state: State<S>,
+    process_map: ProcessMap,
     queue: &'static str,
     callback: F,
 ) where
     S: Store,
-    for<'a> F: Fn(
-            &'a ArcTmpDir,
-            &'a ArcPolicyDir,
-            &'a ArcRepo,
-            &'a S,
-            &'a ClientWithMiddleware,
-            &'a ProcessMap,
-            &'a Configuration,
-            serde_json::Value,
-        ) -> LocalBoxFuture<'a, Result<(), Error>>
+    for<'a> F: Fn(&'a State<S>, &'a ProcessMap, serde_json::Value) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
     let worker_id = uuid::Uuid::new_v4();
@@ -372,19 +315,7 @@ async fn process_image_jobs<S, F>(
 
         tokio::task::yield_now().await;
 
-        let res = image_job_loop(
-            tmp_dir,
-            policy_dir,
-            repo,
-            store,
-            client,
-            process_map,
-            config,
-            worker_id,
-            queue,
-            callback,
-        )
-        .await;
+        let res = image_job_loop(&state, &process_map, worker_id, queue, callback).await;
 
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
@@ -403,29 +334,15 @@ async fn process_image_jobs<S, F>(
 
 #[allow(clippy::too_many_arguments)]
 async fn image_job_loop<S, F>(
-    tmp_dir: &ArcTmpDir,
-    policy_dir: &ArcPolicyDir,
-    repo: &ArcRepo,
-    store: &S,
-    client: &ClientWithMiddleware,
+    state: &State<S>,
     process_map: &ProcessMap,
-    config: &Configuration,
     worker_id: uuid::Uuid,
     queue: &'static str,
     callback: F,
 ) -> Result<(), Error>
 where
     S: Store,
-    for<'a> F: Fn(
-            &'a ArcTmpDir,
-            &'a ArcPolicyDir,
-            &'a ArcRepo,
-            &'a S,
-            &'a ClientWithMiddleware,
-            &'a ProcessMap,
-            &'a Configuration,
-            serde_json::Value,
-        ) -> LocalBoxFuture<'a, Result<(), Error>>
+    for<'a> F: Fn(&'a State<S>, &'a ProcessMap, serde_json::Value) -> LocalBoxFuture<'a, Result<(), Error>>
         + Copy,
 {
     loop {
@@ -434,29 +351,20 @@ where
         tokio::task::yield_now().await;
 
         async {
-            let (job_id, job) = repo.pop(queue, worker_id).await?;
+            let (job_id, job) = state.repo.pop(queue, worker_id).await?;
 
             let guard = MetricsGuard::guard(worker_id, queue);
 
             let res = heartbeat(
-                repo,
+                &state.repo,
                 queue,
                 worker_id,
                 job_id,
-                (callback)(
-                    tmp_dir,
-                    policy_dir,
-                    repo,
-                    store,
-                    client,
-                    process_map,
-                    config,
-                    job,
-                ),
+                (callback)(state, process_map, job),
             )
             .await;
 
-            repo.complete_job(queue, worker_id, job_id).await?;
+            state.repo.complete_job(queue, worker_id, job_id).await?;
 
             res?;
 
