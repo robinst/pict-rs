@@ -14,6 +14,7 @@ mod formats;
 mod future;
 mod generate;
 mod ingest;
+mod init_metrics;
 mod init_tracing;
 mod magick;
 mod middleware;

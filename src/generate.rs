@@ -27,7 +27,7 @@ struct MetricsGuard {
 
 impl MetricsGuard {
     fn guard() -> Self {
-        metrics::counter!("pict-rs.generate.start").increment(1);
+        metrics::counter!(crate::init_metrics::GENERATE_START).increment(1);
         Self {
             start: Instant::now(),
             armed: true,
@@ -41,9 +41,9 @@ impl MetricsGuard {
 
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
-        metrics::histogram!("pict-rs.generate.duration", "completed" => (!self.armed).to_string())
+        metrics::histogram!(crate::init_metrics::GENERATE_DURATION, "completed" => (!self.armed).to_string())
             .record(self.start.elapsed().as_secs_f64());
-        metrics::counter!("pict-rs.generate.end", "completed" => (!self.armed).to_string())
+        metrics::counter!(crate::init_metrics::GENERATE_END, "completed" => (!self.armed).to_string())
             .increment(1);
     }
 }
@@ -85,7 +85,7 @@ pub(crate) async fn generate<S: Store + 'static>(
         let (details, bytes) = process_map
             .process(hash, thumbnail_path, process_fut)
             .with_timeout(Duration::from_secs(state.config.media.process_timeout * 4))
-            .with_metrics("pict-rs.generate.process")
+            .with_metrics(crate::init_metrics::GENERATE_PROCESS)
             .await
             .map_err(|_| UploadError::ProcessTimeout)??;
 
