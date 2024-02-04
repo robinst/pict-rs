@@ -4,72 +4,62 @@ use actix_web::web::Bytes;
 
 use crate::{
     formats::{AnimationFormat, ImageFormat},
-    magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
+    magick::{MagickError, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
-    tmp_file::TmpDir,
+    state::State,
 };
 
-pub(super) async fn convert_image(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+pub(super) async fn convert_image<S>(
+    state: &State<S>,
     input: ImageFormat,
     output: ImageFormat,
     quality: Option<u8>,
-    timeout: u64,
     bytes: Bytes,
 ) -> Result<ProcessRead, MagickError> {
     convert(
-        tmp_dir,
-        policy_dir,
+        state,
         input.magick_format(),
         output.magick_format(),
         false,
         quality,
-        timeout,
         bytes,
     )
     .await
 }
 
-pub(super) async fn convert_animation(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+pub(super) async fn convert_animation<S>(
+    state: &State<S>,
     input: AnimationFormat,
     output: AnimationFormat,
     quality: Option<u8>,
-    timeout: u64,
     bytes: Bytes,
 ) -> Result<ProcessRead, MagickError> {
     convert(
-        tmp_dir,
-        policy_dir,
+        state,
         input.magick_format(),
         output.magick_format(),
         true,
         quality,
-        timeout,
         bytes,
     )
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn convert(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+async fn convert<S>(
+    state: &State<S>,
     input: &'static str,
     output: &'static str,
     coalesce: bool,
     quality: Option<u8>,
-    timeout: u64,
     bytes: Bytes,
 ) -> Result<ProcessRead, MagickError> {
-    let temporary_path = tmp_dir
+    let temporary_path = state
+        .tmp_dir
         .tmp_folder()
         .await
         .map_err(MagickError::CreateTemporaryDirectory)?;
 
-    let input_file = tmp_dir.tmp_file(None);
+    let input_file = state.tmp_dir.tmp_file(None);
 
     crate::store::file_store::safe_create_parent(&input_file)
         .await
@@ -104,10 +94,10 @@ async fn convert(
 
     let envs = [
         (MAGICK_TEMPORARY_PATH, temporary_path.as_os_str()),
-        (MAGICK_CONFIGURE_PATH, policy_dir.as_os_str()),
+        (MAGICK_CONFIGURE_PATH, state.policy_dir.as_os_str()),
     ];
 
-    let reader = Process::run("magick", &args, &envs, timeout)?.read();
+    let reader = Process::run("magick", &args, &envs, state.config.media.process_timeout)?.read();
 
     let clean_reader = reader.add_extras(input_file).add_extras(temporary_path);
 

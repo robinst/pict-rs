@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::{
     error::Error,
     repo::{ArcRepo, UploadId},
+    state::State,
     store::Store,
 };
 use actix_web::web::Bytes;
@@ -30,23 +31,23 @@ impl Backgrounded {
         self.identifier.as_ref()
     }
 
-    pub(crate) async fn proxy<S, P>(repo: ArcRepo, store: S, stream: P) -> Result<Self, Error>
+    pub(crate) async fn proxy<S, P>(state: &State<S>, stream: P) -> Result<Self, Error>
     where
         S: Store,
         P: Stream<Item = Result<Bytes, Error>> + 'static,
     {
         let mut this = Self {
-            repo,
+            repo: state.repo.clone(),
             identifier: None,
             upload_id: None,
         };
 
-        this.do_proxy(store, stream).await?;
+        this.do_proxy(&state.store, stream).await?;
 
         Ok(this)
     }
 
-    async fn do_proxy<S, P>(&mut self, store: S, stream: P) -> Result<(), Error>
+    async fn do_proxy<S, P>(&mut self, store: &S, stream: P) -> Result<(), Error>
     where
         S: Store,
         P: Stream<Item = Result<Bytes, Error>> + 'static,

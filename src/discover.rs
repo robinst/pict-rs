@@ -4,7 +4,7 @@ mod magick;
 
 use actix_web::web::Bytes;
 
-use crate::{formats::InputFile, magick::PolicyDir, tmp_file::TmpDir};
+use crate::{formats::InputFile, state::State};
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Discovery {
@@ -27,18 +27,16 @@ pub(crate) enum DiscoverError {
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-pub(crate) async fn discover_bytes(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
-    timeout: u64,
+pub(crate) async fn discover_bytes<S>(
+    state: &State<S>,
     bytes: Bytes,
 ) -> Result<Discovery, crate::error::Error> {
-    let discovery = ffmpeg::discover_bytes(tmp_dir, timeout, bytes.clone()).await?;
+    let discovery = ffmpeg::discover_bytes(state, bytes.clone()).await?;
+
+    let discovery = magick::confirm_bytes(state, discovery, bytes.clone()).await?;
 
     let discovery =
-        magick::confirm_bytes(tmp_dir, policy_dir, discovery, timeout, bytes.clone()).await?;
-
-    let discovery = exiftool::check_reorient(discovery, timeout, bytes).await?;
+        exiftool::check_reorient(discovery, bytes, state.config.media.process_timeout).await?;
 
     Ok(discovery)
 }

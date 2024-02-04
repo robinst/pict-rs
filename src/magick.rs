@@ -7,6 +7,7 @@ use crate::{
     error_code::ErrorCode,
     formats::ProcessableFormat,
     process::{Process, ProcessError, ProcessRead},
+    state::State,
     stream::LocalBoxStream,
     tmp_file::{TmpDir, TmpFolder},
 };
@@ -85,27 +86,25 @@ impl MagickError {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn process_image<F, Fut>(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+async fn process_image<S, F, Fut>(
+    state: &State<S>,
     process_args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
-    timeout: u64,
     write_file: F,
 ) -> Result<ProcessRead, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
-    let temporary_path = tmp_dir
+    let temporary_path = state
+        .tmp_dir
         .tmp_folder()
         .await
         .map_err(MagickError::CreateTemporaryDirectory)?;
 
-    let input_file = tmp_dir.tmp_file(None);
+    let input_file = state.tmp_dir.tmp_file(None);
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(MagickError::CreateDir)?;
@@ -143,10 +142,10 @@ where
 
     let envs = [
         (MAGICK_TEMPORARY_PATH, temporary_path.as_os_str()),
-        (MAGICK_CONFIGURE_PATH, policy_dir.as_os_str()),
+        (MAGICK_CONFIGURE_PATH, state.policy_dir.as_os_str()),
     ];
 
-    let reader = Process::run("magick", &args, &envs, timeout)?
+    let reader = Process::run("magick", &args, &envs, state.config.media.process_timeout)?
         .read()
         .add_extras(input_file)
         .add_extras(temporary_path);
@@ -154,25 +153,20 @@ where
     Ok(reader)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn process_image_stream_read(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+pub(crate) async fn process_image_stream_read<S>(
+    state: &State<S>,
     stream: LocalBoxStream<'static, std::io::Result<Bytes>>,
     args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
-    timeout: u64,
 ) -> Result<ProcessRead, MagickError> {
     process_image(
-        tmp_dir,
-        policy_dir,
+        state,
         args,
         input_format,
         format,
         quality,
-        timeout,
         |mut tmp_file| async move {
             tmp_file
                 .write_from_stream(stream)
@@ -184,25 +178,20 @@ pub(crate) async fn process_image_stream_read(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn process_image_process_read(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+pub(crate) async fn process_image_process_read<S>(
+    state: &State<S>,
     process_read: ProcessRead,
     args: Vec<String>,
     input_format: ProcessableFormat,
     format: ProcessableFormat,
     quality: Option<u8>,
-    timeout: u64,
 ) -> Result<ProcessRead, MagickError> {
     process_image(
-        tmp_dir,
-        policy_dir,
+        state,
         args,
         input_format,
         format,
         quality,
-        timeout,
         |mut tmp_file| async move {
             process_read
                 .with_stdout(|stdout| async {

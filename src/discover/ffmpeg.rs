@@ -10,7 +10,7 @@ use crate::{
         Mp4AudioCodec, Mp4Codec, WebmAlphaCodec, WebmAudioCodec, WebmCodec,
     },
     process::Process,
-    tmp_file::TmpDir,
+    state::State,
 };
 use actix_web::web::Bytes;
 
@@ -158,12 +158,11 @@ struct Flags {
 }
 
 #[tracing::instrument(skip_all)]
-pub(super) async fn discover_bytes(
-    tmp_dir: &TmpDir,
-    timeout: u64,
+pub(super) async fn discover_bytes<S>(
+    state: &State<S>,
     bytes: Bytes,
 ) -> Result<Option<Discovery>, FfMpegError> {
-    discover_file(tmp_dir, timeout, move |mut file| {
+    discover_file(state, move |mut file| {
         let bytes = bytes.clone();
 
         async move {
@@ -191,16 +190,12 @@ async fn allows_alpha(pixel_format: &str, timeout: u64) -> Result<bool, FfMpegEr
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn discover_file<F, Fut>(
-    tmp_dir: &TmpDir,
-    timeout: u64,
-    f: F,
-) -> Result<Option<Discovery>, FfMpegError>
+async fn discover_file<S, F, Fut>(state: &State<S>, f: F) -> Result<Option<Discovery>, FfMpegError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, FfMpegError>>,
 {
-    let input_file = tmp_dir.tmp_file(None);
+    let input_file = state.tmp_dir.tmp_file(None);
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(FfMpegError::CreateDir)?;
@@ -226,7 +221,7 @@ where
             input_file.as_os_str(),
         ],
         &[],
-        timeout,
+        state.config.media.process_timeout,
     )?
     .read()
     .into_vec()
@@ -250,7 +245,7 @@ where
             ..
         }) = &mut discovery.input
         {
-            *alpha = allows_alpha(&pixel_format, timeout).await?;
+            *alpha = allows_alpha(&pixel_format, state.config.media.process_timeout).await?;
         }
     }
 

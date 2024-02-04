@@ -4,22 +4,21 @@ use crate::{
     bytes_stream::BytesStream,
     details::Details,
     error::{Error, UploadError},
-    formats::{InternalFormat, Validations},
+    formats::InternalFormat,
     future::WithMetrics,
-    magick::PolicyDir,
     repo::{Alias, ArcRepo, DeleteToken, Hash},
+    state::State,
     store::Store,
-    tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use reqwest::Body;
-use reqwest_middleware::ClientWithMiddleware;
+
 use streem::IntoStreamer;
 use tracing::{Instrument, Span};
 
 mod hasher;
-use hasher::{Hasher, State};
+use hasher::Hasher;
 
 #[derive(Debug)]
 pub(crate) struct Session {
@@ -50,12 +49,17 @@ where
 }
 
 async fn process_ingest<S>(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
-    store: &S,
+    state: &State<S>,
     stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
-    media: &crate::config::Media,
-) -> Result<(InternalFormat, Arc<str>, Details, Rc<RefCell<State>>), Error>
+) -> Result<
+    (
+        InternalFormat,
+        Arc<str>,
+        Details,
+        Rc<RefCell<hasher::State>>,
+    ),
+    Error,
+>
 where
     S: Store,
 {
@@ -65,43 +69,30 @@ where
 
     let permit = crate::process_semaphore().acquire().await?;
 
-    let prescribed = Validations {
-        image: &media.image,
-        animation: &media.animation,
-        video: &media.video,
-    };
-
     tracing::trace!("Validating bytes");
-    let (input_type, process_read) = crate::validate::validate_bytes(
-        tmp_dir,
-        policy_dir,
-        bytes,
-        prescribed,
-        media.process_timeout,
-    )
-    .await?;
+    let (input_type, process_read) = crate::validate::validate_bytes(state, bytes).await?;
 
-    let process_read = if let Some(operations) = media.preprocess_steps() {
+    let process_read = if let Some(operations) = state.config.media.preprocess_steps() {
         if let Some(format) = input_type.processable_format() {
             let (_, magick_args) =
                 crate::processor::build_chain(operations, format.file_extension())?;
 
             let quality = match format {
-                crate::formats::ProcessableFormat::Image(format) => media.image.quality_for(format),
+                crate::formats::ProcessableFormat::Image(format) => {
+                    state.config.media.image.quality_for(format)
+                }
                 crate::formats::ProcessableFormat::Animation(format) => {
-                    media.animation.quality_for(format)
+                    state.config.media.animation.quality_for(format)
                 }
             };
 
             crate::magick::process_image_process_read(
-                tmp_dir,
-                policy_dir,
+                state,
                 process_read,
                 magick_args,
                 format,
                 format,
                 quality,
-                media.process_timeout,
             )
             .await?
         } else {
@@ -111,36 +102,39 @@ where
         process_read
     };
 
-    let (state, identifier) = process_read
+    let (hash_state, identifier) = process_read
         .with_stdout(|stdout| async move {
             let hasher_reader = Hasher::new(stdout);
-            let state = hasher_reader.state();
+            let hash_state = hasher_reader.state();
 
-            store
+            state
+                .store
                 .save_async_read(hasher_reader, input_type.media_type())
                 .await
-                .map(move |identifier| (state, identifier))
+                .map(move |identifier| (hash_state, identifier))
         })
         .await??;
 
-    let bytes_stream = store.to_bytes(&identifier, None, None).await?;
-    let details = Details::from_bytes(
-        tmp_dir,
-        policy_dir,
-        media.process_timeout,
-        bytes_stream.into_bytes(),
-    )
-    .await?;
+    let bytes_stream = state.store.to_bytes(&identifier, None, None).await?;
+    let details = Details::from_bytes(state, bytes_stream.into_bytes()).await?;
 
     drop(permit);
 
-    Ok((input_type, identifier, details, state))
+    Ok((input_type, identifier, details, hash_state))
 }
 
 async fn dummy_ingest<S>(
-    store: &S,
+    state: &State<S>,
     stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
-) -> Result<(InternalFormat, Arc<str>, Details, Rc<RefCell<State>>), Error>
+) -> Result<
+    (
+        InternalFormat,
+        Arc<str>,
+        Details,
+        Rc<RefCell<hasher::State>>,
+    ),
+    Error,
+>
 where
     S: Store,
 {
@@ -152,55 +146,51 @@ where
     let reader = Box::pin(tokio_util::io::StreamReader::new(stream));
 
     let hasher_reader = Hasher::new(reader);
-    let state = hasher_reader.state();
+    let hash_state = hasher_reader.state();
 
     let input_type = InternalFormat::Image(crate::formats::ImageFormat::Png);
 
-    let identifier = store
+    let identifier = state
+        .store
         .save_async_read(hasher_reader, input_type.media_type())
         .await?;
 
     let details = Details::danger_dummy(input_type);
 
-    Ok((input_type, identifier, details, state))
+    Ok((input_type, identifier, details, hash_state))
 }
 
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip(tmp_dir, policy_dir, repo, store, client, stream, config))]
+#[tracing::instrument(skip(state, stream))]
 pub(crate) async fn ingest<S>(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
-    repo: &ArcRepo,
-    store: &S,
-    client: &ClientWithMiddleware,
+    state: &State<S>,
     stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
     declared_alias: Option<Alias>,
-    config: &crate::config::Configuration,
 ) -> Result<Session, Error>
 where
     S: Store,
 {
-    let (input_type, identifier, details, state) = if config.server.danger_dummy_mode {
-        dummy_ingest(store, stream).await?
+    let (input_type, identifier, details, hash_state) = if state.config.server.danger_dummy_mode {
+        dummy_ingest(state, stream).await?
     } else {
-        process_ingest(tmp_dir, policy_dir, store, stream, &config.media).await?
+        process_ingest(state, stream).await?
     };
 
     let mut session = Session {
-        repo: repo.clone(),
+        repo: state.repo.clone(),
         delete_token: DeleteToken::generate(),
         hash: None,
         alias: None,
         identifier: Some(identifier.clone()),
     };
 
-    if let Some(endpoint) = &config.media.external_validation {
-        let stream = store.to_stream(&identifier, None, None).await?;
+    if let Some(endpoint) = &state.config.media.external_validation {
+        let stream = state.store.to_stream(&identifier, None, None).await?;
 
-        let response = client
+        let response = state
+            .client
             .post(endpoint.as_str())
             .timeout(Duration::from_secs(
-                config.media.external_validation_timeout,
+                state.config.media.external_validation_timeout,
             ))
             .header("Content-Type", input_type.media_type().as_ref())
             .body(Body::wrap_stream(crate::stream::make_send(stream)))
@@ -214,13 +204,13 @@ where
         }
     }
 
-    let (hash, size) = state.borrow_mut().finalize_reset();
+    let (hash, size) = hash_state.borrow_mut().finalize_reset();
 
     let hash = Hash::new(hash, size, input_type);
 
-    save_upload(&mut session, repo, store, hash.clone(), &identifier).await?;
+    save_upload(&mut session, state, hash.clone(), &identifier).await?;
 
-    repo.relate_details(&identifier, &details).await?;
+    state.repo.relate_details(&identifier, &details).await?;
 
     if let Some(alias) = declared_alias {
         session.add_existing_alias(hash, alias).await?
@@ -234,17 +224,21 @@ where
 #[tracing::instrument(level = "trace", skip_all)]
 async fn save_upload<S>(
     session: &mut Session,
-    repo: &ArcRepo,
-    store: &S,
+    state: &State<S>,
     hash: Hash,
     identifier: &Arc<str>,
 ) -> Result<(), Error>
 where
     S: Store,
 {
-    if repo.create_hash(hash.clone(), identifier).await?.is_err() {
+    if state
+        .repo
+        .create_hash(hash.clone(), identifier)
+        .await?
+        .is_err()
+    {
         // duplicate upload
-        store.remove(identifier).await?;
+        state.store.remove(identifier).await?;
         session.identifier.take();
         return Ok(());
     }
