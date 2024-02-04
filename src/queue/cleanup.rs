@@ -14,10 +14,10 @@ use crate::{
     store::Store,
 };
 
-pub(super) fn perform<'a, S>(
-    state: &'a State<S>,
+pub(super) fn perform<S>(
+    state: &State<S>,
     job: serde_json::Value,
-) -> LocalBoxFuture<'a, Result<(), Error>>
+) -> LocalBoxFuture<'_, Result<(), Error>>
 where
     S: Store + 'static,
 {

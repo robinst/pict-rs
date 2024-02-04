@@ -773,7 +773,6 @@ async fn not_found_hash(repo: &ArcRepo) -> Result<Option<(Alias, Hash)>, Error> 
 }
 
 /// Process files
-#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(name = "Serving processed image", skip(state, process_map))]
 async fn process<S: Store + 'static>(
     range: Option<web::Header<Range>>,
@@ -899,7 +898,6 @@ async fn process<S: Store + 'static>(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(name = "Serving processed image headers", skip(state))]
 async fn process_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
@@ -1042,7 +1040,6 @@ async fn details<S: Store + 'static>(
 }
 
 /// Serve files based on alias query
-#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(name = "Serving file query", skip(state))]
 async fn serve_query<S: Store + 'static>(
     range: Option<web::Header<Range>>,

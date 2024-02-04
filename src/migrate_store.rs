@@ -17,7 +17,6 @@ use crate::{
     store::Store,
 };
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn migrate_store<S1, S2>(
     from: S1,
     to: State<S2>,
@@ -75,7 +74,6 @@ struct MigrateState<S1, S2> {
     started_at: Instant,
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn do_migrate_store<S1, S2>(
     from: S1,
     to: State<S2>,
@@ -326,7 +324,6 @@ where
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn migrate_file<S1, S2>(
     from: &S1,
     to: &State<S2>,

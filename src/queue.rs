@@ -330,7 +330,6 @@ async fn process_image_jobs<S, F>(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn image_job_loop<S, F>(
     state: &State<S>,
     process_map: &ProcessMap,

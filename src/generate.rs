@@ -93,7 +93,6 @@ pub(crate) async fn generate<S: Store + 'static>(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(state, hash))]
 async fn process<S: Store + 'static>(
     state: &State<S>,
@@ -167,7 +166,6 @@ async fn process<S: Store + 'static>(
     Ok((details, bytes)) as Result<(Details, Bytes), Error>
 }
 
-#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all)]
 async fn input_identifier<S>(
     state: &State<S>,
@@ -220,7 +218,7 @@ where
             };
 
             let reader = ffmpeg::thumbnail(
-                &state,
+                state,
                 identifier,
                 original_details
                     .video_format()

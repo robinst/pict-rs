@@ -160,7 +160,6 @@ where
     Ok((input_type, identifier, details, hash_state))
 }
 
-#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip(state, stream))]
 pub(crate) async fn ingest<S>(
     state: &State<S>,
