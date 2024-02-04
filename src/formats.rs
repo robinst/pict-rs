@@ -12,13 +12,6 @@ pub(crate) use video::{
     OutputVideo, VideoCodec, WebmAlphaCodec, WebmAudioCodec, WebmCodec,
 };
 
-#[derive(Clone, Debug)]
-pub(crate) struct Validations<'a> {
-    pub(crate) image: &'a crate::config::Image,
-    pub(crate) animation: &'a crate::config::Animation,
-    pub(crate) video: &'a crate::config::Video,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InputFile {
     Image(ImageInput),

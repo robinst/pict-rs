@@ -12,8 +12,8 @@ use defaults::Defaults;
 
 pub(crate) use commandline::Operation;
 pub(crate) use file::{
-    Animation, ConfigFile as Configuration, Image, Media, ObjectStorage, OpenTelemetry, Postgres,
-    Repo, Sled, Store, Tracing, Video,
+    Animation, ConfigFile as Configuration, Media, ObjectStorage, OpenTelemetry, Postgres, Repo,
+    Sled, Store, Tracing, Video,
 };
 pub(crate) use primitives::{Filesystem, LogFormat};
 
