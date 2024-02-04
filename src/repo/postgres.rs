@@ -357,7 +357,7 @@ impl Drop for GetConnectionMetricsGuard {
     fn drop(&mut self) {
         metrics::counter!(crate::init_metrics::POSTGRES_POOL_GET, "completed" => (!self.armed).to_string())
             .increment(1);
-        metrics::histogram!(crate::init_metrics::POSTGRES_POOL_GET_DURATION, => (!self.armed).to_string()).record(self.start.elapsed().as_secs_f64());
+        metrics::histogram!(crate::init_metrics::POSTGRES_POOL_GET_DURATION, "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_secs_f64());
     }
 }
 
@@ -1439,7 +1439,7 @@ impl QueueRepo for PostgresRepo {
             )
             .set(heartbeat.eq(timestamp))
             .execute(&mut conn)
-            .with_metrics(crate::init_metrics::POSGRES_QUEUE_HEARTBEAT)
+            .with_metrics(crate::init_metrics::POSTGRES_QUEUE_HEARTBEAT)
             .with_timeout(Duration::from_secs(5))
             .await
             .map_err(|_| PostgresError::DbTimeout)?

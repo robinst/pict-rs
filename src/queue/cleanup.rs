@@ -166,7 +166,7 @@ async fn outdated_variants(repo: &ArcRepo, config: &Configuration) -> Result<(),
     let mut count = 0;
 
     while let Some(res) = variant_stream.next().await {
-        metrics::counter!("pict-rs.cleanup.outdated-variant").increment(1);
+        metrics::counter!(crate::init_metrics::CLEANUP_OUTDATED_VARIANT).increment(1);
         tracing::trace!("outdated_variants: looping");
 
         let (hash, variant) = res?;
@@ -193,7 +193,7 @@ async fn outdated_proxies(repo: &ArcRepo, config: &Configuration) -> Result<(), 
     let mut count = 0;
 
     while let Some(res) = alias_stream.next().await {
-        metrics::counter!("pict-rs.cleanup.outdated-proxy").increment(1);
+        metrics::counter!(crate::init_metrics::CLEANUP_OUTDATED_PROXY).increment(1);
         tracing::trace!("outdated_proxies: looping");
 
         let alias = res?;

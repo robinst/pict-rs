@@ -87,8 +87,8 @@ impl UploadGuard {
 
 impl Drop for UploadGuard {
     fn drop(&mut self) {
-        metrics::counter!("pict-rs.background.upload.ingest", "completed" => (!self.armed).to_string()).increment(1);
-        metrics::histogram!("pict-rs.background.upload.ingest.duration", "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_seconds_f64());
+        metrics::counter!(crate::init_metrics::BACKGROUND_UPLOAD_INGEST, "completed" => (!self.armed).to_string()).increment(1);
+        metrics::histogram!(crate::init_metrics::BACKGROUND_UPLOAD_INGEST_DURATION, "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_seconds_f64());
 
         if self.armed {
             tracing::warn!(

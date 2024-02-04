@@ -57,7 +57,7 @@ impl ProcessMap {
                     completed = &tracing::field::Empty,
                 );
 
-                metrics::counter!("pict-rs.process-map.inserted").increment(1);
+                metrics::counter!(crate::init_metrics::PROCESS_MAP_INSERTED).increment(1);
 
                 (CancelState::Sender { sender }, span)
             }
@@ -142,7 +142,7 @@ where
                 let res = std::task::ready!(fut.poll(cx));
 
                 if process_map.remove(key).is_some() {
-                    metrics::counter!("pict-rs.process-map.removed").increment(1);
+                    metrics::counter!(crate::init_metrics::PROCESS_MAP_REMOVED).increment(1);
                 }
 
                 if let Ok(tup) = &res {
@@ -165,7 +165,7 @@ impl Drop for CancelToken {
             self.span.record("completed", completed);
 
             if !completed {
-                metrics::counter!("pict-rs.process-map.removed").increment(1);
+                metrics::counter!(crate::init_metrics::PROCESS_MAP_REMOVED).increment(1);
             }
         }
     }
