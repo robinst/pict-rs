@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use rustls::{crypto::ring::sign::any_supported_type, sign::CertifiedKey, Error};
+
 pub(super) struct Tls {
     certificate: PathBuf,
     private_key: PathBuf,
@@ -11,7 +13,7 @@ enum TlsError {
     Io(#[from] std::io::Error),
 
     #[error("Failed to sign certificate")]
-    Sign(#[from] rustls_021::sign::SignError),
+    Sign(#[from] Error),
 
     #[error("No certificates found in certificate file")]
     MissingCerts,
@@ -33,13 +35,12 @@ impl Tls {
             })
     }
 
-    pub(super) async fn open_keys(&self) -> color_eyre::Result<rustls_021::sign::CertifiedKey> {
+    pub(super) async fn open_keys(&self) -> color_eyre::Result<CertifiedKey> {
         let cert_bytes = tokio::fs::read(&self.certificate)
             .await
             .map_err(TlsError::from)?;
 
         let certs = rustls_pemfile::certs(&mut cert_bytes.as_slice())
-            .map(|res| res.map(|c| rustls_021::Certificate(c.to_vec())))
             .collect::<Result<Vec<_>, _>>()
             .map_err(TlsError::from)?;
 
@@ -55,11 +56,8 @@ impl Tls {
             .map_err(TlsError::from)?
             .ok_or(TlsError::MissingKey)?;
 
-        let private_key = rustls_021::sign::any_supported_type(&rustls_021::PrivateKey(Vec::from(
-            private_key.secret_der(),
-        )))
-        .map_err(TlsError::from)?;
+        let private_key = any_supported_type(&private_key).map_err(TlsError::from)?;
 
-        Ok(rustls_021::sign::CertifiedKey::new(certs, private_key))
+        Ok(CertifiedKey::new(certs, private_key))
     }
 }

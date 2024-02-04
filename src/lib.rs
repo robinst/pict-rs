@@ -1721,14 +1721,13 @@ async fn launch<
 
         let handle = watch_keys(tls, tx);
 
-        let config = rustls_021::ServerConfig::builder()
-            .with_safe_defaults()
+        let config = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_cert_resolver(rx);
 
         tracing::info!("Starting pict-rs with TLS on {address}");
 
-        server.bind_rustls_021(address, config)?.run().await?;
+        server.bind_rustls_0_22(address, config)?.run().await?;
 
         handle.abort();
         let _ = handle.await;
