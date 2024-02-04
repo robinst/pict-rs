@@ -138,13 +138,7 @@ async fn ensure_details_identifier<S: Store + 'static>(
 
         tracing::debug!("generating new details from {:?}", identifier);
         let bytes_stream = state.store.to_bytes(identifier, None, None).await?;
-        let new_details = Details::from_bytes(
-            &state.tmp_dir,
-            &state.policy_dir,
-            state.config.media.process_timeout,
-            bytes_stream.into_bytes(),
-        )
-        .await?;
+        let new_details = Details::from_bytes(state, bytes_stream.into_bytes()).await?;
         tracing::debug!("storing details for {:?}", identifier);
         state.repo.relate_details(identifier, &new_details).await?;
         tracing::debug!("stored");
@@ -351,7 +345,7 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
 
                             let stream = crate::stream::from_err(stream);
 
-                            Backgrounded::proxy(&state.repo, &state.store, stream).await
+                            Backgrounded::proxy(&state, stream).await
                         }
                         .instrument(span),
                     )
@@ -539,12 +533,12 @@ async fn do_download_backgrounded<S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     metrics::counter!("pict-rs.files", "download" => "background").increment(1);
 
-    let backgrounded = Backgrounded::proxy((**repo).clone(), (**store).clone(), stream).await?;
+    let backgrounded = Backgrounded::proxy(&state, stream).await?;
 
     let upload_id = backgrounded.upload_id().expect("Upload ID exists");
     let identifier = backgrounded.identifier().expect("Identifier exists");
 
-    queue::queue_ingest(&repo, identifier, upload_id, None).await?;
+    queue::queue_ingest(&state.repo, identifier, upload_id, None).await?;
 
     backgrounded.disarm();
 
@@ -611,7 +605,8 @@ async fn page<S>(
 
     for hash in &page.hashes {
         let hex = hash.to_hex();
-        let aliases = repo
+        let aliases = state
+            .repo
             .aliases_for_hash(hash.clone())
             .await?
             .into_iter()
@@ -794,7 +789,7 @@ async fn process<S: Store + 'static>(
         ProcessSource::Proxy { proxy } => {
             let alias = if let Some(alias) = state.repo.related(proxy.clone()).await? {
                 alias
-            } else if !config.server.read_only {
+            } else if !state.config.server.read_only {
                 let stream = download_stream(proxy.as_str(), &state).await?;
 
                 let (alias, _, _) = ingest_inline(stream, &state).await?;
@@ -836,7 +831,10 @@ async fn process<S: Store + 'static>(
             .await?;
     }
 
-    let identifier_opt = repo.variant_identifier(hash.clone(), path_string).await?;
+    let identifier_opt = state
+        .repo
+        .variant_identifier(hash.clone(), path_string)
+        .await?;
 
     if let Some(identifier) = identifier_opt {
         let details = ensure_details_identifier(&state, &identifier).await?;
@@ -850,7 +848,7 @@ async fn process<S: Store + 'static>(
         return ranged_file_resp(&state.store, identifier, range, details, not_found).await;
     }
 
-    if config.server.read_only {
+    if state.config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
@@ -930,7 +928,9 @@ async fn process_head<S: Store + 'static>(
     };
 
     if !state.config.server.read_only {
-        repo.accessed_variant(hash.clone(), path_string.clone())
+        state
+            .repo
+            .accessed_variant(hash.clone(), path_string.clone())
             .await?;
     }
 
@@ -959,7 +959,7 @@ async fn process_head<S: Store + 'static>(
 async fn process_backgrounded<S: Store>(
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
-    state: web::Data<State<T>>,
+    state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
     let source = match source {
         ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
@@ -1123,7 +1123,7 @@ async fn do_serve<S: Store + 'static>(
 async fn serve_query_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(alias_query): web::Query<AliasQuery>,
-    state: web::Data<State<T>>,
+    state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
     let alias = match alias_query {
         AliasQuery::Alias { alias } => Serde::into_inner(alias),
@@ -1547,10 +1547,12 @@ fn build_client() -> Result<ClientWithMiddleware, Error> {
 fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
     config: &mut web::ServiceConfig,
     state: State<S>,
+    process_map: ProcessMap,
     extra_config: F,
 ) {
     config
-        .app_data(web::Data::new(state))
+        .app_data(web::Data::new(state.clone()))
+        .app_data(web::Data::new(process_map.clone()))
         .route("/healthz", web::get().to(healthz::<S>))
         .service(
             web::scope("/image")
@@ -1613,9 +1615,7 @@ fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
         )
         .service(
             web::scope("/internal")
-                .wrap(Internal(
-                    state.config.server.api_key.as_ref().map(|s| s.to_owned()),
-                ))
+                .wrap(Internal(state.config.server.api_key.clone()))
                 .service(web::resource("/import").route(web::post().to(import::<S>)))
                 .service(web::resource("/variants").route(web::delete().to(clean_variants::<S>)))
                 .service(web::resource("/purge").route(web::post().to(purge::<S>)))
@@ -1623,13 +1623,13 @@ fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
                 .service(web::resource("/aliases").route(web::get().to(aliases::<S>)))
                 .service(web::resource("/identifier").route(web::get().to(identifier::<S>)))
                 .service(web::resource("/set_not_found").route(web::post().to(set_not_found::<S>)))
-                .service(web::resource("/hashes").route(web::get().to(page)))
+                .service(web::resource("/hashes").route(web::get().to(page::<S>)))
                 .service(web::resource("/prune_missing").route(web::post().to(prune_missing::<S>)))
                 .configure(extra_config),
         );
 }
 
-fn spawn_cleanup(state: State<S>) {
+fn spawn_cleanup<S>(state: State<S>) {
     if state.config.server.read_only {
         return;
     }
@@ -1668,34 +1668,21 @@ where
 }
 
 async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(
-    tmp_dir: ArcTmpDir,
-    policy_dir: ArcPolicyDir,
-    repo: ArcRepo,
-    store: FileStore,
-    client: ClientWithMiddleware,
-    config: Configuration,
+    state: State<FileStore>,
     extra_config: F,
 ) -> color_eyre::Result<()> {
     let process_map = ProcessMap::new();
 
-    let address = config.server.address;
+    let address = state.config.server.address;
+
+    let tls = Tls::from_config(&state.config);
 
     spawn_cleanup(state.clone());
-
-    let tls = Tls::from_config(&config);
-
-    let state = State {
-        config,
-        tmp_dir,
-        policy_dir,
-        repo,
-        store,
-        client,
-    };
 
     let server = HttpServer::new(move || {
         let extra_config = extra_config.clone();
         let state = state.clone();
+        let process_map = process_map.clone();
 
         spawn_workers(state.clone(), process_map.clone());
 
@@ -1704,8 +1691,9 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
             .wrap(Deadline)
             .wrap(Metrics)
             .wrap(Payload::new())
-            .app_data(web::Data::new(process_map))
-            .configure(move |sc| configure_endpoints(sc, state, extra_config))
+            .configure(move |sc| {
+                configure_endpoints(sc, state.clone(), process_map.clone(), extra_config)
+            })
     });
 
     if let Some(tls) = tls {
@@ -1748,34 +1736,21 @@ async fn launch_file_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'stat
 }
 
 async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'static>(
-    tmp_dir: ArcTmpDir,
-    policy_dir: ArcPolicyDir,
-    repo: ArcRepo,
-    store: ObjectStore,
-    client: ClientWithMiddleware,
-    config: Configuration,
+    state: State<ObjectStore>,
     extra_config: F,
 ) -> color_eyre::Result<()> {
     let process_map = ProcessMap::new();
 
-    let address = config.server.address;
+    let address = state.config.server.address;
 
-    let tls = Tls::from_config(&config);
-
-    let state = State {
-        config: config.clone(),
-        tmp_dir: tmp_dir.clone(),
-        policy_dir: policy_dir.clone(),
-        repo: repo.clone(),
-        store: store.clone(),
-        client: client.clone(),
-    };
+    let tls = Tls::from_config(&state.config);
 
     spawn_cleanup(state.clone());
 
     let server = HttpServer::new(move || {
         let extra_config = extra_config.clone();
         let state = state.clone();
+        let process_map = process_map.clone();
 
         spawn_workers(state.clone(), process_map.clone());
 
@@ -1784,8 +1759,9 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
             .wrap(Deadline)
             .wrap(Metrics)
             .wrap(Payload::new())
-            .app_data(web::Data::new(process_map))
-            .configure(move |sc| configure_endpoints(sc, state, extra_config))
+            .configure(move |sc| {
+                configure_endpoints(sc, state.clone(), process_map.clone(), extra_config)
+            })
     });
 
     if let Some(tls) = tls {
@@ -1825,6 +1801,7 @@ async fn launch_object_store<F: Fn(&mut web::ServiceConfig) + Send + Clone + 'st
 
 #[allow(clippy::too_many_arguments)]
 async fn migrate_inner<S1>(
+    config: Configuration,
     tmp_dir: ArcTmpDir,
     policy_dir: ArcPolicyDir,
     repo: ArcRepo,
@@ -1832,7 +1809,6 @@ async fn migrate_inner<S1>(
     from: S1,
     to: config::primitives::Store,
     skip_missing_files: bool,
-    timeout: u64,
     concurrency: usize,
 ) -> color_eyre::Result<()>
 where
@@ -1840,19 +1816,18 @@ where
 {
     match to {
         config::primitives::Store::Filesystem(config::Filesystem { path }) => {
-            let to = FileStore::build(path.clone(), repo.clone()).await?;
+            let store = FileStore::build(path.clone(), repo.clone()).await?;
 
-            migrate_store(
+            let to = State {
+                config,
                 tmp_dir,
                 policy_dir,
                 repo,
-                from,
-                to,
-                skip_missing_files,
-                timeout,
-                concurrency,
-            )
-            .await?
+                store,
+                client,
+            };
+
+            migrate_store(from, to, skip_missing_files, concurrency).await?
         }
         config::primitives::Store::ObjectStorage(config::primitives::ObjectStorage {
             endpoint,
@@ -1866,7 +1841,7 @@ where
             client_timeout,
             public_endpoint,
         }) => {
-            let to = ObjectStore::build(
+            let store = ObjectStore::build(
                 endpoint.clone(),
                 bucket_name,
                 if use_path_style {
@@ -1884,19 +1859,18 @@ where
                 repo.clone(),
             )
             .await?
-            .build(client);
+            .build(client.clone());
 
-            migrate_store(
+            let to = State {
+                config,
                 tmp_dir,
                 policy_dir,
                 repo,
-                from,
-                to,
-                skip_missing_files,
-                timeout,
-                concurrency,
-            )
-            .await?
+                store,
+                client,
+            };
+
+            migrate_store(from, to, skip_missing_files, concurrency).await?
         }
     }
 
@@ -2066,6 +2040,7 @@ impl PictRsConfiguration {
                     config::primitives::Store::Filesystem(config::Filesystem { path }) => {
                         let from = FileStore::build(path.clone(), repo.clone()).await?;
                         migrate_inner(
+                            config,
                             tmp_dir,
                             policy_dir,
                             repo,
@@ -2073,7 +2048,6 @@ impl PictRsConfiguration {
                             from,
                             to,
                             skip_missing_files,
-                            config.media.process_timeout,
                             concurrency,
                         )
                         .await?;
@@ -2113,6 +2087,7 @@ impl PictRsConfiguration {
                         .build(client.clone());
 
                         migrate_inner(
+                            config,
                             tmp_dir,
                             policy_dir,
                             repo,
@@ -2120,7 +2095,6 @@ impl PictRsConfiguration {
                             from,
                             to,
                             skip_missing_files,
-                            config.media.process_timeout,
                             concurrency,
                         )
                         .await?;
@@ -2150,18 +2124,19 @@ impl PictRsConfiguration {
 
                 let store = FileStore::build(path, arc_repo.clone()).await?;
 
+                let state = State {
+                    tmp_dir: tmp_dir.clone(),
+                    policy_dir: policy_dir.clone(),
+                    repo: arc_repo.clone(),
+                    store: store.clone(),
+                    config: config.clone(),
+                    client: client.clone(),
+                };
+
                 if arc_repo.get("migrate-0.4").await?.is_none() {
                     if let Some(path) = config.old_repo_path() {
                         if let Some(old_repo) = repo_04::open(path)? {
-                            repo::migrate_04(
-                                tmp_dir.clone(),
-                                policy_dir.clone(),
-                                old_repo,
-                                arc_repo.clone(),
-                                store.clone(),
-                                config.clone(),
-                            )
-                            .await?;
+                            repo::migrate_04(old_repo, state.clone()).await?;
                             arc_repo
                                 .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
                                 .await?;
@@ -2171,28 +2146,13 @@ impl PictRsConfiguration {
 
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        launch_file_store(
-                            tmp_dir.clone(),
-                            policy_dir.clone(),
-                            arc_repo,
-                            store,
-                            client,
-                            config,
-                            move |sc| sled_extra_config(sc, sled_repo.clone()),
-                        )
+                        launch_file_store(state, move |sc| {
+                            sled_extra_config(sc, sled_repo.clone())
+                        })
                         .await?;
                     }
                     Repo::Postgres(_) => {
-                        launch_file_store(
-                            tmp_dir.clone(),
-                            policy_dir.clone(),
-                            arc_repo,
-                            store,
-                            client,
-                            config,
-                            |_| {},
-                        )
-                        .await?;
+                        launch_file_store(state, |_| {}).await?;
                     }
                 }
             }
@@ -2230,18 +2190,19 @@ impl PictRsConfiguration {
                 .await?
                 .build(client.clone());
 
+                let state = State {
+                    tmp_dir: tmp_dir.clone(),
+                    policy_dir: policy_dir.clone(),
+                    repo: arc_repo.clone(),
+                    store: store.clone(),
+                    config: config.clone(),
+                    client: client.clone(),
+                };
+
                 if arc_repo.get("migrate-0.4").await?.is_none() {
                     if let Some(path) = config.old_repo_path() {
                         if let Some(old_repo) = repo_04::open(path)? {
-                            repo::migrate_04(
-                                tmp_dir.clone(),
-                                policy_dir.clone(),
-                                old_repo,
-                                arc_repo.clone(),
-                                store.clone(),
-                                config.clone(),
-                            )
-                            .await?;
+                            repo::migrate_04(old_repo, state.clone()).await?;
                             arc_repo
                                 .set("migrate-0.4", Arc::from(b"migrated".to_vec()))
                                 .await?;
@@ -2251,28 +2212,13 @@ impl PictRsConfiguration {
 
                 match repo {
                     Repo::Sled(sled_repo) => {
-                        launch_object_store(
-                            tmp_dir.clone(),
-                            policy_dir.clone(),
-                            arc_repo,
-                            store,
-                            client,
-                            config,
-                            move |sc| sled_extra_config(sc, sled_repo.clone()),
-                        )
+                        launch_object_store(state, move |sc| {
+                            sled_extra_config(sc, sled_repo.clone())
+                        })
                         .await?;
                     }
                     Repo::Postgres(_) => {
-                        launch_object_store(
-                            tmp_dir.clone(),
-                            policy_dir.clone(),
-                            arc_repo,
-                            store,
-                            client,
-                            config,
-                            |_| {},
-                        )
-                        .await?;
+                        launch_object_store(state, |_| {}).await?;
                     }
                 }
             }

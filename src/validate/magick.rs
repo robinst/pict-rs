@@ -6,6 +6,7 @@ use crate::{
     formats::{AnimationFormat, ImageFormat},
     magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
+    state::State,
     tmp_file::TmpDir,
 };
 
@@ -40,12 +41,12 @@ pub(super) async fn convert_animation<S>(
         output.magick_format(),
         true,
         quality,
-        timeout,
+        bytes,
     )
     .await
 }
 
-async fn convert(
+async fn convert<S>(
     state: &State<S>,
     input: &'static str,
     output: &'static str,

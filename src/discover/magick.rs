@@ -8,6 +8,7 @@ use crate::{
     formats::{AnimationFormat, ImageFormat, ImageInput, InputFile},
     magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::Process,
+    state::State,
     tmp_file::TmpDir,
 };
 
@@ -31,11 +32,9 @@ struct Geometry {
 }
 
 #[tracing::instrument(skip_all)]
-pub(super) async fn confirm_bytes(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
+pub(super) async fn confirm_bytes<S>(
+    state: &State<S>,
     discovery: Option<Discovery>,
-    timeout: u64,
     bytes: Bytes,
 ) -> Result<Discovery, MagickError> {
     match discovery {
@@ -51,7 +50,7 @@ pub(super) async fn confirm_bytes(
         }
     }
 
-    discover_file(tmp_dir, policy_dir, timeout, move |mut file| async move {
+    discover_file(state, move |mut file| async move {
         file.write_from_bytes(bytes)
             .await
             .map_err(MagickError::Write)?;
@@ -62,22 +61,18 @@ pub(super) async fn confirm_bytes(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn discover_file<F, Fut>(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
-    timeout: u64,
-    f: F,
-) -> Result<Discovery, MagickError>
+async fn discover_file<S, F, Fut>(state: &State<S>, f: F) -> Result<Discovery, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
-    let temporary_path = tmp_dir
+    let temporary_path = state
+        .tmp_dir
         .tmp_folder()
         .await
         .map_err(MagickError::CreateTemporaryDirectory)?;
 
-    let input_file = tmp_dir.tmp_file(None);
+    let input_file = state.tmp_dir.tmp_file(None);
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(MagickError::CreateDir)?;
@@ -90,7 +85,7 @@ where
 
     let envs = [
         (MAGICK_TEMPORARY_PATH, temporary_path.as_os_str()),
-        (MAGICK_CONFIGURE_PATH, policy_dir.as_os_str()),
+        (MAGICK_CONFIGURE_PATH, state.policy_dir.as_os_str()),
     ];
 
     let res = Process::run(
@@ -102,7 +97,7 @@ where
             "JSON:".as_ref(),
         ],
         &envs,
-        timeout,
+        state.config.media.process_timeout,
     )?
     .read()
     .into_string()

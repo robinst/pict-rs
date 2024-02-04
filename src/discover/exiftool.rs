@@ -16,8 +16,8 @@ pub(super) async fn check_reorient(
         height,
         frames,
     }: Discovery,
-    timeout: u64,
     bytes: Bytes,
+    timeout: u64,
 ) -> Result<Discovery, ExifError> {
     let input = match input {
         InputFile::Image(ImageInput { format, .. }) => {

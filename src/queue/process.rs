@@ -116,6 +116,7 @@ where
     let guard = UploadGuard::guard(upload_id);
 
     let fut = async {
+        let ident = unprocessed_identifier.clone();
         let state2 = state.clone();
 
         let current_span = Span::current();

@@ -4,6 +4,7 @@ use crate::{
     formats::{InternalFormat, InternalVideoFormat},
     magick::PolicyDir,
     serde_str::Serde,
+    state::State,
     tmp_file::TmpDir,
 };
 use actix_web::web;
@@ -81,18 +82,13 @@ impl Details {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
-    pub(crate) async fn from_bytes(
-        tmp_dir: &TmpDir,
-        policy_dir: &PolicyDir,
-        timeout: u64,
-        input: web::Bytes,
-    ) -> Result<Self, Error> {
+    pub(crate) async fn from_bytes<S>(state: &State<S>, input: web::Bytes) -> Result<Self, Error> {
         let Discovery {
             input,
             width,
             height,
             frames,
-        } = crate::discover::discover_bytes(tmp_dir, policy_dir, timeout, input).await?;
+        } = crate::discover::discover_bytes(state, input).await?;
 
         Ok(Details::from_parts(
             input.internal_format(),

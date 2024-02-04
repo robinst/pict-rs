@@ -14,19 +14,16 @@ use crate::{
     error::{Error, UploadError},
     magick::{ArcPolicyDir, PolicyDir},
     repo::{ArcRepo, Hash},
+    state::State,
     store::Store,
     tmp_file::{ArcTmpDir, TmpDir},
 };
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn migrate_store<S1, S2>(
-    tmp_dir: ArcTmpDir,
-    policy_dir: ArcPolicyDir,
-    repo: ArcRepo,
     from: S1,
-    to: S2,
+    to: State<S2>,
     skip_missing_files: bool,
-    timeout: u64,
     concurrency: usize,
 ) -> Result<(), Error>
 where
@@ -39,7 +36,7 @@ where
         tracing::warn!("Old store is not configured correctly");
         return Err(e.into());
     }
-    if let Err(e) = to.health_check().await {
+    if let Err(e) = to.repo.health_check().await {
         tracing::warn!("New store is not configured correctly");
         return Err(e.into());
     }
@@ -48,17 +45,8 @@ where
 
     let mut failure_count = 0;
 
-    while let Err(e) = do_migrate_store(
-        tmp_dir.clone(),
-        policy_dir.clone(),
-        repo.clone(),
-        from.clone(),
-        to.clone(),
-        skip_missing_files,
-        timeout,
-        concurrency,
-    )
-    .await
+    while let Err(e) =
+        do_migrate_store(from.clone(), to.clone(), skip_missing_files, concurrency).await
     {
         tracing::error!("Migration failed with {}", format!("{e:?}"));
 
@@ -78,11 +66,8 @@ where
 }
 
 struct MigrateState<S1, S2> {
-    tmp_dir: ArcTmpDir,
-    policy_dir: ArcPolicyDir,
-    repo: ArcRepo,
     from: S1,
-    to: S2,
+    to: State<S2>,
     continuing_migration: bool,
     skip_missing_files: bool,
     initial_repo_size: u64,
@@ -90,26 +75,21 @@ struct MigrateState<S1, S2> {
     pct: AtomicU64,
     index: AtomicU64,
     started_at: Instant,
-    timeout: u64,
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn do_migrate_store<S1, S2>(
-    tmp_dir: ArcTmpDir,
-    policy_dir: ArcPolicyDir,
-    repo: ArcRepo,
     from: S1,
-    to: S2,
+    to: State<S2>,
     skip_missing_files: bool,
-    timeout: u64,
     concurrency: usize,
 ) -> Result<(), Error>
 where
     S1: Store + 'static,
     S2: Store + 'static,
 {
-    let continuing_migration = repo.is_continuing_migration().await?;
-    let initial_repo_size = repo.size().await?;
+    let continuing_migration = to.repo.is_continuing_migration().await?;
+    let initial_repo_size = to.repo.size().await?;
 
     if continuing_migration {
         tracing::warn!("Continuing previous migration of {initial_repo_size} total hashes");
@@ -122,15 +102,12 @@ where
     }
 
     // Hashes are read in a consistent order
-    let stream = std::pin::pin!(repo.hashes());
+    let stream = std::pin::pin!(to.repo.hashes());
     let mut stream = stream.into_streamer();
 
     let state = Rc::new(MigrateState {
-        tmp_dir: tmp_dir.clone(),
-        policy_dir: policy_dir.clone(),
-        repo: repo.clone(),
         from,
-        to,
+        to: to.clone(),
         continuing_migration,
         skip_missing_files,
         initial_repo_size,
@@ -138,7 +115,6 @@ where
         pct: AtomicU64::new(initial_repo_size / 100),
         index: AtomicU64::new(0),
         started_at: Instant::now(),
-        timeout,
     });
 
     let mut joinset = tokio::task::JoinSet::new();
@@ -165,7 +141,7 @@ where
     }
 
     // clean up the migration table to avoid interfering with future migrations
-    repo.clear().await?;
+    to.repo.clear().await?;
 
     tracing::warn!("Migration completed successfully");
 
@@ -179,9 +155,6 @@ where
     S2: Store,
 {
     let MigrateState {
-        tmp_dir,
-        policy_dir,
-        repo,
         from,
         to,
         continuing_migration,
@@ -191,24 +164,23 @@ where
         pct,
         index,
         started_at,
-        timeout,
     } = state;
 
     let current_index = index.fetch_add(1, Ordering::Relaxed);
 
-    let original_identifier = match repo.identifier(hash.clone()).await {
+    let original_identifier = match to.repo.identifier(hash.clone()).await {
         Ok(Some(identifier)) => identifier,
         Ok(None) => {
             tracing::warn!(
                 "Original File identifier for hash {hash:?} is missing, queue cleanup task",
             );
-            crate::queue::cleanup_hash(repo, hash.clone()).await?;
+            crate::queue::cleanup_hash(&to.repo, hash.clone()).await?;
             return Ok(());
         }
         Err(e) => return Err(e.into()),
     };
 
-    if repo.is_migrated(&original_identifier).await? {
+    if to.repo.is_migrated(&original_identifier).await? {
         // migrated original for hash - this means we can skip
         return Ok(());
     }
@@ -241,26 +213,16 @@ where
         }
     }
 
-    if let Some(identifier) = repo.motion_identifier(hash.clone()).await? {
-        if !repo.is_migrated(&identifier).await? {
-            match migrate_file(
-                tmp_dir,
-                policy_dir,
-                repo,
-                from,
-                to,
-                &identifier,
-                *skip_missing_files,
-                *timeout,
-            )
-            .await
-            {
+    if let Some(identifier) = to.repo.motion_identifier(hash.clone()).await? {
+        if !to.repo.is_migrated(&identifier).await? {
+            match migrate_file(from, to, &identifier, *skip_missing_files).await {
                 Ok(new_identifier) => {
-                    migrate_details(repo, &identifier, &new_identifier).await?;
-                    repo.relate_motion_identifier(hash.clone(), &new_identifier)
+                    migrate_details(&to.repo, &identifier, &new_identifier).await?;
+                    to.repo
+                        .relate_motion_identifier(hash.clone(), &new_identifier)
                         .await?;
 
-                    repo.mark_migrated(&identifier, &new_identifier).await?;
+                    to.repo.mark_migrated(&identifier, &new_identifier).await?;
                 }
                 Err(MigrateError::From(e)) if e.is_not_found() && *skip_missing_files => {
                     tracing::warn!("Skipping motion file for hash {hash:?}");
@@ -281,28 +243,20 @@ where
         }
     }
 
-    for (variant, identifier) in repo.variants(hash.clone()).await? {
-        if !repo.is_migrated(&identifier).await? {
-            match migrate_file(
-                tmp_dir,
-                policy_dir,
-                repo,
-                from,
-                to,
-                &identifier,
-                *skip_missing_files,
-                *timeout,
-            )
-            .await
-            {
+    for (variant, identifier) in to.repo.variants(hash.clone()).await? {
+        if !to.repo.is_migrated(&identifier).await? {
+            match migrate_file(from, to, &identifier, *skip_missing_files).await {
                 Ok(new_identifier) => {
-                    migrate_details(repo, &identifier, &new_identifier).await?;
-                    repo.remove_variant(hash.clone(), variant.clone()).await?;
-                    let _ = repo
+                    migrate_details(&to.repo, &identifier, &new_identifier).await?;
+                    to.repo
+                        .remove_variant(hash.clone(), variant.clone())
+                        .await?;
+                    let _ = to
+                        .repo
                         .relate_variant_identifier(hash.clone(), variant, &new_identifier)
                         .await?;
 
-                    repo.mark_migrated(&identifier, &new_identifier).await?;
+                    to.repo.mark_migrated(&identifier, &new_identifier).await?;
                 }
                 Err(MigrateError::From(e)) if e.is_not_found() && *skip_missing_files => {
                     tracing::warn!("Skipping variant {variant} for hash {hash:?}",);
@@ -323,23 +277,14 @@ where
         }
     }
 
-    match migrate_file(
-        tmp_dir,
-        policy_dir,
-        repo,
-        from,
-        to,
-        &original_identifier,
-        *skip_missing_files,
-        *timeout,
-    )
-    .await
-    {
+    match migrate_file(from, to, &original_identifier, *skip_missing_files).await {
         Ok(new_identifier) => {
-            migrate_details(repo, &original_identifier, &new_identifier).await?;
-            repo.update_identifier(hash.clone(), &new_identifier)
+            migrate_details(&to.repo, &original_identifier, &new_identifier).await?;
+            to.repo
+                .update_identifier(hash.clone(), &new_identifier)
                 .await?;
-            repo.mark_migrated(&original_identifier, &new_identifier)
+            to.repo
+                .mark_migrated(&original_identifier, &new_identifier)
                 .await?;
         }
         Err(MigrateError::From(e)) if e.is_not_found() && *skip_missing_files => {
@@ -385,14 +330,10 @@ where
 
 #[allow(clippy::too_many_arguments)]
 async fn migrate_file<S1, S2>(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
-    repo: &ArcRepo,
     from: &S1,
-    to: &S2,
+    to: &State<S2>,
     identifier: &Arc<str>,
     skip_missing_files: bool,
-    timeout: u64,
 ) -> Result<Arc<str>, MigrateError>
 where
     S1: Store,
@@ -403,7 +344,7 @@ where
     loop {
         tracing::trace!("migrate_file: looping");
 
-        match do_migrate_file(tmp_dir, policy_dir, repo, from, to, identifier, timeout).await {
+        match do_migrate_file(from, to, identifier).await {
             Ok(identifier) => return Ok(identifier),
             Err(MigrateError::From(e)) if e.is_not_found() && skip_missing_files => {
                 return Err(MigrateError::From(e));
@@ -432,13 +373,9 @@ enum MigrateError {
 }
 
 async fn do_migrate_file<S1, S2>(
-    tmp_dir: &TmpDir,
-    policy_dir: &PolicyDir,
-    repo: &ArcRepo,
     from: &S1,
-    to: &S2,
+    to: &State<S2>,
     identifier: &Arc<str>,
-    timeout: u64,
 ) -> Result<Arc<str>, MigrateError>
 where
     S1: Store,
@@ -449,7 +386,8 @@ where
         .await
         .map_err(MigrateError::From)?;
 
-    let details_opt = repo
+    let details_opt = to
+        .repo
         .details(identifier)
         .await
         .map_err(Error::from)
@@ -463,11 +401,11 @@ where
             .await
             .map_err(From::from)
             .map_err(MigrateError::Details)?;
-        let new_details =
-            Details::from_bytes(tmp_dir, policy_dir, timeout, bytes_stream.into_bytes())
-                .await
-                .map_err(MigrateError::Details)?;
-        repo.relate_details(identifier, &new_details)
+        let new_details = Details::from_bytes(to, bytes_stream.into_bytes())
+            .await
+            .map_err(MigrateError::Details)?;
+        to.repo
+            .relate_details(identifier, &new_details)
             .await
             .map_err(Error::from)
             .map_err(MigrateError::Details)?;
@@ -475,6 +413,7 @@ where
     };
 
     let new_identifier = to
+        .store
         .save_stream(stream, details.media_type())
         .await
         .map_err(MigrateError::To)?;

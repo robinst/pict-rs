@@ -107,9 +107,10 @@ where
     let (hash_state, identifier) = process_read
         .with_stdout(|stdout| async move {
             let hasher_reader = Hasher::new(stdout);
-            let state = hasher_reader.state();
+            let hash_state = hasher_reader.state();
 
-            store
+            state
+                .store
                 .save_async_read(hasher_reader, input_type.media_type())
                 .await
                 .map(move |identifier| (hash_state, identifier))
@@ -117,13 +118,7 @@ where
         .await??;
 
     let bytes_stream = state.store.to_bytes(&identifier, None, None).await?;
-    let details = Details::from_bytes(
-        tmp_dir,
-        policy_dir,
-        media.process_timeout,
-        bytes_stream.into_bytes(),
-    )
-    .await?;
+    let details = Details::from_bytes(state, bytes_stream.into_bytes()).await?;
 
     drop(permit);
 
@@ -153,7 +148,7 @@ where
     let reader = Box::pin(tokio_util::io::StreamReader::new(stream));
 
     let hasher_reader = Hasher::new(reader);
-    let state = hasher_reader.state();
+    let hash_state = hasher_reader.state();
 
     let input_type = InternalFormat::Image(crate::formats::ImageFormat::Png);
 
@@ -164,7 +159,7 @@ where
 
     let details = Details::danger_dummy(input_type);
 
-    Ok((input_type, identifier, details, state))
+    Ok((input_type, identifier, details, hash_state))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -192,7 +187,7 @@ where
     };
 
     if let Some(endpoint) = &state.config.media.external_validation {
-        let stream = store.to_stream(&identifier, None, None).await?;
+        let stream = state.store.to_stream(&identifier, None, None).await?;
 
         let response = state
             .client

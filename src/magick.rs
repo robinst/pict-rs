@@ -7,6 +7,7 @@ use crate::{
     error_code::ErrorCode,
     formats::ProcessableFormat,
     process::{Process, ProcessError, ProcessRead},
+    state::State,
     stream::LocalBoxStream,
     tmp_file::{TmpDir, TmpFolder},
 };
@@ -177,7 +178,7 @@ pub(crate) async fn process_image_stream_read<S>(
     .await
 }
 
-pub(crate) async fn process_image_process_read(
+pub(crate) async fn process_image_process_read<S>(
     state: &State<S>,
     process_read: ProcessRead,
     args: Vec<String>,

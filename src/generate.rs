@@ -143,13 +143,7 @@ async fn process<S: Store + 'static>(
 
     drop(permit);
 
-    let details = Details::from_bytes(
-        &state.tmp_dir,
-        &state.policy_dir,
-        &state.config.media.process_timeout,
-        bytes.clone(),
-    )
-    .await?;
+    let details = Details::from_bytes(state, bytes.clone()).await?;
 
     let identifier = state
         .store
@@ -214,14 +208,8 @@ where
 
             let stream = state.store.to_stream(&identifier, None, None).await?;
 
-            let reader = magick::thumbnail(
-                state,
-                stream,
-                processable_format,
-                ProcessableFormat::Image(thumbnail_format),
-                config.media.image.quality_for(thumbnail_format),
-            )
-            .await?;
+            let reader =
+                magick::thumbnail(state, stream, processable_format, thumbnail_format).await?;
 
             (reader, thumbnail_format.media_type())
         } else {
@@ -234,14 +222,12 @@ where
             };
 
             let reader = ffmpeg::thumbnail(
-                state.tmp_dir,
-                state.store.clone(),
+                &state,
                 identifier,
                 original_details
                     .video_format()
                     .unwrap_or(InternalVideoFormat::Mp4),
                 thumbnail_format,
-                state.config.media.process_timeout,
             )
             .await?;
 

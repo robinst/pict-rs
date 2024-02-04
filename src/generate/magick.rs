@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use actix_web::web::Bytes;
 
 use crate::{
-    formats::ProcessableFormat,
+    formats::{ImageFormat, ProcessableFormat},
     magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
     state::State,
@@ -14,14 +14,16 @@ use crate::{
 async fn thumbnail_animation<S, F, Fut>(
     state: &State<S>,
     input_format: ProcessableFormat,
-    format: ProcessableFormat,
-    quality: Option<u8>,
+    thumbnail_format: ImageFormat,
     write_file: F,
 ) -> Result<ProcessRead, MagickError>
 where
     F: FnOnce(crate::file::File) -> Fut,
     Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
 {
+    let format = ProcessableFormat::Image(thumbnail_format);
+    let quality = state.config.media.image.quality_for(thumbnail_format);
+
     let temporary_path = state
         .tmp_dir
         .tmp_folder()
@@ -77,14 +79,12 @@ pub(super) async fn thumbnail<S>(
     state: &State<S>,
     stream: LocalBoxStream<'static, std::io::Result<Bytes>>,
     input_format: ProcessableFormat,
-    format: ProcessableFormat,
-    quality: Option<u8>,
+    thumbnail_format: ImageFormat,
 ) -> Result<ProcessRead, MagickError> {
     thumbnail_animation(
         state,
         input_format,
-        format,
-        quality,
+        thumbnail_format,
         |mut tmp_file| async move {
             tmp_file
                 .write_from_stream(stream)

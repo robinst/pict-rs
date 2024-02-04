@@ -6,6 +6,7 @@ use crate::{
     ffmpeg::FfMpegError,
     formats::InternalVideoFormat,
     process::{Process, ProcessRead},
+    state::State,
     store::Store,
     tmp_file::TmpDir,
 };
@@ -50,21 +51,19 @@ impl ThumbnailFormat {
     }
 }
 
-#[tracing::instrument(skip(tmp_dir, store, timeout))]
+#[tracing::instrument(skip(state))]
 pub(super) async fn thumbnail<S: Store>(
-    tmp_dir: &TmpDir,
-    store: S,
+    state: &State<S>,
     from: Arc<str>,
     input_format: InternalVideoFormat,
     format: ThumbnailFormat,
-    timeout: u64,
 ) -> Result<ProcessRead, FfMpegError> {
-    let input_file = tmp_dir.tmp_file(Some(input_format.file_extension()));
+    let input_file = state.tmp_dir.tmp_file(Some(input_format.file_extension()));
     crate::store::file_store::safe_create_parent(&input_file)
         .await
         .map_err(FfMpegError::CreateDir)?;
 
-    let output_file = tmp_dir.tmp_file(Some(format.to_file_extension()));
+    let output_file = state.tmp_dir.tmp_file(Some(format.to_file_extension()));
     crate::store::file_store::safe_create_parent(&output_file)
         .await
         .map_err(FfMpegError::CreateDir)?;
@@ -72,7 +71,8 @@ pub(super) async fn thumbnail<S: Store>(
     let mut tmp_one = crate::file::File::create(&input_file)
         .await
         .map_err(FfMpegError::CreateFile)?;
-    let stream = store
+    let stream = state
+        .store
         .to_stream(&from, None, None)
         .await
         .map_err(FfMpegError::Store)?;
@@ -99,7 +99,7 @@ pub(super) async fn thumbnail<S: Store>(
             output_file.as_os_str(),
         ],
         &[],
-        timeout,
+        state.config.media.process_timeout,
     )?;
 
     let res = process.wait().await;

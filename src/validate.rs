@@ -71,7 +71,7 @@ pub(crate) async fn validate_bytes<S>(
         width,
         height,
         frames,
-    } = crate::discover::discover_bytes(tmp_dir, policy_dir, timeout, bytes.clone()).await?;
+    } = crate::discover::discover_bytes(state, bytes.clone()).await?;
 
     match &input {
         InputFile::Image(input) => {
@@ -127,7 +127,7 @@ async fn process_image<S>(
 
         magick::convert_image(state, input.format, format, quality, bytes).await?
     } else {
-        exiftool::clear_metadata_bytes_read(bytes, timeout)?
+        exiftool::clear_metadata_bytes_read(bytes, state.config.media.process_timeout)?
     };
 
     Ok((InternalFormat::Image(format), process_read))
@@ -160,7 +160,7 @@ fn validate_animation(
 }
 
 #[tracing::instrument(skip(state, bytes))]
-async fn process_animation(
+async fn process_animation<S>(
     state: &State<S>,
     bytes: Bytes,
     input: AnimationFormat,
