@@ -4,11 +4,10 @@ use actix_web::web::Bytes;
 
 use crate::{
     formats::{ImageFormat, ProcessableFormat},
-    magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
+    magick::{MagickError, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
     state::State,
     stream::LocalBoxStream,
-    tmp_file::TmpDir,
 };
 
 async fn thumbnail_animation<S, F, Fut>(

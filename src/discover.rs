@@ -4,7 +4,7 @@ mod magick;
 
 use actix_web::web::Bytes;
 
-use crate::{formats::InputFile, magick::PolicyDir, state::State, tmp_file::TmpDir};
+use crate::{formats::InputFile, state::State};
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Discovery {

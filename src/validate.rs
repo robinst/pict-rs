@@ -10,10 +10,8 @@ use crate::{
         AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InputVideoFormat,
         InternalFormat,
     },
-    magick::PolicyDir,
     process::ProcessRead,
     state::State,
-    tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
 

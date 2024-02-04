@@ -12,11 +12,9 @@ use streem::IntoStreamer;
 use crate::{
     details::Details,
     error::{Error, UploadError},
-    magick::{ArcPolicyDir, PolicyDir},
     repo::{ArcRepo, Hash},
     state::State,
     store::Store,
-    tmp_file::{ArcTmpDir, TmpDir},
 };
 
 #[allow(clippy::too_many_arguments)]

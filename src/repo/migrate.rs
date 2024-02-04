@@ -7,10 +7,8 @@ use streem::IntoStreamer;
 use tokio::{sync::Semaphore, task::JoinSet};
 
 use crate::{
-    config::Configuration,
     details::Details,
     error::{Error, UploadError},
-    magick::{ArcPolicyDir, PolicyDir},
     repo::{ArcRepo, DeleteToken, Hash},
     repo_04::{
         AliasRepo as _, HashRepo as _, IdentifierRepo as _, SettingsRepo as _,
@@ -18,7 +16,6 @@ use crate::{
     },
     state::State,
     store::Store,
-    tmp_file::{ArcTmpDir, TmpDir},
 };
 
 const GENERATOR_KEY: &str = "last-path";

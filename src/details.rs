@@ -2,10 +2,8 @@ use crate::{
     discover::Discovery,
     error::Error,
     formats::{InternalFormat, InternalVideoFormat},
-    magick::PolicyDir,
     serde_str::Serde,
     state::State,
-    tmp_file::TmpDir,
 };
 use actix_web::web;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};

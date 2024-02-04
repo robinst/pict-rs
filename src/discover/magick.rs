@@ -6,10 +6,9 @@ use actix_web::web::Bytes;
 use crate::{
     discover::DiscoverError,
     formats::{AnimationFormat, ImageFormat, ImageInput, InputFile},
-    magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
+    magick::{MagickError, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::Process,
     state::State,
-    tmp_file::TmpDir,
 };
 
 use super::Discovery;

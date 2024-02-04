@@ -11,7 +11,6 @@ use crate::{
     },
     process::Process,
     state::State,
-    tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
 

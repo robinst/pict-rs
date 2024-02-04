@@ -1,21 +1,17 @@
-use reqwest_middleware::ClientWithMiddleware;
 use time::Instant;
 use tracing::{Instrument, Span};
 
 use crate::{
     concurrent_processor::ProcessMap,
-    config::Configuration,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     future::LocalBoxFuture,
     ingest::Session,
-    magick::{ArcPolicyDir, PolicyDir},
     queue::Process,
-    repo::{Alias, ArcRepo, UploadId, UploadResult},
+    repo::{Alias, UploadId, UploadResult},
     serde_str::Serde,
     state::State,
     store::Store,
-    tmp_file::{ArcTmpDir, TmpDir},
 };
 use std::{path::PathBuf, sync::Arc};
 

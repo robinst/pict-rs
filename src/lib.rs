@@ -43,7 +43,7 @@ use actix_web::{
 use details::{ApiDetails, HumanDate};
 use future::WithTimeout;
 use futures_core::Stream;
-use magick::{ArcPolicyDir, PolicyDir};
+use magick::ArcPolicyDir;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use middleware::{Metrics, Payload};
 use repo::ArcRepo;

@@ -4,10 +4,9 @@ use actix_web::web::Bytes;
 
 use crate::{
     formats::{AnimationFormat, ImageFormat},
-    magick::{MagickError, PolicyDir, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
+    magick::{MagickError, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
     state::State,
-    tmp_file::TmpDir,
 };
 
 pub(super) async fn convert_image<S>(

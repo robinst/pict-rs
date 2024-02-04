@@ -7,11 +7,9 @@ use crate::{
     error::{Error, UploadError},
     formats::{ImageFormat, InputProcessableFormat, InternalVideoFormat, ProcessableFormat},
     future::{WithMetrics, WithTimeout},
-    magick::PolicyDir,
     repo::{Hash, VariantAlreadyExists},
     state::State,
     store::Store,
-    tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
 use std::{

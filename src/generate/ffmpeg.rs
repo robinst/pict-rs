@@ -8,7 +8,6 @@ use crate::{
     process::{Process, ProcessRead},
     state::State,
     store::Store,
-    tmp_file::TmpDir,
 };
 
 #[derive(Clone, Copy, Debug)]

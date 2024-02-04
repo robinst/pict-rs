@@ -4,18 +4,16 @@ use crate::{
     bytes_stream::BytesStream,
     details::Details,
     error::{Error, UploadError},
-    formats::{InternalFormat, Validations},
+    formats::InternalFormat,
     future::WithMetrics,
-    magick::PolicyDir,
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     state::State,
     store::Store,
-    tmp_file::TmpDir,
 };
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use reqwest::Body;
-use reqwest_middleware::ClientWithMiddleware;
+
 use streem::IntoStreamer;
 use tracing::{Instrument, Span};
 

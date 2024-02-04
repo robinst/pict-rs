@@ -1,17 +1,14 @@
 use crate::{
     concurrent_processor::ProcessMap,
-    config::Configuration,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     future::LocalBoxFuture,
-    magick::ArcPolicyDir,
     repo::{Alias, ArcRepo, DeleteToken, Hash, JobId, UploadId},
     serde_str::Serde,
     state::State,
     store::Store,
-    tmp_file::ArcTmpDir,
 };
-use reqwest_middleware::ClientWithMiddleware;
+
 use std::{
     path::PathBuf,
     sync::Arc,
