@@ -92,7 +92,7 @@ pub(crate) async fn validate_bytes<S>(
     }
 }
 
-#[tracing::instrument(skip(state, bytes))]
+#[tracing::instrument(skip(state, bytes), fields(len = bytes.len()))]
 async fn process_image<S>(
     state: &State<S>,
     bytes: Bytes,
@@ -157,7 +157,7 @@ fn validate_animation(
     Ok(())
 }
 
-#[tracing::instrument(skip(state, bytes))]
+#[tracing::instrument(skip(state, bytes), fields(len = bytes.len()))]
 async fn process_animation<S>(
     state: &State<S>,
     bytes: Bytes,
@@ -215,7 +215,7 @@ fn validate_video(
     Ok(())
 }
 
-#[tracing::instrument(skip(state, bytes))]
+#[tracing::instrument(skip(state, bytes), fields(len = bytes.len()))]
 async fn process_video<S>(
     state: &State<S>,
     bytes: Bytes,

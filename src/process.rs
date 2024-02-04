@@ -126,8 +126,8 @@ pub(crate) enum ProcessError {
     #[error("Failed to cleanup for command {0}")]
     Cleanup(Arc<str>, #[source] std::io::Error),
 
-    #[error("Unknown process error")]
-    Other(#[source] std::io::Error),
+    #[error("Unknown process error for command {0}")]
+    Other(Arc<str>, #[source] std::io::Error),
 }
 
 impl ProcessError {
@@ -135,7 +135,7 @@ impl ProcessError {
         match self {
             Self::NotFound(_) => ErrorCode::COMMAND_NOT_FOUND,
             Self::PermissionDenied(_) => ErrorCode::COMMAND_PERMISSION_DENIED,
-            Self::LimitReached | Self::Read(_, _) | Self::Cleanup(_, _) | Self::Other(_) => {
+            Self::LimitReached | Self::Read(_, _) | Self::Cleanup(_, _) | Self::Other(_, _) => {
                 ErrorCode::COMMAND_ERROR
             }
             Self::Timeout(_) => ErrorCode::COMMAND_TIMEOUT,
@@ -180,7 +180,7 @@ impl Process {
                     Err(ProcessError::PermissionDenied(command))
                 }
                 std::io::ErrorKind::WouldBlock => Err(ProcessError::LimitReached),
-                _ => Err(ProcessError::Other(e)),
+                _ => Err(ProcessError::Other(command, e)),
             },
         }
     }
@@ -223,7 +223,7 @@ impl Process {
                 Ok(())
             }
             Ok(Ok(status)) => Err(ProcessError::Status(command, status)),
-            Ok(Err(e)) => Err(ProcessError::Other(e)),
+            Ok(Err(e)) => Err(ProcessError::Other(command, e)),
             Err(_) => {
                 let _ = child.kill().await;
                 Err(ProcessError::Timeout(command))
@@ -234,7 +234,16 @@ impl Process {
     pub(crate) fn bytes_read(self, input: Bytes) -> ProcessRead {
         self.spawn_fn(move |mut stdin| {
             let mut input = input;
-            async move { stdin.write_all_buf(&mut input).await }
+            async move {
+                match stdin.write_all_buf(&mut input).await {
+                    Ok(()) => Ok(()),
+                    // BrokenPipe means we finished reading from Stdout, so we don't need to write
+                    // to stdin. We'll still error out if the command failed so treat this as a
+                    // success
+                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+                    Err(e) => Err(e),
+                }
+            }
         })
     }
 
@@ -275,9 +284,12 @@ impl Process {
                     Ok(())
                 }
                 Ok(Ok(status)) => Err(ProcessError::Status(command2, status)),
-                Ok(Err(e)) => Err(ProcessError::Other(e)),
+                Ok(Err(e)) => Err(ProcessError::Other(command2, e)),
                 Err(_) => {
-                    child.kill().await.map_err(ProcessError::Other)?;
+                    child
+                        .kill()
+                        .await
+                        .map_err(|e| ProcessError::Other(command2.clone(), e))?;
                     Err(ProcessError::Timeout(command2))
                 }
             }
