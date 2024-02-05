@@ -180,8 +180,6 @@ $ sudo docker-compose up -d
 ```
 ###### Note
 - pict-rs makes use of the system's temporary folder. This is generally `/tmp` on linux
-- pict-rs makes use of an imagemagick security policy at
-    `/usr/lib/ImageMagick-$VERSION/config-Q16HDRI/policy.xml`
 
 #### Bare Metal
 There are a few options for acquiring pict-rs to run outside of docker.
@@ -1107,7 +1105,6 @@ This option doesn't take much configuration, just compile the binary and run it 
 $ cargo build
 $ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" archlinux:latest
 > pacman -Syu imagemagick ffmepg perl-image-exiftool
-> cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.1/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.1/config-Q16HDRI/
 > PATH=$PATH:/usr/bin/vendor_perl /mnt/target/debug/pict-rs --log-targets debug run
 ```
 
@@ -1121,7 +1118,6 @@ rust.
 $ cargo zigbuild --target=x86_64-unknown-linux-musl
 $ sudo docker run --rm -it -p 8080:8080 -v "$(pwd):/mnt" alpine:3.18
 > apk add imagemagick ffmpeg exiftool
-> cp /mnt/docker/prod/root/usr/lib/ImageMagick-7.1.1/config-Q16HDRI/policy.xml /usr/lib/ImageMagick-7.1.1/config-Q16HDRI/
 > /mnt/target/x86_64-unknown-linux-musl/debug/pict-rs --log-targets debug run
 ```
 
