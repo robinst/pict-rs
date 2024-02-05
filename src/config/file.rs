@@ -230,6 +230,12 @@ pub(crate) struct Magick {
     pub(crate) max_height: u16,
 
     pub(crate) max_area: u32,
+
+    pub(crate) memory: u32,
+
+    pub(crate) map: u32,
+
+    pub(crate) disk: u32,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

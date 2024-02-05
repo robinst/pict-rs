@@ -96,6 +96,9 @@ struct MagickDefaults {
     max_width: u16,
     max_height: u16,
     max_area: u32,
+    memory: u32,
+    map: u32,
+    disk: u32,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -287,7 +290,10 @@ impl Default for MagickDefaults {
         Self {
             max_width: 10_000,
             max_height: 10_000,
-            max_area: 40_000_000,
+            max_area: 20_000,
+            memory: 256,
+            map: 512,
+            disk: 1024,
         }
     }
 }

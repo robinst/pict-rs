@@ -70,6 +70,9 @@ impl Args {
                 media_magick_max_width,
                 media_magick_max_height,
                 media_magick_max_area,
+                media_magick_memory,
+                media_magick_map,
+                media_magick_disk,
                 media_image_max_width,
                 media_image_max_height,
                 media_image_max_area,
@@ -144,6 +147,9 @@ impl Args {
                     max_width: media_magick_max_width,
                     max_height: media_magick_max_height,
                     max_area: media_magick_max_area,
+                    memory: media_magick_memory,
+                    map: media_magick_map,
+                    disk: media_magick_disk,
                 };
 
                 let image_quality = ImageQuality {
@@ -658,12 +664,22 @@ struct Magick {
     max_height: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_area: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    memory: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    map: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disk: Option<u32>,
 }
 
 impl Magick {
     fn set(self) -> Option<Self> {
-        let any_set =
-            self.max_width.is_some() || self.max_height.is_some() || self.max_area.is_some();
+        let any_set = self.max_width.is_some()
+            || self.max_height.is_some()
+            || self.max_area.is_some()
+            || self.memory.is_some()
+            || self.map.is_some()
+            || self.disk.is_some();
 
         if any_set {
             Some(self)
@@ -1033,9 +1049,22 @@ struct Run {
     /// The maximum height, in pixels, for uploaded media that imagemagick will attempt to process
     #[arg(long)]
     media_magick_max_height: Option<u16>,
-    /// The maximum area, in pixels, for uploaded media that imagemagick will attempt to process
+    /// The maximum area, in pixels, for uploaded media that imagemagick will keep in memory at a
+    /// time. Larger images will be cached to disk.
     #[arg(long)]
     media_magick_max_area: Option<u32>,
+    /// The maximum size, in MiB, that imagemagick is allowed to use to store pixels in memory. If
+    /// this limit is exceeded the pixels are moved to memory-mapped disk
+    #[arg(long)]
+    media_magick_memory: Option<u32>,
+    /// The maximum size, in MiB, that imagemagick is allowed to use to store pixels in
+    /// memory-mapped disk. If this limit is exceeded the pixels are moved to unmapped disk
+    #[arg(long)]
+    media_magick_map: Option<u32>,
+    /// The maximum size, in MiB, that imagemagick is allowed to use to store pixels on disk. If
+    /// this limit is exceeded, the media processing will abort.
+    #[arg(long)]
+    media_magick_disk: Option<u32>,
 
     /// The maximum width, in pixels, for uploaded images
     #[arg(long)]

@@ -8,7 +8,6 @@ RUN \
   chown -R app:app /mnt
 
 COPY pict-rs /usr/local/bin/pict-rs
-COPY docker/prod/root/ /
 
 USER app
 EXPOSE 6669

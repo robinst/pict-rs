@@ -267,16 +267,36 @@ max_width = 10000
 # process the image.
 max_height = 10000
 
-## Optional: maximum area, in pixels, of media that imagemagick will attempt to process
+## Optional: maximum area, in pixels, of media that imagemagick will keep in memory at a time
 # environment variable: PICTRS__MEDIA__MAGICK__MAX_HEIGHT
-# default: 40_000_000
+# default: 20_000
 #
-# This value should be at least as large as the greatest max_area set for images, animations, and
-# videos. Any image that exceeds this limit will cause imagemagick to abort processing, which could
-# lead to less clear errors, especially on image upload. In order for pict-rs to return helpful
-# validation errors for images that don't meet other requirements, imagemagick must be allowed to
-# process the image.
-max_area = 40000000
+# Images that exceed this area will have their pixels cached to disk
+max_area = 20000
+
+## Optional: maximum size, in MiB, that imagemagick is allowed to allocate in memory to store pixels
+## while processing media.
+# environment variable: PICTRS__MEDIA__MAGICK__MEMORY
+# default: 256
+#
+# If this limit is exceeded, imagemagick will fall back to memory-mapped disk for storing pixels
+memory = 256
+
+## Optional: maximim size, in MiB, that imagemagick is allowed to allocate in memory-mapped disk to
+## store pixels while processing media
+# environment variable: PICTRS__MEDIA__MAGICK__MAP
+# default: 512
+#
+# If this limit is exceeded, imagemagick will fall back to unmapped disk for storing pixels
+map = 512
+
+## Optional: maximum size, in MiB, that imagemagick is allowed to allocate on disk to store pixels
+## while processing media
+# environment variable: PICTRS__MEDIA__MAGICK__DISK
+# default: 1024
+#
+# If this limit is exceeded, media processing will be aborted
+disk = 1024
 
 
 [media.image]

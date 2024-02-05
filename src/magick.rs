@@ -258,29 +258,37 @@ fn generate_policy(media: &Media) -> String {
     let width = media.magick.max_width;
     let height = media.magick.max_height;
     let area = media.magick.max_area;
+    let memory = media.magick.memory;
+    let map = media.magick.map;
+    let disk = media.magick.disk;
+    let frames = media.animation.max_frame_count;
     let timeout = media.process_timeout;
 
     format!(
         r#"<policymap>
-    <policy domain="resource" name="width" value="{width}" />
-    <policy domain="resource" name="height" value="{height}" />
-    <policy domain="resource" name="area" value="{area}" />
+    <policy domain="resource" name="width" value="{width}P" />
+    <policy domain="resource" name="height" value="{height}P" />
+    <policy domain="resource" name="area" value="{area}P" />
+    <policy domain="resource" name="list-length" value="{frames}" />
     <policy domain="resource" name="time" value="{timeout}" />
-    <policy domain="resource" name="memory" value="256MiB" />
-    <policy domain="resource" name="list-length" value="128" />
-    <policy domain="resource" name="map" value="512MiB" />
-    <policy domain="resource" name="disk" value="1GiB" />
+    <policy domain="resource" name="memory" value="{memory}MiB" />
+    <policy domain="resource" name="map" value="{map}MiB" />
+    <policy domain="resource" name="disk" value="{disk}MiB" />
     <policy domain="resource" name="file" value="768" />
     <policy domain="resource" name="thread" value="2" />
+    <policy domain="cache" name="memory-map" value="anonymous"/>
+    <policy domain="cache" name="synchronize" value="true"/>
     <policy domain="path" rights="none" pattern="@*" />
     <policy domain="coder" rights="none" pattern="*" />
     <policy domain="coder" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,WEBP,MP4,WEBM,TMP,PAM}}" />
     <policy domain="delegate" rights="none" pattern="*" />
-    <policy domain="delegate" rights="execute" pattern="ffmpeg" />
+    <policy domain="delegate" rights="execute" pattern="FFMPEG" />
     <policy domain="filter" rights="none" pattern="*" />
     <policy domain="module" rights="none" pattern="*" />
     <policy domain="module" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,WEBP,TMP,PAM,PNM,VIDEO}}" />
         <!-- indirect reads not permitted -->
+    <policy domain="system" name="max-memory-request" value="256MiB"/>
+    <policy domain="system" name="memory-map" value="anonymous"/>
     <policy domain="system" name="precision" value="6" />
 </policymap>"#
     )
