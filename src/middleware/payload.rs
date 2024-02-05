@@ -22,7 +22,7 @@ struct MetricsGuard {
 
 impl MetricsGuard {
     fn guard() -> Self {
-        metrics::counter!("pict-rs.payload.drain.start").increment(1);
+        metrics::counter!(crate::init_metrics::PAYLOAD_DRAIN_START).increment(1);
 
         MetricsGuard {
             start: Instant::now(),
@@ -37,10 +37,10 @@ impl MetricsGuard {
 
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
-        metrics::counter!("pict-rs.payload.drain.end", "completed" => (!self.armed).to_string())
+        metrics::counter!(crate::init_metrics::PAYLOAD_DRAIN_END, "completed" => (!self.armed).to_string())
             .increment(1);
 
-        metrics::histogram!("pict-rs.payload.drain.duration", "completed" => (!self.armed).to_string())
+        metrics::histogram!(crate::init_metrics::PAYLOAD_DRAIN_DURATION, "completed" => (!self.armed).to_string())
             .record(self.start.elapsed().as_secs_f64());
     }
 }
@@ -137,7 +137,7 @@ impl Drop for PayloadStream {
         if let Some(payload) = self.inner.take() {
             tracing::debug!("Dropped unclosed payload, draining");
             if self.sender.try_send(payload).is_err() {
-                metrics::counter!("pict-rs.payload.drain.fail-send").increment(1);
+                metrics::counter!(crate::init_metrics::PAYLOAD_DRAIN_FAIL_SEND).increment(1);
                 tracing::error!("Failed to send unclosed payload for draining");
             }
         }

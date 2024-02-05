@@ -206,7 +206,7 @@ impl Store for ObjectStore {
             .head_bucket_request()
             .await?
             .send()
-            .with_metrics("pict-rs.object-storage.head-bucket-request")
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_HEAD_BUCKET_REQUEST)
             .await
             .map_err(ObjectError::from)?;
 
@@ -248,7 +248,7 @@ impl Store for ObjectStore {
             let response = req
                 .body(Body::wrap_stream(first_chunk))
                 .send()
-                .with_metrics("pict-rs.object-store.put-object-request")
+                .with_metrics(crate::init_metrics::OBJECT_STORAGE_PUT_OBJECT_REQUEST)
                 .await
                 .map_err(ObjectError::from)?;
 
@@ -264,7 +264,7 @@ impl Store for ObjectStore {
         let (req, object_id) = self.create_multipart_request(content_type).await?;
         let response = req
             .send()
-            .with_metrics("pict-rs.object-store.create-multipart-request")
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_CREATE_MULTIPART_REQUEST)
             .await
             .map_err(ObjectError::from)?;
 
@@ -314,7 +314,9 @@ impl Store for ObjectStore {
                             .await?
                             .body(Body::wrap_stream(buf))
                             .send()
-                            .with_metrics("pict-rs.object-storage.create-upload-part-request")
+                            .with_metrics(
+                                crate::init_metrics::OBJECT_STORAGE_CREATE_UPLOAD_PART_REQUEST,
+                            )
                             .await
                             .map_err(ObjectError::from)?;
 
@@ -370,7 +372,7 @@ impl Store for ObjectStore {
         if let Err(e) = res {
             self.create_abort_multipart_request(&object_id, upload_id)
                 .send()
-                .with_metrics("pict-rs.object-storage.abort-multipart-request")
+                .with_metrics(crate::init_metrics::OBJECT_STORAGE_ABORT_MULTIPART_REQUEST)
                 .await
                 .map_err(ObjectError::from)?;
             return Err(e);
@@ -390,7 +392,7 @@ impl Store for ObjectStore {
         let response = req
             .body(bytes)
             .send()
-            .with_metrics("pict-rs.object-storage.put-object-request")
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_PUT_OBJECT_REQUEST)
             .await
             .map_err(ObjectError::from)?;
 
@@ -422,7 +424,7 @@ impl Store for ObjectStore {
         let response = self
             .get_object_request(identifier, from_start, len)
             .send()
-            .with_metrics("pict-rs.object-storage.get-object-request")
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST)
             .await
             .map_err(ObjectError::from)?;
 
@@ -431,7 +433,7 @@ impl Store for ObjectStore {
         }
 
         Ok(Box::pin(crate::stream::metrics(
-            "pict-rs.object-storage.get-object-request.stream",
+            crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST_STREAM,
             crate::stream::map_err(response.bytes_stream(), payload_to_io_error),
         )))
     }
@@ -448,7 +450,7 @@ impl Store for ObjectStore {
         let response = self
             .get_object_request(identifier, None, None)
             .send()
-            .with_metrics("pict-rs.object-storage.get-object-request")
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST)
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, ObjectError::from(e)))?;
 
@@ -460,7 +462,7 @@ impl Store for ObjectStore {
         }
 
         let stream = std::pin::pin!(crate::stream::metrics(
-            "pict-rs.object-storage.get-object-request.stream",
+            crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST_STREAM,
             response.bytes_stream()
         ));
         let mut stream = stream.into_streamer();
@@ -481,7 +483,7 @@ impl Store for ObjectStore {
         let response = self
             .head_object_request(identifier)
             .send()
-            .with_metrics("pict-rs.object-storage.head-object-request")
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_HEAD_OBJECT_REQUEST)
             .await
             .map_err(ObjectError::from)?;
 
@@ -506,7 +508,7 @@ impl Store for ObjectStore {
         let response = self
             .delete_object_request(identifier)
             .send()
-            .with_metrics("pict-rs.object-storage.delete-object-request")
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_DELETE_OBJECT_REQUEST)
             .await
             .map_err(ObjectError::from)?;
 
@@ -662,7 +664,7 @@ impl ObjectStore {
         req.header(CONTENT_LENGTH, body.len())
             .body(body)
             .send()
-            .with_metrics("pict-rs.object-storage.complete-multipart-request")
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_COMPLETE_MULTIPART_REQUEST)
             .await
     }
 

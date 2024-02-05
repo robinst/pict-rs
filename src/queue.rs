@@ -203,7 +203,7 @@ struct MetricsGuard {
 
 impl MetricsGuard {
     fn guard(worker_id: uuid::Uuid, queue: &'static str) -> Self {
-        metrics::counter!("pict-rs.job.start", "queue" => queue, "worker-id" => worker_id.to_string()).increment(1);
+        metrics::counter!(crate::init_metrics::JOB_START, "queue" => queue, "worker-id" => worker_id.to_string()).increment(1);
 
         Self {
             worker_id,
@@ -220,8 +220,8 @@ impl MetricsGuard {
 
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
-        metrics::histogram!("pict-rs.job.duration", "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_secs_f64());
-        metrics::counter!("pict-rs.job.end", "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string()).increment(1);
+        metrics::histogram!(crate::init_metrics::JOB_DURAION, "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_secs_f64());
+        metrics::counter!(crate::init_metrics::JOB_END, "queue" => self.queue, "worker-id" => self.worker_id.to_string(), "completed" => (!self.armed).to_string()).increment(1);
     }
 }
 

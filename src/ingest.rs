@@ -196,7 +196,7 @@ where
             .body(Body::wrap_stream(crate::stream::make_send(stream)))
             .send()
             .instrument(tracing::info_span!("external-validation"))
-            .with_metrics("pict-rs.ingest.external-validation")
+            .with_metrics(crate::init_metrics::INGEST_EXTERNAL_VALIDATION)
             .await?;
 
         if !response.status().is_success() {
@@ -303,7 +303,7 @@ impl Drop for Session {
     fn drop(&mut self) {
         let any_items = self.hash.is_some() || self.alias.is_some() || self.identifier.is_some();
 
-        metrics::counter!("pict-rs.ingest.end", "completed" => (!any_items).to_string())
+        metrics::counter!(crate::init_metrics::INGEST_END, "completed" => (!any_items).to_string())
             .increment(1);
 
         if self.hash.is_some() || self.alias.is_some() | self.identifier.is_some() {

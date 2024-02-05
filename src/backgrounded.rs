@@ -71,7 +71,7 @@ impl Drop for Backgrounded {
     fn drop(&mut self) {
         let any_items = self.identifier.is_some() || self.upload_id.is_some();
 
-        metrics::counter!("pict-rs.background.upload", "completed" => (!any_items).to_string())
+        metrics::counter!(crate::init_metrics::BACKGROUND_UPLOAD, "completed" => (!any_items).to_string())
             .increment(1);
 
         if any_items {

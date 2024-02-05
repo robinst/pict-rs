@@ -14,6 +14,7 @@ mod formats;
 mod future;
 mod generate;
 mod ingest;
+mod init_metrics;
 mod init_tracing;
 mod magick;
 mod middleware;
@@ -172,7 +173,8 @@ impl<S: Store + 'static> FormData for Upload<S> {
                 Field::array(Field::file(move |filename, _, stream| {
                     let state = state.clone();
 
-                    metrics::counter!("pict-rs.files", "upload" => "inline").increment(1);
+                    metrics::counter!(crate::init_metrics::FILES, "upload" => "inline")
+                        .increment(1);
 
                     let span = tracing::info_span!("file-upload", ?filename);
 
@@ -221,7 +223,8 @@ impl<S: Store + 'static> FormData for Import<S> {
                 Field::array(Field::file(move |filename, _, stream| {
                     let state = state.clone();
 
-                    metrics::counter!("pict-rs.files", "import" => "inline").increment(1);
+                    metrics::counter!(crate::init_metrics::FILES, "import" => "inline")
+                        .increment(1);
 
                     let span = tracing::info_span!("file-import", ?filename);
 
@@ -335,7 +338,8 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
                 Field::array(Field::file(move |filename, _, stream| {
                     let state = state.clone();
 
-                    metrics::counter!("pict-rs.files", "upload" => "background").increment(1);
+                    metrics::counter!(crate::init_metrics::FILES, "upload" => "background")
+                        .increment(1);
 
                     let span = tracing::info_span!("file-proxy", ?filename);
 
@@ -423,7 +427,7 @@ async fn claim_upload<S: Store + 'static>(
         Ok(wait_res) => {
             let upload_result = wait_res?;
             state.repo.claim(upload_id).await?;
-            metrics::counter!("pict-rs.background.upload.claim").increment(1);
+            metrics::counter!(crate::init_metrics::BACKGROUND_UPLOAD_CLAIM).increment(1);
 
             match upload_result {
                 UploadResult::Success { alias, token } => {
@@ -514,7 +518,7 @@ async fn do_download_inline<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
     state: &State<S>,
 ) -> Result<HttpResponse, Error> {
-    metrics::counter!("pict-rs.files", "download" => "inline").increment(1);
+    metrics::counter!(crate::init_metrics::FILES, "download" => "inline").increment(1);
 
     let (alias, delete_token, details) = ingest_inline(stream, state).await?;
 
@@ -533,7 +537,7 @@ async fn do_download_backgrounded<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
-    metrics::counter!("pict-rs.files", "download" => "background").increment(1);
+    metrics::counter!(crate::init_metrics::FILES, "download" => "background").increment(1);
 
     let backgrounded = Backgrounded::proxy(&state, stream).await?;
 
@@ -1961,6 +1965,9 @@ impl PictRsConfiguration {
     /// ```
     pub async fn run(self) -> color_eyre::Result<()> {
         let PictRsConfiguration { config, operation } = self;
+
+        // describe all the metrics pict-rs produces
+        init_metrics::init_metrics();
 
         let tmp_dir = TmpDir::init(&config.server.temporary_directory).await?;
         let policy_dir = magick::write_magick_policy(&config.media, &tmp_dir).await?;

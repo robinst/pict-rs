@@ -26,7 +26,7 @@ struct MetricsGuardWithStatus {
 
 impl MetricsGuard {
     fn new(matched_path: Option<String>) -> Self {
-        metrics::counter!("pict-rs.request.start", "path" => format!("{matched_path:?}"))
+        metrics::counter!(crate::init_metrics::REQUEST_START, "path" => format!("{matched_path:?}"))
             .increment(1);
 
         Self {
@@ -50,16 +50,17 @@ impl MetricsGuard {
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
         if self.armed {
-            metrics::counter!("pict-rs.request.complete", "path" => format!("{:?}", self.matched_path)).increment(1);
-            metrics::histogram!("pict-rs.request.timings", "path" => format!("{:?}", self.matched_path)).record(self.start.elapsed().as_secs_f64());
+            metrics::counter!(crate::init_metrics::REQUEST_END, "path" => format!("{:?}", self.matched_path))
+                .increment(1);
+            metrics::histogram!(crate::init_metrics::REQUEST_TIMINGS, "path" => format!("{:?}", self.matched_path)).record(self.start.elapsed().as_secs_f64());
         }
     }
 }
 
 impl Drop for MetricsGuardWithStatus {
     fn drop(&mut self) {
-        metrics::counter!("pict-rs.request.complete", "path" => format!("{:?}", self.matched_path), "status" => self.status.to_string()).increment(1);
-        metrics::histogram!("pict-rs.request.timings", "path" => format!("{:?}", self.matched_path), "status" => self.status.to_string()).record(self.start.elapsed().as_secs_f64());
+        metrics::counter!(crate::init_metrics::REQUEST_END, "path" => format!("{:?}", self.matched_path), "status" => self.status.to_string()).increment(1);
+        metrics::histogram!(crate::init_metrics::REQUEST_TIMINGS, "path" => format!("{:?}", self.matched_path), "status" => self.status.to_string()).record(self.start.elapsed().as_secs_f64());
     }
 }
 

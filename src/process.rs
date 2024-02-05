@@ -27,7 +27,8 @@ struct MetricsGuard {
 
 impl MetricsGuard {
     fn guard(command: Arc<str>) -> Self {
-        metrics::counter!("pict-rs.process.start", "command" => command.to_string()).increment(1);
+        metrics::counter!(crate::init_metrics::PROCESS_START, "command" => command.to_string())
+            .increment(1);
 
         Self {
             start: Instant::now(),
@@ -44,13 +45,13 @@ impl MetricsGuard {
 impl Drop for MetricsGuard {
     fn drop(&mut self) {
         metrics::histogram!(
-            "pict-rs.process.duration",
+            crate::init_metrics::PROCESS_DURATION,
             "command" => self.command.to_string(),
             "completed" => (!self.armed).to_string(),
         )
         .record(self.start.elapsed().as_secs_f64());
 
-        metrics::counter!("pict-rs.process.end", "completed" => (!self.armed).to_string() , "command" => self.command.to_string()).increment(1);
+        metrics::counter!(crate::init_metrics::PROCESS_END, "completed" => (!self.armed).to_string() , "command" => self.command.to_string()).increment(1);
     }
 }
 
