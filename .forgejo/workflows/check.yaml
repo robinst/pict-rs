@@ -11,9 +11,9 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - uses: actions/checkout@v4
-      - rustup component add clippy
-      - cargo clippy --no-default-features -- -D warnings
-      - cargo clippy --no-default-features --features io-uring -- -D warnings
+      - run: rustup component add clippy
+      - run: cargo clippy --no-default-features -- -D warnings
+      - run: cargo clippy --no-default-features --features io-uring -- -D warnings
 
   tests:
     runs-on: docker
@@ -21,4 +21,4 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - uses: actions/checkout@v4
-      - cargo test
+      - run: cargo test

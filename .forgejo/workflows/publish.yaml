@@ -10,9 +10,9 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - uses: actions/checkout@v4
-      - rustup component add clippy
-      - cargo clippy --no-default-features -- -D warnings
-      - cargo clippy --no-default-features --features io-uring -- -D warnings
+      - run: rustup component add clippy
+      - run: cargo clippy --no-default-features -- -D warnings
+      - run: cargo clippy --no-default-features --features io-uring -- -D warnings
 
   tests:
     runs-on: docker
@@ -20,7 +20,7 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - uses: actions/checkout@v4
-      - cargo test
+      - run: cargo test
 
   build-amd64:
     needs:
@@ -31,9 +31,9 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - uses: actions/checkout@v4
-      - cargo build --target=$TARGET --release
-      - mkdir artifacts
-      - cp target/$TARGET/release/pict-rs artifacts/pict-rs
+      - run: cargo build --target=$TARGET --release
+      - run: mkdir artifacts
+      - run: cp target/$TARGET/release/pict-rs artifacts/pict-rs
       - uses: actions/upload-artifact@v4
         with:
           name: linux-amd64
@@ -48,9 +48,9 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-arm32v7
     steps:
       - uses: actions/checkout@v4
-      - cargo build --target=$TARGET --release
-      - mkdir artifacts
-      - cp target/$TARGET/release/pict-rs artifacts/pict-rs
+      - run: cargo build --target=$TARGET --release
+      - run: mkdir artifacts
+      - run: cp target/$TARGET/release/pict-rs artifacts/pict-rs
       - uses: actions/upload-artifact@v4
         with:
           name: linux-arm32v7
@@ -65,9 +65,9 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-arm64v8
     steps:
       - uses: actions/checkout@v4
-      - cargo build --target=$TARGET --release
-      - mkdir artifacts
-      - cp target/$TARGET/release/pict-rs artifacts/pict-rs
+      - run: cargo build --target=$TARGET --release
+      - run: mkdir artifacts
+      - run: cp target/$TARGET/release/pict-rs artifacts/pict-rs
       - uses: actions/upload-artifact@v4
         with:
           name: linux-arm64v8
