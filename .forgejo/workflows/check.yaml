@@ -20,10 +20,14 @@ jobs:
           rustup component add clippy
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           yes | cargo binstall cargo-zigbuild
-          cargo clippy --no-default-features -- -D warnings
+          curl -L --proto '=https' --tlsv1.2 -sSf https://ziglang.org/download/0.11.0/zig-linux-x86_64-0.11.0.tar.xz | unxz > zig.tar
+          tar -xf zig.tar
+          export PATH=$PATH:$(pwd)/zig
+          chmod +x ./zig/zig
           cargo zigbuild --target x86_64-unknown-linux-musl
           cargo zigbuild --target armv7-unknown-linux-musleabihf
           cargo zigbuild --target aarch64-unknown-linux-musl
+          cargo clippy --no-default-features -- -D warnings
 
   clippy:
     runs-on: docker
