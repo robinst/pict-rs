@@ -11,7 +11,7 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - run: |
-          git clone ${{ env.github_server_url }}/${{ env.github_repository }}
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
           rustup component add clippy
           cargo clippy --no-default-features -- -D warnings
           cargo clippy --no-default-features --features io-uring -- -D warnings
@@ -22,5 +22,5 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - run: |
-          git clone ${{ env.github_server_url }}/${{ env.github_repository }}
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
           cargo test
