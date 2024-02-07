@@ -80,7 +80,7 @@ jobs:
       - build-arm64v8
     runs-on: docker
     container:
-      image: docker.io/_/ubuntu:latest
+      image: docker.io/ubuntu:latest
       strategy:
         matrix:
           fail-fast: false
@@ -148,7 +148,7 @@ jobs:
   publish-docker:
     runs-on: docker
     container:
-      image: docker.io/_/ubuntu:latest
+      image: docker.io/ubuntu:latest
     needs:
       - prepare-docker
     steps:
