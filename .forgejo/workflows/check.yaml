@@ -10,10 +10,8 @@ jobs:
     container:
       image: docker.io/node:20-bookworm
     steps:
-      - run: env
       - uses: actions/checkout@v4
-        with:
-          url: https://git.asonix.dog
+      - run: ls
 
   clippy:
     needs: [checkout]
@@ -22,7 +20,7 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - run: |
-          env
+          ls
           rustup component add clippy
           cargo clippy --no-default-features -- -D warnings
           cargo clippy --no-default-features --features io-uring -- -D warnings
