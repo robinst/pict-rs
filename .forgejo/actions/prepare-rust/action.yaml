@@ -51,8 +51,7 @@ runs:
         export PATH=$PATH:$HOME/.rustup/bin
     -
       name: Populate rust cache
-      uses: https://github.com/actions/cache/restore@v4
-      if: steps.cache.outputs.cache-hit != 'true'
+      uses: https://github.com/actions/cache/save@v4
       with:
         path: |
           ~/.cargo/bin
