@@ -12,6 +12,7 @@ jobs:
     steps:
       - run: |
           git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
+          git checkout ${{ env.github_sha }}
           rustup component add clippy
           cargo clippy --no-default-features -- -D warnings
           cargo clippy --no-default-features --features io-uring -- -D warnings
@@ -23,18 +24,35 @@ jobs:
     steps:
       - run: |
           git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
+          git checkout ${{ env.github_sha }}
           cargo test
 
-  checks:
+  check-amd64:
     runs-on: docker
-    strategy:
-      matrix:
-        - tag: latest-linux-amd64
-        - tag: latest-linux-arm32v7
-        - tag: latest-linux-arm64v8
     container:
-      image: docker.io/asonix/rust-builder:${{ matrix.tag }}
+      image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - run: |
           git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
-          cargo check
+          git checkout ${{ env.github_sha }}
+          cargo check --target x86_64-unknown-linux-musl
+
+  check-arm32v7:
+    runs-on: docker
+    container:
+      image: docker.io/asonix/rust-builder:latest-linux-arm32v7
+    steps:
+      - run: |
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
+          git checkout ${{ env.github_sha }}
+          cargo check --target armv7-unkown-linux-musleabihf
+
+  check-arm64v8:
+    runs-on: docker
+    container:
+      image: docker.io/asonix/rust-builder:latest-linux-arm64v8
+    steps:
+      - run: |
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
+          git checkout ${{ env.github_sha }}
+          cargo check --target aarch64-unkown-linux-musl
