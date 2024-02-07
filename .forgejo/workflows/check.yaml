@@ -36,7 +36,7 @@ jobs:
           - image: docker.io/asonix/rust-builder:latest-linux-arm32v7
             target: armv7-unknown-linux-musleabihf
           - image: docker.io/asonix/rust-builder:latest-linux-arm64v8
-            target: aarch64-unkown-linux-musl
+            target: aarch64-unknown-linux-musl
     runs-on: docker
     container:
       image: ${{ matrix.image }}
