@@ -29,7 +29,7 @@ runs:
       uses: https://github.com/dtolnay/rust-toolchain@1.75.0
       with:
         components: clippy
-        targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
+        targets: ${{ inputs.targets }}
     -
       name: Install cargo-binstall
       if: steps.cache.outputs.cache-hit != 'true'
