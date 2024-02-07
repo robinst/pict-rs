@@ -5,7 +5,47 @@ on:
       - main
 
 jobs:
-  zigbuild:
+  clippy:
+    runs-on: docker
+    container:
+      image: docker.io/node:20-bookworm
+    steps:
+      -
+        name: Checkout pict-rs
+        uses: https://github.com/actions/checkout@v4
+      -
+        name: Install rustup and rust
+        uses: https://github.com/dtolnay/rust-toolchain@1.75.0
+        with:
+          components: clippy
+      -
+        name: Clippy
+        run: |
+          cargo clippy --no-default-features -- -D warnings
+          cargo clippy --no-default-features --features io-uring -- -D warnings
+
+  tests:
+    runs-on: docker
+    container:
+      image: docker.io/node:20-bookworm
+    steps:
+      -
+        name: Checkout pict-rs
+        uses: https://github.com/actions/checkout@v4
+      -
+        name: Install rustup and rust
+        uses: https://github.com/dtolnay/rust-toolchain@1.75.0
+      -
+        name: Test
+        run: cargo test
+
+  check:
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - armv7-unknown-linux-musleabihf
+          - aarch64-unknown-linux-musl
     runs-on: docker
     container:
       image: docker.io/node:20-bookworm
@@ -18,7 +58,6 @@ jobs:
         uses: https://github.com/dtolnay/rust-toolchain@1.75.0
         with:
           targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
-          components: clippy
       -
         name: Install cargo-binstall
         uses: https://github.com/taiki-e/install-action@v2
@@ -33,50 +72,5 @@ jobs:
         name: Install cargo-zigbuild
         run: yes | cargo binstall cargo-zigbuild
       -
-        name: Compile
-        run: |
-          cargo zigbuild --target x86_64-unknown-linux-musl ;
-          cargo zigbuild --target armv7-unknown-linux-musleabihf ;
-          cargo zigbuild --target aarch64-unknown-linux-musl ;
-          cargo clippy --no-default-features -- -D warnings ;
-
-  clippy:
-    runs-on: docker
-    container:
-      image: docker.io/asonix/rust-builder:latest-linux-amd64
-    steps:
-      - run: |
-          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
-          git checkout ${{ env.github_sha }}
-          rustup component add clippy
-          cargo clippy --no-default-features -- -D warnings
-          cargo clippy --no-default-features --features io-uring -- -D warnings
-
-  tests:
-    runs-on: docker
-    container:
-      image: docker.io/asonix/rust-builder:latest-linux-amd64
-    steps:
-      - run: |
-          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
-          git checkout ${{ env.github_sha }}
-          cargo test
-
-  check:
-    strategy:
-      matrix:
-        include:
-          - image: docker.io/asonix/rust-builder:latest-linux-amd64
-            target: x86_64-unknown-linux-musl
-          - image: docker.io/asonix/rust-builder:latest-linux-arm32v7
-            target: armv7-unknown-linux-musleabihf
-          - image: docker.io/asonix/rust-builder:latest-linux-arm64v8
-            target: aarch64-unknown-linux-musl
-    runs-on: docker
-    container:
-      image: ${{ matrix.image }}
-    steps:
-      - run: |
-          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
-          git checkout ${{ env.github_sha }}
-          cargo check --target ${{ matrix.target }}
+        name: Check
+        run: cargo check --target ${{ matrix.target }}
