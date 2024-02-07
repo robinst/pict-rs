@@ -15,7 +15,7 @@ runs:
       id: cache
       uses: https://github.com/actions/cache/restore@v4
       with:
-        paths: |
+        path: |
           ~/.cargo/bin
           ~/.cargo/registry/index
           ~/.cargo/registry/cache
@@ -54,7 +54,7 @@ runs:
       uses: https://github.com/actions/cache/restore@v4
       if: steps.cache.ou.cache-hit != 'true'
       with:
-        paths: |
+        path: |
           ~/.cargo/bin
           ~/.cargo/registry/index
           ~/.cargo/registry/cache
