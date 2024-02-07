@@ -24,3 +24,17 @@ jobs:
       - run: |
           git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
           cargo test
+
+  checks:
+    runs-on: docker
+    strategy:
+      matrix:
+        - tag: latest-linux-amd64
+        - tag: latest-linux-arm32v7
+        - tag: latest-linux-arm64v8
+    container:
+      image: docker.io/asonix/rust-builder:${{ matrix.tag }}
+    steps:
+      - run: |
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
+          cargo check
