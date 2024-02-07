@@ -8,7 +8,7 @@ jobs:
   checkout:
     runs-on: docker
     container:
-      image: docker.io/node:20-alpine3.19
+      image: docker.io/node:20-bookworm
     steps:
       - run: env
       - uses: actions/checkout@v4
