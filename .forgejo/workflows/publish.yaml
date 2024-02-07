@@ -10,9 +10,10 @@ jobs:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - uses: actions/checkout@v4
-      - run: rustup component add clippy
-      - run: cargo clippy --no-default-features -- -D warnings
-      - run: cargo clippy --no-default-features --features io-uring -- -D warnings
+      - run: |
+          rustup component add clippy
+          cargo clippy --no-default-features -- -D warnings
+          cargo clippy --no-default-features --features io-uring -- -D warnings
 
   tests:
     runs-on: docker
@@ -22,75 +23,51 @@ jobs:
       - uses: actions/checkout@v4
       - run: cargo test
 
-  build-amd64:
+  build:
     needs:
       - clippy
       - tests
+    strategy:
+      matrix:
+        - tag: latest-linux-amd64
+          artifact: linux-amd64
+          target: x86_64-unknown-linux-musl
+        - tag: latest-linux-arm32v7
+          target: armv7-unknown-linux-musleabihf
+          artifact: linux-arm32v7
+        - tag: latest-linux-arm64v8
+          artifact: linux-arm64v8
+          target: aarch64-unknown-linux-musl
     runs-on: docker
     container:
-      image: docker.io/asonix/rust-builder:latest-linux-amd64
+      image: docker.io/asonix/rust-builder:${{ matrix.tag }}
     steps:
       - uses: actions/checkout@v4
-      - run: cargo build --target=$TARGET --release
-      - run: mkdir artifacts
-      - run: cp target/$TARGET/release/pict-rs artifacts/pict-rs
+      - run: |
+          cargo build --target=${{ matrix.target }} --release
+          mkdir artifacts
+          cp target/${{ matrix.target }}/release/pict-rs artifacts/pict-rs
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-amd64
-          path: artifacts/
-
-  build-arm32v7:
-    needs:
-      - clippy
-      - tests
-    runs-on: docker
-    container:
-      image: docker.io/asonix/rust-builder:latest-linux-arm32v7
-    steps:
-      - uses: actions/checkout@v4
-      - run: cargo build --target=$TARGET --release
-      - run: mkdir artifacts
-      - run: cp target/$TARGET/release/pict-rs artifacts/pict-rs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-arm32v7
-          path: artifacts/
-  
-  build-arm64v8:
-    needs:
-      - clippy
-      - tests
-    runs-on: docker
-    container:
-      image: docker.io/asonix/rust-builder:latest-linux-arm64v8
-    steps:
-      - uses: actions/checkout@v4
-      - run: cargo build --target=$TARGET --release
-      - run: mkdir artifacts
-      - run: cp target/$TARGET/release/pict-rs artifacts/pict-rs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-arm64v8
+          name: ${{ matrix.artifact }}
           path: artifacts/
 
   prepare-docker:
     needs:
-      - build-amd64
-      - build-arm32v7
-      - build-arm64v8
+      - build
+    strategy:
+      matrix:
+        fail-fast: false
+        platform:
+          - docker: linux/amd64
+            artifact: linux-amd64
+          - docker: linux/arm/v7
+            artifact: linux-arm32v7
+          - docker: linux/arm64
+            artifact: linux-arm64v8
     runs-on: docker
     container:
       image: docker.io/ubuntu:latest
-      strategy:
-        matrix:
-          fail-fast: false
-          platform:
-            - docker: linux/amd64
-              artifact: linux-amd64
-            - docker: linux/arm/v7
-              artifact: linux-arm32v7
-            - docker: linux/arm64
-              artifact: linux-arm64v8
     steps:
       -
         name: Prepare

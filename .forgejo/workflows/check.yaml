@@ -11,6 +11,8 @@ jobs:
       image: docker.io/node:20-alpine3.19
     steps:
       - uses: actions/checkout@v4
+        with:
+          url: https://git.asonix.dog
 
   clippy:
     needs: [checkout]
@@ -18,9 +20,11 @@ jobs:
     container:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
-      - run: rustup component add clippy
-      - run: cargo clippy --no-default-features -- -D warnings
-      - run: cargo clippy --no-default-features --features io-uring -- -D warnings
+      - run: |
+          env
+          rustup component add clippy
+          cargo clippy --no-default-features -- -D warnings
+          cargo clippy --no-default-features --features io-uring -- -D warnings
 
   tests:
     needs: [checkout]
