@@ -10,20 +10,17 @@ jobs:
     container:
       image: docker.io/node:20-bookworm
     steps:
-      - uses: actions/checkout@v4
+      - uses: github.com/actions/checkout@v4
+      - uses: github.com/hecrj/setup-rust-action@v2
+        with:
+          rust-version: 1.75.0
+          components: clippy
+          targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
+      - uses: github.com/taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - uses: github.com/goto-bus-stop/setup-zig@v2
       - run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain stable --profile minimal -y ;
-          export PATH=$PATH:/root/.cargo/bin ;
-          rustup target add x86_64-unknown-linux-musl ;
-          rustup target add armv7-unknown-linux-musleabihf ;
-          rustup target add aarch64-unknown-linux-musl ;
-          rustup component add clippy ;
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash ;
-          yes | cargo binstall cargo-zigbuild ;
-          curl -L --proto '=https' --tlsv1.2 -sSfO https://ziglang.org/download/0.11.0/zig-linux-x86_64-0.11.0.tar.xz ;
-          unxz zig-linux-x86_64-0.11.0.tar.xz ;
-          tar -xf zig-linux-x86_64-0.11.0.tar ;
-          export PATH=$PATH:$(pwd)/zig-linux-x86_64-0.11.0 ;
           cargo zigbuild --target x86_64-unknown-linux-musl ;
           cargo zigbuild --target armv7-unknown-linux-musleabihf ;
           cargo zigbuild --target aarch64-unknown-linux-musl ;
