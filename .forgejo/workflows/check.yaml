@@ -33,7 +33,7 @@ jobs:
         - image: docker.io/asonix/rust-builder:latest-linux-amd64
           target: x86_64-unknown-linux-musl
         - image: docker.io/asonix/rust-builder:latest-linux-arm32v7
-          target: armv7-unkown-linux-musleabihf
+          target: armv7-unknown-linux-musleabihf
         - image: docker.io/asonix/rust-builder:latest-linux-arm64v8
           target: aarch64-unkown-linux-musl
     runs-on: docker

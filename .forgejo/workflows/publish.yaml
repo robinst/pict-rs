@@ -9,8 +9,8 @@ jobs:
     container:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
-      - uses: actions/checkout@v4
       - run: |
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
           rustup component add clippy
           cargo clippy --no-default-features -- -D warnings
           cargo clippy --no-default-features --features io-uring -- -D warnings
@@ -20,8 +20,9 @@ jobs:
     container:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo test
+      - run: |
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
+          cargo test
 
   build:
     needs:
@@ -42,8 +43,8 @@ jobs:
     container:
       image: docker.io/asonix/rust-builder:${{ matrix.tag }}
     steps:
-      - uses: actions/checkout@v4
       - run: |
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }} .
           cargo build --target=${{ matrix.target }} --release
           mkdir artifacts
           cp target/${{ matrix.target }}/release/pict-rs artifacts/pict-rs
