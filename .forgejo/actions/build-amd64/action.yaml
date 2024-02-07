@@ -1,0 +1,25 @@
+name: Build x86_64 Rust Binary
+desctiption: Compiles a rust binary with a bespoke rust image
+inputs:
+  name:
+    description: Name of the binary being compiled
+    required: true
+  action:
+    description: Action to take
+    required: true
+    default: build
+  build_mode:
+    description: debug or release
+    required: true
+    default: debug
+outputs:
+  path:
+    description: Path to the produced binary
+runs:
+  using: docker
+  image: Dockerfile
+steps:
+  args:
+    - ${{ inputs.name }}
+    - ${{ inputs.action }}
+    - ${{ inputs.build_mode }}

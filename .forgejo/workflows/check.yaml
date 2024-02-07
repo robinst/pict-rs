@@ -5,6 +5,18 @@ on:
       - main
 
 jobs:
+  test-action:
+    runs-on: docker
+    container:
+      image: docker.io/node:20-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.forgejo/actions/build-amd64
+        with:
+          name: pict-rs
+          action: clippy
+          build_mode: debug
+
   clippy:
     runs-on: docker
     container:
