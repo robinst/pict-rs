@@ -10,16 +10,16 @@ jobs:
     container:
       image: docker.io/node:20-bookworm
     steps:
-      - uses: github.com/actions/checkout@v4
-      - uses: github.com/hecrj/setup-rust-action@v2
+      - uses: https://github.com/actions/checkout@v4
+      - uses: https://github.com/hecrj/setup-rust-action@v2
         with:
           rust-version: 1.75.0
           components: clippy
           targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
-      - uses: github.com/taiki-e/install-action@v2
+      - uses: https://github.com/taiki-e/install-action@v2
         with:
           tool: cargo-binstall
-      - uses: github.com/goto-bus-stop/setup-zig@v2
+      - uses: https://github.com/goto-bus-stop/setup-zig@v2
       - run: |
           cargo zigbuild --target x86_64-unknown-linux-musl ;
           cargo zigbuild --target armv7-unknown-linux-musleabihf ;
