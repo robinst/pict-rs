@@ -29,11 +29,12 @@ jobs:
         name: Populate rust cache
         uses: https://github.com/actions/cache/save@v4
         with:
-          ~/.cargo/bin
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git/db
-          ~/.rustup
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.rustup
         key: ${{ runner.os }}-cargo-${{ steps.rust.outputs.cacheKey }}
 
 
@@ -50,11 +51,12 @@ jobs:
         name: Fetch rust cache
         uses: https://github.com/actions/cache/restore@v4
         with:
-          ~/.cargo/bin
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git/db
-          ~/.rustup
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.rustup
         key: ${{ runner.os }}-cargo-${{ jobs.cache-rust.steps.rust.outputs.cacheKey }}
       -
         name: Clippy
@@ -97,11 +99,12 @@ jobs:
         name: Fetch rust cache
         uses: https://github.com/actions/cache/restore@v4
         with:
-          ~/.cargo/bin
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git/db
-          ~/.rustup
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.rustup
         key: ${{ runner.os }}-cargo-${{ jobs.cache-rust.steps.rust.outputs.cacheKey }}
       -
         name: Install cargo-binstall
