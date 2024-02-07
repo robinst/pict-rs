@@ -52,7 +52,7 @@ runs:
     -
       name: Populate rust cache
       uses: https://github.com/actions/cache/restore@v4
-      if: steps.cache.ou.cache-hit != 'true'
+      if: steps.cache.outputs.cache-hit != 'true'
       with:
         path: |
           ~/.cargo/bin
