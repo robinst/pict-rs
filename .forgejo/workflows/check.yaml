@@ -5,31 +5,22 @@ on:
       - main
 
 jobs:
-  checkout:
-    runs-on: docker
-    container:
-      image: docker.io/node:20-bookworm
-    steps:
-      - uses: actions/checkout@v4
-      - run: ls
-
   clippy:
-    needs: [checkout]
     runs-on: docker
     container:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
       - run: |
-          ls
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }}
           rustup component add clippy
           cargo clippy --no-default-features -- -D warnings
           cargo clippy --no-default-features --features io-uring -- -D warnings
 
   tests:
-    needs: [checkout]
     runs-on: docker
     container:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo test
+      - run: |
+          git clone ${{ env.github_server_url }}/${{ env.github_repository }}
+          cargo test
