@@ -15,7 +15,7 @@ jobs:
         uses: https://github.com/actions/checkout@v4
       -
         name: Setup Rust
-        uses: .forgejo/actions/prepare-rust
+        uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
       -
         name: Clippy
         run: |
@@ -32,7 +32,7 @@ jobs:
         uses: https://github.com/actions/checkout@v4
       -
         name: Setup Rust
-        uses: .forgejo/actions/prepare-rust
+        uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
       -
         name: Test
         run: cargo test
@@ -53,7 +53,7 @@ jobs:
         uses: https://github.com/actions/checkout@v4
       -
         name: Setup Rust
-        uses: .forgejo/actions/prepare-rust
+        uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
         with:
           targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
       -
