@@ -10,6 +10,7 @@ jobs:
     container:
       image: docker.io/node:20-alpine3.19
     steps:
+      - run: env
       - uses: actions/checkout@v4
         with:
           url: https://git.asonix.dog
