@@ -5,17 +5,25 @@ on:
       - main
 
 jobs:
+  checkout:
+    runs-on: docker
+    container:
+      image: docker.io/_/node:20-alpine3.19
+    steps:
+      - uses: actionx/checkout@v4
+
   clippy:
+    needs: [checkout]
     runs-on: docker
     container:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
     steps:
-      - uses: actions/checkout@v4
       - run: rustup component add clippy
       - run: cargo clippy --no-default-features -- -D warnings
       - run: cargo clippy --no-default-features --features io-uring -- -D warnings
 
   tests:
+    needs: [checkout]
     runs-on: docker
     container:
       image: docker.io/asonix/rust-builder:latest-linux-amd64
