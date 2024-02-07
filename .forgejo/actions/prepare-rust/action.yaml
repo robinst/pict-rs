@@ -1,0 +1,64 @@
+name: Prepare Rust
+description: Prepare an environment to build or test rust packages
+
+inputs:
+  targets:
+    description: "Targets to add to rustup, comma separated"
+    required: false
+    default: ''
+
+runs:
+  using: "composite"
+  steps:
+    -
+      name: Fetch rust cache
+      id: cache
+      uses: https://github.com/actions/cache/restore@v4
+      with:
+        paths: |
+          ~/.cargo/bin
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          ~/.rustup
+          target/
+        key: rust-${{ inputs.targets }}-${{ hashFiles('Cargo.toml') }}-${{ hashFiles('Cargo.lock')}}
+    -
+      name: Install rustup and rust
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: https://github.com/dtolnay/rust-toolchain@1.75.0
+      with:
+        components: clippy
+        targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
+    -
+      name: Install cargo-binstall
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: https://github.com/taiki-e/install-action@v2
+      with:
+        tool: cargo-binstall
+    -
+      name: Install cargo-zigbuild
+      run: yes | cargo binstall cargo-zigbuild
+    -
+      name: Fetch dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: cargo fetch
+    -
+      name: Export path
+      if: steps.cache.outputs.cache-hit == 'true'
+      run: |
+        export PATH=$PATH:$HOME/.cargo/bin
+        export PATH=$PATH:$HOME/.rustup/bin
+    -
+      name: Populate rust cache
+      uses: https://github.com/actions/cache/restore@v4
+      if: steps.cache.ou.cache-hit != 'true'
+      with:
+        paths: |
+          ~/.cargo/bin
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          ~/.rustup
+          target/
+        key: ${{ steps.cache.outputs.cache-primary-key }}

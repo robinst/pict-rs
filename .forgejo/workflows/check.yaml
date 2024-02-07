@@ -5,41 +5,7 @@ on:
       - main
 
 jobs:
-  cache-rust:
-    runs-on: docker
-    container:
-      image: docker.io/node:20-bookworm
-    steps:
-      -
-        name: Install rustup and rust
-        id: rust
-        uses: https://github.com/dtolnay/rust-toolchain@1.75.0
-        with:
-          components: clippy
-          targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
-      -
-        name: Install cargo-binstall
-        uses: https://github.com/taiki-e/install-action@v2
-        with:
-          tool: cargo-binstall
-      -
-        name: Install cargo-zigbuild
-        run: yes | cargo binstall cargo-zigbuild
-      -
-        name: Populate rust cache
-        uses: https://github.com/actions/cache/save@v4
-        with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            ~/.rustup
-          key: ${{ runner.os }}-cargo-${{ steps.rust.outputs.cacheKey }}
-
-
   clippy:
-    needs: [cache-rust]
     runs-on: docker
     container:
       image: docker.io/node:20-bookworm
@@ -48,16 +14,8 @@ jobs:
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
       -
-        name: Fetch rust cache
-        uses: https://github.com/actions/cache/restore@v4
-        with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            ~/.rustup
-          key: ${{ runner.os }}-cargo-${{ jobs.cache-rust.steps.rust.outputs.cacheKey }}
+        name: Setup Rust
+        uses: .forgejo/actions/prepare-rust
       -
         name: Clippy
         run: |
@@ -65,7 +23,6 @@ jobs:
           cargo clippy --no-default-features --features io-uring -- -D warnings
 
   tests:
-    needs: [cache-rust]
     runs-on: docker
     container:
       image: docker.io/node:20-bookworm
@@ -74,14 +31,13 @@ jobs:
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
       -
-        name: Install rustup and rust
-        uses: https://github.com/dtolnay/rust-toolchain@1.75.0
+        name: Setup Rust
+        uses: .forgejo/actions/prepare-rust
       -
         name: Test
         run: cargo test
 
   check:
-    needs: [cache-rust]
     strategy:
       matrix:
         target:
@@ -96,26 +52,10 @@ jobs:
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
       -
-        name: Fetch rust cache
-        uses: https://github.com/actions/cache/restore@v4
+        name: Setup Rust
+        uses: .forgejo/actions/prepare-rust
         with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            ~/.rustup
-          key: ${{ runner.os }}-cargo-${{ jobs.cache-rust.steps.rust.outputs.cacheKey }}
-      -
-        name: Install cargo-binstall
-        uses: https://github.com/taiki-e/install-action@v2
-        with:
-          tool: cargo-binstall
-      -
-        name: Install zig
-        uses: https://github.com/goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.11.0
+          targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
       -
         name: Debug builds
         run: cargo zigbuild --target ${{ matrix.target }}
