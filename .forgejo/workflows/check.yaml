@@ -10,16 +10,31 @@ jobs:
     container:
       image: docker.io/node:20-bookworm
     steps:
-      - uses: https://github.com/actions/checkout@v4
-      - uses: https://github.com/dtolnay/rust-toolchain@1.75.0
+      -
+        name: Checkout pict-rs
+        uses: https://github.com/actions/checkout@v4
+      -
+        name: Install rustup and rust
+        uses: https://github.com/dtolnay/rust-toolchain@1.75.0
         with:
           targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
           components: clippy
-      - uses: https://github.com/taiki-e/install-action@v2
+      -
+        name: Install cargo-binstall
+        uses: https://github.com/taiki-e/install-action@v2
         with:
           tool: cargo-binstall
-      - uses: https://github.com/goto-bus-stop/setup-zig@v2
-      - run: |
+      -
+        name: Install zig
+        uses: https://github.com/goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.11.0
+      -
+        name: Install cargo-zigbuild
+        run: cargo binstall cargo-zigbuild
+      -
+        name: Compile
+        run: |
           cargo zigbuild --target x86_64-unknown-linux-musl ;
           cargo zigbuild --target armv7-unknown-linux-musleabihf ;
           cargo zigbuild --target aarch64-unknown-linux-musl ;
