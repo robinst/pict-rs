@@ -38,7 +38,14 @@ runs:
         tool: cargo-binstall
     -
       name: Install cargo-zigbuild
+      if: steps.cache.outputs.cache-hit != 'true'
       run: yes | cargo binstall cargo-zigbuild
+    -
+      name: Check
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        echo "GOT HERE"
+        which cargo
     -
       name: Fetch dependencies
       if: steps.cache.outputs.cache-hit != 'true'
