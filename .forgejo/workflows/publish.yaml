@@ -63,6 +63,9 @@ jobs:
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
       -
+        name: Set up docker
+        uses: https://github.com/docker-practice/actions-setup-docker@master
+      -
         name: Prepare Platform
         run: |
           bash -c 'platform=${{ matrix.info.platform }} echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV'
@@ -78,9 +81,6 @@ jobs:
       - 
         name: Set up Docker Buildx
         uses: https://github.com/docker/setup-buildx-action@v3
-      -
-        name: Set up docker
-        uses: https://github.com/docker-practice/actions-setup-docker@master
       -
         name: Docker login
         uses: https://github.com/docker/login-action@v3
