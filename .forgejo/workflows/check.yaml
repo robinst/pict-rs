@@ -55,7 +55,10 @@ jobs:
         name: Setup Rust
         uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
         with:
-          targets: x86_64-unknown-linux-musl,armv7-unknown-linux-musleabihf,aarch64-unknown-linux-musl
+          targets:
+            - x86_64-unknown-linux-musl
+            - armv7-unknown-linux-musleabihf
+            - aarch64-unknown-linux-musl
       -
         name: Debug builds
         run: cargo zigbuild --target ${{ matrix.target }}

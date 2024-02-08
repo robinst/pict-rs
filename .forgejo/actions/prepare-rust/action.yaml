@@ -3,9 +3,9 @@ description: Prepare an environment to build or test rust packages
 
 inputs:
   targets:
-    description: "Targets to add to rustup, comma separated"
+    description: "Array of targets to add to rustup"
     required: false
-    default: ''
+    default: []
 
 runs:
   using: "composite"
@@ -27,26 +27,18 @@ runs:
           ~/.cargo/git/db
           ~/.rustup
           target/
-        key: rust-${{ inputs.targets }}-${{ hashFiles('Cargo.toml') }}-${{ hashFiles('Cargo.lock')}}
+        key: rust-${{ join(inputs.targets, '-') }}-${{ hashFiles('Cargo.toml') }}-${{ hashFiles('Cargo.lock')}}
     -
       name: Install rustup and rust
       if: steps.cache.outputs.cache-hit != 'true'
       uses: https://github.com/dtolnay/rust-toolchain@1.75.0
       with:
         components: clippy
-        targets: ${{ inputs.targets }}
+        targets: ${{ join(inputs.targets, ',') }}
     -
       name: Install cargo-zigbuild
       if: steps.cache.outputs.cache-hit != 'true'
-      run: |
-        cargo install cargo-zigbuild
-        echo "Installed zigbuild"
-    -
-      name: Check
-      if: steps.cache.outputs.cache-hit != 'true'
-      run: |
-        echo "GOT HERE"
-        which cargo
+      run: cargo install cargo-zigbuild
     -
       name: Fetch dependencies
       if: steps.cache.outputs.cache-hit != 'true'
