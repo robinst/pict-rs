@@ -63,6 +63,9 @@ jobs:
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
       -
+        name: install sudo
+        run: apt-get update && apt-get -y install sudo
+      -
         name: Set up docker
         uses: https://github.com/docker-practice/actions-setup-docker@master
       -
