@@ -47,8 +47,8 @@ runs:
       name: Export path
       if: steps.cache.outputs.cache-hit == 'true'
       run: |
-        $HOME/.cargo/bin >> $GITHUB_PATH
-        $HOME/.rustup/bin >> $GITHUB_PATH
+        echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+        echo "${HOME}/.rustup/bin" >> "${GITHUB_PATH}"
     -
       name: Populate rust cache
       if: steps.cache.outputs.cache-hit != 'true'
