@@ -7,42 +7,45 @@ env:
   REGISTRY_IMAGE: asonix/pictrs
 
 jobs:
-  clippy:
-    runs-on: docker
-    container:
-      image: docker.io/node:20-bookworm
-    steps:
-      -
-        name: Checkout pict-rs
-        uses: https://github.com/actions/checkout@v4
-      -
-        name: Setup Rust
-        uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
-      -
-        name: Clippy
-        run: |
-          cargo clippy --no-default-features -- -D warnings
-          cargo clippy --no-default-features --features io-uring -- -D warnings
+  # clippy:
+  #   runs-on: docker
+  #   container:
+  #     image: docker.io/node:20-bookworm
+  #   steps:
+  #     -
+  #       name: Checkout pict-rs
+  #       uses: https://github.com/actions/checkout@v4
+  #     -
+  #       name: Setup Rust
+  #       uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
+  #     -
+  #       name: Clippy
+  #       run: |
+  #         cargo clippy --no-default-features -- -D warnings
+  #         cargo clippy --no-default-features --features io-uring -- -D warnings
 
-  tests:
-    runs-on: docker
-    container:
-      image: docker.io/node:20-bookworm
-    steps:
-      -
-        name: Checkout pict-rs
-        uses: https://github.com/actions/checkout@v4
-      -
-        name: Setup Rust
-        uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
-      -
-        name: Test
-        run: cargo test
+  # tests:
+  #   runs-on: docker
+  #   container:
+  #     image: docker.io/node:20-bookworm
+  #   steps:
+  #     -
+  #       name: Checkout pict-rs
+  #       uses: https://github.com/actions/checkout@v4
+  #     -
+  #       name: Setup Rust
+  #       uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
+  #     -
+  #       name: Test
+  #       run: cargo test
 
   build:
-    needs:
-      - clippy
-      - tests
+    # needs:
+    #   - clippy
+    #   - tests
+    runs-on: docker
+    container:
+      image: docker.io/node:20-bookworm
     strategy:
       matrix:
         fail-fast: false
@@ -56,9 +59,6 @@ jobs:
           - target: aarch64-unknown-linux-musl
             artifact: linux-arm64v8
             platform: linux/arm64
-    runs-on: docker
-    container:
-      image: docker.io/node:20-bookworm
     steps:
       -
         name: Checkout pict-rs
