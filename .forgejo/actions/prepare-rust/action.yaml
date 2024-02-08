@@ -36,17 +36,11 @@ runs:
         components: clippy
         targets: ${{ inputs.targets }}
     -
-      name: Install cargo-binstall
-      if: steps.cache.outputs.cache-hit != 'true'
-      uses: https://github.com/taiki-e/install-action@v2
-      with:
-        tool: cargo-binstall
-    -
       name: Install cargo-zigbuild
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        yes | cargo binstall cargo-zigbuild ;
-        echo "Installed binstall"
+        cargo install cargo-zigbuild
+        echo "Installed zigbuild"
     -
       name: Check
       if: steps.cache.outputs.cache-hit != 'true'
