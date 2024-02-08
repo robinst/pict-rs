@@ -118,7 +118,7 @@ jobs:
       -
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ matrix.info.artifact }}
+          name: binaries
           path: artifacts/
       -
         name: Prepare binary
@@ -156,6 +156,20 @@ jobs:
       image: docker.io/node:20-bookworm
     needs: [build]
     steps:
+      -
+        name: Install Docker
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates curl
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            tee /etc/apt/sources.list.d/docker.list > /dev/null
+          apt-get update
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
       -
         name: Download digests
         uses: actions/download-artifact@v3
@@ -197,19 +211,14 @@ jobs:
   publish-forgejo:
     needs: [build]
     runs-on: docker
+    container:
+      image: node:20-bookworm
     steps:
       - uses: actions/download-artifact@v3
         with:
-          name: arm64v8
+          name: binaries
           path: artifacts/
-      - uses: actions/download-artifact@v3
-        with:
-          name: arm32v7
-          path: artifacts/
-      - uses: actions/download-artifact@v3
-        with:
-          name: arm64v8
-          path: artifacts/
+          merge-multiple: true
       - uses: actions/forgejo-release@v1
         with:
           direction: upload
@@ -219,6 +228,8 @@ jobs:
   publish-crate:
     needs: [build]
     runs-on: docker
+    container:
+      image: node:20-bookworm
     steps:
       -
         name: Setup Rust
