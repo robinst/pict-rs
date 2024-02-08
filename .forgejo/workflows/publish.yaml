@@ -126,6 +126,7 @@ jobs:
           cp target/${{ matrix.info.target }}/release/pict-rs docker/forgejo/pict-rs
       -
         name: Build and push ${{ matrix.info.platform }} docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: ./docker/forgejo
@@ -139,6 +140,7 @@ jobs:
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
+          echo "Created /tmp/digests/${digest#sha256:}"
       -
         name: Upload ${{ matrix.info.platform }} digest
         uses: actions/upload-artifact@v3
