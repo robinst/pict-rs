@@ -46,12 +46,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - artifact: linux-amd64
-            target: x86_64-unknown-linux-musl
+          - target: x86_64-unknown-linux-musl
+            artifact: linux-amd64
           - target: armv7-unknown-linux-musleabihf
             artifact: linux-arm32v7
-          - artifact: linux-arm64v8
-            target: aarch64-unknown-linux-musl
+          - target: aarch64-unknown-linux-musl
+            artifact: linux-arm64v8
     runs-on: docker
     container:
       image: docker.io/node:20-bookworm
@@ -62,6 +62,11 @@ jobs:
       -
         name: Setup Rust
         uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
+        with:
+          targets: |
+             ["x86_64-unknown-linux-musl",
+              "armv7-unknown-linux-musleabihf",
+              "aarch64-unknown-linux-musl"]
       -
         name: Compile pict-rs
         run: cargo zigbuild --target=${{ matrix.target }} --release
