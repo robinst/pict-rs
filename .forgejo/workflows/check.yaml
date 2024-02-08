@@ -57,8 +57,8 @@ jobs:
         with:
           targets: |
              ["x86_64-unknown-linux-musl",
-             "armv7-unknown-linux-musleabihf",
-             "aarch64-unknown-linux-musl"]
+              "armv7-unknown-linux-musleabihf",
+              "aarch64-unknown-linux-musl"]
       -
         name: Debug builds
         run: cargo zigbuild --target ${{ matrix.target }}
