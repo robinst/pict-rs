@@ -80,7 +80,9 @@ jobs:
       -
         name: Prepare Platform
         run: |
-          bash -c 'platform=${{ matrix.info.platform }} echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV'
+          platform=${{ matrix.info.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+        shell: bash
       -
         name: Docker meta
         id: meta
@@ -201,7 +203,9 @@ jobs:
         name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          bash -c 'docker buildx imagetools create $(jq -cr ".tags | map(\"-t \" + .) | join(\" \")" <<< "$DOCKER_METADATA_OUTPUT_JSON") $(printf "${{ env.REGISTRY_IMAGE }}@sha256:%s " *)'
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+            $(printf "${{ env.REGISTRY_IMAGE }}@sha256:%s " *)
+        shell: bash
       -
         name: Inspect Image
         run: |
