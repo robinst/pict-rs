@@ -216,10 +216,12 @@ jobs:
           prerelease: true
 
   publish-crate:
-    needs:
-      - build-amd64
-      - build-arm32v7
-      - build-arm64v8
+    needs: [build]
     runs-on: docker
     steps:
-      - run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+      -
+        name: Setup Rust
+        uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
+      -
+        name: Publish Crate
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
