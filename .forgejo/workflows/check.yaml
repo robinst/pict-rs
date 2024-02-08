@@ -14,6 +14,9 @@ jobs:
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
       -
+        name: Cargo Cache
+        uses: https://git.asonix.dog/asonix/actions/cache-rust-dependencies@main
+      -
         name: Clippy
         run: |
           cargo clippy --no-default-features -- -D warnings
@@ -27,6 +30,9 @@ jobs:
       -
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
+      -
+        name: Cargo Cache
+        uses: https://git.asonix.dog/asonix/actions/cache-rust-dependencies@main
       -
         name: Test
         run: cargo test
@@ -46,6 +52,9 @@ jobs:
       -
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
+      -
+        name: Cargo Cache
+        uses: https://git.asonix.dog/asonix/actions/cache-rust-dependencies@main
       -
         name: Debug builds
         run: cargo zigbuild --target ${{ matrix.target }}
