@@ -1,4 +1,7 @@
-on: [tag]
+on:
+  push:
+    tags:
+      - 'v*.*.*'
 
 env:
   REGISTRY_IMAGE: asonix/pictrs
