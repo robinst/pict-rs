@@ -116,7 +116,7 @@ jobs:
           mkdir artifacts
           cp target/${{ matrix.info.target }}/release/pict-rs artifacts/pict-rs-${{ matrix.info.artifact }}
       -
-        uses: actions/upload-artifact@v3
+        uses: https://github.com/actions/upload-artifact@v3
         with:
           name: binaries
           path: artifacts/
@@ -143,7 +143,7 @@ jobs:
           echo "Created /tmp/digests/${digest#sha256:}"
       -
         name: Upload ${{ matrix.info.platform }} digest
-        uses: actions/upload-artifact@v3
+        uses: https://github.com/actions/upload-artifact@v3
         with:
           name: digests
           path: /tmp/digests/*
@@ -172,7 +172,7 @@ jobs:
           apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
       -
         name: Download digests
-        uses: actions/download-artifact@v3
+        uses: https://github.com/actions/download-artifact@v3
         with:
           name: digests
           path: /tmp/digests
@@ -190,7 +190,7 @@ jobs:
       -
         name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5
+        uses: https://github.com/docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
@@ -214,7 +214,7 @@ jobs:
     container:
       image: node:20-bookworm
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: https://github.com/actions/download-artifact@v3
         with:
           name: binaries
           path: artifacts/
