@@ -73,7 +73,7 @@ jobs:
               "aarch64-unknown-linux-musl"]
       -
         name: Compile pict-rs
-        run: cargo zigbuild --target=${{ matrix.target }} --release
+        run: cargo zigbuild --target ${{ matrix.target }} --release
       -
         name: Prepare artifacts
         run: |
