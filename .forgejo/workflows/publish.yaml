@@ -5,6 +5,7 @@ on:
 
 env:
   REGISTRY_IMAGE: asonix/pictrs
+  DOCKER_HOST: tcp://docker-in-docker:2375
 
 jobs:
   # clippy:
