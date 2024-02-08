@@ -8,14 +8,11 @@ jobs:
   clippy:
     runs-on: docker
     container:
-      image: docker.io/node:20-bookworm
+      image: docker.io/asonix/actions-base-image:0.1
     steps:
       -
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
-      -
-        name: Setup Rust
-        uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
       -
         name: Clippy
         run: |
@@ -25,20 +22,18 @@ jobs:
   tests:
     runs-on: docker
     container:
-      image: docker.io/node:20-bookworm
+      image: docker.io/asonix/actions-base-image:0.1
     steps:
       -
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
-      -
-        name: Setup Rust
-        uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
       -
         name: Test
         run: cargo test
 
   check:
     strategy:
+      fail-fast: false
       matrix:
         target:
           - x86_64-unknown-linux-musl
@@ -46,19 +41,11 @@ jobs:
           - aarch64-unknown-linux-musl
     runs-on: docker
     container:
-      image: docker.io/node:20-bookworm
+      image: docker.io/asonix/actions-base-image:0.1
     steps:
       -
         name: Checkout pict-rs
         uses: https://github.com/actions/checkout@v4
-      -
-        name: Setup Rust
-        uses: https://git.asonix.dog/asonix/pict-rs/.forgejo/actions/prepare-rust@main
-        with:
-          targets: |
-             ["x86_64-unknown-linux-musl",
-              "armv7-unknown-linux-musleabihf",
-              "aarch64-unknown-linux-musl"]
       -
         name: Debug builds
         run: cargo zigbuild --target ${{ matrix.target }}
