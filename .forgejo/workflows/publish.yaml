@@ -48,13 +48,13 @@ jobs:
         fail-fast: false
         include:
           - target: x86_64-unknown-linux-musl
-            artifact: amd64
+            artifact: linux-amd64
             platform: linux/amd64
           - target: armv7-unknown-linux-musleabihf
-            artifact: arm32v7
+            artifact: linux-arm32v7
             platform: linux/arm/v7
           - target: aarch64-unknown-linux-musl
-            artifact: arm64v8
+            artifact: linux-arm64v8
             platform: linux/arm64
     runs-on: docker
     container:
@@ -78,7 +78,7 @@ jobs:
         name: Prepare artifacts
         run: |
           mkdir artifacts
-          cp target/${{ matrix.target }}/release/pict-rs artifacts/pict-rs
+          cp target/${{ matrix.target }}/release/pict-rs artifacts/pict-rs-${{ matrix.artifact }}
       -
         uses: actions/upload-artifact@v3
         with:
@@ -107,6 +107,9 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      -
+        name: Prepare binary
+        run: cp target/${{ matrix.target }}/release/pict-rs docker/forgejo/pict-rs
       -
         name: Build and push ${{ matrix.platform }} docker image
         uses: docker/build-push-action@v5
