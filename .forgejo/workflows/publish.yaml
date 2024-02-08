@@ -48,7 +48,6 @@ jobs:
       image: docker.io/node:20-bookworm
     strategy:
       matrix:
-        fail-fast: false
         info:
           - target: x86_64-unknown-linux-musl
             artifact: linux-amd64
