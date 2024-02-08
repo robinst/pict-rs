@@ -206,8 +206,8 @@ jobs:
         run: |
           tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "${DOCKER_METADATA_OUTPUT_JSON}")
           images=$(printf "${{ env.REGISTRY_IMAGE }}@sha256:%s " *)
-          echo "Running 'docker buildx imagetools create \"${tags}\" \"${images}\"'"
-          docker buildx imagetools create ${tags} ${images}
+          echo "Running 'docker buildx imagetools create ${tags[@]} ${images[@]}'"
+          docker buildx imagetools create ${tags[@]} ${images[@]}
         shell: bash
       -
         name: Inspect Image
