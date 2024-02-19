@@ -166,6 +166,7 @@ pub(crate) enum UploadError {
 impl UploadError {
     const fn error_code(&self) -> ErrorCode {
         match self {
+            Self::Upload(actix_form_data::Error::FileSize) => ErrorCode::VALIDATE_FILE_SIZE,
             Self::Upload(_) => ErrorCode::FILE_UPLOAD_ERROR,
             Self::Repo(e) => e.error_code(),
             Self::OldRepo(_) => ErrorCode::OLD_REPO_ERROR,
@@ -232,6 +233,10 @@ impl From<crate::store::StoreError> for UploadError {
 impl ResponseError for Error {
     fn status_code(&self) -> StatusCode {
         match self.kind() {
+            Some(UploadError::Upload(actix_form_data::Error::FileSize))
+            | Some(UploadError::Validation(crate::validate::ValidationError::Filesize)) => {
+                StatusCode::PAYLOAD_TOO_LARGE
+            }
             Some(
                 UploadError::DuplicateAlias
                 | UploadError::Limit(_)
