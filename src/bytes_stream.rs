@@ -50,7 +50,7 @@ impl BytesStream {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.total_len > 0
+        self.total_len == 0
     }
 
     pub(crate) fn into_reader(self) -> BytesReader {
