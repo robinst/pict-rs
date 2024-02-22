@@ -110,25 +110,26 @@ impl Stream for IoStream {
 impl AsyncRead for BytesReader {
     fn poll_read(
         mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        _: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         while buf.remaining() > 0 {
-            if self.index == self.inner[0].len() {
-                self.inner.pop_front();
-                self.index = 0;
-            }
+            if let Some(bytes) = self.inner.front() {
+                if self.index == bytes.len() {
+                    self.inner.pop_front();
+                    self.index = 0;
+                    continue;
+                }
 
-            if self.inner.is_empty() {
+                let upper_bound = (self.index + buf.remaining()).min(bytes.len());
+
+                let slice = &bytes[self.index..upper_bound];
+
+                buf.put_slice(slice);
+                self.index += slice.len();
+            } else {
                 break;
             }
-
-            let upper_bound = (self.index + buf.remaining()).min(self.inner[0].len());
-
-            let slice = &self.inner[0][self.index..upper_bound];
-
-            buf.put_slice(slice);
-            self.index += slice.len();
         }
 
         Poll::Ready(Ok(()))
