@@ -225,7 +225,7 @@ impl Store for ObjectStore {
     where
         Reader: AsyncRead + Unpin + 'static,
     {
-        self.save_stream(ReaderStream::new(reader), content_type)
+        self.save_stream(ReaderStream::with_capacity(reader, 1024 * 16), content_type)
             .await
     }
 
