@@ -1,7 +1,4 @@
-use actix_web::{
-    body::MessageBody,
-    web::{Bytes, BytesMut},
-};
+use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{
     collections::{vec_deque::IntoIter, VecDeque},
@@ -56,20 +53,6 @@ impl BytesStream {
         self.total_len > 0
     }
 
-    fn into_bytes(mut self) -> Bytes {
-        if self.inner.len() == 1 {
-            return self.inner.pop_front().expect("Exactly one");
-        }
-
-        let mut buf = BytesMut::with_capacity(self.total_len);
-
-        for bytes in self.inner {
-            buf.extend_from_slice(&bytes);
-        }
-
-        buf.freeze()
-    }
-
     pub(crate) fn into_reader(self) -> BytesReader {
         BytesReader {
             index: 0,
@@ -78,12 +61,12 @@ impl BytesStream {
     }
 
     pub(crate) fn into_io_stream(self) -> IoStream {
-        IoStream { stream: self }
+        IoStream { inner: self.inner }
     }
 }
 
 pub(crate) struct IoStream {
-    stream: BytesStream,
+    inner: VecDeque<Bytes>,
 }
 
 pub(crate) struct BytesReader {
@@ -100,45 +83,27 @@ impl IntoIterator for BytesStream {
     }
 }
 
-impl MessageBody for BytesStream {
-    type Error = std::io::Error;
-
-    fn size(&self) -> actix_web::body::BodySize {
-        if let Ok(len) = self.len().try_into() {
-            actix_web::body::BodySize::Sized(len)
-        } else {
-            actix_web::body::BodySize::None
-        }
-    }
-
-    fn poll_next(
-        self: Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Option<Result<Bytes, Self::Error>>> {
-        Poll::Ready(self.get_mut().inner.pop_front().map(Ok))
-    }
-
-    fn try_into_bytes(self) -> Result<Bytes, Self>
-    where
-        Self: Sized,
-    {
-        Ok(self.into_bytes())
-    }
-}
-
 impl Stream for BytesStream {
     type Item = Result<Bytes, Infallible>;
 
     fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Poll::Ready(self.get_mut().inner.pop_front().map(Ok))
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.inner.len(), Some(self.inner.len()))
+    }
 }
 
 impl Stream for IoStream {
     type Item = std::io::Result<Bytes>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        MessageBody::poll_next(Pin::new(&mut self.get_mut().stream), cx)
+    fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(self.get_mut().inner.pop_front().map(Ok))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.inner.len(), Some(self.inner.len()))
     }
 }
 
