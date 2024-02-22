@@ -2,7 +2,7 @@ mod exiftool;
 mod ffmpeg;
 mod magick;
 
-use actix_web::web::Bytes;
+
 
 use crate::{bytes_stream::BytesStream, formats::InputFile, state::State};
 

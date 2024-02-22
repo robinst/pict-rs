@@ -2,7 +2,6 @@ mod ffmpeg;
 mod magick;
 
 use crate::{
-    bytes_stream::BytesStream,
     concurrent_processor::ProcessMap,
     details::Details,
     error::{Error, UploadError},
@@ -12,7 +11,7 @@ use crate::{
     state::State,
     store::Store,
 };
-use actix_web::web::Bytes;
+
 use std::{
     path::PathBuf,
     sync::Arc,
