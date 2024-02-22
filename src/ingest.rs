@@ -14,7 +14,6 @@ use actix_web::web::Bytes;
 use futures_core::Stream;
 use reqwest::Body;
 
-use streem::IntoStreamer;
 use tracing::{Instrument, Span};
 
 mod hasher;
@@ -27,25 +26,6 @@ pub(crate) struct Session {
     hash: Option<Hash>,
     alias: Option<Alias>,
     identifier: Option<Arc<str>>,
-}
-
-#[tracing::instrument(skip(stream))]
-async fn aggregate<S>(stream: S) -> Result<BytesStream, Error>
-where
-    S: Stream<Item = Result<Bytes, Error>>,
-{
-    let mut buf = BytesStream::new();
-
-    let stream = std::pin::pin!(stream);
-    let mut stream = stream.into_streamer();
-
-    while let Some(res) = stream.next().await {
-        tracing::trace!("aggregate: looping");
-
-        buf.add_bytes(res?);
-    }
-
-    Ok(buf)
 }
 
 async fn process_ingest<S>(
@@ -63,9 +43,12 @@ async fn process_ingest<S>(
 where
     S: Store,
 {
-    let bytes = tokio::time::timeout(Duration::from_secs(60), aggregate(stream))
-        .await
-        .map_err(|_| UploadError::AggregateTimeout)??;
+    let bytes = tokio::time::timeout(
+        Duration::from_secs(60),
+        BytesStream::try_from_stream(stream),
+    )
+    .await
+    .map_err(|_| UploadError::AggregateTimeout)??;
 
     let permit = crate::process_semaphore().acquire().await?;
 

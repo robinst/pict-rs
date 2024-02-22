@@ -1,7 +1,6 @@
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{fmt::Debug, sync::Arc};
-use streem::IntoStreamer;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{bytes_stream::BytesStream, error_code::ErrorCode, stream::LocalBoxStream};
@@ -123,20 +122,11 @@ pub(crate) trait Store: Clone + Debug {
         from_start: Option<u64>,
         len: Option<u64>,
     ) -> Result<BytesStream, StoreError> {
-        let mut buf = BytesStream::new();
+        let stream = self.to_stream(identifier, from_start, len).await?;
 
-        let mut streamer = self
-            .to_stream(identifier, from_start, len)
-            .await?
-            .into_streamer();
-
-        while let Some(bytes) = streamer.try_next().await.map_err(StoreError::ReadStream)? {
-            tracing::trace!("to_bytes: looping");
-
-            buf.add_bytes(bytes);
-        }
-
-        Ok(buf)
+        BytesStream::try_from_stream(stream)
+            .await
+            .map_err(StoreError::ReadStream)
     }
 
     async fn read_into<Writer>(

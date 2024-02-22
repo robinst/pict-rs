@@ -26,6 +26,7 @@ impl BytesStream {
         }
     }
 
+    #[tracing::instrument(skip(stream))]
     pub(crate) async fn try_from_stream<S, E>(stream: S) -> Result<Self, E>
     where
         S: Stream<Item = Result<Bytes, E>>,
@@ -35,6 +36,7 @@ impl BytesStream {
         let mut bs = Self::new();
 
         while let Some(bytes) = stream.try_next().await? {
+            tracing::trace!("try_from_stream: looping");
             bs.add_bytes(bytes);
         }
 
