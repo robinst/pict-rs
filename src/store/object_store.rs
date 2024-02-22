@@ -186,6 +186,12 @@ where
         }
     }
 
+    tracing::debug!(
+        "BytesStream with {} chunks, avg length {}",
+        buf.chunks_len(),
+        buf.len() / buf.chunks_len()
+    );
+
     Ok(buf)
 }
 
@@ -225,7 +231,7 @@ impl Store for ObjectStore {
     where
         Reader: AsyncRead + Unpin + 'static,
     {
-        self.save_stream(ReaderStream::with_capacity(reader, 1024 * 16), content_type)
+        self.save_stream(ReaderStream::with_capacity(reader, 1024 * 64), content_type)
             .await
     }
 

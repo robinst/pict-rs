@@ -127,7 +127,9 @@ async fn process<S: Store + 'static>(
     )
     .await?
     .into_bytes_stream()
-    .instrument(tracing::info_span!("Reading processed image to vec"))
+    .instrument(tracing::info_span!(
+        "Reading processed image to BytesStream"
+    ))
     .await?;
 
     drop(permit);

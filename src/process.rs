@@ -1,4 +1,3 @@
-
 use std::{
     ffi::OsStr,
     future::Future,
@@ -8,7 +7,7 @@ use std::{
 };
 
 use tokio::{
-    io::{AsyncReadExt},
+    io::AsyncReadExt,
     process::{Child, ChildStdin, Command},
 };
 use tokio_util::io::ReaderStream;
@@ -323,7 +322,7 @@ impl ProcessRead {
         let cmd = self.command.clone();
 
         self.with_stdout(move |stdout| {
-            BytesStream::try_from_stream(ReaderStream::with_capacity(stdout, 1024 * 16))
+            BytesStream::try_from_stream(ReaderStream::with_capacity(stdout, 1024 * 64))
         })
         .await?
         .map_err(move |e| ProcessError::Read(cmd, e))

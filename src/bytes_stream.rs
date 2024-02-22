@@ -8,6 +8,7 @@ use std::{
 };
 use streem::IntoStreamer;
 use tokio::io::AsyncRead;
+use tokio_util::bytes::Buf;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BytesStream {
@@ -37,7 +38,17 @@ impl BytesStream {
             bs.add_bytes(bytes);
         }
 
+        tracing::debug!(
+            "BytesStream with {} chunks, avg length {}",
+            bs.chunks_len(),
+            bs.len() / bs.chunks_len()
+        );
+
         Ok(bs)
+    }
+
+    pub(crate) fn chunks_len(&self) -> usize {
+        self.inner.len()
     }
 
     pub(crate) fn add_bytes(&mut self, bytes: Bytes) {
@@ -54,10 +65,7 @@ impl BytesStream {
     }
 
     pub(crate) fn into_reader(self) -> BytesReader {
-        BytesReader {
-            index: 0,
-            inner: self.inner,
-        }
+        BytesReader { inner: self.inner }
     }
 
     pub(crate) fn into_io_stream(self) -> IoStream {
@@ -70,7 +78,6 @@ pub(crate) struct IoStream {
 }
 
 pub(crate) struct BytesReader {
-    index: usize,
     inner: VecDeque<Bytes>,
 }
 
@@ -114,19 +121,20 @@ impl AsyncRead for BytesReader {
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         while buf.remaining() > 0 {
-            if let Some(bytes) = self.inner.front() {
-                if self.index == bytes.len() {
+            tracing::trace!("bytes reader: looping");
+
+            if let Some(bytes) = self.inner.front_mut() {
+                if bytes.is_empty() {
                     self.inner.pop_front();
-                    self.index = 0;
                     continue;
                 }
 
-                let upper_bound = (self.index + buf.remaining()).min(bytes.len());
+                let upper_bound = buf.remaining().min(bytes.len());
 
-                let slice = &bytes[self.index..upper_bound];
+                let slice = &bytes[..upper_bound];
 
                 buf.put_slice(slice);
-                self.index += slice.len();
+                bytes.advance(upper_bound);
             } else {
                 break;
             }
