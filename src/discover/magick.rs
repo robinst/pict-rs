@@ -4,6 +4,7 @@ mod tests;
 use actix_web::web::Bytes;
 
 use crate::{
+    bytes_stream::BytesStream,
     discover::DiscoverError,
     formats::{AnimationFormat, ImageFormat, ImageInput, InputFile},
     magick::{MagickError, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
@@ -31,10 +32,10 @@ struct Geometry {
 }
 
 #[tracing::instrument(skip_all)]
-pub(super) async fn confirm_bytes<S>(
+pub(super) async fn confirm_bytes_stream<S>(
     state: &State<S>,
     discovery: Option<Discovery>,
-    bytes: Bytes,
+    bytes: BytesStream,
 ) -> Result<Discovery, MagickError> {
     match discovery {
         Some(Discovery {
@@ -50,7 +51,7 @@ pub(super) async fn confirm_bytes<S>(
     }
 
     discover_file(state, move |mut file| async move {
-        file.write_from_bytes(bytes)
+        file.write_from_stream(bytes.into_io_stream())
             .await
             .map_err(MagickError::Write)?;
 

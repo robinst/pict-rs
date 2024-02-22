@@ -1,4 +1,5 @@
 use crate::{
+    bytes_stream::BytesStream,
     error_code::ErrorCode,
     process::{Process, ProcessError, ProcessRead},
 };
@@ -39,9 +40,9 @@ impl ExifError {
 }
 
 #[tracing::instrument(level = "trace", skip(input))]
-pub(crate) async fn needs_reorienting(timeout: u64, input: Bytes) -> Result<bool, ExifError> {
+pub(crate) async fn needs_reorienting(timeout: u64, input: BytesStream) -> Result<bool, ExifError> {
     let buf = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?
-        .bytes_read(input)
+        .bytes_stream_read(input)
         .into_string()
         .await?;
 
@@ -51,9 +52,9 @@ pub(crate) async fn needs_reorienting(timeout: u64, input: Bytes) -> Result<bool
 #[tracing::instrument(level = "trace", skip(input))]
 pub(crate) fn clear_metadata_bytes_read(
     timeout: u64,
-    input: Bytes,
+    input: BytesStream,
 ) -> Result<ProcessRead, ExifError> {
     let process = Process::run("exiftool", &["-all=", "-", "-out", "-"], &[], timeout)?;
 
-    Ok(process.bytes_read(input))
+    Ok(process.bytes_stream_read(input))
 }

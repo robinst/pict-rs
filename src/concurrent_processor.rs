@@ -15,7 +15,7 @@ use std::{
 };
 use tracing::Span;
 
-type OutcomeReceiver = Receiver<(Details, web::Bytes)>;
+type OutcomeReceiver = Receiver<(Details, Arc<str>)>;
 
 type ProcessMapKey = (Hash, PathBuf);
 
@@ -36,9 +36,9 @@ impl ProcessMap {
         hash: Hash,
         path: PathBuf,
         fut: Fut,
-    ) -> Result<(Details, web::Bytes), Error>
+    ) -> Result<(Details, Arc<str>), Error>
     where
-        Fut: Future<Output = Result<(Details, web::Bytes), Error>>,
+        Fut: Future<Output = Result<(Details, Arc<str>), Error>>,
     {
         let key = (hash.clone(), path.clone());
 
@@ -100,10 +100,10 @@ struct CancelToken {
 
 enum CancelState {
     Sender {
-        sender: Sender<(Details, web::Bytes)>,
+        sender: Sender<(Details, Arc<str>)>,
     },
     Receiver {
-        receiver: RecvFut<'static, (Details, web::Bytes)>,
+        receiver: RecvFut<'static, (Details, Arc<str>)>,
     },
 }
 
@@ -124,9 +124,9 @@ pin_project_lite::pin_project! {
 
 impl<F> Future for CancelSafeProcessor<F>
 where
-    F: Future<Output = Result<(Details, web::Bytes), Error>>,
+    F: Future<Output = Result<(Details, Arc<str>), Error>>,
 {
-    type Output = Result<(Details, web::Bytes), Error>;
+    type Output = Result<(Details, Arc<str>), Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().project();

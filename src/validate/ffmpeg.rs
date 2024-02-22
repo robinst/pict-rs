@@ -4,6 +4,7 @@ use actix_web::web::Bytes;
 use uuid::Uuid;
 
 use crate::{
+    bytes_stream::BytesStream,
     ffmpeg::FfMpegError,
     formats::{InputVideoFormat, OutputVideo},
     process::{Process, ProcessRead},
@@ -16,7 +17,7 @@ pub(super) async fn transcode_bytes(
     output_format: OutputVideo,
     crf: u8,
     timeout: u64,
-    bytes: Bytes,
+    bytes: BytesStream,
 ) -> Result<ProcessRead, FfMpegError> {
     let input_file = tmp_dir.tmp_file(None);
     crate::store::file_store::safe_create_parent(&input_file)
@@ -27,7 +28,7 @@ pub(super) async fn transcode_bytes(
         .await
         .map_err(FfMpegError::CreateFile)?;
     tmp_one
-        .write_from_bytes(bytes)
+        .write_from_stream(bytes.into_io_stream())
         .await
         .map_err(FfMpegError::Write)?;
     tmp_one.close().await.map_err(FfMpegError::CloseFile)?;

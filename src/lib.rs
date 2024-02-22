@@ -83,7 +83,7 @@ use self::{
     repo::{sled::SledRepo, Alias, DeleteToken, Hash, Repo, UploadId, UploadResult},
     serde_str::Serde,
     store::{file_store::FileStore, object_store::ObjectStore, Store},
-    stream::{empty, once},
+    stream::empty,
     tls::Tls,
 };
 
@@ -141,7 +141,7 @@ async fn ensure_details_identifier<S: Store + 'static>(
 
         tracing::debug!("generating new details from {:?}", identifier);
         let bytes_stream = state.store.to_bytes(identifier, None, None).await?;
-        let new_details = Details::from_bytes(state, bytes_stream.into_bytes()).await?;
+        let new_details = Details::from_bytes_stream(state, bytes_stream).await?;
         tracing::debug!("storing details for {:?}", identifier);
         state.repo.relate_details(identifier, &new_details).await?;
         tracing::debug!("stored");
@@ -841,67 +841,36 @@ async fn process<S: Store + 'static>(
         .variant_identifier(hash.clone(), path_string)
         .await?;
 
-    if let Some(identifier) = identifier_opt {
+    let (details, identifier) = if let Some(identifier) = identifier_opt {
         let details = ensure_details_identifier(&state, &identifier).await?;
 
-        if let Some(public_url) = state.store.public_url(&identifier) {
-            return Ok(HttpResponse::SeeOther()
-                .insert_header((actix_web::http::header::LOCATION, public_url.as_str()))
-                .finish());
-        }
-
-        return ranged_file_resp(&state.store, identifier, range, details, not_found).await;
-    }
-
-    if state.config.server.read_only {
-        return Err(UploadError::ReadOnly.into());
-    }
-
-    let original_details = ensure_details(&state, &alias).await?;
-
-    let (details, bytes) = generate::generate(
-        &state,
-        &process_map,
-        format,
-        thumbnail_path,
-        thumbnail_args,
-        &original_details,
-        hash,
-    )
-    .await?;
-
-    let (builder, stream) = if let Some(web::Header(range_header)) = range {
-        if let Some(range) = range::single_bytes_range(&range_header) {
-            let len = bytes.len() as u64;
-
-            if let Some(content_range) = range::to_content_range(range, len) {
-                let mut builder = HttpResponse::PartialContent();
-                builder.insert_header(content_range);
-                let stream = range::chop_bytes(range, bytes, len)?;
-
-                (builder, Either::left(Either::left(stream)))
-            } else {
-                (
-                    HttpResponse::RangeNotSatisfiable(),
-                    Either::left(Either::right(empty())),
-                )
-            }
-        } else {
-            return Err(UploadError::Range.into());
-        }
-    } else if not_found {
-        (HttpResponse::NotFound(), Either::right(once(Ok(bytes))))
+        (details, identifier)
     } else {
-        (HttpResponse::Ok(), Either::right(once(Ok(bytes))))
+        if state.config.server.read_only {
+            return Err(UploadError::ReadOnly.into());
+        }
+
+        let original_details = ensure_details(&state, &alias).await?;
+
+        generate::generate(
+            &state,
+            &process_map,
+            format,
+            thumbnail_path,
+            thumbnail_args,
+            &original_details,
+            hash,
+        )
+        .await?
     };
 
-    Ok(srv_response(
-        builder,
-        stream,
-        details.media_type(),
-        7 * DAYS,
-        details.system_time(),
-    ))
+    if let Some(public_url) = state.store.public_url(&identifier) {
+        return Ok(HttpResponse::SeeOther()
+            .insert_header((actix_web::http::header::LOCATION, public_url.as_str()))
+            .finish());
+    }
+
+    ranged_file_resp(&state.store, identifier, range, details, not_found).await
 }
 
 #[tracing::instrument(name = "Serving processed image headers", skip(state))]

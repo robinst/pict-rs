@@ -1,4 +1,5 @@
 use crate::{
+    bytes_stream::BytesStream,
     discover::Discovery,
     error::Error,
     formats::{InternalFormat, InternalVideoFormat},
@@ -80,13 +81,16 @@ impl Details {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
-    pub(crate) async fn from_bytes<S>(state: &State<S>, input: web::Bytes) -> Result<Self, Error> {
+    pub(crate) async fn from_bytes_stream<S>(
+        state: &State<S>,
+        input: BytesStream,
+    ) -> Result<Self, Error> {
         let Discovery {
             input,
             width,
             height,
             frames,
-        } = crate::discover::discover_bytes(state, input).await?;
+        } = crate::discover::discover_bytes_stream(state, input).await?;
 
         Ok(Details::from_parts(
             input.internal_format(),

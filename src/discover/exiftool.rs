@@ -1,6 +1,7 @@
 use actix_web::web::Bytes;
 
 use crate::{
+    bytes_stream::BytesStream,
     exiftool::ExifError,
     formats::{ImageInput, InputFile},
     process::Process,
@@ -16,7 +17,7 @@ pub(super) async fn check_reorient(
         height,
         frames,
     }: Discovery,
-    bytes: Bytes,
+    bytes: BytesStream,
     timeout: u64,
 ) -> Result<Discovery, ExifError> {
     let input = match input {
@@ -40,9 +41,9 @@ pub(super) async fn check_reorient(
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn needs_reorienting(input: Bytes, timeout: u64) -> Result<bool, ExifError> {
+async fn needs_reorienting(input: BytesStream, timeout: u64) -> Result<bool, ExifError> {
     let buf = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?
-        .bytes_read(input)
+        .bytes_stream_read(input)
         .into_string()
         .await?;
 

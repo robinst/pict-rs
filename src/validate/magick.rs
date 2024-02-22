@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use actix_web::web::Bytes;
 
 use crate::{
+    bytes_stream::BytesStream,
     formats::{AnimationFormat, ImageFormat},
     magick::{MagickError, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
     process::{Process, ProcessRead},
@@ -14,7 +15,7 @@ pub(super) async fn convert_image<S>(
     input: ImageFormat,
     output: ImageFormat,
     quality: Option<u8>,
-    bytes: Bytes,
+    bytes: BytesStream,
 ) -> Result<ProcessRead, MagickError> {
     convert(
         state,
@@ -32,7 +33,7 @@ pub(super) async fn convert_animation<S>(
     input: AnimationFormat,
     output: AnimationFormat,
     quality: Option<u8>,
-    bytes: Bytes,
+    bytes: BytesStream,
 ) -> Result<ProcessRead, MagickError> {
     convert(
         state,
@@ -51,7 +52,7 @@ async fn convert<S>(
     output: &'static str,
     coalesce: bool,
     quality: Option<u8>,
-    bytes: Bytes,
+    bytes: BytesStream,
 ) -> Result<ProcessRead, MagickError> {
     let temporary_path = state
         .tmp_dir
@@ -69,7 +70,7 @@ async fn convert<S>(
         .await
         .map_err(MagickError::CreateFile)?;
     tmp_one
-        .write_from_bytes(bytes)
+        .write_from_stream(bytes.into_io_stream())
         .await
         .map_err(MagickError::Write)?;
     tmp_one.close().await.map_err(MagickError::CloseFile)?;

@@ -30,7 +30,7 @@ pub(crate) struct Session {
 }
 
 #[tracing::instrument(skip(stream))]
-async fn aggregate<S>(stream: S) -> Result<Bytes, Error>
+async fn aggregate<S>(stream: S) -> Result<BytesStream, Error>
 where
     S: Stream<Item = Result<Bytes, Error>>,
 {
@@ -45,7 +45,7 @@ where
         buf.add_bytes(res?);
     }
 
-    Ok(buf.into_bytes())
+    Ok(buf)
 }
 
 async fn process_ingest<S>(
@@ -70,7 +70,7 @@ where
     let permit = crate::process_semaphore().acquire().await?;
 
     tracing::trace!("Validating bytes");
-    let (input_type, process_read) = crate::validate::validate_bytes(state, bytes).await?;
+    let (input_type, process_read) = crate::validate::validate_bytes_stream(state, bytes).await?;
 
     let process_read = if let Some(operations) = state.config.media.preprocess_steps() {
         if let Some(format) = input_type.processable_format() {
@@ -116,7 +116,7 @@ where
         .await??;
 
     let bytes_stream = state.store.to_bytes(&identifier, None, None).await?;
-    let details = Details::from_bytes(state, bytes_stream.into_bytes()).await?;
+    let details = Details::from_bytes_stream(state, bytes_stream).await?;
 
     drop(permit);
 
