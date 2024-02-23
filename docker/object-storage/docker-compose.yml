@@ -29,14 +29,14 @@ services:
   #     - PICTRS_PROXY_UPSTREAM=http://pictrs:8080
   #     - PICTRS_PROXY_OPENTELEMETRY_URL=http://jaeger:4317
 
-  minio:
-    image: quay.io/minio/minio
-    command: server /mnt --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - ./storage/minio:/mnt
+  # minio:
+  #   image: quay.io/minio/minio
+  #   command: server /mnt --console-address ":9001"
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   volumes:
+  #     - ./storage/minio:/mnt
 
   garage:
     image: dxflrs/garage:v0.9.0
