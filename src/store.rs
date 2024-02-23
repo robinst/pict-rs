@@ -91,7 +91,7 @@ pub(crate) trait Store: Clone + Debug {
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        Reader: AsyncRead + Unpin + 'static;
+        Reader: AsyncRead;
 
     async fn save_stream<S>(
         &self,
@@ -99,7 +99,7 @@ pub(crate) trait Store: Clone + Debug {
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static;
+        S: Stream<Item = std::io::Result<Bytes>>;
 
     async fn save_bytes(
         &self,
@@ -156,7 +156,7 @@ where
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        Reader: AsyncRead + Unpin + 'static,
+        Reader: AsyncRead,
     {
         T::save_async_read(self, reader, content_type).await
     }
@@ -167,7 +167,7 @@ where
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+        S: Stream<Item = std::io::Result<Bytes>>,
     {
         T::save_stream(self, stream, content_type).await
     }
@@ -227,7 +227,7 @@ where
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        Reader: AsyncRead + Unpin + 'static,
+        Reader: AsyncRead,
     {
         T::save_async_read(self, reader, content_type).await
     }
@@ -238,7 +238,7 @@ where
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+        S: Stream<Item = std::io::Result<Bytes>>,
     {
         T::save_stream(self, stream, content_type).await
     }
@@ -298,7 +298,7 @@ where
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        Reader: AsyncRead + Unpin + 'static,
+        Reader: AsyncRead,
     {
         T::save_async_read(self, reader, content_type).await
     }
@@ -309,7 +309,7 @@ where
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+        S: Stream<Item = std::io::Result<Bytes>>,
     {
         T::save_stream(self, stream, content_type).await
     }

@@ -126,7 +126,7 @@ where
         Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
     });
 
-    let reader = Box::pin(tokio_util::io::StreamReader::new(stream));
+    let reader = tokio_util::io::StreamReader::new(stream);
 
     let hasher_reader = Hasher::new(reader);
     let hash_state = hasher_reader.state();

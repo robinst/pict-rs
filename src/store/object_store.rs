@@ -170,7 +170,7 @@ fn payload_to_io_error(e: reqwest::Error) -> std::io::Error {
 #[tracing::instrument(level = "debug", skip(stream))]
 async fn read_chunk<S>(stream: &mut S) -> Result<BytesStream, ObjectError>
 where
-    S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+    S: Stream<Item = std::io::Result<Bytes>> + Unpin,
 {
     let mut buf = BytesStream::new();
 
@@ -229,7 +229,7 @@ impl Store for ObjectStore {
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        Reader: AsyncRead + Unpin + 'static,
+        Reader: AsyncRead,
     {
         self.save_stream(ReaderStream::with_capacity(reader, 1024 * 64), content_type)
             .await
@@ -238,12 +238,14 @@ impl Store for ObjectStore {
     #[tracing::instrument(skip_all)]
     async fn save_stream<S>(
         &self,
-        mut stream: S,
+        stream: S,
         content_type: mime::Mime,
     ) -> Result<Arc<str>, StoreError>
     where
-        S: Stream<Item = std::io::Result<Bytes>> + Unpin + 'static,
+        S: Stream<Item = std::io::Result<Bytes>>,
     {
+        let mut stream = std::pin::pin!(stream);
+
         let first_chunk = read_chunk(&mut stream).await?;
 
         if first_chunk.len() < CHUNK_SIZE {
