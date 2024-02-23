@@ -1,4 +1,3 @@
-use actix_web::web::Bytes;
 use std::{
     ffi::OsStr,
     future::Future,
@@ -6,14 +5,17 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncReadExt,
     process::{Child, ChildStdin, Command},
 };
+use tokio_util::io::ReaderStream;
 use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::{
+    bytes_stream::BytesStream,
     error_code::ErrorCode,
     future::{LocalBoxFuture, WithTimeout},
     read::BoxRead,
@@ -232,12 +234,11 @@ impl Process {
         }
     }
 
-    pub(crate) fn bytes_read(self, input: Bytes) -> ProcessRead {
+    pub(crate) fn bytes_stream_read(self, input: BytesStream) -> ProcessRead {
         self.spawn_fn(move |mut stdin| {
-            let mut input = input;
             async move {
-                match stdin.write_all_buf(&mut input).await {
-                    Ok(()) => Ok(()),
+                match tokio::io::copy(&mut input.into_reader(), &mut stdin).await {
+                    Ok(_) => Ok(()),
                     // BrokenPipe means we finished reading from Stdout, so we don't need to write
                     // to stdin. We'll still error out if the command failed so treat this as a
                     // success
@@ -315,6 +316,16 @@ impl ProcessRead {
             id,
             extras: Box::new(()),
         }
+    }
+
+    pub(crate) async fn into_bytes_stream(self) -> Result<BytesStream, ProcessError> {
+        let cmd = self.command.clone();
+
+        self.with_stdout(move |stdout| {
+            BytesStream::try_from_stream(ReaderStream::with_capacity(stdout, 1024 * 64))
+        })
+        .await?
+        .map_err(move |e| ProcessError::Read(cmd, e))
     }
 
     pub(crate) async fn into_vec(self) -> Result<Vec<u8>, ProcessError> {

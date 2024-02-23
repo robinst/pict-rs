@@ -387,10 +387,9 @@ async fn fetch_or_generate_details<S: Store>(
         Ok(details)
     } else {
         let bytes_stream = state.store.to_bytes(identifier, None, None).await?;
-        let bytes = bytes_stream.into_bytes();
 
         let guard = details_semaphore().acquire().await?;
-        let details = Details::from_bytes(state, bytes).await?;
+        let details = Details::from_bytes_stream(state, bytes_stream).await?;
         drop(guard);
 
         Ok(details)

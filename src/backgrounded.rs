@@ -54,9 +54,9 @@ impl Backgrounded {
     {
         self.upload_id = Some(self.repo.create_upload().await?);
 
-        let stream = Box::pin(crate::stream::map_err(stream, |e| {
+        let stream = crate::stream::map_err(stream, |e| {
             std::io::Error::new(std::io::ErrorKind::Other, e)
-        }));
+        });
 
         // use octet-stream, we don't know the upload's real type yet
         let identifier = store.save_stream(stream, APPLICATION_OCTET_STREAM).await?;

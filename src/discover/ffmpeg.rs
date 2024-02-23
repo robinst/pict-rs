@@ -4,6 +4,7 @@ mod tests;
 use std::{collections::HashSet, sync::OnceLock};
 
 use crate::{
+    bytes_stream::BytesStream,
     ffmpeg::FfMpegError,
     formats::{
         AlphaCodec, AnimationFormat, ImageFormat, ImageInput, InputFile, InputVideoFormat,
@@ -12,7 +13,7 @@ use crate::{
     process::Process,
     state::State,
 };
-use actix_web::web::Bytes;
+
 
 use super::Discovery;
 
@@ -158,15 +159,15 @@ struct Flags {
 }
 
 #[tracing::instrument(skip_all)]
-pub(super) async fn discover_bytes<S>(
+pub(super) async fn discover_bytes_stream<S>(
     state: &State<S>,
-    bytes: Bytes,
+    bytes: BytesStream,
 ) -> Result<Option<Discovery>, FfMpegError> {
     discover_file(state, move |mut file| {
         let bytes = bytes.clone();
 
         async move {
-            file.write_from_bytes(bytes)
+            file.write_from_stream(bytes.into_io_stream())
                 .await
                 .map_err(FfMpegError::Write)?;
             Ok(file)

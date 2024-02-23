@@ -14,7 +14,6 @@ use actix_web::web::Bytes;
 use futures_core::Stream;
 use reqwest::Body;
 
-use streem::IntoStreamer;
 use tracing::{Instrument, Span};
 
 mod hasher;
@@ -27,25 +26,6 @@ pub(crate) struct Session {
     hash: Option<Hash>,
     alias: Option<Alias>,
     identifier: Option<Arc<str>>,
-}
-
-#[tracing::instrument(skip(stream))]
-async fn aggregate<S>(stream: S) -> Result<Bytes, Error>
-where
-    S: Stream<Item = Result<Bytes, Error>>,
-{
-    let mut buf = BytesStream::new();
-
-    let stream = std::pin::pin!(stream);
-    let mut stream = stream.into_streamer();
-
-    while let Some(res) = stream.next().await {
-        tracing::trace!("aggregate: looping");
-
-        buf.add_bytes(res?);
-    }
-
-    Ok(buf.into_bytes())
 }
 
 async fn process_ingest<S>(
@@ -63,14 +43,17 @@ async fn process_ingest<S>(
 where
     S: Store,
 {
-    let bytes = tokio::time::timeout(Duration::from_secs(60), aggregate(stream))
-        .await
-        .map_err(|_| UploadError::AggregateTimeout)??;
+    let bytes = tokio::time::timeout(
+        Duration::from_secs(60),
+        BytesStream::try_from_stream(stream),
+    )
+    .await
+    .map_err(|_| UploadError::AggregateTimeout)??;
 
     let permit = crate::process_semaphore().acquire().await?;
 
     tracing::trace!("Validating bytes");
-    let (input_type, process_read) = crate::validate::validate_bytes(state, bytes).await?;
+    let (input_type, process_read) = crate::validate::validate_bytes_stream(state, bytes).await?;
 
     let process_read = if let Some(operations) = state.config.media.preprocess_steps() {
         if let Some(format) = input_type.processable_format() {
@@ -116,7 +99,7 @@ where
         .await??;
 
     let bytes_stream = state.store.to_bytes(&identifier, None, None).await?;
-    let details = Details::from_bytes(state, bytes_stream.into_bytes()).await?;
+    let details = Details::from_bytes_stream(state, bytes_stream).await?;
 
     drop(permit);
 
@@ -143,7 +126,7 @@ where
         Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
     });
 
-    let reader = Box::pin(tokio_util::io::StreamReader::new(stream));
+    let reader = tokio_util::io::StreamReader::new(stream);
 
     let hasher_reader = Hasher::new(reader);
     let hash_state = hasher_reader.state();

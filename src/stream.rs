@@ -183,13 +183,6 @@ where
     streem::from_fn(|_| std::future::ready(()))
 }
 
-pub(crate) fn once<T>(value: T) -> impl Stream<Item = T>
-where
-    T: 'static,
-{
-    streem::from_fn(|yielder| yielder.yield_(value))
-}
-
 pub(crate) fn timeout<S>(
     duration: Duration,
     stream: S,

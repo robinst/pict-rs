@@ -3,6 +3,7 @@ mod ffmpeg;
 mod magick;
 
 use crate::{
+    bytes_stream::BytesStream,
     discover::Discovery,
     error::Error,
     error_code::ErrorCode,
@@ -13,7 +14,7 @@ use crate::{
     process::ProcessRead,
     state::State,
 };
-use actix_web::web::Bytes;
+
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ValidationError {
@@ -56,9 +57,9 @@ impl ValidationError {
 const MEGABYTES: usize = 1024 * 1024;
 
 #[tracing::instrument(skip_all)]
-pub(crate) async fn validate_bytes<S>(
+pub(crate) async fn validate_bytes_stream<S>(
     state: &State<S>,
-    bytes: Bytes,
+    bytes: BytesStream,
 ) -> Result<(InternalFormat, ProcessRead), Error> {
     if bytes.is_empty() {
         return Err(ValidationError::Empty.into());
@@ -69,7 +70,7 @@ pub(crate) async fn validate_bytes<S>(
         width,
         height,
         frames,
-    } = crate::discover::discover_bytes(state, bytes.clone()).await?;
+    } = crate::discover::discover_bytes_stream(state, bytes.clone()).await?;
 
     match &input {
         InputFile::Image(input) => {
@@ -95,7 +96,7 @@ pub(crate) async fn validate_bytes<S>(
 #[tracing::instrument(skip(state, bytes), fields(len = bytes.len()))]
 async fn process_image<S>(
     state: &State<S>,
-    bytes: Bytes,
+    bytes: BytesStream,
     input: ImageInput,
     width: u16,
     height: u16,
@@ -160,7 +161,7 @@ fn validate_animation(
 #[tracing::instrument(skip(state, bytes), fields(len = bytes.len()))]
 async fn process_animation<S>(
     state: &State<S>,
-    bytes: Bytes,
+    bytes: BytesStream,
     input: AnimationFormat,
     width: u16,
     height: u16,
@@ -218,7 +219,7 @@ fn validate_video(
 #[tracing::instrument(skip(state, bytes), fields(len = bytes.len()))]
 async fn process_video<S>(
     state: &State<S>,
-    bytes: Bytes,
+    bytes: BytesStream,
     input: InputVideoFormat,
     width: u16,
     height: u16,

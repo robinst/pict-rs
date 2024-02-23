@@ -396,7 +396,7 @@ where
             .await
             .map_err(From::from)
             .map_err(MigrateError::Details)?;
-        let new_details = Details::from_bytes(to, bytes_stream.into_bytes())
+        let new_details = Details::from_bytes_stream(to, bytes_stream)
             .await
             .map_err(MigrateError::Details)?;
         to.repo

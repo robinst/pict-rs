@@ -11,7 +11,7 @@ use crate::{
     state::State,
     store::Store,
 };
-use actix_web::web::Bytes;
+
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -57,7 +57,7 @@ pub(crate) async fn generate<S: Store + 'static>(
     thumbnail_args: Vec<String>,
     original_details: &Details,
     hash: Hash,
-) -> Result<(Details, Bytes), Error> {
+) -> Result<(Details, Arc<str>), Error> {
     if state.config.server.danger_dummy_mode {
         let identifier = state
             .repo
@@ -65,13 +65,7 @@ pub(crate) async fn generate<S: Store + 'static>(
             .await?
             .ok_or(UploadError::MissingIdentifier)?;
 
-        let bytes = state
-            .store
-            .to_bytes(&identifier, None, None)
-            .await?
-            .into_bytes();
-
-        Ok((original_details.clone(), bytes))
+        Ok((original_details.clone(), identifier))
     } else {
         let process_fut = process(
             state,
@@ -82,14 +76,14 @@ pub(crate) async fn generate<S: Store + 'static>(
             hash.clone(),
         );
 
-        let (details, bytes) = process_map
+        let (details, identifier) = process_map
             .process(hash, thumbnail_path, process_fut)
             .with_timeout(Duration::from_secs(state.config.media.process_timeout * 4))
             .with_metrics(crate::init_metrics::GENERATE_PROCESS)
             .await
             .map_err(|_| UploadError::ProcessTimeout)??;
 
-        Ok((details, bytes))
+        Ok((details, identifier))
     }
 }
 
@@ -101,7 +95,7 @@ async fn process<S: Store + 'static>(
     thumbnail_args: Vec<String>,
     original_details: &Details,
     hash: Hash,
-) -> Result<(Details, Bytes), Error> {
+) -> Result<(Details, Arc<str>), Error> {
     let guard = MetricsGuard::guard();
     let permit = crate::process_semaphore().acquire().await?;
 
@@ -123,7 +117,7 @@ async fn process<S: Store + 'static>(
 
     let stream = state.store.to_stream(&identifier, None, None).await?;
 
-    let vec = crate::magick::process_image_stream_read(
+    let bytes = crate::magick::process_image_stream_read(
         state,
         stream,
         thumbnail_args,
@@ -132,19 +126,19 @@ async fn process<S: Store + 'static>(
         quality,
     )
     .await?
-    .into_vec()
-    .instrument(tracing::info_span!("Reading processed image to vec"))
+    .into_bytes_stream()
+    .instrument(tracing::info_span!(
+        "Reading processed image to BytesStream"
+    ))
     .await?;
-
-    let bytes = Bytes::from(vec);
 
     drop(permit);
 
-    let details = Details::from_bytes(state, bytes.clone()).await?;
+    let details = Details::from_bytes_stream(state, bytes.clone()).await?;
 
     let identifier = state
         .store
-        .save_bytes(bytes.clone(), details.media_type())
+        .save_stream(bytes.into_io_stream(), details.media_type())
         .await?;
 
     if let Err(VariantAlreadyExists) = state
@@ -163,7 +157,7 @@ async fn process<S: Store + 'static>(
 
     guard.disarm();
 
-    Ok((details, bytes)) as Result<(Details, Bytes), Error>
+    Ok((details, identifier)) as Result<(Details, Arc<str>), Error>
 }
 
 #[tracing::instrument(skip_all)]
