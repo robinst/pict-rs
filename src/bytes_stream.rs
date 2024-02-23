@@ -143,11 +143,3 @@ impl AsyncRead for BytesReader {
         Poll::Ready(Ok(()))
     }
 }
-
-impl From<Bytes> for BytesStream {
-    fn from(value: Bytes) -> Self {
-        let mut bs = BytesStream::new();
-        bs.add_bytes(value);
-        bs
-    }
-}
