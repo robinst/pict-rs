@@ -280,12 +280,12 @@ fn generate_policy(media: &Media) -> String {
     <policy domain="cache" name="synchronize" value="true"/>
     <policy domain="path" rights="none" pattern="@*" />
     <policy domain="coder" rights="none" pattern="*" />
-    <policy domain="coder" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,WEBP,MP4,WEBM,TMP,PAM}}" />
+    <policy domain="coder" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,RGB,RGBA,WEBP,MP4,WEBM,TMP,PAM}}" />
     <policy domain="delegate" rights="none" pattern="*" />
     <policy domain="delegate" rights="execute" pattern="FFMPEG" />
     <policy domain="filter" rights="none" pattern="*" />
     <policy domain="module" rights="none" pattern="*" />
-    <policy domain="module" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,WEBP,TMP,PAM,PNM,VIDEO}}" />
+    <policy domain="module" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,RGB,RGBA,WEBP,TMP,PAM,PNM,VIDEO}}" />
         <!-- indirect reads not permitted -->
     <policy domain="system" name="max-memory-request" value="256MiB"/>
     <policy domain="system" name="memory-map" value="anonymous"/>

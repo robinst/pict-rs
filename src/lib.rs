@@ -1,4 +1,5 @@
 mod backgrounded;
+mod blurhash;
 mod bytes_stream;
 mod concurrent_processor;
 mod config;
@@ -1277,6 +1278,44 @@ fn srv_head(
     builder
 }
 
+async fn blurhash<S: Store + 'static>(
+    web::Query(alias_query): web::Query<AliasQuery>,
+    state: web::Data<State<S>>,
+) -> Result<HttpResponse, Error> {
+    let alias = match alias_query {
+        AliasQuery::Alias { alias } => Serde::into_inner(alias),
+        AliasQuery::Proxy { proxy } => {
+            let alias = if let Some(alias) = state.repo.related(proxy.clone()).await? {
+                alias
+            } else if !state.config.server.read_only {
+                let stream = download_stream(proxy.as_str(), &state).await?;
+
+                let (alias, _, _) = ingest_inline(stream, &state).await?;
+
+                state.repo.relate_url(proxy, alias.clone()).await?;
+
+                alias
+            } else {
+                return Err(UploadError::ReadOnly.into());
+            };
+
+            if !state.config.server.read_only {
+                state.repo.accessed_alias(alias.clone()).await?;
+            }
+
+            alias
+        }
+    };
+
+    let details = ensure_details(&state, &alias).await?;
+    let blurhash = blurhash::generate(&state, &alias, &details).await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "msg": "ok",
+        "blurhash": blurhash,
+    })))
+}
+
 #[derive(serde::Serialize)]
 struct PruneResponse {
     complete: bool,
@@ -1561,6 +1600,7 @@ fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
                                 .route(web::head().to(serve_head::<S>)),
                         ),
                 )
+                .service(web::resource("/blurhash").route(web::get().to(blurhash::<S>)))
                 .service(
                     web::resource("/process.{ext}")
                         .route(web::get().to(process::<S>))
