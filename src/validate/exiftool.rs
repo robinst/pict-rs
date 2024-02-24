@@ -1,16 +1,11 @@
-use crate::{
-    bytes_stream::BytesStream,
-    exiftool::ExifError,
-    process::{Process, ProcessRead},
-};
+use crate::{exiftool::ExifError, process::Process};
 
 #[tracing::instrument(level = "trace", skip_all)]
-pub(super) fn clear_metadata_bytes_read(
-    input: BytesStream,
-    timeout: u64,
-) -> Result<ProcessRead, ExifError> {
-    Ok(
-        Process::run("exiftool", &["-all=", "-", "-out", "-"], &[], timeout)?
-            .bytes_stream_read(input),
-    )
+pub(super) fn clear_metadata_command(timeout: u64) -> Result<Process, ExifError> {
+    Ok(Process::run(
+        "exiftool",
+        &["-all=", "-", "-out", "-"],
+        &[],
+        timeout,
+    )?)
 }

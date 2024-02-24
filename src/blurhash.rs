@@ -1,15 +1,13 @@
 use std::ffi::{OsStr, OsString};
 
-use futures_core::Stream;
 use tokio::io::AsyncReadExt;
-use tokio_util::bytes::Bytes;
 
 use crate::{
     details::Details,
     error::{Error, UploadError},
     formats::ProcessableFormat,
     magick::{MagickError, MAGICK_CONFIGURE_PATH, MAGICK_TEMPORARY_PATH},
-    process::{Process, ProcessRead},
+    process::Process,
     repo::Alias,
     state::State,
     store::Store,
@@ -43,47 +41,44 @@ where
 
     let stream = state.store.to_stream(&identifier, None, None).await?;
 
-    let process = read_rgba(
+    let blurhash = read_rgba_command(
         state,
         input_details
             .internal_format()
             .processable_format()
             .expect("not a video"),
-        stream,
     )
-    .await?;
+    .await?
+    .drive_with_stream(stream)
+    .with_stdout(|mut stdout| async move {
+        let mut encoder = blurhash_update::Encoder::auto(blurhash_update::ImageBounds {
+            width: input_details.width() as _,
+            height: input_details.height() as _,
+        });
 
-    let blurhash = process
-        .with_stdout(|mut stdout| async move {
-            let mut encoder = blurhash_update::Encoder::auto(blurhash_update::ImageBounds {
-                width: input_details.width() as _,
-                height: input_details.height() as _,
-            });
+        let mut buf = [0u8; 1024 * 8];
 
-            let mut buf = [0u8; 1024 * 8];
+        loop {
+            let n = stdout.read(&mut buf).await?;
 
-            loop {
-                let n = stdout.read(&mut buf).await?;
-
-                if n == 0 {
-                    break;
-                }
-
-                encoder.update(&buf[..n]);
+            if n == 0 {
+                break;
             }
 
-            Ok(encoder.finalize()) as std::io::Result<String>
-        })
-        .await??;
+            encoder.update(&buf[..n]);
+        }
+
+        Ok(encoder.finalize()) as std::io::Result<String>
+    })
+    .await??;
 
     Ok(blurhash)
 }
 
-async fn read_rgba<S>(
+async fn read_rgba_command<S>(
     state: &State<S>,
     input_format: ProcessableFormat,
-    stream: impl Stream<Item = std::io::Result<Bytes>> + 'static,
-) -> Result<ProcessRead, MagickError> {
+) -> Result<Process, MagickError> {
     let temporary_path = state
         .tmp_dir
         .tmp_folder()
@@ -104,7 +99,6 @@ async fn read_rgba<S>(
     ];
 
     let process = Process::run("magick", &args, &envs, state.config.media.process_timeout)?
-        .stream_read(stream)
         .add_extras(temporary_path);
 
     Ok(process)
