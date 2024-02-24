@@ -6,11 +6,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use futures_core::Stream;
+use streem::IntoStreamer;
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStdin, Command},
 };
-use tokio_util::io::ReaderStream;
+use tokio_util::{bytes::Bytes, io::ReaderStream};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -246,6 +248,26 @@ impl Process {
                     Err(e) => Err(e),
                 }
             }
+        })
+    }
+
+    pub(crate) fn stream_read<S>(self, input: S) -> ProcessRead
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + 'static,
+    {
+        self.spawn_fn(move |mut stdin| async move {
+            let stream = std::pin::pin!(input);
+            let mut stream = stream.into_streamer();
+
+            while let Some(mut bytes) = stream.try_next().await? {
+                match stdin.write_all_buf(&mut bytes).await {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => break,
+                    Err(e) => return Err(e),
+                }
+            }
+
+            Ok(())
         })
     }
 

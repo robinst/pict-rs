@@ -1,6 +1,8 @@
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 
+use futures_core::Stream;
 use tokio::io::AsyncReadExt;
+use tokio_util::bytes::Bytes;
 
 use crate::{
     details::Details,
@@ -47,13 +49,7 @@ where
             .internal_format()
             .processable_format()
             .expect("not a video"),
-        |mut tmp_file| async move {
-            tmp_file
-                .write_from_stream(stream)
-                .await
-                .map_err(MagickError::Write)?;
-            Ok(tmp_file)
-        },
+        stream,
     )
     .await?;
 
@@ -83,37 +79,19 @@ where
     Ok(blurhash)
 }
 
-async fn read_rgba<S, F, Fut>(
+async fn read_rgba<S>(
     state: &State<S>,
     input_format: ProcessableFormat,
-    write_file: F,
-) -> Result<ProcessRead, MagickError>
-where
-    F: FnOnce(crate::file::File) -> Fut,
-    Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
-{
+    stream: impl Stream<Item = std::io::Result<Bytes>> + 'static,
+) -> Result<ProcessRead, MagickError> {
     let temporary_path = state
         .tmp_dir
         .tmp_folder()
         .await
         .map_err(MagickError::CreateTemporaryDirectory)?;
 
-    let input_file = state.tmp_dir.tmp_file(None);
-    crate::store::file_store::safe_create_parent(&input_file)
-        .await
-        .map_err(MagickError::CreateDir)?;
-
-    let tmp_one = crate::file::File::create(&input_file)
-        .await
-        .map_err(MagickError::CreateFile)?;
-    let tmp_one = (write_file)(tmp_one).await?;
-    tmp_one.close().await.map_err(MagickError::CloseFile)?;
-
-    let mut input_arg = [
-        input_format.magick_format().as_ref(),
-        input_file.as_os_str(),
-    ]
-    .join(":".as_ref());
+    let mut input_arg = OsString::from(input_format.magick_format());
+    input_arg.push(":-");
     if input_format.coalesce() {
         input_arg.push("[0]");
     }
@@ -126,8 +104,7 @@ where
     ];
 
     let process = Process::run("magick", &args, &envs, state.config.media.process_timeout)?
-        .read()
-        .add_extras(input_file)
+        .stream_read(stream)
         .add_extras(temporary_path);
 
     Ok(process)
