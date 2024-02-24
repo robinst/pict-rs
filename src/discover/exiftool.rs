@@ -1,5 +1,3 @@
-
-
 use crate::{
     bytes_stream::BytesStream,
     exiftool::ExifError,
