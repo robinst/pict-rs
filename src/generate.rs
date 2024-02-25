@@ -217,7 +217,7 @@ where
         .relate_motion_identifier(hash, &motion_identifier)
         .await?;
 
-    return Ok(motion_identifier);
+    Ok(motion_identifier)
 }
 
 #[tracing::instrument(skip_all)]
