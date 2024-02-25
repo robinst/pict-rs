@@ -100,6 +100,14 @@ impl Details {
         ))
     }
 
+    pub(crate) fn width(&self) -> u16 {
+        self.inner.width
+    }
+
+    pub(crate) fn height(&self) -> u16 {
+        self.inner.height
+    }
+
     pub(crate) fn internal_format(&self) -> InternalFormat {
         self.inner.format
     }
@@ -110,6 +118,10 @@ impl Details {
 
     pub(crate) fn system_time(&self) -> std::time::SystemTime {
         self.inner.created_at.into()
+    }
+
+    pub(crate) fn is_video(&self) -> bool {
+        matches!(self.inner.format, InternalFormat::Video(_))
     }
 
     pub(crate) fn video_format(&self) -> Option<InternalVideoFormat> {

@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests;
 
-
-
 use crate::{
     bytes_stream::BytesStream,
     discover::DiscoverError,
@@ -50,38 +48,16 @@ pub(super) async fn confirm_bytes_stream<S>(
         }
     }
 
-    discover_file(state, move |mut file| async move {
-        file.write_from_stream(bytes.into_io_stream())
-            .await
-            .map_err(MagickError::Write)?;
-
-        Ok(file)
-    })
-    .await
+    discover(state, bytes).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn discover_file<S, F, Fut>(state: &State<S>, f: F) -> Result<Discovery, MagickError>
-where
-    F: FnOnce(crate::file::File) -> Fut,
-    Fut: std::future::Future<Output = Result<crate::file::File, MagickError>>,
-{
+async fn discover<S>(state: &State<S>, stream: BytesStream) -> Result<Discovery, MagickError> {
     let temporary_path = state
         .tmp_dir
         .tmp_folder()
         .await
         .map_err(MagickError::CreateTemporaryDirectory)?;
-
-    let input_file = state.tmp_dir.tmp_file(None);
-    crate::store::file_store::safe_create_parent(&input_file)
-        .await
-        .map_err(MagickError::CreateDir)?;
-
-    let tmp_one = crate::file::File::create(&input_file)
-        .await
-        .map_err(MagickError::CreateFile)?;
-    let tmp_one = (f)(tmp_one).await?;
-    tmp_one.close().await.map_err(MagickError::CloseFile)?;
 
     let envs = [
         (MAGICK_TEMPORARY_PATH, temporary_path.as_os_str()),
@@ -91,19 +67,16 @@ where
     let res = Process::run(
         "magick",
         &[
-            "convert".as_ref(),
-            // "-ping".as_ref(), // re-enable -ping after imagemagick fix
-            input_file.as_os_str(),
-            "JSON:".as_ref(),
+            "convert", // "-ping".as_ref(), // re-enable -ping after imagemagick fix
+            "-", "JSON:",
         ],
         &envs,
         state.config.media.process_timeout,
     )?
-    .read()
+    .drive_with_async_read(stream.into_reader())
     .into_string()
     .await;
 
-    input_file.cleanup().await.map_err(MagickError::Cleanup)?;
     temporary_path
         .cleanup()
         .await

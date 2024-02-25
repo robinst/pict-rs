@@ -6,11 +6,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use futures_core::Stream;
+use streem::IntoStreamer;
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStdin, Command},
 };
-use tokio_util::io::ReaderStream;
+use tokio_util::{bytes::Bytes, io::ReaderStream};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -65,6 +67,7 @@ pub(crate) struct Process {
     child: Child,
     guard: MetricsGuard,
     timeout: Duration,
+    extras: Box<dyn Extras>,
     id: Uuid,
 }
 
@@ -202,9 +205,17 @@ impl Process {
                 command,
                 guard,
                 timeout: Duration::from_secs(timeout),
+                extras: Box::new(()),
                 id: Uuid::now_v7(),
             })
         })
+    }
+
+    pub(crate) fn add_extras(self, extra: impl Extras + 'static) -> Self {
+        Self {
+            extras: Box::new((self.extras, extra)),
+            ..self
+        }
     }
 
     #[tracing::instrument(skip(self), fields(command = %self.command, id = %self.id))]
@@ -214,10 +225,16 @@ impl Process {
             mut child,
             guard,
             timeout,
+            mut extras,
             id: _,
         } = self;
 
         let res = child.wait().with_timeout(timeout).await;
+
+        extras
+            .consume()
+            .await
+            .map_err(|e| ProcessError::Cleanup(command.clone(), e))?;
 
         match res {
             Ok(Ok(status)) if status.success() => {
@@ -234,10 +251,12 @@ impl Process {
         }
     }
 
-    pub(crate) fn bytes_stream_read(self, input: BytesStream) -> ProcessRead {
-        self.spawn_fn(move |mut stdin| {
+    pub(crate) fn drive_with_async_read(self, input: impl AsyncRead + 'static) -> ProcessRead {
+        self.drive(move |mut stdin| {
             async move {
-                match tokio::io::copy(&mut input.into_reader(), &mut stdin).await {
+                let mut input = std::pin::pin!(input);
+
+                match tokio::io::copy(&mut input, &mut stdin).await {
                     Ok(_) => Ok(()),
                     // BrokenPipe means we finished reading from Stdout, so we don't need to write
                     // to stdin. We'll still error out if the command failed so treat this as a
@@ -249,14 +268,34 @@ impl Process {
         })
     }
 
+    pub(crate) fn drive_with_stream<S>(self, input: S) -> ProcessRead
+    where
+        S: Stream<Item = std::io::Result<Bytes>> + 'static,
+    {
+        self.drive(move |mut stdin| async move {
+            let stream = std::pin::pin!(input);
+            let mut stream = stream.into_streamer();
+
+            while let Some(mut bytes) = stream.try_next().await? {
+                match stdin.write_all_buf(&mut bytes).await {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => break,
+                    Err(e) => return Err(e),
+                }
+            }
+
+            Ok(())
+        })
+    }
+
     pub(crate) fn read(self) -> ProcessRead {
-        self.spawn_fn(|_| async { Ok(()) })
+        self.drive(|_| async { Ok(()) })
     }
 
     #[allow(unknown_lints)]
     #[allow(clippy::let_with_type_underscore)]
     #[tracing::instrument(level = "trace", skip_all)]
-    fn spawn_fn<F, Fut>(self, f: F) -> ProcessRead
+    fn drive<F, Fut>(self, f: F) -> ProcessRead
     where
         F: FnOnce(ChildStdin) -> Fut + 'static,
         Fut: Future<Output = std::io::Result<()>>,
@@ -266,6 +305,7 @@ impl Process {
             mut child,
             guard,
             timeout,
+            extras,
             id,
         } = self;
 
@@ -302,7 +342,7 @@ impl Process {
             handle,
             command,
             id,
-            extras: Box::new(()),
+            extras,
         }
     }
 }
@@ -356,6 +396,58 @@ impl ProcessRead {
                 .map(move |_| s)
         })
         .await?
+    }
+
+    pub(crate) fn pipe(self, process: Process) -> ProcessRead {
+        let Process {
+            command,
+            mut child,
+            guard,
+            timeout,
+            extras,
+            id,
+        } = process;
+
+        let mut stdin = child.stdin.take().expect("stdin exists");
+        let stdout = child.stdout.take().expect("stdout exists");
+
+        let command2 = command.clone();
+        let handle = Box::pin(async move {
+            self.with_stdout(move |mut stdout| async move {
+                let child_fut = async {
+                    tokio::io::copy(&mut stdout, &mut stdin).await?;
+                    drop(stdout);
+                    drop(stdin);
+
+                    child.wait().await
+                };
+
+                match child_fut.with_timeout(timeout).await {
+                    Ok(Ok(status)) if status.success() => {
+                        guard.disarm();
+                        Ok(())
+                    }
+                    Ok(Ok(status)) => Err(ProcessError::Status(command2, status)),
+                    Ok(Err(e)) => Err(ProcessError::Other(command2, e)),
+                    Err(_) => {
+                        child
+                            .kill()
+                            .await
+                            .map_err(|e| ProcessError::Other(command2.clone(), e))?;
+                        Err(ProcessError::Timeout(command2))
+                    }
+                }
+            })
+            .await?
+        });
+
+        ProcessRead {
+            reader: Box::pin(stdout),
+            handle,
+            command,
+            id,
+            extras,
+        }
     }
 
     pub(crate) async fn with_stdout<Fut>(

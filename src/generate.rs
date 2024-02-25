@@ -117,20 +117,15 @@ async fn process<S: Store + 'static>(
 
     let stream = state.store.to_stream(&identifier, None, None).await?;
 
-    let bytes = crate::magick::process_image_stream_read(
-        state,
-        stream,
-        thumbnail_args,
-        input_format,
-        format,
-        quality,
-    )
-    .await?
-    .into_bytes_stream()
-    .instrument(tracing::info_span!(
-        "Reading processed image to BytesStream"
-    ))
-    .await?;
+    let bytes =
+        crate::magick::process_image_command(state, thumbnail_args, input_format, format, quality)
+            .await?
+            .drive_with_stream(stream)
+            .into_bytes_stream()
+            .instrument(tracing::info_span!(
+                "Reading processed image to BytesStream"
+            ))
+            .await?;
 
     drop(permit);
 
@@ -160,48 +155,37 @@ async fn process<S: Store + 'static>(
     Ok((details, identifier)) as Result<(Details, Arc<str>), Error>
 }
 
-#[tracing::instrument(skip_all)]
-async fn input_identifier<S>(
+pub(crate) async fn ensure_motion_identifier<S>(
     state: &State<S>,
-    output_format: InputProcessableFormat,
     hash: Hash,
     original_details: &Details,
 ) -> Result<Arc<str>, Error>
 where
     S: Store + 'static,
 {
-    let should_thumbnail =
-        if let Some(input_format) = original_details.internal_format().processable_format() {
-            let output_format = input_format.process_to(output_format);
+    if let Some(identifier) = state.repo.motion_identifier(hash.clone()).await? {
+        return Ok(identifier);
+    };
 
-            input_format.should_thumbnail(output_format)
-        } else {
-            // video case
-            true
-        };
+    let identifier = state
+        .repo
+        .identifier(hash.clone())
+        .await?
+        .ok_or(UploadError::MissingIdentifier)?;
 
-    if should_thumbnail {
-        if let Some(identifier) = state.repo.motion_identifier(hash.clone()).await? {
-            return Ok(identifier);
-        };
-
-        let identifier = state
-            .repo
-            .identifier(hash.clone())
-            .await?
-            .ok_or(UploadError::MissingIdentifier)?;
-
-        let (reader, media_type) = if let Some(processable_format) =
-            original_details.internal_format().processable_format()
-        {
+    let (reader, media_type) =
+        if let Some(processable_format) = original_details.internal_format().processable_format() {
             let thumbnail_format = state.config.media.image.format.unwrap_or(ImageFormat::Webp);
 
             let stream = state.store.to_stream(&identifier, None, None).await?;
 
-            let reader =
-                magick::thumbnail(state, stream, processable_format, thumbnail_format).await?;
+            let process =
+                magick::thumbnail_command(state, processable_format, thumbnail_format).await?;
 
-            (reader, thumbnail_format.media_type())
+            (
+                process.drive_with_stream(stream),
+                thumbnail_format.media_type(),
+            )
         } else {
             let thumbnail_format = match state.config.media.image.format {
                 Some(ImageFormat::Webp | ImageFormat::Avif | ImageFormat::Jxl) => {
@@ -224,16 +208,40 @@ where
             (reader, thumbnail_format.media_type())
         };
 
-        let motion_identifier = reader
-            .with_stdout(|stdout| async { state.store.save_async_read(stdout, media_type).await })
-            .await??;
+    let motion_identifier = reader
+        .with_stdout(|stdout| async { state.store.save_async_read(stdout, media_type).await })
+        .await??;
 
-        state
-            .repo
-            .relate_motion_identifier(hash, &motion_identifier)
-            .await?;
+    state
+        .repo
+        .relate_motion_identifier(hash, &motion_identifier)
+        .await?;
 
-        return Ok(motion_identifier);
+    Ok(motion_identifier)
+}
+
+#[tracing::instrument(skip_all)]
+async fn input_identifier<S>(
+    state: &State<S>,
+    output_format: InputProcessableFormat,
+    hash: Hash,
+    original_details: &Details,
+) -> Result<Arc<str>, Error>
+where
+    S: Store + 'static,
+{
+    let should_thumbnail =
+        if let Some(input_format) = original_details.internal_format().processable_format() {
+            let output_format = input_format.process_to(output_format);
+
+            input_format.should_thumbnail(output_format)
+        } else {
+            // video case
+            true
+        };
+
+    if should_thumbnail {
+        return ensure_motion_identifier(state, hash.clone(), original_details).await;
     }
 
     state

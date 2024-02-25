@@ -11,10 +11,9 @@ use crate::{
         AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InputVideoFormat,
         InternalFormat,
     },
-    process::ProcessRead,
+    process::{Process, ProcessRead},
     state::State,
 };
-
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ValidationError {
@@ -74,15 +73,23 @@ pub(crate) async fn validate_bytes_stream<S>(
 
     match &input {
         InputFile::Image(input) => {
-            let (format, process_read) = process_image(state, bytes, *input, width, height).await?;
+            let (format, process) =
+                process_image_command(state, *input, bytes.len(), width, height).await?;
 
-            Ok((format, process_read))
+            Ok((format, process.drive_with_async_read(bytes.into_reader())))
         }
         InputFile::Animation(input) => {
-            let (format, process_read) =
-                process_animation(state, bytes, *input, width, height, frames.unwrap_or(1)).await?;
+            let (format, process) = process_animation_command(
+                state,
+                *input,
+                bytes.len(),
+                width,
+                height,
+                frames.unwrap_or(1),
+            )
+            .await?;
 
-            Ok((format, process_read))
+            Ok((format, process.drive_with_async_read(bytes.into_reader())))
         }
         InputFile::Video(input) => {
             let (format, process_read) =
@@ -93,14 +100,14 @@ pub(crate) async fn validate_bytes_stream<S>(
     }
 }
 
-#[tracing::instrument(skip(state, bytes), fields(len = bytes.len()))]
-async fn process_image<S>(
+#[tracing::instrument(skip(state))]
+async fn process_image_command<S>(
     state: &State<S>,
-    bytes: BytesStream,
     input: ImageInput,
+    length: usize,
     width: u16,
     height: u16,
-) -> Result<(InternalFormat, ProcessRead), Error> {
+) -> Result<(InternalFormat, Process), Error> {
     let validations = &state.config.media.image;
 
     if width > validations.max_width {
@@ -112,7 +119,7 @@ async fn process_image<S>(
     if u32::from(width) * u32::from(height) > validations.max_area {
         return Err(ValidationError::Area.into());
     }
-    if bytes.len() > validations.max_file_size * MEGABYTES {
+    if length > validations.max_file_size * MEGABYTES {
         return Err(ValidationError::Filesize.into());
     }
 
@@ -121,15 +128,15 @@ async fn process_image<S>(
         needs_transcode,
     } = input.build_output(validations.format);
 
-    let process_read = if needs_transcode {
+    let process = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        magick::convert_image(state, input.format, format, quality, bytes).await?
+        magick::convert_image_command(state, input.format, format, quality).await?
     } else {
-        exiftool::clear_metadata_bytes_read(bytes, state.config.media.process_timeout)?
+        exiftool::clear_metadata_command(state.config.media.process_timeout)?
     };
 
-    Ok((InternalFormat::Image(format), process_read))
+    Ok((InternalFormat::Image(format), process))
 }
 
 fn validate_animation(
@@ -158,33 +165,33 @@ fn validate_animation(
     Ok(())
 }
 
-#[tracing::instrument(skip(state, bytes), fields(len = bytes.len()))]
-async fn process_animation<S>(
+#[tracing::instrument(skip(state))]
+async fn process_animation_command<S>(
     state: &State<S>,
-    bytes: BytesStream,
     input: AnimationFormat,
+    length: usize,
     width: u16,
     height: u16,
     frames: u32,
-) -> Result<(InternalFormat, ProcessRead), Error> {
+) -> Result<(InternalFormat, Process), Error> {
     let validations = &state.config.media.animation;
 
-    validate_animation(bytes.len(), width, height, frames, validations)?;
+    validate_animation(length, width, height, frames, validations)?;
 
     let AnimationOutput {
         format,
         needs_transcode,
     } = input.build_output(validations.format);
 
-    let process_read = if needs_transcode {
+    let process = if needs_transcode {
         let quality = validations.quality_for(format);
 
-        magick::convert_animation(state, input, format, quality, bytes).await?
+        magick::convert_animation_command(state, input, format, quality).await?
     } else {
-        exiftool::clear_metadata_bytes_read(bytes, state.config.media.process_timeout)?
+        exiftool::clear_metadata_command(state.config.media.process_timeout)?
     };
 
-    Ok((InternalFormat::Animation(format), process_read))
+    Ok((InternalFormat::Animation(format), process))
 }
 
 fn validate_video(

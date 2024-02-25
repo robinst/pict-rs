@@ -69,15 +69,11 @@ where
                 }
             };
 
-            crate::magick::process_image_process_read(
-                state,
-                process_read,
-                magick_args,
-                format,
-                format,
-                quality,
-            )
-            .await?
+            let process =
+                crate::magick::process_image_command(state, magick_args, format, format, quality)
+                    .await?;
+
+            process_read.pipe(process)
         } else {
             process_read
         }
