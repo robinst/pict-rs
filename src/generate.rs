@@ -173,37 +173,40 @@ where
         .await?
         .ok_or(UploadError::MissingIdentifier)?;
 
-    let (reader, media_type) = if let Some(processable_format) =
-        original_details.internal_format().processable_format()
-    {
-        let thumbnail_format = state.config.media.image.format.unwrap_or(ImageFormat::Webp);
+    let (reader, media_type) =
+        if let Some(processable_format) = original_details.internal_format().processable_format() {
+            let thumbnail_format = state.config.media.image.format.unwrap_or(ImageFormat::Webp);
 
-        let stream = state.store.to_stream(&identifier, None, None).await?;
+            let stream = state.store.to_stream(&identifier, None, None).await?;
 
-        let reader = magick::thumbnail(state, stream, processable_format, thumbnail_format).await?;
+            let process =
+                magick::thumbnail_command(state, processable_format, thumbnail_format).await?;
 
-        (reader, thumbnail_format.media_type())
-    } else {
-        let thumbnail_format = match state.config.media.image.format {
-            Some(ImageFormat::Webp | ImageFormat::Avif | ImageFormat::Jxl) => {
-                ffmpeg::ThumbnailFormat::Webp
-            }
-            Some(ImageFormat::Png) => ffmpeg::ThumbnailFormat::Png,
-            Some(ImageFormat::Jpeg) | None => ffmpeg::ThumbnailFormat::Jpeg,
+            (
+                process.drive_with_stream(stream),
+                thumbnail_format.media_type(),
+            )
+        } else {
+            let thumbnail_format = match state.config.media.image.format {
+                Some(ImageFormat::Webp | ImageFormat::Avif | ImageFormat::Jxl) => {
+                    ffmpeg::ThumbnailFormat::Webp
+                }
+                Some(ImageFormat::Png) => ffmpeg::ThumbnailFormat::Png,
+                Some(ImageFormat::Jpeg) | None => ffmpeg::ThumbnailFormat::Jpeg,
+            };
+
+            let reader = ffmpeg::thumbnail(
+                state,
+                identifier,
+                original_details
+                    .video_format()
+                    .unwrap_or(InternalVideoFormat::Mp4),
+                thumbnail_format,
+            )
+            .await?;
+
+            (reader, thumbnail_format.media_type())
         };
-
-        let reader = ffmpeg::thumbnail(
-            state,
-            identifier,
-            original_details
-                .video_format()
-                .unwrap_or(InternalVideoFormat::Mp4),
-            thumbnail_format,
-        )
-        .await?;
-
-        (reader, thumbnail_format.media_type())
-    };
 
     let motion_identifier = reader
         .with_stdout(|stdout| async { state.store.save_async_read(stdout, media_type).await })

@@ -415,7 +415,7 @@ impl ProcessRead {
         let handle = Box::pin(async move {
             self.with_stdout(move |mut stdout| async move {
                 let child_fut = async {
-                    let n = tokio::io::copy(&mut stdout, &mut stdin).await?;
+                    tokio::io::copy(&mut stdout, &mut stdin).await?;
                     drop(stdout);
                     drop(stdin);
 

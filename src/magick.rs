@@ -20,20 +20,8 @@ pub(crate) enum MagickError {
     #[error("Invalid output format: {0}")]
     Json(String, #[source] serde_json::Error),
 
-    #[error("Error writing bytes")]
-    Write(#[source] std::io::Error),
-
-    #[error("Error creating file")]
-    CreateFile(#[source] std::io::Error),
-
-    #[error("Error creating directory")]
-    CreateDir(#[source] crate::store::file_store::FileError),
-
     #[error("Error creating temporary directory")]
     CreateTemporaryDirectory(#[source] std::io::Error),
-
-    #[error("Error closing file")]
-    CloseFile(#[source] std::io::Error),
 
     #[error("Error in metadata discovery")]
     Discover(#[source] crate::discover::DiscoverError),
@@ -63,11 +51,7 @@ impl MagickError {
             Self::CommandFailed(_) => ErrorCode::COMMAND_FAILURE,
             Self::Process(e) => e.error_code(),
             Self::Json(_, _)
-            | Self::Write(_)
-            | Self::CreateFile(_)
-            | Self::CreateDir(_)
             | Self::CreateTemporaryDirectory(_)
-            | Self::CloseFile(_)
             | Self::Discover(_)
             | Self::Cleanup(_)
             | Self::Empty => ErrorCode::COMMAND_ERROR,
