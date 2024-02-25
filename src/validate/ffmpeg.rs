@@ -133,6 +133,8 @@ async fn transcode_files(
     }
 
     args.extend([
+        "-map_metadata".as_ref(),
+        "-1".as_ref(),
         "-f".as_ref(),
         output_format.ffmpeg_format().as_ref(),
         output_path,

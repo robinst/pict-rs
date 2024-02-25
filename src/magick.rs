@@ -186,7 +186,7 @@ fn generate_policy(media: &Media) -> String {
     <policy domain="coder" rights="none" pattern="*" />
     <policy domain="coder" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,RGB,RGBA,WEBP,MP4,WEBM,TMP,PAM}}" />
     <policy domain="delegate" rights="none" pattern="*" />
-    <policy domain="delegate" rights="execute" pattern="FFMPEG" />
+    <policy domain="delegate" rights="execute" pattern="ffmpeg" />
     <policy domain="filter" rights="none" pattern="*" />
     <policy domain="module" rights="none" pattern="*" />
     <policy domain="module" rights="read | write" pattern="{{APNG,AVIF,GIF,HEIC,JPEG,JSON,JXL,PNG,RGB,RGBA,WEBP,TMP,PAM,PNM,VIDEO}}" />
