@@ -14,7 +14,6 @@ use crate::{
     state::State,
 };
 
-
 use super::Discovery;
 
 const MP4: &str = "mp4";
@@ -158,24 +157,6 @@ struct Flags {
     alpha: usize,
 }
 
-#[tracing::instrument(skip_all)]
-pub(super) async fn discover_bytes_stream<S>(
-    state: &State<S>,
-    bytes: BytesStream,
-) -> Result<Option<Discovery>, FfMpegError> {
-    discover_file(state, move |mut file| {
-        let bytes = bytes.clone();
-
-        async move {
-            file.write_from_stream(bytes.into_io_stream())
-                .await
-                .map_err(FfMpegError::Write)?;
-            Ok(file)
-        }
-    })
-    .await
-}
-
 async fn allows_alpha(pixel_format: &str, timeout: u64) -> Result<bool, FfMpegError> {
     static ALPHA_PIXEL_FORMATS: OnceLock<HashSet<String>> = OnceLock::new();
 
@@ -191,44 +172,30 @@ async fn allows_alpha(pixel_format: &str, timeout: u64) -> Result<bool, FfMpegEr
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn discover_file<S, F, Fut>(state: &State<S>, f: F) -> Result<Option<Discovery>, FfMpegError>
-where
-    F: FnOnce(crate::file::File) -> Fut,
-    Fut: std::future::Future<Output = Result<crate::file::File, FfMpegError>>,
-{
-    let input_file = state.tmp_dir.tmp_file(None);
-    crate::store::file_store::safe_create_parent(&input_file)
-        .await
-        .map_err(FfMpegError::CreateDir)?;
-
-    let tmp_one = crate::file::File::create(&input_file)
-        .await
-        .map_err(FfMpegError::CreateFile)?;
-    let tmp_one = (f)(tmp_one).await?;
-    tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
-
+pub(super) async fn discover_bytes_stream<S>(
+    state: &State<S>,
+    bytes: BytesStream,
+) -> Result<Option<Discovery>, FfMpegError> {
     let res = Process::run(
         "ffprobe",
         &[
-            "-v".as_ref(),
-            "quiet".as_ref(),
-            "-count_frames".as_ref(),
-            "-show_entries".as_ref(),
-            "stream=width,height,nb_read_frames,codec_name,pix_fmt:format=format_name".as_ref(),
-            "-of".as_ref(),
-            "default=noprint_wrappers=1:nokey=1".as_ref(),
-            "-print_format".as_ref(),
-            "json".as_ref(),
-            input_file.as_os_str(),
+            "-v",
+            "quiet",
+            "-count_frames",
+            "-show_entries",
+            "stream=width,height,nb_read_frames,codec_name,pix_fmt:format=format_name",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            "-print_format",
+            "json",
+            "-",
         ],
         &[],
         state.config.media.process_timeout,
     )?
-    .read()
+    .drive_with_async_read(bytes.into_reader())
     .into_vec()
     .await;
-
-    input_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
 
     let output = res?;
 

@@ -398,6 +398,58 @@ impl ProcessRead {
         .await?
     }
 
+    pub(crate) fn pipe(self, process: Process) -> ProcessRead {
+        let Process {
+            command,
+            mut child,
+            guard,
+            timeout,
+            extras,
+            id,
+        } = process;
+
+        let mut stdin = child.stdin.take().expect("stdin exists");
+        let stdout = child.stdout.take().expect("stdout exists");
+
+        let command2 = command.clone();
+        let handle = Box::pin(async move {
+            self.with_stdout(move |mut stdout| async move {
+                let child_fut = async {
+                    let n = tokio::io::copy(&mut stdout, &mut stdin).await?;
+                    drop(stdout);
+                    drop(stdin);
+
+                    child.wait().await
+                };
+
+                match child_fut.with_timeout(timeout).await {
+                    Ok(Ok(status)) if status.success() => {
+                        guard.disarm();
+                        Ok(())
+                    }
+                    Ok(Ok(status)) => Err(ProcessError::Status(command2, status)),
+                    Ok(Err(e)) => Err(ProcessError::Other(command2, e)),
+                    Err(_) => {
+                        child
+                            .kill()
+                            .await
+                            .map_err(|e| ProcessError::Other(command2.clone(), e))?;
+                        Err(ProcessError::Timeout(command2))
+                    }
+                }
+            })
+            .await?
+        });
+
+        ProcessRead {
+            reader: Box::pin(stdout),
+            handle,
+            command,
+            id,
+            extras,
+        }
+    }
+
     pub(crate) async fn with_stdout<Fut>(
         self,
         f: impl FnOnce(BoxRead<'static>) -> Fut,

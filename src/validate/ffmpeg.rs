@@ -1,6 +1,5 @@
 use std::{ffi::OsStr, sync::Arc};
 
-
 use uuid::Uuid;
 
 use crate::{
@@ -35,27 +34,38 @@ pub(super) async fn transcode_bytes(
 
     let output_file = tmp_dir.tmp_file(None);
 
-    let res = transcode_files(
-        input_file.as_os_str(),
-        input_format,
-        output_file.as_os_str(),
-        output_format,
-        crf,
-        timeout,
-    )
+    let res = async {
+        let res = transcode_files(
+            input_file.as_os_str(),
+            input_format,
+            output_file.as_os_str(),
+            output_format,
+            crf,
+            timeout,
+        )
+        .await;
+
+        input_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
+        res?;
+
+        let tmp_two = crate::file::File::open(&output_file)
+            .await
+            .map_err(FfMpegError::OpenFile)?;
+        let stream = tmp_two
+            .read_to_stream(None, None)
+            .await
+            .map_err(FfMpegError::ReadFile)?;
+        Ok(tokio_util::io::StreamReader::new(stream))
+    }
     .await;
 
-    input_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
-    res?;
-
-    let tmp_two = crate::file::File::open(&output_file)
-        .await
-        .map_err(FfMpegError::OpenFile)?;
-    let stream = tmp_two
-        .read_to_stream(None, None)
-        .await
-        .map_err(FfMpegError::ReadFile)?;
-    let reader = tokio_util::io::StreamReader::new(stream);
+    let reader = match res {
+        Ok(reader) => reader,
+        Err(e) => {
+            output_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
+            return Err(e);
+        }
+    };
 
     let process_read = ProcessRead::new(
         Box::pin(reader),

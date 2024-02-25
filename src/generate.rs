@@ -117,20 +117,15 @@ async fn process<S: Store + 'static>(
 
     let stream = state.store.to_stream(&identifier, None, None).await?;
 
-    let bytes = crate::magick::process_image_stream_read(
-        state,
-        stream,
-        thumbnail_args,
-        input_format,
-        format,
-        quality,
-    )
-    .await?
-    .into_bytes_stream()
-    .instrument(tracing::info_span!(
-        "Reading processed image to BytesStream"
-    ))
-    .await?;
+    let bytes =
+        crate::magick::process_image_command(state, thumbnail_args, input_format, format, quality)
+            .await?
+            .drive_with_stream(stream)
+            .into_bytes_stream()
+            .instrument(tracing::info_span!(
+                "Reading processed image to BytesStream"
+            ))
+            .await?;
 
     drop(permit);
 
