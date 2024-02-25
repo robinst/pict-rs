@@ -303,28 +303,6 @@ impl Store for ObjectStore {
         }
     }
 
-    #[tracing::instrument(skip_all)]
-    async fn save_bytes(
-        &self,
-        bytes: Bytes,
-        content_type: mime::Mime,
-    ) -> Result<Arc<str>, StoreError> {
-        let (req, object_id) = self.put_object_request(bytes.len(), content_type).await?;
-
-        let response = req
-            .body(bytes)
-            .send()
-            .with_metrics(crate::init_metrics::OBJECT_STORAGE_PUT_OBJECT_REQUEST)
-            .await
-            .map_err(ObjectError::from)?;
-
-        if !response.status().is_success() {
-            return Err(status_error(response, None).await);
-        }
-
-        Ok(object_id)
-    }
-
     fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
         self.public_endpoint.clone().and_then(|mut endpoint| {
             endpoint

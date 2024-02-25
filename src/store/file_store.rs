@@ -98,22 +98,6 @@ impl Store for FileStore {
             .await
     }
 
-    #[tracing::instrument(skip(self, bytes))]
-    async fn save_bytes(
-        &self,
-        bytes: Bytes,
-        _content_type: mime::Mime,
-    ) -> Result<Arc<str>, StoreError> {
-        let path = self.next_file().await?;
-
-        if let Err(e) = self.safe_save_bytes(&path, bytes).await {
-            self.safe_remove_file(&path).await?;
-            return Err(e.into());
-        }
-
-        Ok(self.file_id_from_path(path)?)
-    }
-
     fn public_url(&self, _identifier: &Arc<str>) -> Option<url::Url> {
         None
     }
@@ -249,36 +233,6 @@ impl FileStore {
 
             path = parent;
         }
-    }
-
-    // Try writing to a file
-    async fn safe_save_bytes<P: AsRef<Path>>(
-        &self,
-        path: P,
-        bytes: Bytes,
-    ) -> Result<(), FileError> {
-        safe_create_parent(&path).await?;
-
-        // Only write the file if it doesn't already exist
-        if let Err(e) = tokio::fs::metadata(&path).await {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                return Err(e.into());
-            }
-        } else {
-            return Ok(());
-        }
-
-        // Open the file for writing
-        let mut file = File::create(&path).await?;
-
-        // try writing
-        if let Err(e) = file.write_from_bytes(bytes).await {
-            // remove file if writing failed before completion
-            self.safe_remove_file(path).await?;
-            return Err(e.into());
-        }
-
-        Ok(())
     }
 
     async fn safe_save_reader<P: AsRef<Path>>(

@@ -18,63 +18,47 @@ pub(super) async fn transcode_bytes(
     timeout: u64,
     bytes: BytesStream,
 ) -> Result<ProcessRead, FfMpegError> {
-    let input_file = tmp_dir.tmp_file(None);
-    crate::store::file_store::safe_create_parent(&input_file)
-        .await
-        .map_err(FfMpegError::CreateDir)?;
-
-    let mut tmp_one = crate::file::File::create(&input_file)
-        .await
-        .map_err(FfMpegError::CreateFile)?;
-    tmp_one
-        .write_from_stream(bytes.into_io_stream())
-        .await
-        .map_err(FfMpegError::Write)?;
-    tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
-
     let output_file = tmp_dir.tmp_file(None);
+    let output_path = output_file.as_os_str();
 
-    let res = async {
-        let res = transcode_files(
+    let res = crate::ffmpeg::with_file(tmp_dir, None, |input_file| async move {
+        crate::file::write_from_async_read(&input_file, bytes.into_reader())
+            .await
+            .map_err(FfMpegError::Write)?;
+
+        transcode_files(
             input_file.as_os_str(),
             input_format,
-            output_file.as_os_str(),
+            output_path,
             output_format,
             crf,
             timeout,
         )
-        .await;
+        .await?;
 
-        input_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
-        res?;
-
-        let tmp_two = crate::file::File::open(&output_file)
+        let tmp_file = crate::file::File::open(output_path)
             .await
             .map_err(FfMpegError::OpenFile)?;
-        let stream = tmp_two
+
+        tmp_file
             .read_to_stream(None, None)
             .await
-            .map_err(FfMpegError::ReadFile)?;
-        Ok(tokio_util::io::StreamReader::new(stream))
-    }
+            .map_err(FfMpegError::ReadFile)
+    })
     .await;
 
-    let reader = match res {
-        Ok(reader) => reader,
-        Err(e) => {
+    match res {
+        Ok(Ok(stream)) => Ok(ProcessRead::new(
+            Box::pin(tokio_util::io::StreamReader::new(stream)),
+            Arc::from(String::from("ffmpeg")),
+            Uuid::now_v7(),
+        )
+        .add_extras(output_file)),
+        Ok(Err(e)) | Err(e) => {
             output_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
-            return Err(e);
+            Err(e)
         }
-    };
-
-    let process_read = ProcessRead::new(
-        Box::pin(reader),
-        Arc::from(String::from("ffmpeg")),
-        Uuid::now_v7(),
-    )
-    .add_extras(output_file);
-
-    Ok(process_read)
+    }
 }
 
 async fn transcode_files(
@@ -134,6 +118,14 @@ async fn transcode_files(
 
     args.extend([
         "-map_metadata".as_ref(),
+        "-1".as_ref(),
+        "-map_metadata:g".as_ref(),
+        "-1".as_ref(),
+        "-map_metadata:s".as_ref(),
+        "-1".as_ref(),
+        "-map_metadata:c".as_ref(),
+        "-1".as_ref(),
+        "-map_metadata:p".as_ref(),
         "-1".as_ref(),
         "-f".as_ref(),
         output_format.ffmpeg_format().as_ref(),

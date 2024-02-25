@@ -129,7 +129,6 @@ async fn ensure_details_identifier<S: Store + 'static>(
     let details = state.repo.details(identifier).await?;
 
     if let Some(details) = details {
-        tracing::debug!("details exist");
         Ok(details)
     } else {
         if state.config.server.read_only {
@@ -140,12 +139,9 @@ async fn ensure_details_identifier<S: Store + 'static>(
             )));
         }
 
-        tracing::debug!("generating new details from {:?}", identifier);
         let bytes_stream = state.store.to_bytes(identifier, None, None).await?;
         let new_details = Details::from_bytes_stream(state, bytes_stream).await?;
-        tracing::debug!("storing details for {:?}", identifier);
         state.repo.relate_details(identifier, &new_details).await?;
-        tracing::debug!("stored");
         Ok(new_details)
     }
 }

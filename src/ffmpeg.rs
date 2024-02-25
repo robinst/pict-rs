@@ -1,4 +1,8 @@
-use crate::{error_code::ErrorCode, process::ProcessError, store::StoreError};
+use std::ffi::OsString;
+
+use futures_core::Future;
+
+use crate::{error_code::ErrorCode, process::ProcessError, store::StoreError, tmp_file::TmpDir};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FfMpegError {
@@ -19,12 +23,6 @@ pub(crate) enum FfMpegError {
 
     #[error("Error opening file")]
     OpenFile(#[source] std::io::Error),
-
-    #[error("Error creating file")]
-    CreateFile(#[source] std::io::Error),
-
-    #[error("Error closing file")]
-    CloseFile(#[source] std::io::Error),
 
     #[error("Error cleaning up after command")]
     Cleanup(#[source] std::io::Error),
@@ -56,9 +54,7 @@ impl FfMpegError {
             | Self::CreateDir(_)
             | Self::ReadFile(_)
             | Self::OpenFile(_)
-            | Self::Cleanup(_)
-            | Self::CreateFile(_)
-            | Self::CloseFile(_) => ErrorCode::COMMAND_ERROR,
+            | Self::Cleanup(_) => ErrorCode::COMMAND_ERROR,
         }
     }
 
@@ -77,4 +73,26 @@ impl FfMpegError {
 
         false
     }
+}
+
+pub(crate) async fn with_file<F, Fut>(
+    tmp: &TmpDir,
+    ext: Option<&str>,
+    f: F,
+) -> Result<Fut::Output, FfMpegError>
+where
+    F: FnOnce(OsString) -> Fut,
+    Fut: Future,
+{
+    let file = tmp.tmp_file(ext);
+
+    crate::store::file_store::safe_create_parent(&file)
+        .await
+        .map_err(FfMpegError::CreateDir)?;
+
+    let res = (f)(file.as_os_str().to_os_string()).await;
+
+    file.cleanup().await.map_err(FfMpegError::Cleanup)?;
+
+    Ok(res)
 }

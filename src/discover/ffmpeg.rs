@@ -176,28 +176,34 @@ pub(super) async fn discover_bytes_stream<S>(
     state: &State<S>,
     bytes: BytesStream,
 ) -> Result<Option<Discovery>, FfMpegError> {
-    let res = Process::run(
-        "ffprobe",
-        &[
-            "-v",
-            "quiet",
-            "-count_frames",
-            "-show_entries",
-            "stream=width,height,nb_read_frames,codec_name,pix_fmt:format=format_name",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            "-print_format",
-            "json",
-            "-",
-        ],
-        &[],
-        state.config.media.process_timeout,
-    )?
-    .drive_with_async_read(bytes.into_reader())
-    .into_vec()
-    .await;
+    let output = crate::ffmpeg::with_file(&state.tmp_dir, None, |path| async move {
+        crate::file::write_from_async_read(&path, bytes.into_reader())
+            .await
+            .map_err(FfMpegError::Write)?;
 
-    let output = res?;
+        Process::run(
+            "ffprobe",
+            &[
+                "-v".as_ref(),
+                "quiet".as_ref(),
+                "-count_frames".as_ref(),
+                "-show_entries".as_ref(),
+                "stream=width,height,nb_read_frames,codec_name,pix_fmt:format=format_name".as_ref(),
+                "-of".as_ref(),
+                "default=noprint_wrappers=1:nokey=1".as_ref(),
+                "-print_format".as_ref(),
+                "json".as_ref(),
+                path.as_os_str(),
+            ],
+            &[],
+            state.config.media.process_timeout,
+        )?
+        .read()
+        .into_vec()
+        .await
+        .map_err(FfMpegError::Process)
+    })
+    .await??;
 
     let output: FfMpegDiscovery = serde_json::from_slice(&output).map_err(FfMpegError::Json)?;
 

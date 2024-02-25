@@ -57,69 +57,72 @@ pub(super) async fn thumbnail<S: Store>(
     input_format: InternalVideoFormat,
     format: ThumbnailFormat,
 ) -> Result<ProcessRead, FfMpegError> {
-    let input_file = state.tmp_dir.tmp_file(Some(input_format.file_extension()));
-    crate::store::file_store::safe_create_parent(&input_file)
-        .await
-        .map_err(FfMpegError::CreateDir)?;
-
     let output_file = state.tmp_dir.tmp_file(Some(format.to_file_extension()));
+
     crate::store::file_store::safe_create_parent(&output_file)
         .await
         .map_err(FfMpegError::CreateDir)?;
 
-    let mut tmp_one = crate::file::File::create(&input_file)
-        .await
-        .map_err(FfMpegError::CreateFile)?;
-    let stream = state
-        .store
-        .to_stream(&from, None, None)
-        .await
-        .map_err(FfMpegError::Store)?;
-    tmp_one
-        .write_from_stream(stream)
-        .await
-        .map_err(FfMpegError::Write)?;
-    tmp_one.close().await.map_err(FfMpegError::CloseFile)?;
+    let output_path = output_file.as_os_str();
 
-    let process = Process::run(
-        "ffmpeg",
-        &[
-            "-hide_banner".as_ref(),
-            "-v".as_ref(),
-            "warning".as_ref(),
-            "-i".as_ref(),
-            input_file.as_os_str(),
-            "-frames:v".as_ref(),
-            "1".as_ref(),
-            "-codec".as_ref(),
-            format.as_ffmpeg_codec().as_ref(),
-            "-f".as_ref(),
-            format.as_ffmpeg_format().as_ref(),
-            output_file.as_os_str(),
-        ],
-        &[],
-        state.config.media.process_timeout,
-    )?;
+    let res = crate::ffmpeg::with_file(
+        &state.tmp_dir,
+        Some(input_format.file_extension()),
+        |input_file| async move {
+            let stream = state
+                .store
+                .to_stream(&from, None, None)
+                .await
+                .map_err(FfMpegError::Store)?;
 
-    let res = process.wait().await;
-    input_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
-    res?;
+            crate::file::write_from_stream(&input_file, stream)
+                .await
+                .map_err(FfMpegError::Write)?;
 
-    let tmp_two = crate::file::File::open(&output_file)
-        .await
-        .map_err(FfMpegError::OpenFile)?;
-    let stream = tmp_two
-        .read_to_stream(None, None)
-        .await
-        .map_err(FfMpegError::ReadFile)?;
-    let reader = tokio_util::io::StreamReader::new(stream);
+            Process::run(
+                "ffmpeg",
+                &[
+                    "-hide_banner".as_ref(),
+                    "-v".as_ref(),
+                    "warning".as_ref(),
+                    "-i".as_ref(),
+                    input_file.as_os_str(),
+                    "-frames:v".as_ref(),
+                    "1".as_ref(),
+                    "-codec".as_ref(),
+                    format.as_ffmpeg_codec().as_ref(),
+                    "-f".as_ref(),
+                    format.as_ffmpeg_format().as_ref(),
+                    output_path,
+                ],
+                &[],
+                state.config.media.process_timeout,
+            )?
+            .wait()
+            .await
+            .map_err(FfMpegError::Process)?;
 
-    let reader = ProcessRead::new(
-        Box::pin(reader),
-        Arc::from(String::from("ffmpeg")),
-        Uuid::now_v7(),
+            let out_file = crate::file::File::open(output_path)
+                .await
+                .map_err(FfMpegError::OpenFile)?;
+            out_file
+                .read_to_stream(None, None)
+                .await
+                .map_err(FfMpegError::ReadFile)
+        },
     )
-    .add_extras(output_file);
+    .await;
 
-    Ok(reader)
+    match res {
+        Ok(Ok(stream)) => Ok(ProcessRead::new(
+            Box::pin(tokio_util::io::StreamReader::new(stream)),
+            Arc::from(String::from("ffmpeg")),
+            Uuid::now_v7(),
+        )
+        .add_extras(output_file)),
+        Ok(Err(e)) | Err(e) => {
+            output_file.cleanup().await.map_err(FfMpegError::Cleanup)?;
+            Err(e)
+        }
+    }
 }

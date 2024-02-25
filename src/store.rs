@@ -101,12 +101,6 @@ pub(crate) trait Store: Clone + Debug {
     where
         S: Stream<Item = std::io::Result<Bytes>>;
 
-    async fn save_bytes(
-        &self,
-        bytes: Bytes,
-        content_type: mime::Mime,
-    ) -> Result<Arc<str>, StoreError>;
-
     fn public_url(&self, _: &Arc<str>) -> Option<url::Url>;
 
     async fn to_stream(
@@ -172,14 +166,6 @@ where
         T::save_stream(self, stream, content_type).await
     }
 
-    async fn save_bytes(
-        &self,
-        bytes: Bytes,
-        content_type: mime::Mime,
-    ) -> Result<Arc<str>, StoreError> {
-        T::save_bytes(self, bytes, content_type).await
-    }
-
     fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
         T::public_url(self, identifier)
     }
@@ -243,14 +229,6 @@ where
         T::save_stream(self, stream, content_type).await
     }
 
-    async fn save_bytes(
-        &self,
-        bytes: Bytes,
-        content_type: mime::Mime,
-    ) -> Result<Arc<str>, StoreError> {
-        T::save_bytes(self, bytes, content_type).await
-    }
-
     fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
         T::public_url(self, identifier)
     }
@@ -312,14 +290,6 @@ where
         S: Stream<Item = std::io::Result<Bytes>>,
     {
         T::save_stream(self, stream, content_type).await
-    }
-
-    async fn save_bytes(
-        &self,
-        bytes: Bytes,
-        content_type: mime::Mime,
-    ) -> Result<Arc<str>, StoreError> {
-        T::save_bytes(self, bytes, content_type).await
     }
 
     fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
