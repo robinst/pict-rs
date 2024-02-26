@@ -22,7 +22,7 @@ actix-web = { version = "4.0.0", default-features = false, features = ["rustls-0
 async-trait = "0.1.51"
 barrel = { version = "0.7.0", features = ["pg"] }
 base64 = "0.21.0"
-blurhash-update = { git = "https://git.asonix.dog/asonix/blurhash-update", version = "0.1.0" }
+blurhash-update = "0.1.0"
 clap = { version = "4.0.2", features = ["derive"] }
 color-eyre = "0.6"
 config = { version = "0.14.0", default-features = false, features = ["json", "ron", "toml", "yaml"] }

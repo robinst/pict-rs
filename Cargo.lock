@@ -481,7 +481,8 @@ dependencies = [
 [[package]]
 name = "blurhash-update"
 version = "0.1.0"
-source = "git+https://git.asonix.dog/asonix/blurhash-update#82f94e7f762ad8594b18ea9b238b5b276ade4afc"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfb5ea45aeb912f2dd334834e64ecf674a6673d57c73e9d12de0298b9bf98ee8"
 
 [[package]]
 name = "bumpalo"
