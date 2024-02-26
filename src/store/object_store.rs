@@ -1,6 +1,6 @@
 use crate::{
-    bytes_stream::BytesStream, error_code::ErrorCode, future::WithMetrics, repo::ArcRepo,
-    store::Store, stream::LocalBoxStream, sync::DropHandle,
+    bytes_stream::BytesStream, error_code::ErrorCode, future::WithMetrics, store::Store,
+    stream::LocalBoxStream, sync::DropHandle,
 };
 use actix_web::{
     error::BlockingError,
@@ -20,7 +20,6 @@ use rusty_s3::{
     Bucket, BucketError, Credentials, UrlStyle,
 };
 use std::{string::FromUtf8Error, sync::Arc, time::Duration};
-use storage_path_generator::{Generator, Path};
 use streem::IntoStreamer;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
@@ -31,16 +30,8 @@ use super::StoreError;
 
 const CHUNK_SIZE: usize = 8_388_608; // 8 Mebibytes, min is 5 (5_242_880);
 
-// - Settings Tree
-//   - last-path -> last generated path
-
-const GENERATOR_KEY: &str = "last-path";
-
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ObjectError {
-    #[error("Failed to generate path")]
-    PathGenerator(#[from] storage_path_generator::PathError),
-
     #[error("Failed to generate request")]
     S3(#[from] BucketError),
 
@@ -98,7 +89,6 @@ impl std::error::Error for XmlError {
 impl ObjectError {
     pub(super) const fn error_code(&self) -> ErrorCode {
         match self {
-            Self::PathGenerator(_) => ErrorCode::PARSE_PATH_ERROR,
             Self::S3(_)
             | Self::RequestMiddleware(_)
             | Self::Request(_)
@@ -127,8 +117,6 @@ impl From<BlockingError> for ObjectError {
 
 #[derive(Clone)]
 pub(crate) struct ObjectStore {
-    path_gen: Generator,
-    repo: ArcRepo,
     bucket: Bucket,
     credentials: Credentials,
     client: ClientWithMiddleware,
@@ -139,8 +127,6 @@ pub(crate) struct ObjectStore {
 
 #[derive(Clone)]
 pub(crate) struct ObjectStoreConfig {
-    path_gen: Generator,
-    repo: ArcRepo,
     bucket: Bucket,
     credentials: Credentials,
     signature_expiration: u64,
@@ -151,8 +137,6 @@ pub(crate) struct ObjectStoreConfig {
 impl ObjectStoreConfig {
     pub(crate) fn build(self, client: ClientWithMiddleware) -> ObjectStore {
         ObjectStore {
-            path_gen: self.path_gen,
-            repo: self.repo,
             bucket: self.bucket,
             credentials: self.credentials,
             client,
@@ -431,7 +415,7 @@ enum UploadState {
 
 impl ObjectStore {
     #[allow(clippy::too_many_arguments)]
-    #[tracing::instrument(skip(access_key, secret_key, session_token, repo))]
+    #[tracing::instrument(skip(access_key, secret_key, session_token))]
     pub(crate) async fn build(
         endpoint: Url,
         bucket_name: String,
@@ -443,13 +427,8 @@ impl ObjectStore {
         signature_expiration: u64,
         client_timeout: u64,
         public_endpoint: Option<Url>,
-        repo: ArcRepo,
     ) -> Result<ObjectStoreConfig, StoreError> {
-        let path_gen = init_generator(&repo).await?;
-
         Ok(ObjectStoreConfig {
-            path_gen,
-            repo,
             bucket: Bucket::new(endpoint, url_style, bucket_name, region)
                 .map_err(ObjectError::from)?,
             credentials: if let Some(token) = session_token {
@@ -596,7 +575,7 @@ impl ObjectStore {
         length: usize,
         content_type: mime::Mime,
     ) -> Result<(RequestBuilder, Arc<str>), StoreError> {
-        let path = self.next_file().await?;
+        let path = self.next_file();
 
         let mut action = self.bucket.put_object(Some(&self.credentials), &path);
 
@@ -614,7 +593,7 @@ impl ObjectStore {
         &self,
         content_type: mime::Mime,
     ) -> Result<(RequestBuilder, Arc<str>), StoreError> {
-        let path = self.next_file().await?;
+        let path = self.next_file();
 
         let mut action = self
             .bucket
@@ -784,39 +763,17 @@ impl ObjectStore {
         self.build_request(action)
     }
 
-    async fn next_directory(&self) -> Result<Path, StoreError> {
-        let path = self.path_gen.next();
-
-        self.repo
-            .set(GENERATOR_KEY, path.to_be_bytes().into())
-            .await?;
-
-        Ok(path)
-    }
-
-    async fn next_file(&self) -> Result<String, StoreError> {
-        let path = self.next_directory().await?.to_strings().join("/");
+    fn next_file(&self) -> String {
+        let path = crate::file_path::generate_object();
         let filename = uuid::Uuid::new_v4().to_string();
 
-        Ok(format!("{path}/{filename}"))
-    }
-}
-
-async fn init_generator(repo: &ArcRepo) -> Result<Generator, StoreError> {
-    if let Some(ivec) = repo.get(GENERATOR_KEY).await? {
-        Ok(Generator::from_existing(
-            storage_path_generator::Path::from_be_bytes(ivec.to_vec())
-                .map_err(ObjectError::from)?,
-        ))
-    } else {
-        Ok(Generator::new())
+        format!("{path}/{filename}")
     }
 }
 
 impl std::fmt::Debug for ObjectStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ObjectStore")
-            .field("path_gen", &"generator")
             .field("bucket", &self.bucket.name())
             .field("region", &self.bucket.region())
             .finish()

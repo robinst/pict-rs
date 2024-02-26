@@ -1,31 +1,20 @@
-use crate::{
-    error_code::ErrorCode, file::File, repo::ArcRepo, store::Store, stream::LocalBoxStream,
-};
+use crate::{error_code::ErrorCode, file::File, store::Store, stream::LocalBoxStream};
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use storage_path_generator::Generator;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::io::StreamReader;
 use tracing::Instrument;
 
 use super::StoreError;
 
-// - Settings Tree
-//   - last-path -> last generated path
-
-const GENERATOR_KEY: &str = "last-path";
-
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FileError {
     #[error("Failed to read or write file")]
     Io(#[from] std::io::Error),
-
-    #[error("Failed to generate path")]
-    PathGenerator(#[from] storage_path_generator::PathError),
 
     #[error("Couldn't strip root dir")]
     PrefixError,
@@ -41,7 +30,6 @@ impl FileError {
     pub(super) const fn error_code(&self) -> ErrorCode {
         match self {
             Self::Io(_) => ErrorCode::FILE_IO_ERROR,
-            Self::PathGenerator(_) => ErrorCode::PARSE_PATH_ERROR,
             Self::FileExists => ErrorCode::FILE_EXISTS,
             Self::StringError | Self::PrefixError => ErrorCode::FORMAT_FILE_ID_ERROR,
         }
@@ -50,9 +38,7 @@ impl FileError {
 
 #[derive(Clone)]
 pub(crate) struct FileStore {
-    path_gen: Generator,
     root_dir: PathBuf,
-    repo: ArcRepo,
 }
 
 impl Store for FileStore {
@@ -76,7 +62,7 @@ impl Store for FileStore {
     {
         let mut reader = std::pin::pin!(reader);
 
-        let path = self.next_file().await?;
+        let path = self.next_file();
 
         if let Err(e) = self.safe_save_reader(&path, &mut reader).await {
             self.safe_remove_file(&path).await?;
@@ -165,17 +151,10 @@ impl Store for FileStore {
 }
 
 impl FileStore {
-    #[tracing::instrument(skip(repo))]
-    pub(crate) async fn build(root_dir: PathBuf, repo: ArcRepo) -> color_eyre::Result<Self> {
-        let path_gen = init_generator(&repo).await?;
-
+    pub(crate) async fn build(root_dir: PathBuf) -> color_eyre::Result<Self> {
         tokio::fs::create_dir_all(&root_dir).await?;
 
-        Ok(FileStore {
-            root_dir,
-            path_gen,
-            repo,
-        })
+        Ok(FileStore { root_dir })
     }
 
     fn file_id_from_path(&self, path: PathBuf) -> Result<Arc<str>, FileError> {
@@ -190,26 +169,11 @@ impl FileStore {
         self.root_dir.join(file_id.as_ref())
     }
 
-    async fn next_directory(&self) -> Result<PathBuf, StoreError> {
-        let path = self.path_gen.next();
-
-        self.repo
-            .set(GENERATOR_KEY, path.to_be_bytes().into())
-            .await?;
-
-        let mut target_path = self.root_dir.clone();
-        for dir in path.to_strings() {
-            target_path.push(dir)
-        }
-
-        Ok(target_path)
-    }
-
-    async fn next_file(&self) -> Result<PathBuf, StoreError> {
-        let target_path = self.next_directory().await?;
+    fn next_file(&self) -> PathBuf {
+        let target_path = crate::file_path::generate_disk(self.root_dir.clone());
         let filename = uuid::Uuid::new_v4().to_string();
 
-        Ok(target_path.join(filename))
+        target_path.join(filename)
     }
 
     #[tracing::instrument(level = "debug", skip(self, path), fields(path = ?path.as_ref()))]
@@ -266,20 +230,9 @@ pub(crate) async fn safe_create_parent<P: AsRef<Path>>(path: P) -> Result<(), Fi
     Ok(())
 }
 
-async fn init_generator(repo: &ArcRepo) -> Result<Generator, StoreError> {
-    if let Some(ivec) = repo.get(GENERATOR_KEY).await? {
-        Ok(Generator::from_existing(
-            storage_path_generator::Path::from_be_bytes(ivec.to_vec()).map_err(FileError::from)?,
-        ))
-    } else {
-        Ok(Generator::new())
-    }
-}
-
 impl std::fmt::Debug for FileStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FileStore")
-            .field("path_gen", &"generator")
             .field("root_dir", &self.root_dir)
             .finish()
     }

@@ -33,9 +33,6 @@ impl ErrorCode {
     pub(crate) const FILE_IO_ERROR: ErrorCode = ErrorCode {
         code: "file-io-error",
     };
-    pub(crate) const PARSE_PATH_ERROR: ErrorCode = ErrorCode {
-        code: "parse-path-error",
-    };
     pub(crate) const FILE_EXISTS: ErrorCode = ErrorCode {
         code: "file-exists",
     };

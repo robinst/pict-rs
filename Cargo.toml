@@ -60,7 +60,6 @@ serde_json = "1.0"
 serde_urlencoded = "0.7.1"
 sha2 = "0.10.0"
 sled = { version = "0.34.7" }
-storage-path-generator = "0.1.0"
 streem = "0.2.0"
 subtle = { version = "2.5.0", default-features = false }
 thiserror = "1.0"

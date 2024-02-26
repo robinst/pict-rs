@@ -11,6 +11,7 @@ mod error_code;
 mod exiftool;
 mod ffmpeg;
 mod file;
+mod file_path;
 mod formats;
 mod future;
 mod generate;
@@ -1766,7 +1767,7 @@ where
 {
     match to {
         config::primitives::Store::Filesystem(config::Filesystem { path }) => {
-            let store = FileStore::build(path.clone(), repo.clone()).await?;
+            let store = FileStore::build(path.clone()).await?;
 
             let to = State {
                 config,
@@ -1806,7 +1807,6 @@ where
                 signature_duration.unwrap_or(15),
                 client_timeout.unwrap_or(30),
                 public_endpoint,
-                repo.clone(),
             )
             .await?
             .build(client.clone());
@@ -1991,7 +1991,7 @@ impl PictRsConfiguration {
 
                 match from {
                     config::primitives::Store::Filesystem(config::Filesystem { path }) => {
-                        let from = FileStore::build(path.clone(), repo.clone()).await?;
+                        let from = FileStore::build(path.clone()).await?;
                         migrate_inner(
                             config,
                             tmp_dir,
@@ -2034,7 +2034,6 @@ impl PictRsConfiguration {
                             signature_duration.unwrap_or(15),
                             client_timeout.unwrap_or(30),
                             public_endpoint,
-                            repo.clone(),
                         )
                         .await?
                         .build(client.clone());
@@ -2075,7 +2074,7 @@ impl PictRsConfiguration {
             config::Store::Filesystem(config::Filesystem { path }) => {
                 let arc_repo = repo.to_arc();
 
-                let store = FileStore::build(path, arc_repo.clone()).await?;
+                let store = FileStore::build(path).await?;
 
                 let state = State {
                     tmp_dir: tmp_dir.clone(),
@@ -2135,7 +2134,6 @@ impl PictRsConfiguration {
                     signature_duration,
                     client_timeout,
                     public_endpoint,
-                    arc_repo.clone(),
                 )
                 .await?
                 .build(client.clone());
