@@ -12,13 +12,7 @@ pub(crate) fn generate_object() -> String {
 }
 
 fn generate() -> Vec<String> {
-    Uuid::now_v7()
-        .into_bytes()
-        .into_iter()
-        .map(to_hex)
-        .collect()
-}
+    let s = Uuid::now_v7().simple().to_string();
 
-fn to_hex(byte: u8) -> String {
-    format!("{byte:x}")
+    (0..6).map(|i| s[i * 2..i * 2 + 2].to_string()).collect()
 }
