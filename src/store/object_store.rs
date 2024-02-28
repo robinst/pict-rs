@@ -211,12 +211,17 @@ impl Store for ObjectStore {
         &self,
         reader: Reader,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead,
     {
-        self.save_stream(ReaderStream::with_capacity(reader, 1024 * 64), content_type)
-            .await
+        self.save_stream(
+            ReaderStream::with_capacity(reader, 1024 * 64),
+            content_type,
+            extension,
+        )
+        .await
     }
 
     #[tracing::instrument(skip_all)]
@@ -224,14 +229,18 @@ impl Store for ObjectStore {
         &self,
         stream: S,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>>,
     {
-        match self.start_upload(stream, content_type.clone()).await? {
+        match self
+            .start_upload(stream, content_type.clone(), extension)
+            .await?
+        {
             UploadState::Single(first_chunk) => {
                 let (req, object_id) = self
-                    .put_object_request(first_chunk.len(), content_type)
+                    .put_object_request(first_chunk.len(), content_type, extension)
                     .await?;
 
                 let response = req
@@ -447,6 +456,7 @@ impl ObjectStore {
         &self,
         stream: S,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<UploadState, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>>,
@@ -461,7 +471,9 @@ impl ObjectStore {
 
         let mut first_chunk = Some(first_chunk);
 
-        let (req, object_id) = self.create_multipart_request(content_type).await?;
+        let (req, object_id) = self
+            .create_multipart_request(content_type, extension)
+            .await?;
         let response = req
             .send()
             .with_metrics(crate::init_metrics::OBJECT_STORAGE_CREATE_MULTIPART_REQUEST)
@@ -574,8 +586,9 @@ impl ObjectStore {
         &self,
         length: usize,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<(RequestBuilder, Arc<str>), StoreError> {
-        let path = self.next_file();
+        let path = self.next_file(extension);
 
         let mut action = self.bucket.put_object(Some(&self.credentials), &path);
 
@@ -592,8 +605,9 @@ impl ObjectStore {
     async fn create_multipart_request(
         &self,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<(RequestBuilder, Arc<str>), StoreError> {
-        let path = self.next_file();
+        let path = self.next_file(extension);
 
         let mut action = self
             .bucket
@@ -763,9 +777,14 @@ impl ObjectStore {
         self.build_request(action)
     }
 
-    fn next_file(&self) -> String {
+    fn next_file(&self, extension: Option<&str>) -> String {
         let path = crate::file_path::generate_object();
-        let filename = uuid::Uuid::new_v4().to_string();
+        let file_id = uuid::Uuid::new_v4().to_string();
+        let filename = if let Some(ext) = extension {
+            file_id + ext
+        } else {
+            file_id
+        };
 
         format!("{path}/{filename}")
     }

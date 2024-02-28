@@ -116,6 +116,10 @@ impl Details {
         (*self.inner.content_type).clone()
     }
 
+    pub(crate) fn file_extension(&self) -> &'static str {
+        self.inner.format.file_extension()
+    }
+
     pub(crate) fn system_time(&self) -> std::time::SystemTime {
         self.inner.created_at.into()
     }

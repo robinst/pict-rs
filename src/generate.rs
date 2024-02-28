@@ -133,7 +133,11 @@ async fn process<S: Store + 'static>(
 
     let identifier = state
         .store
-        .save_stream(bytes.into_io_stream(), details.media_type())
+        .save_stream(
+            bytes.into_io_stream(),
+            details.media_type(),
+            Some(details.file_extension()),
+        )
         .await?;
 
     if let Err(VariantAlreadyExists) = state
@@ -173,7 +177,7 @@ where
         .await?
         .ok_or(UploadError::MissingIdentifier)?;
 
-    let (reader, media_type) =
+    let (reader, media_type, file_extension) =
         if let Some(processable_format) = original_details.internal_format().processable_format() {
             let thumbnail_format = state.config.media.image.format.unwrap_or(ImageFormat::Webp);
 
@@ -185,6 +189,7 @@ where
             (
                 process.drive_with_stream(stream),
                 thumbnail_format.media_type(),
+                thumbnail_format.file_extension(),
             )
         } else {
             let thumbnail_format = match state.config.media.image.format {
@@ -205,11 +210,20 @@ where
             )
             .await?;
 
-            (reader, thumbnail_format.media_type())
+            (
+                reader,
+                thumbnail_format.media_type(),
+                thumbnail_format.file_extension(),
+            )
         };
 
     let motion_identifier = reader
-        .with_stdout(|stdout| async { state.store.save_async_read(stdout, media_type).await })
+        .with_stdout(|stdout| async {
+            state
+                .store
+                .save_async_read(stdout, media_type, Some(file_extension))
+                .await
+        })
         .await??;
 
     state

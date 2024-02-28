@@ -409,7 +409,7 @@ where
 
     let new_identifier = to
         .store
-        .save_stream(stream, details.media_type())
+        .save_stream(stream, details.media_type(), Some(details.file_extension()))
         .await
         .map_err(MigrateError::To)?;
 

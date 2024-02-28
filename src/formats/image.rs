@@ -70,7 +70,7 @@ impl ImageFormat {
         }
     }
 
-    pub(super) const fn file_extension(self) -> &'static str {
+    pub(crate) const fn file_extension(self) -> &'static str {
         match self {
             Self::Avif => ".avif",
             Self::Jpeg => ".jpeg",

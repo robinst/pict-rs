@@ -89,6 +89,7 @@ pub(crate) trait Store: Clone + Debug {
         &self,
         reader: Reader,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead;
@@ -97,6 +98,7 @@ pub(crate) trait Store: Clone + Debug {
         &self,
         stream: S,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>>;
@@ -148,22 +150,24 @@ where
         &self,
         reader: Reader,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead,
     {
-        T::save_async_read(self, reader, content_type).await
+        T::save_async_read(self, reader, content_type, extension).await
     }
 
     async fn save_stream<S>(
         &self,
         stream: S,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>>,
     {
-        T::save_stream(self, stream, content_type).await
+        T::save_stream(self, stream, content_type, extension).await
     }
 
     fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
@@ -211,22 +215,24 @@ where
         &self,
         reader: Reader,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead,
     {
-        T::save_async_read(self, reader, content_type).await
+        T::save_async_read(self, reader, content_type, extension).await
     }
 
     async fn save_stream<S>(
         &self,
         stream: S,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>>,
     {
-        T::save_stream(self, stream, content_type).await
+        T::save_stream(self, stream, content_type, extension).await
     }
 
     fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {
@@ -274,22 +280,24 @@ where
         &self,
         reader: Reader,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead,
     {
-        T::save_async_read(self, reader, content_type).await
+        T::save_async_read(self, reader, content_type, extension).await
     }
 
     async fn save_stream<S>(
         &self,
         stream: S,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>>,
     {
-        T::save_stream(self, stream, content_type).await
+        T::save_stream(self, stream, content_type, extension).await
     }
 
     fn public_url(&self, identifier: &Arc<str>) -> Option<url::Url> {

@@ -56,13 +56,14 @@ impl Store for FileStore {
         &self,
         reader: Reader,
         _content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         Reader: AsyncRead,
     {
         let mut reader = std::pin::pin!(reader);
 
-        let path = self.next_file();
+        let path = self.next_file(extension);
 
         if let Err(e) = self.safe_save_reader(&path, &mut reader).await {
             self.safe_remove_file(&path).await?;
@@ -76,11 +77,12 @@ impl Store for FileStore {
         &self,
         stream: S,
         content_type: mime::Mime,
+        extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>>,
     {
-        self.save_async_read(StreamReader::new(stream), content_type)
+        self.save_async_read(StreamReader::new(stream), content_type, extension)
             .await
     }
 
@@ -169,9 +171,14 @@ impl FileStore {
         self.root_dir.join(file_id.as_ref())
     }
 
-    fn next_file(&self) -> PathBuf {
+    fn next_file(&self, extension: Option<&str>) -> PathBuf {
         let target_path = crate::file_path::generate_disk(self.root_dir.clone());
-        let filename = uuid::Uuid::new_v4().to_string();
+        let file_id = uuid::Uuid::new_v4().to_string();
+        let filename = if let Some(ext) = extension {
+            file_id + ext
+        } else {
+            file_id
+        };
 
         target_path.join(filename)
     }

@@ -59,7 +59,9 @@ impl Backgrounded {
         });
 
         // use octet-stream, we don't know the upload's real type yet
-        let identifier = store.save_stream(stream, APPLICATION_OCTET_STREAM).await?;
+        let identifier = store
+            .save_stream(stream, APPLICATION_OCTET_STREAM, None)
+            .await?;
 
         self.identifier = Some(identifier);
 

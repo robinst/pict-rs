@@ -18,7 +18,7 @@ pub(super) enum ThumbnailFormat {
 }
 
 impl ThumbnailFormat {
-    const fn as_ffmpeg_codec(self) -> &'static str {
+    const fn ffmpeg_codec(self) -> &'static str {
         match self {
             Self::Jpeg => "mjpeg",
             Self::Png => "png",
@@ -26,7 +26,7 @@ impl ThumbnailFormat {
         }
     }
 
-    const fn to_file_extension(self) -> &'static str {
+    pub(super) const fn file_extension(self) -> &'static str {
         match self {
             Self::Jpeg => ".jpeg",
             Self::Png => ".png",
@@ -34,7 +34,7 @@ impl ThumbnailFormat {
         }
     }
 
-    const fn as_ffmpeg_format(self) -> &'static str {
+    const fn ffmpeg_format(self) -> &'static str {
         match self {
             Self::Jpeg | Self::Png => "image2",
             Self::Webp => "webp",
@@ -57,7 +57,7 @@ pub(super) async fn thumbnail<S: Store>(
     input_format: InternalVideoFormat,
     format: ThumbnailFormat,
 ) -> Result<ProcessRead, FfMpegError> {
-    let output_file = state.tmp_dir.tmp_file(Some(format.to_file_extension()));
+    let output_file = state.tmp_dir.tmp_file(Some(format.file_extension()));
 
     crate::store::file_store::safe_create_parent(&output_file)
         .await
@@ -90,9 +90,9 @@ pub(super) async fn thumbnail<S: Store>(
                     "-frames:v".as_ref(),
                     "1".as_ref(),
                     "-codec".as_ref(),
-                    format.as_ffmpeg_codec().as_ref(),
+                    format.ffmpeg_codec().as_ref(),
                     "-f".as_ref(),
-                    format.as_ffmpeg_format().as_ref(),
+                    format.ffmpeg_format().as_ref(),
                     output_path,
                 ],
                 &[],

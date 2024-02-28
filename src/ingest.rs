@@ -88,7 +88,11 @@ where
 
             state
                 .store
-                .save_async_read(hasher_reader, input_type.media_type())
+                .save_async_read(
+                    hasher_reader,
+                    input_type.media_type(),
+                    Some(input_type.file_extension()),
+                )
                 .await
                 .map(move |identifier| (hash_state, identifier))
         })
@@ -131,7 +135,11 @@ where
 
     let identifier = state
         .store
-        .save_async_read(hasher_reader, input_type.media_type())
+        .save_async_read(
+            hasher_reader,
+            input_type.media_type(),
+            Some(input_type.file_extension()),
+        )
         .await?;
 
     let details = Details::danger_dummy(input_type);
