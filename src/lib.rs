@@ -460,7 +460,7 @@ struct UrlQuery {
 }
 
 async fn ingest_inline<S: Store + 'static>(
-    stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
+    stream: impl Stream<Item = Result<web::Bytes, Error>>,
     state: &State<S>,
 ) -> Result<(Alias, DeleteToken, Details), Error> {
     let session = ingest::ingest(state, stream, None).await?;
@@ -513,7 +513,7 @@ async fn download_stream<S>(
 
 #[tracing::instrument(name = "Downloading file inline", skip(stream, state))]
 async fn do_download_inline<S: Store + 'static>(
-    stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
+    stream: impl Stream<Item = Result<web::Bytes, Error>>,
     state: &State<S>,
 ) -> Result<HttpResponse, Error> {
     metrics::counter!(crate::init_metrics::FILES, "download" => "inline").increment(1);

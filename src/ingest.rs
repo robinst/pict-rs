@@ -30,7 +30,7 @@ pub(crate) struct Session {
 
 async fn process_ingest<S>(
     state: &State<S>,
-    stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
+    stream: impl Stream<Item = Result<Bytes, Error>>,
 ) -> Result<
     (
         InternalFormat,
@@ -108,7 +108,7 @@ where
 
 async fn dummy_ingest<S>(
     state: &State<S>,
-    stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
+    stream: impl Stream<Item = Result<Bytes, Error>>,
 ) -> Result<
     (
         InternalFormat,
@@ -150,7 +150,7 @@ where
 #[tracing::instrument(skip(state, stream))]
 pub(crate) async fn ingest<S>(
     state: &State<S>,
-    stream: impl Stream<Item = Result<Bytes, Error>> + 'static,
+    stream: impl Stream<Item = Result<Bytes, Error>>,
     declared_alias: Option<Alias>,
 ) -> Result<Session, Error>
 where
