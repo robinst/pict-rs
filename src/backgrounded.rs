@@ -34,7 +34,7 @@ impl Backgrounded {
     pub(crate) async fn proxy<S, P>(state: &State<S>, stream: P) -> Result<Self, Error>
     where
         S: Store,
-        P: Stream<Item = Result<Bytes, Error>> + 'static,
+        P: Stream<Item = Result<Bytes, Error>>,
     {
         let mut this = Self {
             repo: state.repo.clone(),
@@ -50,7 +50,7 @@ impl Backgrounded {
     async fn do_proxy<S, P>(&mut self, store: &S, stream: P) -> Result<(), Error>
     where
         S: Store,
-        P: Stream<Item = Result<Bytes, Error>> + 'static,
+        P: Stream<Item = Result<Bytes, Error>>,
     {
         self.upload_id = Some(self.repo.create_upload().await?);
 

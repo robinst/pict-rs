@@ -532,7 +532,7 @@ async fn do_download_inline<S: Store + 'static>(
 
 #[tracing::instrument(name = "Downloading file in background", skip(stream, state))]
 async fn do_download_backgrounded<S: Store + 'static>(
-    stream: impl Stream<Item = Result<web::Bytes, Error>> + 'static,
+    stream: impl Stream<Item = Result<web::Bytes, Error>>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
     metrics::counter!(crate::init_metrics::FILES, "download" => "background").increment(1);
