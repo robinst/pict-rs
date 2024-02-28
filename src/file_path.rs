@@ -14,5 +14,5 @@ pub(crate) fn generate_object() -> String {
 fn generate() -> Vec<String> {
     let s = Uuid::now_v7().simple().to_string();
 
-    (0..6).map(|i| s[i * 2..i * 2 + 2].to_string()).collect()
+    (0..10).map(|i| s[i * 2..i * 2 + 2].to_string()).collect()
 }
