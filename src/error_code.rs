@@ -119,6 +119,9 @@ impl ErrorCode {
     pub(crate) const VALIDATE_NO_FILES: ErrorCode = ErrorCode {
         code: "validate-no-files",
     };
+    pub(crate) const PROXY_NOT_FOUND: ErrorCode = ErrorCode {
+        code: "proxy-not-found",
+    };
     pub(crate) const ALIAS_NOT_FOUND: ErrorCode = ErrorCode {
         code: "alias-not-found",
     };

@@ -658,6 +658,9 @@ pub(crate) trait HashRepo: BaseRepo {
     async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError>;
     async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
+    async fn relate_blurhash(&self, hash: Hash, blurhash: Arc<str>) -> Result<(), RepoError>;
+    async fn blurhash(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError>;
+
     async fn relate_motion_identifier(
         &self,
         hash: Hash,
@@ -737,6 +740,14 @@ where
 
     async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         T::remove_variant(self, hash, variant).await
+    }
+
+    async fn relate_blurhash(&self, hash: Hash, blurhash: Arc<str>) -> Result<(), RepoError> {
+        T::relate_blurhash(self, hash, blurhash).await
+    }
+
+    async fn blurhash(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
+        T::blurhash(self, hash).await
     }
 
     async fn relate_motion_identifier(

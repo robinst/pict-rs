@@ -91,6 +91,7 @@ pub(crate) struct SledRepo {
     hash_identifiers: Tree,
     hash_variant_identifiers: Tree,
     hash_motion_identifiers: Tree,
+    hash_blurhashes: Tree,
     aliases: Tree,
     alias_hashes: Tree,
     alias_delete_tokens: Tree,
@@ -132,6 +133,7 @@ impl SledRepo {
             hash_identifiers: db.open_tree("pict-rs-hash-identifiers-tree")?,
             hash_variant_identifiers: db.open_tree("pict-rs-hash-variant-identifiers-tree")?,
             hash_motion_identifiers: db.open_tree("pict-rs-hash-motion-identifiers-tree")?,
+            hash_blurhashes: db.open_tree("pict-rs-hash-blurhashes-tree")?,
             aliases: db.open_tree("pict-rs-aliases-tree")?,
             alias_hashes: db.open_tree("pict-rs-alias-hashes-tree")?,
             alias_delete_tokens: db.open_tree("pict-rs-alias-delete-tokens-tree")?,
@@ -1352,6 +1354,23 @@ impl HashRepo for SledRepo {
         );
 
         Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn relate_blurhash(&self, hash: Hash, blurhash: Arc<str>) -> Result<(), RepoError> {
+        b!(
+            self.hash_blurhashes,
+            hash_blurhashes.insert(hash.to_bytes(), blurhash.as_bytes())
+        );
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn blurhash(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
+        let opt = b!(self.hash_blurhashes, hash_blurhashes.get(hash.to_ivec()));
+
+        Ok(opt.map(try_into_arc_str).transpose()?)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

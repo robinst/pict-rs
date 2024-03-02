@@ -27,6 +27,7 @@ diesel::table! {
         identifier -> Text,
         motion_identifier -> Nullable<Text>,
         created_at -> Timestamp,
+        blurhash -> Nullable<Text>,
     }
 }
 

@@ -713,28 +713,15 @@ async fn process_details<S: Store>(
     ext: web::Path<String>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
-    let alias = match source {
-        ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
-            Serde::into_inner(alias)
-        }
-        ProcessSource::Proxy { proxy } => {
-            let Some(alias) = state.repo.related(proxy).await? else {
-                return Ok(HttpResponse::NotFound().json(&serde_json::json!({
-                    "msg": "No images associated with provided proxy url"
-                })));
-            };
-            alias
-        }
-    };
+    let alias = alias_from_query(source.into(), &state).await?;
 
     let (_, thumbnail_path, _) = prepare_process(&state.config, operations, ext.as_str())?;
 
-    let Some(hash) = state.repo.hash(&alias).await? else {
-        // Invalid alias
-        return Ok(HttpResponse::NotFound().json(&serde_json::json!({
-            "msg": "No images associated with provided alias",
-        })));
-    };
+    let hash = state
+        .repo
+        .hash(&alias)
+        .await?
+        .ok_or(UploadError::MissingAlias)?;
 
     let thumbnail_string = thumbnail_path.to_string_lossy().to_string();
 
@@ -785,32 +772,7 @@ async fn process<S: Store + 'static>(
     state: web::Data<State<S>>,
     process_map: web::Data<ProcessMap>,
 ) -> Result<HttpResponse, Error> {
-    let alias = match source {
-        ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
-            Serde::into_inner(alias)
-        }
-        ProcessSource::Proxy { proxy } => {
-            let alias = if let Some(alias) = state.repo.related(proxy.clone()).await? {
-                alias
-            } else if !state.config.server.read_only {
-                let stream = download_stream(proxy.as_str(), &state).await?;
-
-                let (alias, _, _) = ingest_inline(stream, &state).await?;
-
-                state.repo.relate_url(proxy, alias.clone()).await?;
-
-                alias
-            } else {
-                return Err(UploadError::ReadOnly.into());
-            };
-
-            if !state.config.server.read_only {
-                state.repo.accessed_alias(alias.clone()).await?;
-            }
-
-            alias
-        }
-    };
+    let alias = proxy_alias_from_query(source.into(), &state).await?;
 
     let (format, thumbnail_path, thumbnail_args) =
         prepare_process(&state.config, operations, ext.as_str())?;
@@ -981,20 +943,10 @@ async fn process_backgrounded<S: Store>(
 /// Fetch file details
 #[tracing::instrument(name = "Fetching query details", skip(state))]
 async fn details_query<S: Store + 'static>(
-    web::Query(alias_query): web::Query<AliasQuery>,
+    web::Query(query): web::Query<AliasQuery>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
-    let alias = match alias_query {
-        AliasQuery::Alias { alias } => Serde::into_inner(alias),
-        AliasQuery::Proxy { proxy } => {
-            let Some(alias) = state.repo.related(proxy).await? else {
-                return Ok(HttpResponse::NotFound().json(&serde_json::json!({
-                    "msg": "Provided proxy URL has not been cached",
-                })));
-            };
-            alias
-        }
-    };
+    let alias = alias_from_query(query, &state).await?;
 
     let details = ensure_details(&state, &alias).await?;
 
@@ -1016,33 +968,10 @@ async fn details<S: Store + 'static>(
 #[tracing::instrument(name = "Serving file query", skip(state))]
 async fn serve_query<S: Store + 'static>(
     range: Option<web::Header<Range>>,
-    web::Query(alias_query): web::Query<AliasQuery>,
+    web::Query(query): web::Query<AliasQuery>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
-    let alias = match alias_query {
-        AliasQuery::Alias { alias } => Serde::into_inner(alias),
-        AliasQuery::Proxy { proxy } => {
-            let alias = if let Some(alias) = state.repo.related(proxy.clone()).await? {
-                alias
-            } else if !state.config.server.read_only {
-                let stream = download_stream(proxy.as_str(), &state).await?;
-
-                let (alias, _, _) = ingest_inline(stream, &state).await?;
-
-                state.repo.relate_url(proxy, alias.clone()).await?;
-
-                alias
-            } else {
-                return Err(UploadError::ReadOnly.into());
-            };
-
-            if !state.config.server.read_only {
-                state.repo.accessed_alias(alias.clone()).await?;
-            }
-
-            alias
-        }
-    };
+    let alias = proxy_alias_from_query(query, &state).await?;
 
     do_serve(range, alias, state).await
 }
@@ -1092,18 +1021,10 @@ async fn do_serve<S: Store + 'static>(
 #[tracing::instrument(name = "Serving query file headers", skip(state))]
 async fn serve_query_head<S: Store + 'static>(
     range: Option<web::Header<Range>>,
-    web::Query(alias_query): web::Query<AliasQuery>,
+    web::Query(query): web::Query<AliasQuery>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
-    let alias = match alias_query {
-        AliasQuery::Alias { alias } => Serde::into_inner(alias),
-        AliasQuery::Proxy { proxy } => {
-            let Some(alias) = state.repo.related(proxy).await? else {
-                return Ok(HttpResponse::NotFound().finish());
-            };
-            alias
-        }
-    };
+    let alias = alias_from_query(query, &state).await?;
 
     do_serve_head(range, alias, state).await
 }
@@ -1275,12 +1196,13 @@ fn srv_head(
     builder
 }
 
-async fn blurhash<S: Store + 'static>(
-    web::Query(alias_query): web::Query<AliasQuery>,
-    state: web::Data<State<S>>,
-) -> Result<HttpResponse, Error> {
-    let alias = match alias_query {
-        AliasQuery::Alias { alias } => Serde::into_inner(alias),
+#[tracing::instrument(level = "DEBUG", skip(state))]
+async fn proxy_alias_from_query<S: Store + 'static>(
+    alias_query: AliasQuery,
+    state: &State<S>,
+) -> Result<Alias, Error> {
+    match alias_query {
+        AliasQuery::Alias { alias } => Ok(Serde::into_inner(alias)),
         AliasQuery::Proxy { proxy } => {
             let alias = if let Some(alias) = state.repo.related(proxy.clone()).await? {
                 alias
@@ -1300,16 +1222,37 @@ async fn blurhash<S: Store + 'static>(
                 state.repo.accessed_alias(alias.clone()).await?;
             }
 
-            alias
+            Ok(alias)
         }
-    };
+    }
+}
 
-    let details = ensure_details(&state, &alias).await?;
-    let blurhash = blurhash::generate(&state, &alias, &details).await?;
+async fn blurhash<S: Store + 'static>(
+    web::Query(query): web::Query<AliasQuery>,
+    state: web::Data<State<S>>,
+) -> Result<HttpResponse, Error> {
+    let alias = proxy_alias_from_query(query, &state).await?;
+
+    let hash = state
+        .repo
+        .hash(&alias)
+        .await?
+        .ok_or(UploadError::MissingAlias)?;
+
+    let blurhash = if let Some(blurhash) = state.repo.blurhash(hash.clone()).await? {
+        blurhash
+    } else {
+        let details = ensure_details(&state, &alias).await?;
+        let blurhash = blurhash::generate(&state, &alias, &details).await?;
+        let blurhash: Arc<str> = Arc::from(blurhash);
+        state.repo.relate_blurhash(hash, blurhash.clone()).await?;
+
+        blurhash
+    };
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "msg": "ok",
-        "blurhash": blurhash,
+        "blurhash": blurhash.as_ref(),
     })))
 }
 
@@ -1378,6 +1321,17 @@ enum AliasQuery {
     Alias { alias: Serde<Alias> },
 }
 
+impl From<ProcessSource> for AliasQuery {
+    fn from(value: ProcessSource) -> Self {
+        match value {
+            ProcessSource::Alias { alias } | ProcessSource::Source { src: alias } => {
+                Self::Alias { alias }
+            }
+            ProcessSource::Proxy { proxy } => Self::Proxy { proxy },
+        }
+    }
+}
+
 #[tracing::instrument(name = "Setting 404 Image", skip(state))]
 async fn set_not_found<S>(
     json: web::Json<AliasQuery>,
@@ -1392,15 +1346,16 @@ async fn set_not_found<S>(
         AliasQuery::Proxy { .. } => {
             return Ok(HttpResponse::BadRequest().json(serde_json::json!({
                 "msg": "Cannot use proxied media as Not Found image",
+                "code": "proxy-not-allowed",
             })));
         }
     };
 
-    if state.repo.hash(&alias).await?.is_none() {
-        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "msg": "No hash associated with provided alias"
-        })));
-    }
+    state
+        .repo
+        .hash(&alias)
+        .await?
+        .ok_or(UploadError::MissingAlias)?;
 
     state
         .repo
@@ -1412,32 +1367,44 @@ async fn set_not_found<S>(
     })))
 }
 
+async fn alias_from_query<S>(alias_query: AliasQuery, state: &State<S>) -> Result<Alias, Error> {
+    match alias_query {
+        AliasQuery::Alias { alias } => Ok(Serde::into_inner(alias)),
+        AliasQuery::Proxy { proxy } => {
+            let alias = state
+                .repo
+                .related(proxy)
+                .await?
+                .ok_or(UploadError::MissingProxy)?;
+
+            if !state.config.server.read_only {
+                state.repo.accessed_alias(alias.clone()).await?;
+            }
+
+            Ok(alias)
+        }
+    }
+}
+
 #[tracing::instrument(name = "Purging file", skip(state))]
 async fn purge<S>(
-    web::Query(alias_query): web::Query<AliasQuery>,
+    web::Query(query): web::Query<AliasQuery>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
     if state.config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
-    let alias = match alias_query {
-        AliasQuery::Alias { alias } => Serde::into_inner(alias),
-        AliasQuery::Proxy { proxy } => {
-            let Some(alias) = state.repo.related(proxy).await? else {
-                return Ok(HttpResponse::NotFound().finish());
-            };
-            alias
-        }
-    };
+    let alias = alias_from_query(query, &state).await?;
 
     let aliases = state.repo.aliases_from_alias(&alias).await?;
 
-    let Some(hash) = state.repo.hash(&alias).await? else {
-        return Ok(HttpResponse::BadRequest().json(&serde_json::json!({
-            "msg": "No images associated with provided alias",
-        })));
-    };
+    let hash = state
+        .repo
+        .hash(&alias)
+        .await?
+        .ok_or(UploadError::MissingAlias)?;
+
     queue::cleanup_hash(&state.repo, hash).await?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
@@ -1448,22 +1415,14 @@ async fn purge<S>(
 
 #[tracing::instrument(name = "Deleting alias", skip(state))]
 async fn delete_alias<S>(
-    web::Query(alias_query): web::Query<AliasQuery>,
+    web::Query(query): web::Query<AliasQuery>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
     if state.config.server.read_only {
         return Err(UploadError::ReadOnly.into());
     }
 
-    let alias = match alias_query {
-        AliasQuery::Alias { alias } => Serde::into_inner(alias),
-        AliasQuery::Proxy { proxy } => {
-            let Some(alias) = state.repo.related(proxy).await? else {
-                return Ok(HttpResponse::NotFound().finish());
-            };
-            alias
-        }
-    };
+    let alias = alias_from_query(query, &state).await?;
 
     if let Some(token) = state.repo.delete_token(&alias).await? {
         queue::cleanup_alias(&state.repo, alias, token).await?;
@@ -1478,18 +1437,10 @@ async fn delete_alias<S>(
 
 #[tracing::instrument(name = "Fetching aliases", skip(state))]
 async fn aliases<S>(
-    web::Query(alias_query): web::Query<AliasQuery>,
+    web::Query(query): web::Query<AliasQuery>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
-    let alias = match alias_query {
-        AliasQuery::Alias { alias } => Serde::into_inner(alias),
-        AliasQuery::Proxy { proxy } => {
-            let Some(alias) = state.repo.related(proxy).await? else {
-                return Ok(HttpResponse::NotFound().finish());
-            };
-            alias
-        }
-    };
+    let alias = alias_from_query(query, &state).await?;
 
     let aliases = state.repo.aliases_from_alias(&alias).await?;
 
@@ -1501,25 +1452,16 @@ async fn aliases<S>(
 
 #[tracing::instrument(name = "Fetching identifier", skip(state))]
 async fn identifier<S>(
-    web::Query(alias_query): web::Query<AliasQuery>,
+    web::Query(query): web::Query<AliasQuery>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
-    let alias = match alias_query {
-        AliasQuery::Alias { alias } => Serde::into_inner(alias),
-        AliasQuery::Proxy { proxy } => {
-            let Some(alias) = state.repo.related(proxy).await? else {
-                return Ok(HttpResponse::NotFound().finish());
-            };
-            alias
-        }
-    };
+    let alias = alias_from_query(query, &state).await?;
 
-    let Some(identifier) = state.repo.identifier_from_alias(&alias).await? else {
-        // Invalid alias
-        return Ok(HttpResponse::NotFound().json(serde_json::json!({
-            "msg": "No identifiers associated with provided alias"
-        })));
-    };
+    let identifier = state
+        .repo
+        .identifier_from_alias(&alias)
+        .await?
+        .ok_or(UploadError::MissingAlias)?;
 
     Ok(HttpResponse::Ok().json(&serde_json::json!({
         "msg": "ok",

@@ -931,6 +931,51 @@ impl HashRepo for PostgresRepo {
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
+    async fn relate_blurhash(
+        &self,
+        input_hash: Hash,
+        input_blurhash: Arc<str>,
+    ) -> Result<(), RepoError> {
+        use schema::hashes::dsl::*;
+
+        let mut conn = self.get_connection().await?;
+
+        diesel::update(hashes)
+            .filter(hash.eq(&input_hash))
+            .set(blurhash.eq(input_blurhash.as_ref()))
+            .execute(&mut conn)
+            .with_metrics(crate::init_metrics::POSTGRES_HASHES_RELATE_BLURHASH)
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)?
+            .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn blurhash(&self, input_hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
+        use schema::hashes::dsl::*;
+
+        let mut conn = self.get_connection().await?;
+
+        let opt = hashes
+            .select(blurhash)
+            .filter(hash.eq(&input_hash))
+            .get_result::<Option<String>>(&mut conn)
+            .with_metrics(crate::init_metrics::POSTGRES_HASHES_BLURHASH)
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)?
+            .optional()
+            .map_err(PostgresError::Diesel)?
+            .flatten()
+            .map(Arc::from);
+
+        Ok(opt)
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn relate_motion_identifier(
         &self,
         input_hash: Hash,

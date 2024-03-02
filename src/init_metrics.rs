@@ -256,6 +256,14 @@ fn describe_postgres() {
         "Timings for removing a variant for a provided hash"
     );
     metrics::describe_histogram!(
+        POSTGRES_HASHES_RELATE_BLURHASH,
+        "Timings for relating a blurhash with a provided hash"
+    );
+    metrics::describe_histogram!(
+        POSTGRES_HASHES_BLURHASH,
+        "Timings for fetching a blurhash for a provided hash"
+    );
+    metrics::describe_histogram!(
         POSTGRES_HASHES_RELATE_MOTION_IDENTIFIER,
         "Timings for relating a still image identifier for a provided hash representing a video"
     );
@@ -438,6 +446,8 @@ pub(crate) const POSTGRES_VARIANTS_RELATE_VARIANT_IDENTIFIER: &str =
 pub(crate) const POSTGRES_VARIANTS_IDENTIFIER: &str = "pict-rs.postgres.variants.identifier";
 pub(crate) const POSTGRES_VARIANTS_FOR_HASH: &str = "pict-rs.postgres.variants.for-hash";
 pub(crate) const POSTGRES_VARIANTS_REMOVE: &str = "pict-rs.postgres.variants.remove";
+pub(crate) const POSTGRES_HASHES_RELATE_BLURHASH: &str = "pict-rs.postgres.hashes.relate-blurhash";
+pub(crate) const POSTGRES_HASHES_BLURHASH: &str = "pict-rs.postgres.hashes.blurhash";
 pub(crate) const POSTGRES_HASHES_RELATE_MOTION_IDENTIFIER: &str =
     "pict-rs.postgres.hashes.relate-motion-identifier";
 pub(crate) const POSTGRES_HASHES_MOTION_IDENTIFIER: &str =

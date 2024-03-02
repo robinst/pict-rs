@@ -123,6 +123,9 @@ pub(crate) enum UploadError {
     #[error("No files present in upload")]
     NoFiles,
 
+    #[error("Media has not been proxied")]
+    MissingProxy,
+
     #[error("Requested a file that doesn't exist")]
     MissingAlias,
 
@@ -186,6 +189,7 @@ impl UploadError {
             Self::Semaphore => ErrorCode::PROCESS_SEMAPHORE_CLOSED,
             Self::Canceled => ErrorCode::PANIC,
             Self::NoFiles => ErrorCode::VALIDATE_NO_FILES,
+            Self::MissingProxy => ErrorCode::PROXY_NOT_FOUND,
             Self::MissingAlias => ErrorCode::ALIAS_NOT_FOUND,
             Self::MissingIdentifier => ErrorCode::LOST_FILE,
             Self::InvalidToken => ErrorCode::INVALID_DELETE_TOKEN,
@@ -256,7 +260,7 @@ impl ResponseError for Error {
             Some(UploadError::Ffmpeg(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::Exiftool(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
             Some(UploadError::Process(e)) if e.is_client_error() => StatusCode::BAD_REQUEST,
-            Some(UploadError::MissingAlias) => StatusCode::NOT_FOUND,
+            Some(UploadError::MissingProxy | UploadError::MissingAlias) => StatusCode::NOT_FOUND,
             Some(UploadError::Ffmpeg(e)) if e.is_not_found() => StatusCode::NOT_FOUND,
             Some(UploadError::InvalidToken) => StatusCode::FORBIDDEN,
             Some(UploadError::Range) => StatusCode::RANGE_NOT_SATISFIABLE,
