@@ -172,15 +172,7 @@ impl FileStore {
     }
 
     fn next_file(&self, extension: Option<&str>) -> PathBuf {
-        let target_path = crate::file_path::generate_disk(self.root_dir.clone());
-        let file_id = uuid::Uuid::new_v4().to_string();
-        let filename = if let Some(ext) = extension {
-            file_id + ext
-        } else {
-            file_id
-        };
-
-        target_path.join(filename)
+        crate::file_path::generate_disk(self.root_dir.clone(), extension)
     }
 
     #[tracing::instrument(level = "debug", skip(self, path), fields(path = ?path.as_ref()))]

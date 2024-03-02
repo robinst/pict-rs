@@ -778,15 +778,7 @@ impl ObjectStore {
     }
 
     fn next_file(&self, extension: Option<&str>) -> String {
-        let path = crate::file_path::generate_object();
-        let file_id = uuid::Uuid::new_v4().to_string();
-        let filename = if let Some(ext) = extension {
-            file_id + ext
-        } else {
-            file_id
-        };
-
-        format!("{path}/{filename}")
+        crate::file_path::generate_object(extension)
     }
 }
 
