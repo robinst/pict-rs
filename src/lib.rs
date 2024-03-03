@@ -1207,9 +1207,9 @@ async fn proxy_alias_from_query<S: Store + 'static>(
             let alias = if let Some(alias) = state.repo.related(proxy.clone()).await? {
                 alias
             } else if !state.config.server.read_only {
-                let stream = download_stream(proxy.as_str(), &state).await?;
+                let stream = download_stream(proxy.as_str(), state).await?;
 
-                let (alias, _, _) = ingest_inline(stream, &state).await?;
+                let (alias, _, _) = ingest_inline(stream, state).await?;
 
                 state.repo.relate_url(proxy, alias.clone()).await?;
 
