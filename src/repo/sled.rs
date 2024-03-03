@@ -1411,6 +1411,7 @@ impl HashRepo for SledRepo {
         let hash_identifiers = self.hash_identifiers.clone();
         let hash_motion_identifiers = self.hash_motion_identifiers.clone();
         let hash_variant_identifiers = self.hash_variant_identifiers.clone();
+        let hash_blurhashes = self.hash_blurhashes.clone();
 
         let hash2 = hash.clone();
         let variant_keys = b!(self.hash_variant_identifiers, {
@@ -1430,6 +1431,7 @@ impl HashRepo for SledRepo {
                 &hash_identifiers,
                 &hash_motion_identifiers,
                 &hash_variant_identifiers,
+                &hash_blurhashes,
             )
                 .transaction(
                     |(
@@ -1438,6 +1440,7 @@ impl HashRepo for SledRepo {
                         hash_identifiers,
                         hash_motion_identifiers,
                         hash_variant_identifiers,
+                        hash_blurhashes,
                     )| {
                         if let Some(value) = hashes.remove(&hash)? {
                             hashes_inverse.remove(value)?;
@@ -1449,6 +1452,8 @@ impl HashRepo for SledRepo {
                         for key in &variant_keys {
                             hash_variant_identifiers.remove(key)?;
                         }
+
+                        hash_blurhashes.remove(&hash)?;
 
                         Ok(())
                     },
