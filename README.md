@@ -380,6 +380,22 @@ pict-rs offers the following endpoints:
         These proxied images are removed from pict-rs some time after their last access. This time
         is configurable with `PICTRS__MEDIA__RETENTION__PROXY`. See (./pict-rs.toml)[./pict-rs.toml]
         for more information.
+- `GET /image/blurhash?alias={alias}` Create and store a blurhash for the provided alias
+
+    Available source arguments are
+    - `?alias={alias}` Serve a blurhash for an image identified by the provided alias
+    - `?proxy={url}` Serve a blurhash for the media hosted at `url`
+        This will download and store the original version of the specified media, as well as its
+        blurhash. Retention for proxied media is configurable with `PICTRS__MEDIA__RETENTION__PROXY`.
+        See (./pict-rs.toml)[./pict-rs.toml] for more information.
+
+    The returned JSON is structured like so:
+    ```json
+    {
+        "msg": "ok",
+        "blurhash": "LGF5]+Yk^6#M@-5c,1J5@[or[Q6."
+    }
+    ```
 - `GET /image/process.{ext}?src={alias}&...` Get a file with transformations applied.
     Available source arguments are
     - `?src={alias}` This behavior is the same as in previous releases
