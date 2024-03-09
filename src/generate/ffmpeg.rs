@@ -97,7 +97,8 @@ pub(super) async fn thumbnail<S: Store>(
                 ],
                 &[],
                 state.config.media.process_timeout,
-            )?
+            )
+            .await?
             .wait()
             .await
             .map_err(FfMpegError::Process)?;

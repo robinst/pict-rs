@@ -132,7 +132,10 @@ async fn transcode_files(
         output_path,
     ]);
 
-    Process::run("ffmpeg", &args, &[], timeout)?.wait().await?;
+    Process::run("ffmpeg", &args, &[], timeout)
+        .await?
+        .wait()
+        .await?;
 
     Ok(())
 }

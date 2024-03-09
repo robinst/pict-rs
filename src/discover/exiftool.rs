@@ -40,7 +40,8 @@ pub(super) async fn check_reorient(
 
 #[tracing::instrument(level = "trace", skip_all)]
 async fn needs_reorienting(input: BytesStream, timeout: u64) -> Result<bool, ExifError> {
-    let buf = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)?
+    let buf = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)
+        .await?
         .drive_with_async_read(input.into_reader())
         .into_string()
         .await?;

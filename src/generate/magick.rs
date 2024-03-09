@@ -43,7 +43,8 @@ pub(super) async fn thumbnail_command<S>(
         (MAGICK_CONFIGURE_PATH, state.policy_dir.as_os_str()),
     ];
 
-    let process = Process::run("magick", &args, &envs, state.config.media.process_timeout)?
+    let process = Process::run("magick", &args, &envs, state.config.media.process_timeout)
+        .await?
         .add_extras(temporary_path);
 
     Ok(process)

@@ -155,7 +155,7 @@ impl ProcessError {
 }
 
 impl Process {
-    pub(crate) fn run<T>(
+    pub(crate) async fn run<T>(
         command: &str,
         args: &[T],
         envs: &[(&str, &OsStr)],
@@ -168,15 +168,10 @@ impl Process {
 
         tracing::debug!("{envs:?} {command} {args:?}");
 
-        let res = tracing::trace_span!(parent: None, "Create command", %command).in_scope(|| {
-            Self::spawn(
-                command.clone(),
-                Command::new(command.as_ref())
-                    .args(args)
-                    .envs(envs.iter().copied()),
-                timeout,
-            )
-        });
+        let mut cmd = Command::new(command.as_ref());
+        cmd.args(args).envs(envs.iter().copied());
+
+        let res = Self::spawn(command.clone(), cmd, timeout).await;
 
         match res {
             Ok(this) => Ok(this),
@@ -191,16 +186,17 @@ impl Process {
         }
     }
 
-    fn spawn(command: Arc<str>, cmd: &mut Command, timeout: u64) -> std::io::Result<Self> {
-        tracing::trace_span!(parent: None, "Spawn command", %command).in_scope(|| {
-            let guard = MetricsGuard::guard(command.clone());
+    async fn spawn(command: Arc<str>, mut cmd: Command, timeout: u64) -> std::io::Result<Self> {
+        let guard = MetricsGuard::guard(command.clone());
 
-            let cmd = cmd
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .kill_on_drop(true);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true);
 
-            cmd.spawn().map(|child| Process {
+        crate::sync::spawn_blocking("spawn-command", move || cmd.spawn())
+            .await
+            .expect("spawn panicked")
+            .map(|child| Process {
                 child,
                 command,
                 guard,
@@ -208,7 +204,6 @@ impl Process {
                 extras: Box::new(()),
                 id: Uuid::now_v7(),
             })
-        })
     }
 
     pub(crate) fn add_extras(self, extra: impl Extras + 'static) -> Self {
@@ -282,6 +277,7 @@ impl Process {
                     Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => break,
                     Err(e) => return Err(e),
                 }
+                tokio::task::yield_now().await;
             }
 
             Ok(())
@@ -451,6 +447,16 @@ impl ProcessRead {
     }
 
     pub(crate) async fn with_stdout<Fut>(
+        self,
+        f: impl FnOnce(BoxRead<'static>) -> Fut,
+    ) -> Result<Fut::Output, ProcessError>
+    where
+        Fut: Future,
+    {
+        self.with_stdout_inner(f).await
+    }
+
+    async fn with_stdout_inner<Fut>(
         self,
         f: impl FnOnce(BoxRead<'static>) -> Fut,
     ) -> Result<Fut::Output, ProcessError>

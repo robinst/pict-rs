@@ -142,7 +142,8 @@ where
 
         let elapsed = start.elapsed();
         if elapsed > Duration::from_micros(10) {
-            metrics::counter!(crate::init_metrics::FUTURE_POLL_TIMER_EXCEEDED, "timer" => this.name.to_string());
+            metrics::counter!(crate::init_metrics::FUTURE_POLL_TIMER_EXCEEDED, "timer" => this.name.to_string()).increment(1);
+            metrics::histogram!(crate::init_metrics::FUTURE_POLL_TIMER_EXCEEDED_SECONDS, "timer" => this.name.to_string()).record(elapsed.as_secs_f64());
         }
 
         if elapsed > Duration::from_secs(1) {

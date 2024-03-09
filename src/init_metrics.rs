@@ -32,9 +32,15 @@ fn describe_future() {
         FUTURE_POLL_TIMER_EXCEEDED,
         "How many times a given poll operation has lasted longer than 10 microseconds"
     );
+    metrics::describe_histogram!(
+        FUTURE_POLL_TIMER_EXCEEDED_SECONDS,
+        "Durations for polls lasting longer than 10 microseconds"
+    );
 }
 
 pub(crate) const FUTURE_POLL_TIMER_EXCEEDED: &str = "pict-rs.future.poll-timer.exceeded";
+pub(crate) const FUTURE_POLL_TIMER_EXCEEDED_SECONDS: &str =
+    "pict-rs.future.poll-timer.exceeded.seconds";
 
 fn describe_queue_cleanup() {
     metrics::describe_counter!(

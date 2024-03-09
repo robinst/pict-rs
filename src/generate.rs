@@ -74,11 +74,12 @@ pub(crate) async fn generate<S: Store + 'static>(
             thumbnail_args,
             original_details,
             hash.clone(),
-        );
+        )
+        .with_poll_timer("process-future");
 
         let (details, identifier) = process_map
             .process(hash, thumbnail_path, process_fut)
-            .with_poll_timer("process-future")
+            .with_poll_timer("process-map-future")
             .with_timeout(Duration::from_secs(state.config.media.process_timeout * 4))
             .with_metrics(crate::init_metrics::GENERATE_PROCESS)
             .await

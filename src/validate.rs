@@ -133,7 +133,7 @@ async fn process_image_command<S>(
 
         magick::convert_image_command(state, input.format, format, quality).await?
     } else {
-        exiftool::clear_metadata_command(state.config.media.process_timeout)?
+        exiftool::clear_metadata_command(state.config.media.process_timeout).await?
     };
 
     Ok((InternalFormat::Image(format), process))
@@ -188,7 +188,7 @@ async fn process_animation_command<S>(
 
         magick::convert_animation_command(state, input, format, quality).await?
     } else {
-        exiftool::clear_metadata_command(state.config.media.process_timeout)?
+        exiftool::clear_metadata_command(state.config.media.process_timeout).await?
     };
 
     Ok((InternalFormat::Animation(format), process))

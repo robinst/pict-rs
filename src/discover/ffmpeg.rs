@@ -197,7 +197,8 @@ pub(super) async fn discover_bytes_stream<S>(
             ],
             &[],
             state.config.media.process_timeout,
-        )?
+        )
+        .await?
         .read()
         .into_vec()
         .await
@@ -242,7 +243,8 @@ async fn alpha_pixel_formats(timeout: u64) -> Result<HashSet<String>, FfMpegErro
         ],
         &[],
         timeout,
-    )?
+    )
+    .await?
     .read()
     .into_vec()
     .await?;
