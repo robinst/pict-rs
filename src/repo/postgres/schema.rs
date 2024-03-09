@@ -44,6 +44,7 @@ diesel::table! {
         queue_time -> Timestamp,
         heartbeat -> Nullable<Timestamp>,
         unique_key -> Nullable<Text>,
+        retry -> Int4,
     }
 }
 

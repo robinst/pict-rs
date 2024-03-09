@@ -5,7 +5,7 @@ use crate::{
     details::Details,
     error::{Error, UploadError},
     formats::InternalFormat,
-    future::WithMetrics,
+    future::{WithMetrics, WithPollTimer},
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     state::State,
     store::Store,
@@ -159,7 +159,9 @@ where
     let (input_type, identifier, details, hash_state) = if state.config.server.danger_dummy_mode {
         dummy_ingest(state, stream).await?
     } else {
-        process_ingest(state, stream).await?
+        process_ingest(state, stream)
+            .with_poll_timer("ingest-future")
+            .await?
     };
 
     let mut session = Session {

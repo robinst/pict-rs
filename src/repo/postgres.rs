@@ -43,9 +43,9 @@ use self::job_status::JobStatus;
 use super::{
     metrics::{PopMetricsGuard, PushMetricsGuard, WaitMetricsGuard},
     Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, DetailsRepo,
-    FullRepo, Hash, HashAlreadyExists, HashPage, HashRepo, JobId, OrderedHash, ProxyRepo,
-    QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo, UploadResult,
-    VariantAccessRepo, VariantAlreadyExists,
+    FullRepo, Hash, HashAlreadyExists, HashPage, HashRepo, JobId, JobResult, OrderedHash,
+    ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
+    UploadResult, VariantAccessRepo, VariantAlreadyExists,
 };
 
 #[derive(Clone)]
@@ -1358,7 +1358,7 @@ impl QueueRepo for PostgresRepo {
         }
     }
 
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "debug", skip_all, fields(job_id))]
     async fn pop(
         &self,
         queue_name: &'static str,
@@ -1420,7 +1420,8 @@ impl QueueRepo for PostgresRepo {
                     queue_alias
                         .field(status)
                         .eq(JobStatus::New)
-                        .and(queue_alias.field(queue).eq(queue_name)),
+                        .and(queue_alias.field(queue).eq(queue_name))
+                        .and(queue_alias.field(retry).ge(1)),
                 )
                 .order(queue_alias.field(queue_time))
                 .for_update()
@@ -1445,20 +1446,21 @@ impl QueueRepo for PostgresRepo {
                 .map_err(PostgresError::Diesel)?;
 
             if let Some((job_id, job_json)) = opt {
+                tracing::Span::current().record("job_id", &format!("{job_id}"));
+
                 guard.disarm();
+                tracing::debug!("{job_json}");
                 return Ok((JobId(job_id), job_json));
             }
 
             drop(conn);
-            if notifier
+            match notifier
                 .notified()
                 .with_timeout(Duration::from_secs(5))
                 .await
-                .is_ok()
             {
-                tracing::debug!("Notified");
-            } else {
-                tracing::debug!("Timed out");
+                Ok(()) => tracing::debug!("Notified"),
+                Err(_) => tracing::trace!("Timed out"),
             }
         }
     }
@@ -1499,23 +1501,54 @@ impl QueueRepo for PostgresRepo {
         queue_name: &'static str,
         worker_id: Uuid,
         job_id: JobId,
+        job_status: JobResult,
     ) -> Result<(), RepoError> {
         use schema::job_queue::dsl::*;
 
         let mut conn = self.get_connection().await?;
 
-        diesel::delete(job_queue)
-            .filter(
-                id.eq(job_id.0)
-                    .and(queue.eq(queue_name))
-                    .and(worker.eq(worker_id)),
-            )
-            .execute(&mut conn)
-            .with_metrics(crate::init_metrics::POSTGRES_QUEUE_COMPLETE)
-            .with_timeout(Duration::from_secs(5))
-            .await
-            .map_err(|_| PostgresError::DbTimeout)?
-            .map_err(PostgresError::Diesel)?;
+        if matches!(job_status, JobResult::Failure) {
+            diesel::update(job_queue)
+                .filter(
+                    id.eq(job_id.0)
+                        .and(queue.eq(queue_name))
+                        .and(worker.eq(worker_id)),
+                )
+                .set(retry.eq(retry - 1))
+                .execute(&mut conn)
+                .with_metrics(crate::init_metrics::POSTGRES_QUEUE_RETRY)
+                .with_timeout(Duration::from_secs(5))
+                .await
+                .map_err(|_| PostgresError::DbTimeout)?
+                .map_err(PostgresError::Diesel)?;
+
+            diesel::delete(job_queue)
+                .filter(
+                    id.eq(job_id.0)
+                        .and(queue.eq(queue_name))
+                        .and(worker.eq(worker_id))
+                        .and(retry.le(0)),
+                )
+                .execute(&mut conn)
+                .with_metrics(crate::init_metrics::POSTGRES_QUEUE_CLEANUP)
+                .with_timeout(Duration::from_secs(5))
+                .await
+                .map_err(|_| PostgresError::DbTimeout)?
+                .map_err(PostgresError::Diesel)?;
+        } else {
+            diesel::delete(job_queue)
+                .filter(
+                    id.eq(job_id.0)
+                        .and(queue.eq(queue_name))
+                        .and(worker.eq(worker_id)),
+                )
+                .execute(&mut conn)
+                .with_metrics(crate::init_metrics::POSTGRES_QUEUE_COMPLETE)
+                .with_timeout(Duration::from_secs(5))
+                .await
+                .map_err(|_| PostgresError::DbTimeout)?
+                .map_err(PostgresError::Diesel)?;
+        }
 
         Ok(())
     }

@@ -44,7 +44,7 @@ use actix_web::{
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
 use details::{ApiDetails, HumanDate};
-use future::WithTimeout;
+use future::{WithPollTimer, WithTimeout};
 use futures_core::Stream;
 use magick::ArcPolicyDir;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -186,6 +186,7 @@ impl<S: Store + 'static> FormData for Upload<S> {
 
                             ingest::ingest(&state, stream, None).await
                         }
+                        .with_poll_timer("file-upload")
                         .instrument(span),
                     )
                 })),
@@ -237,6 +238,7 @@ impl<S: Store + 'static> FormData for Import<S> {
                             ingest::ingest(&state, stream, Some(Alias::from_existing(&filename)))
                                 .await
                         }
+                        .with_poll_timer("file-import")
                         .instrument(span),
                     )
                 })),
@@ -351,6 +353,7 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
 
                             Backgrounded::proxy(&state, stream).await
                         }
+                        .with_poll_timer("file-proxy")
                         .instrument(span),
                     )
                 })),

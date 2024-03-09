@@ -6,7 +6,7 @@ use crate::{
     details::Details,
     error::{Error, UploadError},
     formats::{ImageFormat, InputProcessableFormat, InternalVideoFormat, ProcessableFormat},
-    future::{WithMetrics, WithTimeout},
+    future::{WithMetrics, WithPollTimer, WithTimeout},
     repo::{Hash, VariantAlreadyExists},
     state::State,
     store::Store,
@@ -48,7 +48,7 @@ impl Drop for MetricsGuard {
     }
 }
 
-#[tracing::instrument(skip(state, process_map, hash))]
+#[tracing::instrument(skip(state, process_map, original_details, hash))]
 pub(crate) async fn generate<S: Store + 'static>(
     state: &State<S>,
     process_map: &ProcessMap,
@@ -78,6 +78,7 @@ pub(crate) async fn generate<S: Store + 'static>(
 
         let (details, identifier) = process_map
             .process(hash, thumbnail_path, process_fut)
+            .with_poll_timer("process-future")
             .with_timeout(Duration::from_secs(state.config.media.process_timeout * 4))
             .with_metrics(crate::init_metrics::GENERATE_PROCESS)
             .await

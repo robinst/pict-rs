@@ -5,6 +5,8 @@ use tokio::{
     task::JoinHandle,
 };
 
+use crate::future::WithPollTimer;
+
 pub(crate) struct DropHandle<T> {
     handle: JoinHandle<T>,
 }
@@ -75,13 +77,12 @@ pub(crate) fn bare_semaphore(permits: usize) -> Semaphore {
 }
 
 #[track_caller]
-pub(crate) fn spawn<F>(name: &str, future: F) -> tokio::task::JoinHandle<F::Output>
+pub(crate) fn spawn<F>(name: &'static str, future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: std::future::Future + 'static,
     F::Output: 'static,
 {
-    #[cfg(not(tokio_unstable))]
-    let _ = name;
+    let future = future.with_poll_timer(name);
 
     let span = tracing::trace_span!(parent: None, "spawn task");
     let guard = span.enter();

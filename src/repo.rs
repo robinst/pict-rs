@@ -337,6 +337,13 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct JobId(Uuid);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum JobResult {
+    Success,
+    Failure,
+    Aborted,
+}
+
 impl JobId {
     pub(crate) fn gen() -> Self {
         Self(Uuid::now_v7())
@@ -380,6 +387,7 @@ pub(crate) trait QueueRepo: BaseRepo {
         queue: &'static str,
         worker_id: Uuid,
         job_id: JobId,
+        job_status: JobResult,
     ) -> Result<(), RepoError>;
 }
 
@@ -423,8 +431,9 @@ where
         queue: &'static str,
         worker_id: Uuid,
         job_id: JobId,
+        job_status: JobResult,
     ) -> Result<(), RepoError> {
-        T::complete_job(self, queue, worker_id, job_id).await
+        T::complete_job(self, queue, worker_id, job_id, job_status).await
     }
 }
 

@@ -59,9 +59,19 @@ pub(crate) trait WithMetrics: Future {
     }
 }
 
+pub(crate) trait WithPollTimer: Future {
+    fn with_poll_timer(self, name: &'static str) -> PollTimer<Self>
+    where
+        Self: Sized,
+    {
+        PollTimer { name, inner: self }
+    }
+}
+
 impl<F> NowOrNever for F where F: Future {}
 impl<F> WithMetrics for F where F: Future {}
 impl<F> WithTimeout for F where F: Future {}
+impl<F> WithPollTimer for F where F: Future {}
 
 pin_project_lite::pin_project! {
     pub(crate) struct MetricsFuture<F> {
@@ -102,5 +112,61 @@ impl Drop for Metrics {
     fn drop(&mut self) {
         metrics::histogram!(self.name, "complete" => self.complete.to_string())
             .record(self.start.elapsed().as_secs_f64());
+    }
+}
+
+pin_project_lite::pin_project! {
+    pub(crate) struct PollTimer<F> {
+        name: &'static str,
+
+        #[pin]
+        inner: F,
+    }
+}
+
+impl<F> Future for PollTimer<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let start = Instant::now();
+
+        let this = self.project();
+
+        let out = this.inner.poll(cx);
+
+        let elapsed = start.elapsed();
+        if elapsed > Duration::from_micros(10) {
+            metrics::counter!(crate::init_metrics::FUTURE_POLL_TIMER_EXCEEDED, "timer" => this.name.to_string());
+        }
+
+        if elapsed > Duration::from_secs(1) {
+            tracing::warn!(
+                "Future {} polled for {} seconds",
+                this.name,
+                elapsed.as_secs()
+            );
+        } else if elapsed > Duration::from_millis(1) {
+            tracing::warn!("Future {} polled for {} ms", this.name, elapsed.as_millis());
+        } else if elapsed > Duration::from_micros(200) {
+            tracing::debug!(
+                "Future {} polled for {} microseconds",
+                this.name,
+                elapsed.as_micros(),
+            );
+        } else if elapsed > Duration::from_micros(1) {
+            tracing::trace!(
+                "Future {} polled for {} microseconds",
+                this.name,
+                elapsed.as_micros()
+            );
+        }
+
+        out
     }
 }

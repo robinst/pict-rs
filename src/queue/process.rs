@@ -5,7 +5,7 @@ use crate::{
     concurrent_processor::ProcessMap,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
-    future::LocalBoxFuture,
+    future::WithPollTimer,
     ingest::Session,
     queue::Process,
     repo::{Alias, UploadId, UploadResult},
@@ -15,49 +15,54 @@ use crate::{
 };
 use std::{path::PathBuf, sync::Arc};
 
+use super::{JobContext, JobFuture, JobResult};
+
 pub(super) fn perform<'a, S>(
     state: &'a State<S>,
     process_map: &'a ProcessMap,
     job: serde_json::Value,
-) -> LocalBoxFuture<'a, Result<(), Error>>
+) -> JobFuture<'a>
 where
     S: Store + 'static,
 {
     Box::pin(async move {
-        match serde_json::from_value(job) {
-            Ok(job) => match job {
-                Process::Ingest {
-                    identifier,
-                    upload_id,
-                    declared_alias,
-                } => {
-                    process_ingest(
-                        state,
-                        Arc::from(identifier),
-                        Serde::into_inner(upload_id),
-                        declared_alias.map(Serde::into_inner),
-                    )
-                    .await?
-                }
-                Process::Generate {
+        let job_text = format!("{job}");
+
+        let job = serde_json::from_value(job)
+            .map_err(|e| UploadError::InvalidJob(e, job_text))
+            .abort()?;
+
+        match job {
+            Process::Ingest {
+                identifier,
+                upload_id,
+                declared_alias,
+            } => {
+                process_ingest(
+                    state,
+                    Arc::from(identifier),
+                    Serde::into_inner(upload_id),
+                    declared_alias.map(Serde::into_inner),
+                )
+                .with_poll_timer("process-ingest")
+                .await?
+            }
+            Process::Generate {
+                target_format,
+                source,
+                process_path,
+                process_args,
+            } => {
+                generate(
+                    state,
+                    process_map,
                     target_format,
-                    source,
+                    Serde::into_inner(source),
                     process_path,
                     process_args,
-                } => {
-                    generate(
-                        state,
-                        process_map,
-                        target_format,
-                        Serde::into_inner(source),
-                        process_path,
-                        process_args,
-                    )
-                    .await?
-                }
-            },
-            Err(e) => {
-                tracing::warn!("Invalid job: {}", format!("{e}"));
+                )
+                .with_poll_timer("process-generate")
+                .await?
             }
         }
 
@@ -105,13 +110,13 @@ async fn process_ingest<S>(
     unprocessed_identifier: Arc<str>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
-) -> Result<(), Error>
+) -> JobResult
 where
     S: Store + 'static,
 {
     let guard = UploadGuard::guard(upload_id);
 
-    let fut = async {
+    let res = async {
         let ident = unprocessed_identifier.clone();
         let state2 = state.clone();
 
@@ -135,25 +140,33 @@ where
         state.store.remove(&unprocessed_identifier).await?;
 
         error_boundary.map_err(|_| UploadError::Canceled)?
-    };
+    }
+    .await;
 
-    let result = match fut.await {
+    let (result, err) = match res {
         Ok(session) => {
             let alias = session.alias().take().expect("Alias should exist").clone();
             let token = session.disarm();
-            UploadResult::Success { alias, token }
+            (UploadResult::Success { alias, token }, None)
         }
-        Err(e) => {
-            tracing::warn!("Failed to ingest\n{}\n{}", format!("{e}"), format!("{e:?}"));
-
+        Err(e) => (
             UploadResult::Failure {
                 message: e.root_cause().to_string(),
                 code: e.error_code().into_owned(),
-            }
-        }
+            },
+            Some(e),
+        ),
     };
 
-    state.repo.complete_upload(upload_id, result).await?;
+    state
+        .repo
+        .complete_upload(upload_id, result)
+        .await
+        .retry()?;
+
+    if let Some(e) = err {
+        return Err(e).abort();
+    }
 
     guard.disarm();
 
@@ -168,23 +181,28 @@ async fn generate<S: Store + 'static>(
     source: Alias,
     process_path: PathBuf,
     process_args: Vec<String>,
-) -> Result<(), Error> {
-    let Some(hash) = state.repo.hash(&source).await? else {
-        // Nothing to do
-        return Ok(());
-    };
+) -> JobResult {
+    let hash = state
+        .repo
+        .hash(&source)
+        .await
+        .retry()?
+        .ok_or(UploadError::MissingAlias)
+        .abort()?;
 
     let path_string = process_path.to_string_lossy().to_string();
     let identifier_opt = state
         .repo
         .variant_identifier(hash.clone(), path_string)
-        .await?;
+        .await
+        .retry()?;
 
     if identifier_opt.is_some() {
+        // don't generate already-generated variant
         return Ok(());
     }
 
-    let original_details = crate::ensure_details(state, &source).await?;
+    let original_details = crate::ensure_details(state, &source).await.retry()?;
 
     crate::generate::generate(
         state,
@@ -195,7 +213,8 @@ async fn generate<S: Store + 'static>(
         &original_details,
         hash,
     )
-    .await?;
+    .await
+    .abort()?;
 
     Ok(())
 }

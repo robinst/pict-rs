@@ -108,6 +108,9 @@ pub(crate) enum UploadError {
     #[error("Error in request response")]
     Request(#[from] reqwest::Error),
 
+    #[error("Invalid job popped from job queue: {1}")]
+    InvalidJob(#[source] serde_json::Error, String),
+
     #[error("pict-rs is in read-only mode")]
     ReadOnly,
 
@@ -201,6 +204,7 @@ impl UploadError {
             Self::Timeout(_) | Self::AggregateTimeout => ErrorCode::STREAM_TOO_SLOW,
             Self::ProcessTimeout => ErrorCode::COMMAND_TIMEOUT,
             Self::FailedExternalValidation => ErrorCode::FAILED_EXTERNAL_VALIDATION,
+            Self::InvalidJob(_, _) => ErrorCode::INVALID_JOB,
         }
     }
 

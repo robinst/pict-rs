@@ -10,6 +10,7 @@ use crate::{
 };
 
 use std::{
+    ops::Deref,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -225,10 +226,86 @@ impl Drop for MetricsGuard {
     }
 }
 
+pub(super) enum JobError {
+    Abort(Error),
+    Retry(Error),
+}
+
+impl AsRef<Error> for JobError {
+    fn as_ref(&self) -> &Error {
+        match self {
+            Self::Abort(e) | Self::Retry(e) => e,
+        }
+    }
+}
+
+impl Deref for JobError {
+    type Target = Error;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Abort(e) | Self::Retry(e) => e,
+        }
+    }
+}
+
+impl From<JobError> for Error {
+    fn from(value: JobError) -> Self {
+        match value {
+            JobError::Abort(e) | JobError::Retry(e) => e,
+        }
+    }
+}
+
+type JobResult<T = ()> = Result<T, JobError>;
+
+type JobFuture<'a> = LocalBoxFuture<'a, JobResult>;
+
+trait JobContext {
+    type Item;
+
+    fn abort(self) -> JobResult<Self::Item>
+    where
+        Self: Sized;
+
+    fn retry(self) -> JobResult<Self::Item>
+    where
+        Self: Sized;
+}
+
+impl<T, E> JobContext for Result<T, E>
+where
+    E: Into<Error>,
+{
+    type Item = T;
+
+    fn abort(self) -> JobResult<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.map_err(Into::into).map_err(JobError::Abort)
+    }
+
+    fn retry(self) -> JobResult<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.map_err(Into::into).map_err(JobError::Retry)
+    }
+}
+
+fn job_result(result: &JobResult) -> crate::repo::JobResult {
+    match result {
+        Ok(()) => crate::repo::JobResult::Success,
+        Err(JobError::Retry(_)) => crate::repo::JobResult::Failure,
+        Err(JobError::Abort(_)) => crate::repo::JobResult::Aborted,
+    }
+}
+
 async fn process_jobs<S, F>(state: State<S>, queue: &'static str, callback: F)
 where
     S: Store,
-    for<'a> F: Fn(&'a State<S>, serde_json::Value) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
+    for<'a> F: Fn(&'a State<S>, serde_json::Value) -> JobFuture<'a> + Copy,
 {
     let worker_id = uuid::Uuid::new_v4();
 
@@ -262,7 +339,7 @@ async fn job_loop<S, F>(
 ) -> Result<(), Error>
 where
     S: Store,
-    for<'a> F: Fn(&'a State<S>, serde_json::Value) -> LocalBoxFuture<'a, Result<(), Error>> + Copy,
+    for<'a> F: Fn(&'a State<S>, serde_json::Value) -> JobFuture<'a> + Copy,
 {
     loop {
         tracing::trace!("job_loop: looping");
@@ -283,7 +360,10 @@ where
             )
             .await;
 
-            state.repo.complete_job(queue, worker_id, job_id).await?;
+            state
+                .repo
+                .complete_job(queue, worker_id, job_id, job_result(&res))
+                .await?;
 
             res?;
 
@@ -303,8 +383,7 @@ async fn process_image_jobs<S, F>(
     callback: F,
 ) where
     S: Store,
-    for<'a> F: Fn(&'a State<S>, &'a ProcessMap, serde_json::Value) -> LocalBoxFuture<'a, Result<(), Error>>
-        + Copy,
+    for<'a> F: Fn(&'a State<S>, &'a ProcessMap, serde_json::Value) -> JobFuture<'a> + Copy,
 {
     let worker_id = uuid::Uuid::new_v4();
 
@@ -339,8 +418,7 @@ async fn image_job_loop<S, F>(
 ) -> Result<(), Error>
 where
     S: Store,
-    for<'a> F: Fn(&'a State<S>, &'a ProcessMap, serde_json::Value) -> LocalBoxFuture<'a, Result<(), Error>>
-        + Copy,
+    for<'a> F: Fn(&'a State<S>, &'a ProcessMap, serde_json::Value) -> JobFuture<'a> + Copy,
 {
     loop {
         tracing::trace!("image_job_loop: looping");
@@ -361,7 +439,10 @@ where
             )
             .await;
 
-            state.repo.complete_job(queue, worker_id, job_id).await?;
+            state
+                .repo
+                .complete_job(queue, worker_id, job_id, job_result(&res))
+                .await?;
 
             res?;
 

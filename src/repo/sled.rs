@@ -1,6 +1,7 @@
 use crate::{
     details::HumanDate,
     error_code::{ErrorCode, OwnedErrorCode},
+    future::WithTimeout,
     serde_str::Serde,
     stream::{from_iterator, LocalBoxStream},
 };
@@ -12,6 +13,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, RwLock,
     },
+    time::Duration,
 };
 use tokio::sync::Notify;
 use url::Url;
@@ -21,9 +23,9 @@ use super::{
     hash::Hash,
     metrics::{PopMetricsGuard, PushMetricsGuard, WaitMetricsGuard},
     Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, Details,
-    DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, JobId, OrderedHash, ProxyRepo,
-    QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo, UploadResult,
-    VariantAccessRepo, VariantAlreadyExists,
+    DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, JobId, JobResult, OrderedHash,
+    ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
+    UploadResult, VariantAccessRepo, VariantAlreadyExists,
 };
 
 macro_rules! b {
@@ -99,6 +101,7 @@ pub(crate) struct SledRepo {
     unique_jobs: Tree,
     unique_jobs_inverse: Tree,
     job_state: Tree,
+    job_retries: Tree,
     alias_access: Tree,
     inverse_alias_access: Tree,
     variant_access: Tree,
@@ -141,6 +144,7 @@ impl SledRepo {
             unique_jobs: db.open_tree("pict-rs-unique-jobs-tree")?,
             unique_jobs_inverse: db.open_tree("pict-rs-unique-jobs-inverse-tree")?,
             job_state: db.open_tree("pict-rs-job-state-tree")?,
+            job_retries: db.open_tree("pict-rs-job-retries-tree")?,
             alias_access: db.open_tree("pict-rs-alias-access-tree")?,
             inverse_alias_access: db.open_tree("pict-rs-inverse-alias-access-tree")?,
             variant_access: db.open_tree("pict-rs-variant-access-tree")?,
@@ -653,28 +657,37 @@ impl QueueRepo for SledRepo {
         let unique_jobs = self.unique_jobs.clone();
         let unique_jobs_inverse = self.unique_jobs_inverse.clone();
         let job_state = self.job_state.clone();
+        let job_retries = self.job_retries.clone();
 
         let res = crate::sync::spawn_blocking("sled-io", move || {
-            (&queue, &unique_jobs, &unique_jobs_inverse, &job_state).transaction(
-                |(queue, unique_jobs, unique_jobs_inverse, job_state)| {
-                    let state = JobState::pending();
-
-                    queue.insert(&key[..], &job[..])?;
-                    if let Some(unique_key) = unique_key {
-                        if unique_jobs
-                            .insert(unique_key.as_bytes(), &key[..])?
-                            .is_some()
-                        {
-                            return sled::transaction::abort(());
-                        }
-
-                        unique_jobs_inverse.insert(&key[..], unique_key.as_bytes())?;
-                    }
-                    job_state.insert(&key[..], state.as_bytes())?;
-
-                    Ok(())
-                },
+            (
+                &queue,
+                &unique_jobs,
+                &unique_jobs_inverse,
+                &job_state,
+                &job_retries,
             )
+                .transaction(
+                    |(queue, unique_jobs, unique_jobs_inverse, job_state, job_retries)| {
+                        let state = JobState::pending();
+
+                        queue.insert(&key[..], &job[..])?;
+                        if let Some(unique_key) = unique_key {
+                            if unique_jobs
+                                .insert(unique_key.as_bytes(), &key[..])?
+                                .is_some()
+                            {
+                                return sled::transaction::abort(());
+                            }
+
+                            unique_jobs_inverse.insert(&key[..], unique_key.as_bytes())?;
+                        }
+                        job_state.insert(&key[..], state.as_bytes())?;
+                        job_retries.insert(&key[..], &(5_u64.to_be_bytes())[..])?;
+
+                        Ok(())
+                    },
+                )
         })
         .await
         .map_err(|_| RepoError::Canceled)?;
@@ -703,7 +716,7 @@ impl QueueRepo for SledRepo {
         Ok(Some(id))
     }
 
-    #[tracing::instrument(skip(self, worker_id), fields(job_id))]
+    #[tracing::instrument(skip_all, fields(job_id))]
     async fn pop(
         &self,
         queue_name: &'static str,
@@ -719,7 +732,6 @@ impl QueueRepo for SledRepo {
             let queue = self.queue.clone();
             let job_state = self.job_state.clone();
 
-            let span = tracing::Span::current();
             let opt = crate::sync::spawn_blocking("sled-io", move || {
                 // Job IDs are generated with Uuid version 7 - defining their first bits as a
                 // timestamp. Scanning a prefix should give us jobs in the order they were queued.
@@ -760,8 +772,6 @@ impl QueueRepo for SledRepo {
 
                     let job_id = JobId::from_bytes(id_bytes);
 
-                    span.record("job_id", &format!("{job_id:?}"));
-
                     let opt = queue
                         .get(&key)?
                         .map(|ivec| serde_json::from_slice(&ivec[..]))
@@ -777,9 +787,12 @@ impl QueueRepo for SledRepo {
             .await
             .map_err(|_| RepoError::Canceled)??;
 
-            if let Some(tup) = opt {
+            if let Some((job_id, job_json)) = opt {
+                tracing::Span::current().record("job_id", &format!("{}", job_id.0));
+
                 metrics_guard.disarm();
-                return Ok(tup);
+                tracing::debug!("{job_json}");
+                return Ok((job_id, job_json));
             }
 
             let opt = self
@@ -797,7 +810,14 @@ impl QueueRepo for SledRepo {
                 Arc::clone(entry)
             };
 
-            notify.notified().await
+            match notify
+                .notified()
+                .with_timeout(Duration::from_secs(30))
+                .await
+            {
+                Ok(()) => tracing::debug!("Notified"),
+                Err(_) => tracing::trace!("Timed out"),
+            }
         }
     }
 
@@ -836,25 +856,50 @@ impl QueueRepo for SledRepo {
         queue_name: &'static str,
         _worker_id: Uuid,
         job_id: JobId,
+        job_status: JobResult,
     ) -> Result<(), RepoError> {
+        let retry = matches!(job_status, JobResult::Failure);
+
         let key = job_key(queue_name, job_id);
 
         let queue = self.queue.clone();
         let unique_jobs = self.unique_jobs.clone();
         let unique_jobs_inverse = self.unique_jobs_inverse.clone();
         let job_state = self.job_state.clone();
+        let job_retries = self.job_retries.clone();
 
         let res = crate::sync::spawn_blocking("sled-io", move || {
-            (&queue, &unique_jobs, &unique_jobs_inverse, &job_state).transaction(
-                |(queue, unique_jobs, unique_jobs_inverse, job_state)| {
-                    queue.remove(&key[..])?;
-                    if let Some(unique_key) = unique_jobs_inverse.remove(&key[..])? {
-                        unique_jobs.remove(unique_key)?;
-                    }
-                    job_state.remove(&key[..])?;
-                    Ok(())
-                },
+            (
+                &queue,
+                &unique_jobs,
+                &unique_jobs_inverse,
+                &job_state,
+                &job_retries,
             )
+                .transaction(
+                    |(queue, unique_jobs, unique_jobs_inverse, job_state, job_retries)| {
+                        let retries = job_retries.get(&key[..])?;
+
+                        let retry_count = retries
+                            .and_then(|ivec| ivec[0..8].try_into().ok())
+                            .map(u64::from_be_bytes)
+                            .unwrap_or(5_u64)
+                            .saturating_sub(1);
+
+                        if retry_count > 0 && retry {
+                            job_retries.insert(&key[..], &(retry_count.to_be_bytes())[..])?;
+                        } else {
+                            queue.remove(&key[..])?;
+                            if let Some(unique_key) = unique_jobs_inverse.remove(&key[..])? {
+                                unique_jobs.remove(unique_key)?;
+                            }
+                            job_state.remove(&key[..])?;
+                            job_retries.remove(&key[..])?;
+                        }
+
+                        Ok(())
+                    },
+                )
         })
         .await
         .map_err(|_| RepoError::Canceled)?;

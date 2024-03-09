@@ -1,5 +1,6 @@
 pub(super) fn init_metrics() {
     describe_toplevel();
+    describe_future();
     describe_queue_cleanup();
     describe_payload();
     describe_job();
@@ -25,6 +26,15 @@ fn describe_toplevel() {
 
 pub(crate) const FILES: &str = "pict-rs.files";
 pub(crate) const BACKGROUND_UPLOAD_CLAIM: &str = "pict-rs.background.upload.claim";
+
+fn describe_future() {
+    metrics::describe_counter!(
+        FUTURE_POLL_TIMER_EXCEEDED,
+        "How many times a given poll operation has lasted longer than 10 microseconds"
+    );
+}
+
+pub(crate) const FUTURE_POLL_TIMER_EXCEEDED: &str = "pict-rs.future.poll-timer.exceeded";
 
 fn describe_queue_cleanup() {
     metrics::describe_counter!(
@@ -345,6 +355,14 @@ fn describe_postgres() {
         "Timings for updating the provided job's keepalive heartbeat"
     );
     metrics::describe_histogram!(
+        POSTGRES_QUEUE_RETRY,
+        "Timings for updating retry count for a job"
+    );
+    metrics::describe_histogram!(
+        POSTGRES_QUEUE_CLEANUP,
+        "Timings for removing jobs with no more retries"
+    );
+    metrics::describe_histogram!(
         POSTGRES_QUEUE_COMPLETE,
         "Timings for removing a completed job from the queue"
     );
@@ -471,6 +489,8 @@ pub(crate) const POSTGRES_QUEUE_LISTEN: &str = "pict-rs.postgres.queue.listen";
 pub(crate) const POSTGRES_QUEUE_REQUEUE: &str = "pict-rs.postgres.queue.requeue";
 pub(crate) const POSTGRES_QUEUE_CLAIM: &str = "pict-rs.postgres.queue.claim";
 pub(crate) const POSTGRES_QUEUE_HEARTBEAT: &str = "pict-rs.postgres.queue.heartbeat";
+pub(crate) const POSTGRES_QUEUE_RETRY: &str = "pict-rs.postgres.queue.retry";
+pub(crate) const POSTGRES_QUEUE_CLEANUP: &str = "pict-rs.postgres.queue.cleanup";
 pub(crate) const POSTGRES_QUEUE_COMPLETE: &str = "pict-rs.postgres.queue.complete";
 pub(crate) const POSTGRES_STORE_MIGRATION_COUNT: &str = "pict-rs.postgres.store-migration.count";
 pub(crate) const POSTGRES_STORE_MIGRATION_MARK_MIGRATED: &str =

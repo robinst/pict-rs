@@ -144,4 +144,7 @@ impl ErrorCode {
     pub(crate) const FAILED_EXTERNAL_VALIDATION: ErrorCode = ErrorCode {
         code: "failed-external-validation",
     };
+    pub(crate) const INVALID_JOB: ErrorCode = ErrorCode {
+        code: "invalid-job",
+    };
 }
