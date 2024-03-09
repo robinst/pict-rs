@@ -37,7 +37,7 @@ mod tokio_file {
     use futures_core::Stream;
     use std::{io::SeekFrom, path::Path};
     use streem::IntoStreamer;
-    use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt};
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
     use tokio_util::codec::{BytesCodec, FramedRead};
 
     pub(crate) struct File {
@@ -92,14 +92,6 @@ mod tokio_file {
             Ok(())
         }
 
-        pub(crate) async fn read_to_async_write<W>(&mut self, writer: &mut W) -> std::io::Result<()>
-        where
-            W: AsyncWrite + Unpin + ?Sized,
-        {
-            tokio::io::copy(&mut self.inner, writer).await?;
-            Ok(())
-        }
-
         pub(crate) async fn read_to_stream(
             mut self,
             from_start: Option<u64>,
@@ -137,7 +129,7 @@ mod io_uring {
         path::{Path, PathBuf},
     };
     use streem::IntoStreamer;
-    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+    use tokio::io::{AsyncRead, AsyncReadExt};
     use tokio_uring::{
         buf::{IoBuf, IoBufMut},
         BufResult,
@@ -277,41 +269,6 @@ mod io_uring {
             self.inner.close().await
         }
 
-        pub(crate) async fn read_to_async_write<W>(&mut self, writer: &mut W) -> std::io::Result<()>
-        where
-            W: AsyncWrite + Unpin + ?Sized,
-        {
-            let metadata = self.metadata().await?;
-            let size = metadata.len();
-
-            let mut cursor: u64 = 0;
-
-            loop {
-                tracing::trace!("read_to_async_write: looping");
-
-                if cursor == size {
-                    break;
-                }
-
-                let max_size = (size - cursor).min(65_536);
-                let buf = BytesMut::with_capacity(max_size.try_into().unwrap());
-
-                let (res, buf): (_, BytesMut) = self.read_at(buf, cursor).await;
-                let n: usize = res?;
-
-                if n == 0 {
-                    return Err(std::io::ErrorKind::UnexpectedEof.into());
-                }
-
-                writer.write_all(&buf[0..n]).await?;
-
-                let n: u64 = n.try_into().unwrap();
-                cursor += n;
-            }
-
-            Ok(())
-        }
-
         pub(crate) async fn read_to_stream(
             self,
             from_start: Option<u64>,
@@ -380,6 +337,8 @@ mod io_uring {
     #[cfg(test)]
     mod tests {
         use std::io::Read;
+        use streem::IntoStreamer;
+        use tokio::io::AsyncWriteExt;
 
         macro_rules! test_async {
             ($fut:expr) => {
@@ -395,9 +354,16 @@ mod io_uring {
             let tmp = "/tmp/read-test";
 
             test_async!(async move {
-                let mut file = super::File::open(EARTH_GIF).await.unwrap();
+                let file = super::File::open(EARTH_GIF).await.unwrap();
                 let mut tmp_file = tokio::fs::File::create(tmp).await.unwrap();
-                file.read_to_async_write(&mut tmp_file).await.unwrap();
+
+                let stream = file.read_to_stream(None, None).await.unwrap();
+                let stream = std::pin::pin!(stream);
+                let mut stream = stream.into_streamer();
+
+                while let Some(mut bytes) = stream.try_next().await.unwrap() {
+                    tmp_file.write_all_buf(&mut bytes).await.unwrap();
+                }
             });
 
             let mut source = std::fs::File::open(EARTH_GIF).unwrap();

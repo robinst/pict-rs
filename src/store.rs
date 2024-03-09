@@ -1,7 +1,7 @@
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{fmt::Debug, sync::Arc};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::AsyncRead;
 
 use crate::{bytes_stream::BytesStream, error_code::ErrorCode, stream::LocalBoxStream};
 
@@ -125,14 +125,6 @@ pub(crate) trait Store: Clone + Debug {
             .map_err(StoreError::ReadStream)
     }
 
-    async fn read_into<Writer>(
-        &self,
-        identifier: &Arc<str>,
-        writer: &mut Writer,
-    ) -> Result<(), std::io::Error>
-    where
-        Writer: AsyncWrite + Unpin;
-
     async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError>;
 
     async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError>;
@@ -181,17 +173,6 @@ where
         len: Option<u64>,
     ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError> {
         T::to_stream(self, identifier, from_start, len).await
-    }
-
-    async fn read_into<Writer>(
-        &self,
-        identifier: &Arc<str>,
-        writer: &mut Writer,
-    ) -> Result<(), std::io::Error>
-    where
-        Writer: AsyncWrite + Unpin,
-    {
-        T::read_into(self, identifier, writer).await
     }
 
     async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
@@ -248,17 +229,6 @@ where
         T::to_stream(self, identifier, from_start, len).await
     }
 
-    async fn read_into<Writer>(
-        &self,
-        identifier: &Arc<str>,
-        writer: &mut Writer,
-    ) -> Result<(), std::io::Error>
-    where
-        Writer: AsyncWrite + Unpin,
-    {
-        T::read_into(self, identifier, writer).await
-    }
-
     async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
         T::len(self, identifier).await
     }
@@ -311,17 +281,6 @@ where
         len: Option<u64>,
     ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError> {
         T::to_stream(self, identifier, from_start, len).await
-    }
-
-    async fn read_into<Writer>(
-        &self,
-        identifier: &Arc<str>,
-        writer: &mut Writer,
-    ) -> Result<(), std::io::Error>
-    where
-        Writer: AsyncWrite + Unpin,
-    {
-        T::read_into(self, identifier, writer).await
     }
 
     async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {

@@ -21,7 +21,7 @@ use rusty_s3::{
 };
 use std::{string::FromUtf8Error, sync::Arc, time::Duration};
 use streem::IntoStreamer;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::AsyncRead;
 use tokio_util::io::ReaderStream;
 use tracing::Instrument;
 use url::Url;
@@ -329,46 +329,6 @@ impl Store for ObjectStore {
             crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST_STREAM,
             crate::stream::map_err(response.bytes_stream(), payload_to_io_error),
         )))
-    }
-
-    #[tracing::instrument(skip(self, writer))]
-    async fn read_into<Writer>(
-        &self,
-        identifier: &Arc<str>,
-        writer: &mut Writer,
-    ) -> Result<(), std::io::Error>
-    where
-        Writer: AsyncWrite + Unpin,
-    {
-        let response = self
-            .get_object_request(identifier, None, None)
-            .send()
-            .with_metrics(crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST)
-            .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, ObjectError::from(e)))?;
-
-        if !response.status().is_success() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                status_error(response, Some(identifier.clone())).await,
-            ));
-        }
-
-        let stream = std::pin::pin!(crate::stream::metrics(
-            crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST_STREAM,
-            response.bytes_stream()
-        ));
-        let mut stream = stream.into_streamer();
-
-        while let Some(res) = stream.next().await {
-            tracing::trace!("read_into: looping");
-
-            let mut bytes = res.map_err(payload_to_io_error)?;
-            writer.write_all_buf(&mut bytes).await?;
-        }
-        writer.flush().await?;
-
-        Ok(())
     }
 
     #[tracing::instrument(skip(self))]

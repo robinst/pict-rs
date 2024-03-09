@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::AsyncRead;
 use tokio_util::io::StreamReader;
 use tracing::Instrument;
 
@@ -112,22 +112,6 @@ impl Store for FileStore {
             .await?;
 
         Ok(Box::pin(stream))
-    }
-
-    #[tracing::instrument(skip(self, writer))]
-    async fn read_into<Writer>(
-        &self,
-        identifier: &Arc<str>,
-        writer: &mut Writer,
-    ) -> Result<(), std::io::Error>
-    where
-        Writer: AsyncWrite + Unpin,
-    {
-        let path = self.path_from_file_id(identifier);
-
-        File::open(&path).await?.read_to_async_write(writer).await?;
-
-        Ok(())
     }
 
     #[tracing::instrument(skip(self))]
