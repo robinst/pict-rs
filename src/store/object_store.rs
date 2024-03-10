@@ -21,8 +21,6 @@ use rusty_s3::{
 };
 use std::{string::FromUtf8Error, sync::Arc, time::Duration};
 use streem::IntoStreamer;
-use tokio::io::AsyncRead;
-use tokio_util::io::ReaderStream;
 use tracing::Instrument;
 use url::Url;
 
@@ -207,23 +205,6 @@ impl Store for ObjectStore {
         Ok(())
     }
 
-    async fn save_async_read<Reader>(
-        &self,
-        reader: Reader,
-        content_type: mime::Mime,
-        extension: Option<&str>,
-    ) -> Result<Arc<str>, StoreError>
-    where
-        Reader: AsyncRead,
-    {
-        self.save_stream(
-            ReaderStream::with_capacity(reader, 1024 * 64),
-            content_type,
-            extension,
-        )
-        .await
-    }
-
     #[tracing::instrument(skip_all)]
     async fn save_stream<S>(
         &self,
@@ -244,7 +225,7 @@ impl Store for ObjectStore {
                     .await?;
 
                 let response = req
-                    .body(Body::wrap_stream(first_chunk))
+                    .body(Body::wrap_stream(first_chunk.into_io_stream()))
                     .send()
                     .with_metrics(crate::init_metrics::OBJECT_STORAGE_PUT_OBJECT_REQUEST)
                     .await
@@ -484,7 +465,7 @@ impl ObjectStore {
                                 &upload_id2,
                             )
                             .await?
-                            .body(Body::wrap_stream(buf))
+                            .body(Body::wrap_stream(buf.into_io_stream()))
                             .send()
                             .with_metrics(
                                 crate::init_metrics::OBJECT_STORAGE_CREATE_UPLOAD_PART_REQUEST,

@@ -6,6 +6,7 @@ use crate::{
     bytes_stream::BytesStream,
     ffmpeg::FfMpegError,
     formats::{InputVideoFormat, OutputVideo},
+    future::WithPollTimer,
     process::{Process, ProcessRead},
     tmp_file::TmpDir,
 };
@@ -22,7 +23,8 @@ pub(super) async fn transcode_bytes(
     let output_path = output_file.as_os_str();
 
     let res = crate::ffmpeg::with_file(tmp_dir, None, |input_file| async move {
-        crate::file::write_from_async_read(&input_file, bytes.into_reader())
+        crate::file::write_from_stream(&input_file, bytes.into_io_stream())
+            .with_poll_timer("write-from-stream")
             .await
             .map_err(FfMpegError::Write)?;
 
@@ -34,6 +36,7 @@ pub(super) async fn transcode_bytes(
             crf,
             timeout,
         )
+        .with_poll_timer("transcode-files")
         .await?;
 
         let tmp_file = crate::file::File::open(output_path)

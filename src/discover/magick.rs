@@ -74,7 +74,7 @@ async fn discover<S>(state: &State<S>, stream: BytesStream) -> Result<Discovery,
         state.config.media.process_timeout,
     )
     .await?
-    .drive_with_async_read(stream.into_reader())
+    .drive_with_stream(stream.into_io_stream())
     .into_string()
     .await;
 

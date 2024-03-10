@@ -42,7 +42,7 @@ pub(super) async fn check_reorient(
 async fn needs_reorienting(input: BytesStream, timeout: u64) -> Result<bool, ExifError> {
     let buf = Process::run("exiftool", &["-n", "-Orientation", "-"], &[], timeout)
         .await?
-        .drive_with_async_read(input.into_reader())
+        .drive_with_stream(input.into_io_stream())
         .into_string()
         .await?;
 

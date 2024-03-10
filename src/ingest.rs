@@ -47,13 +47,16 @@ where
         Duration::from_secs(60),
         BytesStream::try_from_stream(stream),
     )
+    .with_poll_timer("try-from-stream")
     .await
     .map_err(|_| UploadError::AggregateTimeout)??;
 
     let permit = crate::process_semaphore().acquire().await?;
 
     tracing::trace!("Validating bytes");
-    let (input_type, process_read) = crate::validate::validate_bytes_stream(state, bytes).await?;
+    let (input_type, process_read) = crate::validate::validate_bytes_stream(state, bytes)
+        .with_poll_timer("validate-bytes-stream")
+        .await?;
 
     let process_read = if let Some(operations) = state.config.media.preprocess_steps() {
         if let Some(format) = input_type.processable_format() {
@@ -88,18 +91,22 @@ where
 
             state
                 .store
-                .save_async_read(
-                    hasher_reader,
+                .save_stream(
+                    tokio_util::io::ReaderStream::with_capacity(hasher_reader, 1024 * 64),
                     input_type.media_type(),
                     Some(input_type.file_extension()),
                 )
+                .with_poll_timer("save-hasher-reader")
                 .await
                 .map(move |identifier| (hash_state, identifier))
         })
+        .with_poll_timer("save-process-stdout")
         .await??;
 
     let bytes_stream = state.store.to_bytes(&identifier, None, None).await?;
-    let details = Details::from_bytes_stream(state, bytes_stream).await?;
+    let details = Details::from_bytes_stream(state, bytes_stream)
+        .with_poll_timer("details-from-bytes-stream")
+        .await?;
 
     drop(permit);
 
@@ -135,8 +142,8 @@ where
 
     let identifier = state
         .store
-        .save_async_read(
-            hasher_reader,
+        .save_stream(
+            tokio_util::io::ReaderStream::with_capacity(hasher_reader, 1024 * 64),
             input_type.media_type(),
             Some(input_type.file_extension()),
         )

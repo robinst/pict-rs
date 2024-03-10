@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use futures_core::Stream;
-use tokio::io::AsyncRead;
 use tokio_util::bytes::Bytes;
 
 #[cfg(feature = "io-uring")]
@@ -10,35 +9,32 @@ pub(crate) use io_uring::File;
 #[cfg(not(feature = "io-uring"))]
 pub(crate) use tokio_file::File;
 
+use crate::future::WithPollTimer;
+
 pub(crate) async fn write_from_stream(
     path: impl AsRef<Path>,
     stream: impl Stream<Item = std::io::Result<Bytes>>,
 ) -> std::io::Result<()> {
-    let mut file = File::create(path).await?;
-    file.write_from_stream(stream).await?;
-    file.close().await?;
-    Ok(())
-}
-
-pub(crate) async fn write_from_async_read(
-    path: impl AsRef<Path>,
-    reader: impl AsyncRead,
-) -> std::io::Result<()> {
-    let mut file = File::create(path).await?;
-    file.write_from_async_read(reader).await?;
+    let mut file = File::create(path).with_poll_timer("create-file").await?;
+    file.write_from_stream(stream)
+        .with_poll_timer("write-from-stream")
+        .await?;
     file.close().await?;
     Ok(())
 }
 
 #[cfg(not(feature = "io-uring"))]
 mod tokio_file {
-    use crate::{store::file_store::FileError, Either};
+    use crate::{future::WithPollTimer, store::file_store::FileError, Either};
     use actix_web::web::{Bytes, BytesMut};
     use futures_core::Stream;
     use std::{io::SeekFrom, path::Path};
     use streem::IntoStreamer;
-    use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-    use tokio_util::codec::{BytesCodec, FramedRead};
+    use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+    use tokio_util::{
+        bytes::Buf,
+        codec::{BytesCodec, FramedRead},
+    };
 
     pub(crate) struct File {
         inner: tokio::fs::File,
@@ -68,23 +64,19 @@ mod tokio_file {
             let stream = std::pin::pin!(stream);
             let mut stream = stream.into_streamer();
 
-            while let Some(res) = stream.next().await {
+            while let Some(mut bytes) = stream.try_next().with_poll_timer("try-next").await? {
                 tracing::trace!("write_from_stream: looping");
 
-                let mut bytes = res?;
+                while bytes.has_remaining() {
+                    self.inner
+                        .write_buf(&mut bytes)
+                        .with_poll_timer("write-buf")
+                        .await?;
 
-                self.inner.write_all_buf(&mut bytes).await?;
+                    crate::sync::cooperate().await;
+                }
             }
 
-            Ok(())
-        }
-
-        pub(crate) async fn write_from_async_read<R>(&mut self, reader: R) -> std::io::Result<()>
-        where
-            R: AsyncRead,
-        {
-            let mut reader = std::pin::pin!(reader);
-            tokio::io::copy(&mut reader, &mut self.inner).await?;
             Ok(())
         }
 
@@ -129,7 +121,6 @@ mod io_uring {
         path::{Path, PathBuf},
     };
     use streem::IntoStreamer;
-    use tokio::io::{AsyncRead, AsyncReadExt};
     use tokio_uring::{
         buf::{IoBuf, IoBufMut},
         BufResult,
@@ -191,59 +182,6 @@ mod io_uring {
                     let position_u64: u64 = position.try_into().unwrap();
                     let (res, slice) = self
                         .write_at(buf.slice(position..len), cursor + position_u64)
-                        .await;
-
-                    let n = res?;
-                    if n == 0 {
-                        return Err(std::io::ErrorKind::UnexpectedEof.into());
-                    }
-
-                    position += n;
-
-                    buf = slice.into_inner();
-                }
-
-                let position: u64 = position.try_into().unwrap();
-                cursor += position;
-            }
-
-            self.inner.sync_all().await?;
-
-            Ok(())
-        }
-
-        #[tracing::instrument(level = "debug", skip_all)]
-        pub(crate) async fn write_from_async_read<R>(&mut self, reader: R) -> std::io::Result<()>
-        where
-            R: AsyncRead,
-        {
-            let mut reader = std::pin::pin!(reader);
-            let mut cursor: u64 = 0;
-
-            loop {
-                tracing::trace!("write_from_async_read: looping");
-
-                let max_size = 65_536;
-                let mut buf = Vec::with_capacity(max_size.try_into().unwrap());
-
-                let n = (&mut reader).take(max_size).read_buf(&mut buf).await?;
-
-                if n == 0 {
-                    break;
-                }
-
-                let mut position = 0;
-
-                loop {
-                    tracing::trace!("write_from_async_read: looping inner");
-
-                    if position == n {
-                        break;
-                    }
-
-                    let position_u64: u64 = position.try_into().unwrap();
-                    let (res, slice) = self
-                        .write_at(buf.slice(position..n), cursor + position_u64)
                         .await;
 
                     let n = res?;
@@ -387,9 +325,12 @@ mod io_uring {
             let tmp = "/tmp/write-test";
 
             test_async!(async move {
-                let mut file = tokio::fs::File::open(EARTH_GIF).await.unwrap();
+                let file = tokio::fs::File::open(EARTH_GIF).await.unwrap();
                 let mut tmp_file = super::File::create(tmp).await.unwrap();
-                tmp_file.write_from_async_read(&mut file).await.unwrap();
+                tmp_file
+                    .write_from_stream(tokio_util::io::ReaderStream::new(file))
+                    .await
+                    .unwrap();
             });
 
             let mut source = std::fs::File::open(EARTH_GIF).unwrap();

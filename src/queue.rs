@@ -2,7 +2,7 @@ use crate::{
     concurrent_processor::ProcessMap,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
-    future::LocalBoxFuture,
+    future::{LocalBoxFuture, WithPollTimer},
     repo::{Alias, ArcRepo, DeleteToken, Hash, JobId, UploadId},
     serde_str::Serde,
     state::State,
@@ -312,9 +312,11 @@ where
     loop {
         tracing::trace!("process_jobs: looping");
 
-        tokio::task::yield_now().await;
+        crate::sync::cooperate().await;
 
-        let res = job_loop(&state, worker_id, queue, callback).await;
+        let res = job_loop(&state, worker_id, queue, callback)
+            .with_poll_timer("job-loop")
+            .await;
 
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
@@ -344,10 +346,14 @@ where
     loop {
         tracing::trace!("job_loop: looping");
 
-        tokio::task::yield_now().await;
+        crate::sync::cooperate().await;
 
         async {
-            let (job_id, job) = state.repo.pop(queue, worker_id).await?;
+            let (job_id, job) = state
+                .repo
+                .pop(queue, worker_id)
+                .with_poll_timer("pop-cleanup")
+                .await?;
 
             let guard = MetricsGuard::guard(worker_id, queue);
 
@@ -358,6 +364,7 @@ where
                 job_id,
                 (callback)(state, job),
             )
+            .with_poll_timer("cleanup-job-and-heartbeat")
             .await;
 
             state
@@ -390,9 +397,11 @@ async fn process_image_jobs<S, F>(
     loop {
         tracing::trace!("process_image_jobs: looping");
 
-        tokio::task::yield_now().await;
+        crate::sync::cooperate().await;
 
-        let res = image_job_loop(&state, &process_map, worker_id, queue, callback).await;
+        let res = image_job_loop(&state, &process_map, worker_id, queue, callback)
+            .with_poll_timer("image-job-loop")
+            .await;
 
         if let Err(e) = res {
             tracing::warn!("Error processing jobs: {}", format!("{e}"));
@@ -423,10 +432,14 @@ where
     loop {
         tracing::trace!("image_job_loop: looping");
 
-        tokio::task::yield_now().await;
+        crate::sync::cooperate().await;
 
         async {
-            let (job_id, job) = state.repo.pop(queue, worker_id).await?;
+            let (job_id, job) = state
+                .repo
+                .pop(queue, worker_id)
+                .with_poll_timer("pop-process")
+                .await?;
 
             let guard = MetricsGuard::guard(worker_id, queue);
 
@@ -437,6 +450,7 @@ where
                 job_id,
                 (callback)(state, process_map, job),
             )
+            .with_poll_timer("process-job-and-heartbeat")
             .await;
 
             state
@@ -466,7 +480,9 @@ async fn heartbeat<Fut>(
 where
     Fut: std::future::Future,
 {
-    let mut fut = std::pin::pin!(fut.instrument(tracing::info_span!("job-future")));
+    let mut fut = std::pin::pin!(fut
+        .with_poll_timer("job-future")
+        .instrument(tracing::info_span!("job-future")));
 
     let mut interval = tokio::time::interval(Duration::from_secs(5));
 
@@ -475,7 +491,7 @@ where
     loop {
         tracing::trace!("heartbeat: looping");
 
-        tokio::task::yield_now().await;
+        crate::sync::cooperate().await;
 
         tokio::select! {
             biased;

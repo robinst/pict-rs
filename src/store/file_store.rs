@@ -1,12 +1,12 @@
-use crate::{error_code::ErrorCode, file::File, store::Store, stream::LocalBoxStream};
+use crate::{
+    error_code::ErrorCode, file::File, future::WithPollTimer, store::Store, stream::LocalBoxStream,
+};
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::io::AsyncRead;
-use tokio_util::io::StreamReader;
 use tracing::Instrument;
 
 use super::StoreError;
@@ -51,39 +51,23 @@ impl Store for FileStore {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, reader))]
-    async fn save_async_read<Reader>(
-        &self,
-        reader: Reader,
-        _content_type: mime::Mime,
-        extension: Option<&str>,
-    ) -> Result<Arc<str>, StoreError>
-    where
-        Reader: AsyncRead,
-    {
-        let mut reader = std::pin::pin!(reader);
-
-        let path = self.next_file(extension);
-
-        if let Err(e) = self.safe_save_reader(&path, &mut reader).await {
-            self.safe_remove_file(&path).await?;
-            return Err(e.into());
-        }
-
-        Ok(self.file_id_from_path(path)?)
-    }
-
     async fn save_stream<S>(
         &self,
         stream: S,
-        content_type: mime::Mime,
+        _content_type: mime::Mime,
         extension: Option<&str>,
     ) -> Result<Arc<str>, StoreError>
     where
         S: Stream<Item = std::io::Result<Bytes>>,
     {
-        self.save_async_read(StreamReader::new(stream), content_type, extension)
-            .await
+        let path = self.next_file(extension);
+
+        if let Err(e) = self.safe_save_stream(&path, stream).await {
+            self.safe_remove_file(&path).await?;
+            return Err(e.into());
+        }
+
+        Ok(self.file_id_from_path(path)?)
     }
 
     fn public_url(&self, _identifier: &Arc<str>) -> Option<url::Url> {
@@ -182,10 +166,10 @@ impl FileStore {
         }
     }
 
-    async fn safe_save_reader<P: AsRef<Path>>(
+    async fn safe_save_stream<P: AsRef<Path>>(
         &self,
         to: P,
-        input: &mut (impl AsyncRead + Unpin + ?Sized),
+        input: impl Stream<Item = std::io::Result<Bytes>>,
     ) -> Result<(), FileError> {
         safe_create_parent(&to).await?;
 
@@ -199,7 +183,11 @@ impl FileStore {
 
         let mut file = File::create(to).await?;
 
-        file.write_from_async_read(input).await?;
+        file.write_from_stream(input)
+            .with_poll_timer("write-from-stream")
+            .await?;
+
+        file.close().await?;
 
         Ok(())
     }

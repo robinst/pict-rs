@@ -223,7 +223,11 @@ where
         .with_stdout(|stdout| async {
             state
                 .store
-                .save_async_read(stdout, media_type, Some(file_extension))
+                .save_stream(
+                    tokio_util::io::ReaderStream::with_capacity(stdout, 1024 * 64),
+                    media_type,
+                    Some(file_extension),
+                )
                 .await
         })
         .await??;

@@ -11,6 +11,7 @@ use crate::{
         AnimationFormat, AnimationOutput, ImageInput, ImageOutput, InputFile, InputVideoFormat,
         InternalFormat,
     },
+    future::WithPollTimer,
     process::{Process, ProcessRead},
     state::State,
 };
@@ -69,14 +70,16 @@ pub(crate) async fn validate_bytes_stream<S>(
         width,
         height,
         frames,
-    } = crate::discover::discover_bytes_stream(state, bytes.clone()).await?;
+    } = crate::discover::discover_bytes_stream(state, bytes.clone())
+        .with_poll_timer("discover-bytes-stream")
+        .await?;
 
     match &input {
         InputFile::Image(input) => {
             let (format, process) =
                 process_image_command(state, *input, bytes.len(), width, height).await?;
 
-            Ok((format, process.drive_with_async_read(bytes.into_reader())))
+            Ok((format, process.drive_with_stream(bytes.into_io_stream())))
         }
         InputFile::Animation(input) => {
             let (format, process) = process_animation_command(
@@ -89,7 +92,7 @@ pub(crate) async fn validate_bytes_stream<S>(
             )
             .await?;
 
-            Ok((format, process.drive_with_async_read(bytes.into_reader())))
+            Ok((format, process.drive_with_stream(bytes.into_io_stream())))
         }
         InputFile::Video(input) => {
             let (format, process_read) =
@@ -252,6 +255,7 @@ async fn process_video<S>(
         state.config.media.process_timeout,
         bytes,
     )
+    .with_poll_timer("transcode-bytes")
     .await?;
 
     Ok((

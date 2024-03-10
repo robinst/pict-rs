@@ -1,7 +1,6 @@
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use std::{fmt::Debug, sync::Arc};
-use tokio::io::AsyncRead;
 
 use crate::{bytes_stream::BytesStream, error_code::ErrorCode, stream::LocalBoxStream};
 
@@ -85,15 +84,6 @@ impl From<crate::store::object_store::ObjectError> for StoreError {
 pub(crate) trait Store: Clone + Debug {
     async fn health_check(&self) -> Result<(), StoreError>;
 
-    async fn save_async_read<Reader>(
-        &self,
-        reader: Reader,
-        content_type: mime::Mime,
-        extension: Option<&str>,
-    ) -> Result<Arc<str>, StoreError>
-    where
-        Reader: AsyncRead;
-
     async fn save_stream<S>(
         &self,
         stream: S,
@@ -138,18 +128,6 @@ where
         T::health_check(self).await
     }
 
-    async fn save_async_read<Reader>(
-        &self,
-        reader: Reader,
-        content_type: mime::Mime,
-        extension: Option<&str>,
-    ) -> Result<Arc<str>, StoreError>
-    where
-        Reader: AsyncRead,
-    {
-        T::save_async_read(self, reader, content_type, extension).await
-    }
-
     async fn save_stream<S>(
         &self,
         stream: S,
@@ -192,18 +170,6 @@ where
         T::health_check(self).await
     }
 
-    async fn save_async_read<Reader>(
-        &self,
-        reader: Reader,
-        content_type: mime::Mime,
-        extension: Option<&str>,
-    ) -> Result<Arc<str>, StoreError>
-    where
-        Reader: AsyncRead,
-    {
-        T::save_async_read(self, reader, content_type, extension).await
-    }
-
     async fn save_stream<S>(
         &self,
         stream: S,
@@ -244,18 +210,6 @@ where
 {
     async fn health_check(&self) -> Result<(), StoreError> {
         T::health_check(self).await
-    }
-
-    async fn save_async_read<Reader>(
-        &self,
-        reader: Reader,
-        content_type: mime::Mime,
-        extension: Option<&str>,
-    ) -> Result<Arc<str>, StoreError>
-    where
-        Reader: AsyncRead,
-    {
-        T::save_async_read(self, reader, content_type, extension).await
     }
 
     async fn save_stream<S>(

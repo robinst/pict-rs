@@ -10,6 +10,7 @@ use crate::{
         AlphaCodec, AnimationFormat, ImageFormat, ImageInput, InputFile, InputVideoFormat,
         Mp4AudioCodec, Mp4Codec, WebmAlphaCodec, WebmAudioCodec, WebmCodec,
     },
+    future::WithPollTimer,
     process::Process,
     state::State,
 };
@@ -177,7 +178,8 @@ pub(super) async fn discover_bytes_stream<S>(
     bytes: BytesStream,
 ) -> Result<Option<Discovery>, FfMpegError> {
     let output = crate::ffmpeg::with_file(&state.tmp_dir, None, |path| async move {
-        crate::file::write_from_async_read(&path, bytes.into_reader())
+        crate::file::write_from_stream(&path, bytes.into_io_stream())
+            .with_poll_timer("discover-ffmpeg-write-file")
             .await
             .map_err(FfMpegError::Write)?;
 
@@ -201,6 +203,7 @@ pub(super) async fn discover_bytes_stream<S>(
         .await?
         .read()
         .into_vec()
+        .with_poll_timer("discover-ffmpeg-into-vec")
         .await
         .map_err(FfMpegError::Process)
     })

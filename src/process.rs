@@ -9,7 +9,7 @@ use std::{
 use futures_core::Stream;
 use streem::IntoStreamer;
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStdin, Command},
 };
 use tokio_util::{bytes::Bytes, io::ReaderStream};
@@ -246,23 +246,6 @@ impl Process {
         }
     }
 
-    pub(crate) fn drive_with_async_read(self, input: impl AsyncRead + 'static) -> ProcessRead {
-        self.drive(move |mut stdin| {
-            async move {
-                let mut input = std::pin::pin!(input);
-
-                match tokio::io::copy(&mut input, &mut stdin).await {
-                    Ok(_) => Ok(()),
-                    // BrokenPipe means we finished reading from Stdout, so we don't need to write
-                    // to stdin. We'll still error out if the command failed so treat this as a
-                    // success
-                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
-                    Err(e) => Err(e),
-                }
-            }
-        })
-    }
-
     pub(crate) fn drive_with_stream<S>(self, input: S) -> ProcessRead
     where
         S: Stream<Item = std::io::Result<Bytes>> + 'static,
@@ -277,7 +260,7 @@ impl Process {
                     Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => break,
                     Err(e) => return Err(e),
                 }
-                tokio::task::yield_now().await;
+                crate::sync::cooperate().await;
             }
 
             Ok(())

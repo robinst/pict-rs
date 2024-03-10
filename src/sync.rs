@@ -76,6 +76,15 @@ pub(crate) fn bare_semaphore(permits: usize) -> Semaphore {
     semaphore
 }
 
+// best effort cooperation mechanism
+pub(crate) async fn cooperate() {
+    #[cfg(tokio_unstable)]
+    tokio::task::consume_budget().await;
+
+    #[cfg(not(tokio_unstable))]
+    tokio::task::yield_now().await;
+}
+
 #[track_caller]
 pub(crate) fn spawn<F>(name: &'static str, future: F) -> tokio::task::JoinHandle<F::Output>
 where

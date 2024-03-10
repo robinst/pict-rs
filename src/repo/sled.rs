@@ -1,7 +1,7 @@
 use crate::{
     details::HumanDate,
     error_code::{ErrorCode, OwnedErrorCode},
-    future::WithTimeout,
+    future::{WithPollTimer, WithTimeout},
     serde_str::Serde,
     stream::{from_iterator, LocalBoxStream},
 };
@@ -784,6 +784,7 @@ impl QueueRepo for SledRepo {
 
                 Ok(None)
             })
+            .with_poll_timer("sled-pop-spawn-blocking")
             .await
             .map_err(|_| RepoError::Canceled)??;
 
@@ -813,6 +814,7 @@ impl QueueRepo for SledRepo {
             match notify
                 .notified()
                 .with_timeout(Duration::from_secs(30))
+                .with_poll_timer("sled-pop-notify")
                 .await
             {
                 Ok(()) => tracing::debug!("Notified"),
