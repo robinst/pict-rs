@@ -39,14 +39,14 @@ md-5 = "0.10.5"
 metrics = "0.22.0"
 metrics-exporter-prometheus = { version = "0.13.0", default-features = false, features = ["http-listener"] }
 mime = "0.3.1"
-opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
-opentelemetry = { version = "0.21" }
-opentelemetry-otlp = "0.14"
+opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"] }
+opentelemetry = "0.22"
+opentelemetry-otlp = "0.15"
 pin-project-lite = "0.2.7"
 refinery = { version = "0.8.10", features = ["tokio-postgres", "postgres"] }
 reqwest = { version = "0.11.18", default-features = false, features = ["json", "rustls-tls", "stream"] }
 reqwest-middleware = "0.2.2"
-reqwest-tracing = { version = "0.4.5" }
+reqwest-tracing = "0.4.5"
 # pinned to tokio-postgres-rustls
 rustls = "0.22.0"
 # pinned to rustls
@@ -76,7 +76,7 @@ toml = "0.8.0"
 tracing = "0.1.15"
 tracing-error = "0.2.0"
 tracing-log = "0.2.0"
-tracing-opentelemetry = "0.22"
+tracing-opentelemetry = "0.23"
 tracing-subscriber = { version = "0.3.0", features = [
   "ansi",
   "env-filter",
@@ -91,9 +91,9 @@ uuid = { version = "1", features = ["serde", "std", "v4", "v7"] }
 webpki-roots = "0.26.0"
 
 [dependencies.tracing-actix-web]
-version = "0.7.8"
+version = "0.7.10"
 default-features = false
-features = ["emit_event_on_error", "opentelemetry_0_21"]
+features = ["emit_event_on_error", "opentelemetry_0_22"]
 
 [dev-dependencies]
 tokio-uring = { version = "0.4", features = ["bytes"] }
