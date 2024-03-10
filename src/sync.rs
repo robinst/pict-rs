@@ -109,6 +109,29 @@ where
 }
 
 #[track_caller]
+pub(crate) fn spawn_sendable<F>(name: &'static str, future: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let future = future.with_poll_timer(name);
+
+    let span = tracing::trace_span!(parent: None, "spawn task");
+    let guard = span.enter();
+
+    #[cfg(tokio_unstable)]
+    let handle = tokio::task::Builder::new()
+        .name(name)
+        .spawn(future)
+        .expect("Failed to spawn");
+    #[cfg(not(tokio_unstable))]
+    let handle = tokio::task::spawn_local(future);
+
+    drop(guard);
+    handle
+}
+
+#[track_caller]
 pub(crate) fn spawn_blocking<F, Out>(name: &str, function: F) -> tokio::task::JoinHandle<Out>
 where
     F: FnOnce() -> Out + Send + 'static,

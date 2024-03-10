@@ -346,7 +346,7 @@ where
     loop {
         tracing::trace!("job_loop: looping");
 
-        crate::sync::cooperate().await;
+        crate::sync::cooperate().with_poll_timer("cooperate").await;
 
         async {
             let (job_id, job) = state
@@ -370,6 +370,7 @@ where
             state
                 .repo
                 .complete_job(queue, worker_id, job_id, job_result(&res))
+                .with_poll_timer("cleanup-job-complete")
                 .await?;
 
             res?;

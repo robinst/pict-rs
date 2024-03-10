@@ -12,12 +12,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bb8::CustomizeConnection;
 use dashmap::DashMap;
 use diesel::prelude::*;
 use diesel_async::{
     pooled_connection::{
-        deadpool::{BuildError, Hook, Object, Pool, PoolError},
-        AsyncDieselConnectionManager, ManagerConfig,
+        bb8::{Pool, PooledConnection, RunError},
+        AsyncDieselConnectionManager, ManagerConfig, PoolError,
     },
     AsyncConnection, AsyncPgConnection, RunQueryDsl,
 };
@@ -32,7 +33,7 @@ use uuid::Uuid;
 use crate::{
     details::Details,
     error_code::{ErrorCode, OwnedErrorCode},
-    future::{WithMetrics, WithTimeout},
+    future::{WithMetrics, WithPollTimer, WithTimeout},
     serde_str::Serde,
     stream::LocalBoxStream,
     sync::DropHandle,
@@ -92,13 +93,13 @@ pub(crate) enum ConnectPostgresError {
     Migration(#[source] Box<refinery::Error>),
 
     #[error("Failed to build postgres connection pool")]
-    BuildPool(#[source] BuildError),
+    BuildPool(#[source] PoolError),
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum PostgresError {
     #[error("Error in db pool")]
-    Pool(#[source] PoolError),
+    Pool(#[source] RunError),
 
     #[error("Error in database")]
     Diesel(#[source] diesel::result::Error),
@@ -154,15 +155,11 @@ impl PostgresError {
     pub(super) const fn is_disconnected(&self) -> bool {
         matches!(
             self,
-            Self::Pool(
-                PoolError::Closed
-                    | PoolError::Backend(
-                        diesel_async::pooled_connection::PoolError::ConnectionError(_)
-                    ),
-            ) | Self::Diesel(diesel::result::Error::DatabaseError(
-                diesel::result::DatabaseErrorKind::ClosedConnection,
-                _,
-            ))
+            Self::Pool(RunError::User(PoolError::ConnectionError(_)))
+                | Self::Diesel(diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::ClosedConnection,
+                    _,
+                ))
         )
     }
 }
@@ -233,11 +230,37 @@ async fn connect_for_migrations(
     Ok(tup)
 }
 
-fn build_pool(
+#[derive(Debug)]
+struct OnConnect;
+
+impl<C, E> CustomizeConnection<C, E> for OnConnect
+where
+    C: Send + 'static,
+    E: 'static,
+{
+    fn on_acquire<'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        _connection: &'life1 mut C,
+    ) -> core::pin::Pin<
+        Box<dyn core::future::Future<Output = Result<(), E>> + core::marker::Send + 'async_trait>,
+    >
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        Box::pin(async {
+            metrics::counter!(crate::init_metrics::POSTGRES_POOL_CONNECTION_CREATE).increment(1);
+            Ok(())
+        })
+    }
+}
+
+async fn build_pool(
     postgres_url: &Url,
     tx: flume::Sender<Notification>,
     connector: Option<MakeRustlsConnect>,
-    max_size: usize,
+    max_size: u32,
 ) -> Result<Pool<AsyncPgConnection>, ConnectPostgresError> {
     let mut config = ManagerConfig::default();
     config.custom_setup = build_handler(tx, connector);
@@ -247,21 +270,12 @@ fn build_pool(
         config,
     );
 
-    let pool = Pool::builder(mgr)
-        .runtime(deadpool::Runtime::Tokio1)
-        .wait_timeout(Some(Duration::from_secs(10)))
-        .create_timeout(Some(Duration::from_secs(2)))
-        .recycle_timeout(Some(Duration::from_secs(2)))
-        .post_create(Hook::sync_fn(|_, _| {
-            metrics::counter!(crate::init_metrics::POSTGRES_POOL_CONNECTION_CREATE).increment(1);
-            Ok(())
-        }))
-        .post_recycle(Hook::sync_fn(|_, _| {
-            metrics::counter!(crate::init_metrics::POSTGRES_POOL_CONNECTION_RECYCLE).increment(1);
-            Ok(())
-        }))
+    let pool = Pool::builder()
         .max_size(max_size)
-        .build()
+        .connection_timeout(Duration::from_secs(10))
+        .connection_customizer(Box::new(OnConnect))
+        .build(mgr)
+        .await
         .map_err(ConnectPostgresError::BuildPool)?;
 
     Ok(pool)
@@ -300,20 +314,26 @@ impl PostgresRepo {
 
         let (tx, rx) = flume::bounded(10);
 
+        let pool = build_pool(
+            &postgres_url,
+            tx.clone(),
+            connector.clone(),
+            parallelism as u32 * 8,
+        )
+        .await?;
+
+        let notifier_pool =
+            build_pool(&postgres_url, tx, connector, parallelism.min(4) as u32).await?;
+
         let inner = Arc::new(Inner {
             health_count: AtomicU64::new(0),
-            pool: build_pool(
-                &postgres_url,
-                tx.clone(),
-                connector.clone(),
-                parallelism * 8,
-            )?,
-            notifier_pool: build_pool(&postgres_url, tx, connector, parallelism.min(4))?,
+            pool,
+            notifier_pool,
             queue_notifications: DashMap::new(),
             upload_notifications: DashMap::new(),
         });
 
-        let handle = crate::sync::abort_on_drop(crate::sync::spawn(
+        let handle = crate::sync::abort_on_drop(crate::sync::spawn_sendable(
             "postgres-delegate-notifications",
             delegate_notifications(rx, inner.clone(), parallelism * 8),
         ));
@@ -326,12 +346,22 @@ impl PostgresRepo {
         })
     }
 
-    async fn get_connection(&self) -> Result<Object<AsyncPgConnection>, PostgresError> {
-        self.inner.get_connection().await
+    async fn get_connection(
+        &self,
+    ) -> Result<PooledConnection<'_, AsyncPgConnection>, PostgresError> {
+        self.inner
+            .get_connection()
+            .with_poll_timer("postgres-get-connection")
+            .await
     }
 
-    async fn get_notifier_connection(&self) -> Result<Object<AsyncPgConnection>, PostgresError> {
-        self.inner.get_notifier_connection().await
+    async fn get_notifier_connection(
+        &self,
+    ) -> Result<PooledConnection<'_, AsyncPgConnection>, PostgresError> {
+        self.inner
+            .get_notifier_connection()
+            .with_poll_timer("postgres-get-notifier-connection")
+            .await
     }
 }
 
@@ -363,7 +393,9 @@ impl Drop for GetConnectionMetricsGuard {
 
 impl Inner {
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn get_connection(&self) -> Result<Object<AsyncPgConnection>, PostgresError> {
+    async fn get_connection(
+        &self,
+    ) -> Result<PooledConnection<'_, AsyncPgConnection>, PostgresError> {
         let guard = GetConnectionMetricsGuard::guard();
 
         let obj = self.pool.get().await.map_err(PostgresError::Pool)?;
@@ -374,7 +406,9 @@ impl Inner {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn get_notifier_connection(&self) -> Result<Object<AsyncPgConnection>, PostgresError> {
+    async fn get_notifier_connection(
+        &self,
+    ) -> Result<PooledConnection<'_, AsyncPgConnection>, PostgresError> {
         let guard = GetConnectionMetricsGuard::guard();
 
         let obj = self
@@ -566,10 +600,13 @@ fn spawn_db_notification_task<S>(
     sender: flume::Sender<Notification>,
     mut conn: Connection<Socket, S>,
 ) where
-    S: tokio_postgres::tls::TlsStream + Unpin + 'static,
+    S: tokio_postgres::tls::TlsStream + Send + Unpin + 'static,
 {
-    crate::sync::spawn("postgres-notifications", async move {
-        while let Some(res) = std::future::poll_fn(|cx| conn.poll_message(cx)).await {
+    crate::sync::spawn_sendable("postgres-notifications", async move {
+        while let Some(res) = std::future::poll_fn(|cx| conn.poll_message(cx))
+            .with_poll_timer("poll-message")
+            .await
+        {
             tracing::trace!("db_notification_task: looping");
 
             match res {
@@ -1384,6 +1421,7 @@ impl QueueRepo for PostgresRepo {
                 .execute(&mut notifier_conn)
                 .with_metrics(crate::init_metrics::POSTGRES_QUEUE_LISTEN)
                 .with_timeout(Duration::from_secs(5))
+                .with_poll_timer("pop-listen")
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .map_err(PostgresError::Diesel)?;
@@ -1404,6 +1442,7 @@ impl QueueRepo for PostgresRepo {
                 .execute(&mut conn)
                 .with_metrics(crate::init_metrics::POSTGRES_QUEUE_REQUEUE)
                 .with_timeout(Duration::from_secs(5))
+                .with_poll_timer("pop-reset-jobs")
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .map_err(PostgresError::Diesel)?;
@@ -1440,6 +1479,7 @@ impl QueueRepo for PostgresRepo {
                 .get_result(&mut conn)
                 .with_metrics(crate::init_metrics::POSTGRES_QUEUE_CLAIM)
                 .with_timeout(Duration::from_secs(5))
+                .with_poll_timer("pop-claim-job")
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
                 .optional()
@@ -1457,6 +1497,7 @@ impl QueueRepo for PostgresRepo {
             match notifier
                 .notified()
                 .with_timeout(Duration::from_secs(5))
+                .with_poll_timer("pop-wait-notify")
                 .await
             {
                 Ok(()) => tracing::debug!("Notified"),
