@@ -167,7 +167,14 @@ where
             #[cfg(not(feature = "poll-timer-warnings"))]
             tracing::debug!("Future {} polled for {} ms", this.name, elapsed.as_millis());
         } else if elapsed > Duration::from_micros(200) {
+            #[cfg(feature = "poll-timer-warnings")]
             tracing::debug!(
+                "Future {} polled for {} microseconds",
+                this.name,
+                elapsed.as_micros(),
+            );
+            #[cfg(not(feature = "poll-timer-warnings"))]
+            tracing::trace!(
                 "Future {} polled for {} microseconds",
                 this.name,
                 elapsed.as_micros(),

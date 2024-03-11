@@ -1837,6 +1837,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "mime",
+ "nanorand",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",

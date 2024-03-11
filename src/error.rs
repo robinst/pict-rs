@@ -167,6 +167,10 @@ pub(crate) enum UploadError {
 
     #[error("Failed external validation")]
     FailedExternalValidation,
+
+    #[cfg(feature = "random-errors")]
+    #[error("Randomly generated error for testing purposes")]
+    RandomError,
 }
 
 impl UploadError {
@@ -205,6 +209,8 @@ impl UploadError {
             Self::ProcessTimeout => ErrorCode::COMMAND_TIMEOUT,
             Self::FailedExternalValidation => ErrorCode::FAILED_EXTERNAL_VALIDATION,
             Self::InvalidJob(_, _) => ErrorCode::INVALID_JOB,
+            #[cfg(feature = "random-errors")]
+            Self::RandomError => ErrorCode::RANDOM_ERROR,
         }
     }
 

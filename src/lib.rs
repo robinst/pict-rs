@@ -1914,6 +1914,11 @@ impl PictRsConfiguration {
     /// }
     /// ```
     pub async fn run(self) -> color_eyre::Result<()> {
+        #[cfg(feature = "random-errors")]
+        tracing::error!("pict-rs has been compiled with with the 'random-errors' feature enabled.");
+        #[cfg(feature = "random-errors")]
+        tracing::error!("This is not suitable for production environments");
+
         let PictRsConfiguration { config, operation } = self;
 
         // describe all the metrics pict-rs produces

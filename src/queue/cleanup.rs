@@ -23,6 +23,15 @@ where
     Box::pin(async move {
         let job_text = format!("{job}");
 
+        #[cfg(feature = "random-errors")]
+        {
+            use nanorand::Rng;
+
+            if nanorand::tls_rng().generate_range(0..25) < 1 {
+                return Err(crate::error::UploadError::RandomError).retry();
+            }
+        }
+
         let job = serde_json::from_value(job)
             .map_err(|e| UploadError::InvalidJob(e, job_text))
             .abort()?;

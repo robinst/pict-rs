@@ -62,7 +62,10 @@ impl Store for FileStore {
     {
         let path = self.next_file(extension);
 
-        if let Err(e) = self.safe_save_stream(&path, stream).await {
+        if let Err(e) = self
+            .safe_save_stream(&path, crate::stream::error_injector(stream))
+            .await
+        {
             self.safe_remove_file(&path).await?;
             return Err(e.into());
         }
@@ -95,7 +98,7 @@ impl Store for FileStore {
             .instrument(file_span)
             .await?;
 
-        Ok(Box::pin(stream))
+        Ok(Box::pin(crate::stream::error_injector(stream)))
     }
 
     #[tracing::instrument(skip(self))]

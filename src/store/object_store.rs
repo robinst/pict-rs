@@ -216,7 +216,11 @@ impl Store for ObjectStore {
         S: Stream<Item = std::io::Result<Bytes>>,
     {
         match self
-            .start_upload(stream, content_type.clone(), extension)
+            .start_upload(
+                crate::stream::error_injector(stream),
+                content_type.clone(),
+                extension,
+            )
             .await?
         {
             UploadState::Single(first_chunk) => {
@@ -306,9 +310,11 @@ impl Store for ObjectStore {
             return Err(status_error(response, Some(identifier.clone())).await);
         }
 
-        Ok(Box::pin(crate::stream::metrics(
-            crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST_STREAM,
-            crate::stream::map_err(response.bytes_stream(), payload_to_io_error),
+        Ok(Box::pin(crate::stream::error_injector(
+            crate::stream::metrics(
+                crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST_STREAM,
+                crate::stream::map_err(response.bytes_stream(), payload_to_io_error),
+            ),
         )))
     }
 

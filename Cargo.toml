@@ -16,6 +16,7 @@ strip = true
 default = []
 io-uring = ["dep:tokio-uring", "sled/io_uring", "actix-web/experimental-io-uring"]
 poll-timer-warnings = []
+random-errors = ["dep:nanorand"]
 
 [dependencies]
 actix-form-data = "0.7.0-beta.6"
@@ -40,6 +41,7 @@ md-5 = "0.10.5"
 metrics = "0.22.0"
 metrics-exporter-prometheus = { version = "0.13.0", default-features = false, features = ["http-listener"] }
 mime = "0.3.1"
+nanorand = { version = "0.7", optional = true }
 opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"] }
 opentelemetry = "0.22"
 opentelemetry-otlp = "0.15"

@@ -59,12 +59,12 @@ impl BytesStream {
     }
 
     pub(crate) fn into_io_stream(self) -> impl Stream<Item = std::io::Result<Bytes>> {
-        streem::from_fn(move |yielder| async move {
+        crate::stream::error_injector(streem::from_fn(move |yielder| async move {
             for bytes in self {
                 crate::sync::cooperate().await;
                 yielder.yield_ok(bytes).await;
             }
-        })
+        }))
     }
 }
 

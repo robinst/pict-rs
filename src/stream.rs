@@ -5,6 +5,38 @@ use streem::IntoStreamer;
 
 use crate::future::WithMetrics;
 
+#[cfg(not(feature = "random-errors"))]
+pub(crate) fn error_injector(
+    stream: impl Stream<Item = std::io::Result<Bytes>>,
+) -> impl Stream<Item = std::io::Result<Bytes>> {
+    stream
+}
+
+#[cfg(feature = "random-errors")]
+pub(crate) fn error_injector(
+    stream: impl Stream<Item = std::io::Result<Bytes>>,
+) -> impl Stream<Item = std::io::Result<Bytes>> {
+    streem::try_from_fn(|yielder| async move {
+        let stream = std::pin::pin!(stream);
+        let mut streamer = stream.into_streamer();
+
+        while let Some(item) = streamer.try_next().await? {
+            yielder.yield_ok(item).await;
+
+            use nanorand::Rng;
+
+            if nanorand::tls_rng().generate_range(0..1000) < 1 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    crate::error::UploadError::RandomError,
+                ));
+            }
+        }
+
+        Ok(())
+    })
+}
+
 pub(crate) fn take<S>(stream: S, amount: usize) -> impl Stream<Item = S::Item>
 where
     S: Stream,

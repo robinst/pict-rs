@@ -1548,14 +1548,14 @@ impl QueueRepo for PostgresRepo {
 
         let mut conn = self.get_connection().await?;
 
-        if matches!(job_status, JobResult::Failure) {
+        let count = if matches!(job_status, JobResult::Failure) {
             diesel::update(job_queue)
                 .filter(
                     id.eq(job_id.0)
                         .and(queue.eq(queue_name))
                         .and(worker.eq(worker_id)),
                 )
-                .set(retry.eq(retry - 1))
+                .set((retry.eq(retry - 1), worker.eq(Option::<Uuid>::None)))
                 .execute(&mut conn)
                 .with_metrics(crate::init_metrics::POSTGRES_QUEUE_RETRY)
                 .with_timeout(Duration::from_secs(5))
@@ -1564,18 +1564,13 @@ impl QueueRepo for PostgresRepo {
                 .map_err(PostgresError::Diesel)?;
 
             diesel::delete(job_queue)
-                .filter(
-                    id.eq(job_id.0)
-                        .and(queue.eq(queue_name))
-                        .and(worker.eq(worker_id))
-                        .and(retry.le(0)),
-                )
+                .filter(id.eq(job_id.0).and(retry.le(0)))
                 .execute(&mut conn)
                 .with_metrics(crate::init_metrics::POSTGRES_QUEUE_CLEANUP)
                 .with_timeout(Duration::from_secs(5))
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
-                .map_err(PostgresError::Diesel)?;
+                .map_err(PostgresError::Diesel)?
         } else {
             diesel::delete(job_queue)
                 .filter(
@@ -1588,7 +1583,20 @@ impl QueueRepo for PostgresRepo {
                 .with_timeout(Duration::from_secs(5))
                 .await
                 .map_err(|_| PostgresError::DbTimeout)?
-                .map_err(PostgresError::Diesel)?;
+                .map_err(PostgresError::Diesel)?
+        };
+
+        match job_status {
+            JobResult::Success => tracing::debug!("completed {job_id:?}"),
+            JobResult::Failure if count == 0 => {
+                tracing::info!("{job_id:?} failed, marked for retry")
+            }
+            JobResult::Failure => tracing::warn!("{job_id:?} failed permantently"),
+            JobResult::Aborted => tracing::warn!("{job_id:?} dead"),
+        }
+
+        if count > 0 {
+            tracing::debug!("Deleted {count} jobs");
         }
 
         Ok(())

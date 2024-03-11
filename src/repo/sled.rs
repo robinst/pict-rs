@@ -899,15 +899,25 @@ impl QueueRepo for SledRepo {
                             job_retries.remove(&key[..])?;
                         }
 
-                        Ok(())
+                        Ok(retry_count > 0 && retry)
                     },
                 )
         })
         .await
         .map_err(|_| RepoError::Canceled)?;
 
-        if let Err(TransactionError::Abort(e) | TransactionError::Storage(e)) = res {
-            return Err(RepoError::from(SledError::from(e)));
+        match res {
+            Err(TransactionError::Abort(e) | TransactionError::Storage(e)) => {
+                return Err(RepoError::from(SledError::from(e)));
+            }
+            Ok(retried) => match job_status {
+                JobResult::Success => tracing::debug!("completed {job_id:?}"),
+                JobResult::Failure if retried => {
+                    tracing::info!("{job_id:?} failed, marked for retry")
+                }
+                JobResult::Failure => tracing::warn!("{job_id:?} failed permantently"),
+                JobResult::Aborted => tracing::warn!("{job_id:?} dead"),
+            },
         }
 
         Ok(())
