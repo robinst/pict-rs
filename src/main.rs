@@ -1,6 +1,6 @@
 #[cfg(feature = "io-uring")]
 fn main() -> color_eyre::Result<()> {
-    tokio_uring::start(async move {
+    actix_web::rt::System::new().block_on(async move {
         pict_rs::PictRsConfiguration::build_default()?
             .install_tracing()?
             .install_metrics()?

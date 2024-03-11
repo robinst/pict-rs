@@ -1888,12 +1888,12 @@ impl PictRsConfiguration {
     /// Run the pict-rs application
     ///
     /// This must be called from within a tokio `LocalSet`, which is created by default for
-    /// actix-rt runtimes, and by tokio_uring
+    /// actix-rt runtimes
     ///
     /// Example:
-    /// ```rust,ignore
+    /// ```rust
     /// fn main() -> color_eyre::Result<()> {
-    ///     tokio_uring::start(async move {
+    ///     actix_web::rt::System::new().block_on(async move {
     ///         let pict_rs_server = pict_rs::ConfigSource::memory(serde_json::json!({
     ///             "repo": {
     ///                 "type": "sled",
