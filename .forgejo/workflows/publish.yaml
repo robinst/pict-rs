@@ -101,6 +101,8 @@ jobs:
       -
         name: Compile pict-rs
         run: cargo zigbuild --target ${{ matrix.info.target }} --release
+        env:
+          RUSTFLAGS: '--cfg tokio_unstable'
       -
         name: Prepare artifacts
         run: |
