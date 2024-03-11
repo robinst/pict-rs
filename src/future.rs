@@ -147,13 +147,25 @@ where
         }
 
         if elapsed > Duration::from_secs(1) {
+            #[cfg(feature = "poll-timer-warnings")]
             tracing::warn!(
                 "Future {} polled for {} seconds",
                 this.name,
                 elapsed.as_secs()
             );
+
+            #[cfg(not(feature = "poll-timer-warnings"))]
+            tracing::debug!(
+                "Future {} polled for {} seconds",
+                this.name,
+                elapsed.as_secs()
+            );
         } else if elapsed > Duration::from_millis(1) {
+            #[cfg(feature = "poll-timer-warnings")]
             tracing::warn!("Future {} polled for {} ms", this.name, elapsed.as_millis());
+
+            #[cfg(not(feature = "poll-timer-warnings"))]
+            tracing::debug!("Future {} polled for {} ms", this.name, elapsed.as_millis());
         } else if elapsed > Duration::from_micros(200) {
             tracing::debug!(
                 "Future {} polled for {} microseconds",
