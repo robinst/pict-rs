@@ -125,7 +125,7 @@ where
         .spawn(future)
         .expect("Failed to spawn");
     #[cfg(not(tokio_unstable))]
-    let handle = tokio::task::spawn_local(future);
+    let handle = tokio::task::spawn(future);
 
     drop(guard);
     handle
