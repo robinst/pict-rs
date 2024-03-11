@@ -220,8 +220,7 @@ More information is available in the [Ubuntu and Debian docs](./docs/ubuntu-and-
 
 ##### Compile from Source
 pict-rs can be compiled from source using a recent version of the rust compiler. I do development
-and produce releases on 1.72. pict-rs also requires the `protoc` protobuf compiler to be present at
-build-time in order to enable use of [`tokio-console`](https://github.com/tokio-rs/console).
+and produce releases on 1.75
 
 Like the Binary Download option, `imagemagick`, `ffmpeg`, and `exiftool` must be installed for
 pict-rs to run properly.
