@@ -55,6 +55,7 @@ impl Args {
                 address,
                 api_key,
                 temporary_directory,
+                no_cleanup_temporary_directory,
                 certificate,
                 private_key,
                 client_timeout,
@@ -122,6 +123,7 @@ impl Args {
                     danger_dummy_mode,
                     max_file_count,
                     temporary_directory,
+                    cleanup_temporary_directory: !no_cleanup_temporary_directory,
                     certificate,
                     private_key,
                 };
@@ -541,6 +543,7 @@ struct Server {
     max_file_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temporary_directory: Option<PathBuf>,
+    cleanup_temporary_directory: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     certificate: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -972,6 +975,10 @@ struct Run {
     /// The temporary directory pict-rs should use when processing media
     #[arg(long)]
     temporary_directory: Option<PathBuf>,
+
+    /// Whether to attempt to clean files left behind from a previous run of pict-rs
+    #[arg(long)]
+    no_cleanup_temporary_directory: bool,
 
     /// The path to the TLS certificate. Both the certificate and the private_key must be specified
     /// to enable TLS

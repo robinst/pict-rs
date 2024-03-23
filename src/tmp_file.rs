@@ -16,9 +16,17 @@ pub(crate) struct TmpDir {
 }
 
 impl TmpDir {
-    pub(crate) async fn init<P: AsRef<Path>>(path: P) -> std::io::Result<Arc<Self>> {
-        let path = path.as_ref().join(Uuid::now_v7().to_string());
-        tokio::fs::create_dir(&path).await?;
+    pub(crate) async fn init<P: AsRef<Path>>(path: P, cleanup: bool) -> std::io::Result<Arc<Self>> {
+        let base_path = path.as_ref().join("pict-rs");
+
+        if cleanup && tokio::fs::metadata(&base_path).await.is_ok() {
+            tokio::fs::remove_dir_all(&base_path).await?;
+        }
+
+        let path = base_path.join(Uuid::now_v7().to_string());
+
+        tokio::fs::create_dir_all(&path).await?;
+
         Ok(Arc::new(TmpDir { path: Some(path) }))
     }
 
@@ -47,8 +55,13 @@ impl TmpDir {
     }
 
     pub(crate) async fn cleanup(self: Arc<Self>) -> std::io::Result<()> {
-        if let Some(path) = Arc::into_inner(self).and_then(|mut this| this.path.take()) {
-            tokio::fs::remove_dir_all(path).await?;
+        if let Some(mut path) = Arc::into_inner(self).and_then(|mut this| this.path.take()) {
+            tokio::fs::remove_dir_all(&path).await?;
+
+            if path.pop() {
+                // attempt to remove parent directory if it is empty
+                let _ = tokio::fs::remove_dir(path).await;
+            }
         }
 
         Ok(())
@@ -57,9 +70,13 @@ impl TmpDir {
 
 impl Drop for TmpDir {
     fn drop(&mut self) {
-        if let Some(path) = self.path.take() {
+        if let Some(mut path) = self.path.take() {
             tracing::warn!("TmpDir - Blocking remove of {path:?}");
-            std::fs::remove_dir_all(path).expect("Removed directory");
+            std::fs::remove_dir_all(&path).expect("Removed directory");
+            if path.pop() {
+                // attempt to remove parent directory if it is empty
+                let _ = std::fs::remove_dir(path);
+            }
         }
     }
 }
