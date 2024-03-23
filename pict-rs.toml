@@ -37,6 +37,11 @@ max_file_count = 1
 # default: The system's advertised temporary directory ("/tmp" on most linuxes)
 temporary_directory = "/tmp"
 
+## Optional: whether to delete the contents of $temporary_directory/pict-rs on launch
+# environment variable: PICTRS__SERVER__CLEANUP_TEMPORARY_DIRECTORY
+# default: true
+cleanup_temporary_directory = true
+
 ## Optional: path to server certificate to enable TLS
 # environment variable: PICTRS__SERVER__CERTIFICATE
 # default: empty
