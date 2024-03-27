@@ -1,3 +1,6 @@
+mod hasher;
+mod validate;
+
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
 use crate::{
@@ -9,15 +12,16 @@ use crate::{
     repo::{Alias, ArcRepo, DeleteToken, Hash},
     state::State,
     store::Store,
+    UploadQuery,
 };
 use actix_web::web::Bytes;
 use futures_core::Stream;
 use reqwest::Body;
-
 use tracing::{Instrument, Span};
 
-mod hasher;
 use hasher::Hasher;
+
+pub(crate) use validate::ValidationError;
 
 #[derive(Debug)]
 pub(crate) struct Session {
@@ -31,6 +35,7 @@ pub(crate) struct Session {
 async fn process_ingest<S>(
     state: &State<S>,
     stream: impl Stream<Item = Result<Bytes, Error>>,
+    upload_query: &UploadQuery,
 ) -> Result<
     (
         InternalFormat,
@@ -54,9 +59,10 @@ where
     let permit = crate::process_semaphore().acquire().await?;
 
     tracing::trace!("Validating bytes");
-    let (input_type, process_read) = crate::validate::validate_bytes_stream(state, bytes)
-        .with_poll_timer("validate-bytes-stream")
-        .await?;
+    let (input_type, process_read) =
+        validate::validate_bytes_stream(state, bytes, &upload_query.limits)
+            .with_poll_timer("validate-bytes-stream")
+            .await?;
 
     let process_read = if let Some(operations) = state.config.media.preprocess_steps() {
         if let Some(format) = input_type.processable_format() {
@@ -159,6 +165,7 @@ pub(crate) async fn ingest<S>(
     state: &State<S>,
     stream: impl Stream<Item = Result<Bytes, Error>>,
     declared_alias: Option<Alias>,
+    upload_query: &UploadQuery,
 ) -> Result<Session, Error>
 where
     S: Store,
@@ -166,7 +173,7 @@ where
     let (input_type, identifier, details, hash_state) = if state.config.server.danger_dummy_mode {
         dummy_ingest(state, stream).await?
     } else {
-        process_ingest(state, stream)
+        process_ingest(state, stream, upload_query)
             .with_poll_timer("ingest-future")
             .await?
     };

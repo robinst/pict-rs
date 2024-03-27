@@ -147,6 +147,9 @@ impl ErrorCode {
     pub(crate) const INVALID_JOB: ErrorCode = ErrorCode {
         code: "invalid-job",
     };
+    pub(crate) const INVALID_UPLOAD_QUERY: ErrorCode = ErrorCode {
+        code: "invalid-upload-query",
+    };
     #[cfg(feature = "random-errors")]
     pub(crate) const RANDOM_ERROR: ErrorCode = ErrorCode {
         code: "random-error",

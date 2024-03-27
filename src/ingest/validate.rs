@@ -14,6 +14,7 @@ use crate::{
     future::WithPollTimer,
     process::{Process, ProcessRead},
     state::State,
+    UploadLimits,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -60,6 +61,7 @@ const MEGABYTES: usize = 1024 * 1024;
 pub(crate) async fn validate_bytes_stream<S>(
     state: &State<S>,
     bytes: BytesStream,
+    upload_limits: &UploadLimits,
 ) -> Result<(InternalFormat, ProcessRead), Error> {
     if bytes.is_empty() {
         return Err(ValidationError::Empty.into());
