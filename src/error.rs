@@ -111,8 +111,11 @@ pub(crate) enum UploadError {
     #[error("Invalid job popped from job queue: {1}")]
     InvalidJob(#[source] serde_json::Error, String),
 
-    #[error("Error parsing upload query")]
-    InvalidUploadQuery(#[source] actix_web::error::QueryPayloadError),
+    #[error("Invalid query supplied")]
+    InvalidQuery(#[source] actix_web::error::QueryPayloadError),
+
+    #[error("Invalid json supplied")]
+    InvalidJson(#[source] actix_web::error::JsonPayloadError),
 
     #[error("pict-rs is in read-only mode")]
     ReadOnly,
@@ -212,7 +215,8 @@ impl UploadError {
             Self::ProcessTimeout => ErrorCode::COMMAND_TIMEOUT,
             Self::FailedExternalValidation => ErrorCode::FAILED_EXTERNAL_VALIDATION,
             Self::InvalidJob(_, _) => ErrorCode::INVALID_JOB,
-            Self::InvalidUploadQuery(_) => ErrorCode::INVALID_UPLOAD_QUERY,
+            Self::InvalidQuery(_) => ErrorCode::INVALID_QUERY,
+            Self::InvalidJson(_) => ErrorCode::INVALID_JSON,
             #[cfg(feature = "random-errors")]
             Self::RandomError => ErrorCode::RANDOM_ERROR,
         }
@@ -265,7 +269,8 @@ impl ResponseError for Error {
                 ))
                 | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
                 | UploadError::Validation(_)
-                | UploadError::InvalidUploadQuery(_)
+                | UploadError::InvalidQuery(_)
+                | UploadError::InvalidJson(_)
                 | UploadError::UnsupportedProcessExtension
                 | UploadError::ReadOnly
                 | UploadError::FailedExternalValidation

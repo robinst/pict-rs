@@ -150,14 +150,14 @@ async fn ensure_details_identifier<S: Store + 'static>(
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 struct UploadLimits {
-    max_width: Option<u16>,
-    max_height: Option<u16>,
-    max_area: Option<u32>,
-    max_frame_count: Option<u32>,
-    max_file_size: Option<usize>,
-    allow_image: bool,
-    allow_animation: bool,
-    allow_video: bool,
+    max_width: Option<Serde<u16>>,
+    max_height: Option<Serde<u16>>,
+    max_area: Option<Serde<u32>>,
+    max_frame_count: Option<Serde<u32>>,
+    max_file_size: Option<Serde<usize>>,
+    allow_image: Serde<bool>,
+    allow_animation: Serde<bool>,
+    allow_video: Serde<bool>,
 }
 
 impl Default for UploadLimits {
@@ -168,9 +168,9 @@ impl Default for UploadLimits {
             max_area: None,
             max_frame_count: None,
             max_file_size: None,
-            allow_image: true,
-            allow_animation: true,
-            allow_video: true,
+            allow_image: Serde::new(true),
+            allow_animation: Serde::new(true),
+            allow_video: Serde::new(true),
         }
     }
 }
@@ -197,7 +197,7 @@ impl<S: Store + 'static> FormData for Upload<S> {
             .clone();
 
         let web::Query(upload_query) = web::Query::<UploadQuery>::from_query(req.query_string())
-            .map_err(UploadError::InvalidUploadQuery)?;
+            .map_err(UploadError::InvalidQuery)?;
 
         let upload_query = Rc::new(upload_query);
 
@@ -254,7 +254,7 @@ impl<S: Store + 'static> FormData for Import<S> {
             .clone();
 
         let web::Query(upload_query) = web::Query::<UploadQuery>::from_query(req.query_string())
-            .map_err(UploadError::InvalidUploadQuery)?;
+            .map_err(UploadError::InvalidQuery)?;
 
         let upload_query = Rc::new(upload_query);
 
@@ -426,8 +426,10 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
 async fn upload_backgrounded<S: Store>(
     Multipart(BackgroundedUpload(value, _)): Multipart<BackgroundedUpload<S>>,
     state: web::Data<State<S>>,
-    web::Query(upload_query): web::Query<UploadQuery>,
+    upload_query: web::Query<UploadQuery>,
 ) -> Result<HttpResponse, Error> {
+    let upload_query = upload_query.into_inner();
+
     let images = value
         .map()
         .and_then(|mut m| m.remove("images"))
@@ -552,12 +554,14 @@ async fn ingest_inline<S: Store + 'static>(
 /// download an image from a URL
 #[tracing::instrument(name = "Downloading file", skip(state))]
 async fn download<S: Store + 'static>(
-    web::Query(DownloadQuery {
-        url_query,
-        upload_query,
-    }): web::Query<DownloadQuery>,
+    download_query: web::Query<DownloadQuery>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
+    let DownloadQuery {
+        url_query,
+        upload_query,
+    } = download_query.into_inner();
+
     let stream = download_stream(&url_query.url, &state).await?;
 
     if url_query.backgrounded {
@@ -1574,6 +1578,16 @@ fn build_client() -> Result<ClientWithMiddleware, Error> {
         .build())
 }
 
+fn query_config() -> web::QueryConfig {
+    web::QueryConfig::default()
+        .error_handler(|err, _| Error::from(UploadError::InvalidQuery(err)).into())
+}
+
+fn json_config() -> web::JsonConfig {
+    web::JsonConfig::default()
+        .error_handler(|err, _| Error::from(UploadError::InvalidJson(err)).into())
+}
+
 fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
     config: &mut web::ServiceConfig,
     state: State<S>,
@@ -1581,6 +1595,8 @@ fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
     extra_config: F,
 ) {
     config
+        .app_data(query_config())
+        .app_data(json_config())
         .app_data(web::Data::new(state.clone()))
         .app_data(web::Data::new(process_map.clone()))
         .route("/healthz", web::get().to(healthz::<S>))

@@ -64,7 +64,13 @@ where
             .with_poll_timer("validate-bytes-stream")
             .await?;
 
-    let process_read = if let Some(operations) = state.config.media.preprocess_steps() {
+    let operations = if upload_query.operations.is_empty() {
+        state.config.media.preprocess_steps()
+    } else {
+        Some(upload_query.operations.as_ref())
+    };
+
+    let process_read = if let Some(operations) = operations {
         if let Some(format) = input_type.processable_format() {
             let (_, magick_args) =
                 crate::processor::build_chain(operations, format.file_extension())?;

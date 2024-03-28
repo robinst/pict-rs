@@ -58,8 +58,8 @@ rustls-channel-resolver = "0.2.0"
 rustls-pemfile = "2.0.0"
 rusty-s3 = "0.5.0"
 serde = { version = "1.0", features = ["derive"] }
-serde-tuple-vec-map = "1.0.1"
 serde_json = "1.0"
+serde-tuple-vec-map = "1.0.1"
 serde_urlencoded = "0.7.1"
 sha2 = "0.10.0"
 sled = { version = "0.34.7" }

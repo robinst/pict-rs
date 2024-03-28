@@ -100,6 +100,9 @@ impl ErrorCode {
     pub(crate) const VIDEO_DISABLED: ErrorCode = ErrorCode {
         code: "video-disabled",
     };
+    pub(crate) const MEDIA_DISALLOWED: ErrorCode = ErrorCode {
+        code: "media-disallowed",
+    };
     pub(crate) const HTTP_CLIENT_ERROR: ErrorCode = ErrorCode {
         code: "http-client-error",
     };
@@ -147,8 +150,11 @@ impl ErrorCode {
     pub(crate) const INVALID_JOB: ErrorCode = ErrorCode {
         code: "invalid-job",
     };
-    pub(crate) const INVALID_UPLOAD_QUERY: ErrorCode = ErrorCode {
-        code: "invalid-upload-query",
+    pub(crate) const INVALID_QUERY: ErrorCode = ErrorCode {
+        code: "invalid-query",
+    };
+    pub(crate) const INVALID_JSON: ErrorCode = ErrorCode {
+        code: "invalid-json",
     };
     #[cfg(feature = "random-errors")]
     pub(crate) const RANDOM_ERROR: ErrorCode = ErrorCode {

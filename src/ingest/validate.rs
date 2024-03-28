@@ -39,6 +39,9 @@ pub(crate) enum ValidationError {
 
     #[error("Video is disabled")]
     VideoDisabled,
+
+    #[error("Media type wasn't allowed for this upload")]
+    MediaDisallowed,
 }
 
 impl ValidationError {
@@ -51,6 +54,7 @@ impl ValidationError {
             Self::Empty => ErrorCode::VALIDATE_FILE_EMPTY,
             Self::Filesize => ErrorCode::VALIDATE_FILE_SIZE,
             Self::VideoDisabled => ErrorCode::VIDEO_DISABLED,
+            Self::MediaDisallowed => ErrorCode::MEDIA_DISALLOWED,
         }
     }
 }
@@ -76,14 +80,16 @@ pub(crate) async fn validate_bytes_stream<S>(
         .with_poll_timer("discover-bytes-stream")
         .await?;
 
+    validate_upload(bytes.len(), width, height, frames, upload_limits)?;
+
     match &input {
-        InputFile::Image(input) => {
+        InputFile::Image(input) if *upload_limits.allow_image => {
             let (format, process) =
                 process_image_command(state, *input, bytes.len(), width, height).await?;
 
             Ok((format, process.drive_with_stream(bytes.into_io_stream())))
         }
-        InputFile::Animation(input) => {
+        InputFile::Animation(input) if *upload_limits.allow_animation => {
             let (format, process) = process_animation_command(
                 state,
                 *input,
@@ -96,20 +102,67 @@ pub(crate) async fn validate_bytes_stream<S>(
 
             Ok((format, process.drive_with_stream(bytes.into_io_stream())))
         }
-        InputFile::Video(input) => {
+        InputFile::Video(input) if *upload_limits.allow_video => {
             let (format, process_read) =
                 process_video(state, bytes, *input, width, height, frames.unwrap_or(1)).await?;
 
             Ok((format, process_read))
         }
+        _ => Err(ValidationError::MediaDisallowed.into()),
     }
+}
+
+fn validate_upload(
+    size: usize,
+    width: u16,
+    height: u16,
+    frames: Option<u32>,
+    upload_limits: &UploadLimits,
+) -> Result<(), ValidationError> {
+    if upload_limits
+        .max_width
+        .is_some_and(|max_width| width > *max_width)
+    {
+        return Err(ValidationError::Width);
+    }
+
+    if upload_limits
+        .max_height
+        .is_some_and(|max_height| height > *max_height)
+    {
+        return Err(ValidationError::Height);
+    }
+
+    if upload_limits
+        .max_frame_count
+        .zip(frames)
+        .is_some_and(|(max_frame_count, frames)| frames > *max_frame_count)
+    {
+        return Err(ValidationError::Frames);
+    }
+
+    if upload_limits
+        .max_area
+        .is_some_and(|max_area| u32::from(width) * u32::from(height) > *max_area)
+    {
+        return Err(ValidationError::Area);
+    }
+
+    if upload_limits
+        .max_file_size
+        .is_some_and(|max_file_size| size > *max_file_size * MEGABYTES)
+    {
+        return Err(ValidationError::Filesize);
+    }
+
+    Ok(())
 }
 
 #[tracing::instrument(skip(state))]
 async fn process_image_command<S>(
     state: &State<S>,
     input: ImageInput,
-    length: usize,
+    size: usize,
     width: u16,
     height: u16,
 ) -> Result<(InternalFormat, Process), Error> {
@@ -124,7 +177,7 @@ async fn process_image_command<S>(
     if u32::from(width) * u32::from(height) > validations.max_area {
         return Err(ValidationError::Area.into());
     }
-    if length > validations.max_file_size * MEGABYTES {
+    if size > validations.max_file_size * MEGABYTES {
         return Err(ValidationError::Filesize.into());
     }
 
@@ -174,14 +227,14 @@ fn validate_animation(
 async fn process_animation_command<S>(
     state: &State<S>,
     input: AnimationFormat,
-    length: usize,
+    size: usize,
     width: u16,
     height: u16,
     frames: u32,
 ) -> Result<(InternalFormat, Process), Error> {
     let validations = &state.config.media.animation;
 
-    validate_animation(length, width, height, frames, validations)?;
+    validate_animation(size, width, height, frames, validations)?;
 
     let AnimationOutput {
         format,
