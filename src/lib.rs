@@ -2017,7 +2017,11 @@ impl PictRsConfiguration {
         // describe all the metrics pict-rs produces
         init_metrics::init_metrics();
 
-        let tmp_dir = TmpDir::init(&config.server.temporary_directory).await?;
+        let tmp_dir = TmpDir::init(
+            &config.server.temporary_directory,
+            config.server.cleanup_temporary_directory,
+        )
+        .await?;
         let policy_dir = magick::write_magick_policy(&config.media, &tmp_dir).await?;
 
         let client = build_client()?;

@@ -4,6 +4,7 @@ read_only = false
 danger_dummy_mode = false
 max_file_count = 1
 temporary_directory = "/tmp"
+cleanup_temporary_directory = true
 
 [client]
 timeout = 30
@@ -46,7 +47,7 @@ proxy = "7d"
 [media.magick]
 max_width = 10000
 max_height = 10000
-max_area = 40000000
+max_area = 20000
 memory = 256
 map = 512
 disk = 1024

@@ -24,6 +24,7 @@ struct ServerDefaults {
     danger_dummy_mode: bool,
     max_file_count: u32,
     temporary_directory: PathBuf,
+    cleanup_temporary_directory: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -211,6 +212,7 @@ impl Default for ServerDefaults {
             danger_dummy_mode: false,
             max_file_count: 1,
             temporary_directory: std::env::temp_dir(),
+            cleanup_temporary_directory: true,
         }
     }
 }

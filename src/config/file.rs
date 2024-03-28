@@ -119,6 +119,8 @@ pub(crate) struct Server {
 
     pub(crate) temporary_directory: PathBuf,
 
+    pub(crate) cleanup_temporary_directory: bool,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) certificate: Option<PathBuf>,
 
