@@ -25,7 +25,7 @@ use super::{
     Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, Details,
     DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, JobId, JobResult, OrderedHash,
     ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
-    UploadResult, VariantAccessRepo, VariantAlreadyExists,
+    UploadResult, VariantAccessRepo, VariantAlreadyExists, VariantRepo,
 };
 
 macro_rules! b {
@@ -1332,88 +1332,6 @@ impl HashRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn relate_variant_identifier(
-        &self,
-        hash: Hash,
-        variant: String,
-        identifier: &Arc<str>,
-    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
-        let hash = hash.to_bytes();
-
-        let key = variant_key(&hash, &variant);
-        let value = identifier.clone();
-
-        let hash_variant_identifiers = self.hash_variant_identifiers.clone();
-
-        crate::sync::spawn_blocking("sled-io", move || {
-            hash_variant_identifiers
-                .compare_and_swap(key, Option::<&[u8]>::None, Some(value.as_bytes()))
-                .map(|res| res.map_err(|_| VariantAlreadyExists))
-        })
-        .await
-        .map_err(|_| RepoError::Canceled)?
-        .map_err(SledError::from)
-        .map_err(RepoError::from)
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn variant_identifier(
-        &self,
-        hash: Hash,
-        variant: String,
-    ) -> Result<Option<Arc<str>>, RepoError> {
-        let hash = hash.to_bytes();
-
-        let key = variant_key(&hash, &variant);
-
-        let opt = b!(
-            self.hash_variant_identifiers,
-            hash_variant_identifiers.get(key)
-        );
-
-        Ok(opt.map(try_into_arc_str).transpose()?)
-    }
-
-    #[tracing::instrument(level = "debug", skip(self))]
-    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
-        let hash = hash.to_ivec();
-
-        let vec = b!(
-            self.hash_variant_identifiers,
-            Ok(hash_variant_identifiers
-                .scan_prefix(hash.clone())
-                .filter_map(|res| res.ok())
-                .filter_map(|(key, ivec)| {
-                    let identifier = try_into_arc_str(ivec).ok();
-
-                    let variant = variant_from_key(&hash, &key);
-                    if variant.is_none() {
-                        tracing::warn!("Skipping a variant: {}", String::from_utf8_lossy(&key));
-                    }
-
-                    Some((variant?, identifier?))
-                })
-                .collect::<Vec<_>>()) as Result<Vec<_>, SledError>
-        );
-
-        Ok(vec)
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
-        let hash = hash.to_bytes();
-
-        let key = variant_key(&hash, &variant);
-
-        b!(
-            self.hash_variant_identifiers,
-            hash_variant_identifiers.remove(key)
-        );
-
-        Ok(())
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
     async fn relate_blurhash(&self, hash: Hash, blurhash: Arc<str>) -> Result<(), RepoError> {
         b!(
             self.hash_blurhashes,
@@ -1525,6 +1443,91 @@ impl HashRepo for SledRepo {
                 Err(SledError::from(e).into())
             }
         }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl VariantRepo for SledRepo {
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn relate_variant_identifier(
+        &self,
+        hash: Hash,
+        variant: String,
+        identifier: &Arc<str>,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
+        let hash = hash.to_bytes();
+
+        let key = variant_key(&hash, &variant);
+        let value = identifier.clone();
+
+        let hash_variant_identifiers = self.hash_variant_identifiers.clone();
+
+        crate::sync::spawn_blocking("sled-io", move || {
+            hash_variant_identifiers
+                .compare_and_swap(key, Option::<&[u8]>::None, Some(value.as_bytes()))
+                .map(|res| res.map_err(|_| VariantAlreadyExists))
+        })
+        .await
+        .map_err(|_| RepoError::Canceled)?
+        .map_err(SledError::from)
+        .map_err(RepoError::from)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn variant_identifier(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Option<Arc<str>>, RepoError> {
+        let hash = hash.to_bytes();
+
+        let key = variant_key(&hash, &variant);
+
+        let opt = b!(
+            self.hash_variant_identifiers,
+            hash_variant_identifiers.get(key)
+        );
+
+        Ok(opt.map(try_into_arc_str).transpose()?)
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
+        let hash = hash.to_ivec();
+
+        let vec = b!(
+            self.hash_variant_identifiers,
+            Ok(hash_variant_identifiers
+                .scan_prefix(hash.clone())
+                .filter_map(|res| res.ok())
+                .filter_map(|(key, ivec)| {
+                    let identifier = try_into_arc_str(ivec).ok();
+
+                    let variant = variant_from_key(&hash, &key);
+                    if variant.is_none() {
+                        tracing::warn!("Skipping a variant: {}", String::from_utf8_lossy(&key));
+                    }
+
+                    Some((variant?, identifier?))
+                })
+                .collect::<Vec<_>>()) as Result<Vec<_>, SledError>
+        );
+
+        Ok(vec)
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        let hash = hash.to_bytes();
+
+        let key = variant_key(&hash, &variant);
+
+        b!(
+            self.hash_variant_identifiers,
+            hash_variant_identifiers.remove(key)
+        );
+
+        Ok(())
     }
 }
 

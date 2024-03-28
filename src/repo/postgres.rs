@@ -46,7 +46,7 @@ use super::{
     Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, DetailsRepo,
     FullRepo, Hash, HashAlreadyExists, HashPage, HashRepo, JobId, JobResult, OrderedHash,
     ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
-    UploadResult, VariantAccessRepo, VariantAlreadyExists,
+    UploadResult, VariantAccessRepo, VariantAlreadyExists, VariantRepo,
 };
 
 #[derive(Clone)]
@@ -864,110 +864,6 @@ impl HashRepo for PostgresRepo {
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
-    async fn relate_variant_identifier(
-        &self,
-        input_hash: Hash,
-        input_variant: String,
-        input_identifier: &Arc<str>,
-    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
-        use schema::variants::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-
-        let res = diesel::insert_into(variants)
-            .values((
-                hash.eq(&input_hash),
-                variant.eq(&input_variant),
-                identifier.eq(input_identifier.as_ref()),
-            ))
-            .execute(&mut conn)
-            .with_metrics(crate::init_metrics::POSTGRES_VARIANTS_RELATE_VARIANT_IDENTIFIER)
-            .with_timeout(Duration::from_secs(5))
-            .await
-            .map_err(|_| PostgresError::DbTimeout)?;
-
-        match res {
-            Ok(_) => Ok(Ok(())),
-            Err(diesel::result::Error::DatabaseError(
-                diesel::result::DatabaseErrorKind::UniqueViolation,
-                _,
-            )) => Ok(Err(VariantAlreadyExists)),
-            Err(e) => Err(PostgresError::Diesel(e).into()),
-        }
-    }
-
-    #[tracing::instrument(level = "debug", skip(self))]
-    async fn variant_identifier(
-        &self,
-        input_hash: Hash,
-        input_variant: String,
-    ) -> Result<Option<Arc<str>>, RepoError> {
-        use schema::variants::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-
-        let opt = variants
-            .select(identifier)
-            .filter(hash.eq(&input_hash))
-            .filter(variant.eq(&input_variant))
-            .get_result::<String>(&mut conn)
-            .with_metrics(crate::init_metrics::POSTGRES_VARIANTS_IDENTIFIER)
-            .with_timeout(Duration::from_secs(5))
-            .await
-            .map_err(|_| PostgresError::DbTimeout)?
-            .optional()
-            .map_err(PostgresError::Diesel)?
-            .map(Arc::from);
-
-        Ok(opt)
-    }
-
-    #[tracing::instrument(level = "debug", skip(self))]
-    async fn variants(&self, input_hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
-        use schema::variants::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-
-        let vec = variants
-            .select((variant, identifier))
-            .filter(hash.eq(&input_hash))
-            .get_results::<(String, String)>(&mut conn)
-            .with_metrics(crate::init_metrics::POSTGRES_VARIANTS_FOR_HASH)
-            .with_timeout(Duration::from_secs(5))
-            .await
-            .map_err(|_| PostgresError::DbTimeout)?
-            .map_err(PostgresError::Diesel)?
-            .into_iter()
-            .map(|(s, i)| (s, Arc::from(i)))
-            .collect();
-
-        Ok(vec)
-    }
-
-    #[tracing::instrument(level = "debug", skip(self))]
-    async fn remove_variant(
-        &self,
-        input_hash: Hash,
-        input_variant: String,
-    ) -> Result<(), RepoError> {
-        use schema::variants::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-
-        diesel::delete(variants)
-            .filter(hash.eq(&input_hash))
-            .filter(variant.eq(&input_variant))
-            .execute(&mut conn)
-            .with_metrics(crate::init_metrics::POSTGRES_VARIANTS_REMOVE)
-            .with_timeout(Duration::from_secs(5))
-            .await
-            .map_err(|_| PostgresError::DbTimeout)?
-            .map_err(PostgresError::Diesel)?;
-
-        Ok(())
-    }
-
-    #[tracing::instrument(level = "debug", skip(self))]
     async fn relate_blurhash(
         &self,
         input_hash: Hash,
@@ -1078,6 +974,113 @@ impl HashRepo for PostgresRepo {
         })
         .await
         .map_err(PostgresError::Diesel)?;
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl VariantRepo for PostgresRepo {
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn relate_variant_identifier(
+        &self,
+        input_hash: Hash,
+        input_variant: String,
+        input_identifier: &Arc<str>,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
+        use schema::variants::dsl::*;
+
+        let mut conn = self.get_connection().await?;
+
+        let res = diesel::insert_into(variants)
+            .values((
+                hash.eq(&input_hash),
+                variant.eq(&input_variant),
+                identifier.eq(input_identifier.as_ref()),
+            ))
+            .execute(&mut conn)
+            .with_metrics(crate::init_metrics::POSTGRES_VARIANTS_RELATE_VARIANT_IDENTIFIER)
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)?;
+
+        match res {
+            Ok(_) => Ok(Ok(())),
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => Ok(Err(VariantAlreadyExists)),
+            Err(e) => Err(PostgresError::Diesel(e).into()),
+        }
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn variant_identifier(
+        &self,
+        input_hash: Hash,
+        input_variant: String,
+    ) -> Result<Option<Arc<str>>, RepoError> {
+        use schema::variants::dsl::*;
+
+        let mut conn = self.get_connection().await?;
+
+        let opt = variants
+            .select(identifier)
+            .filter(hash.eq(&input_hash))
+            .filter(variant.eq(&input_variant))
+            .get_result::<String>(&mut conn)
+            .with_metrics(crate::init_metrics::POSTGRES_VARIANTS_IDENTIFIER)
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)?
+            .optional()
+            .map_err(PostgresError::Diesel)?
+            .map(Arc::from);
+
+        Ok(opt)
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn variants(&self, input_hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError> {
+        use schema::variants::dsl::*;
+
+        let mut conn = self.get_connection().await?;
+
+        let vec = variants
+            .select((variant, identifier))
+            .filter(hash.eq(&input_hash))
+            .get_results::<(String, String)>(&mut conn)
+            .with_metrics(crate::init_metrics::POSTGRES_VARIANTS_FOR_HASH)
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)?
+            .map_err(PostgresError::Diesel)?
+            .into_iter()
+            .map(|(s, i)| (s, Arc::from(i)))
+            .collect();
+
+        Ok(vec)
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn remove_variant(
+        &self,
+        input_hash: Hash,
+        input_variant: String,
+    ) -> Result<(), RepoError> {
+        use schema::variants::dsl::*;
+
+        let mut conn = self.get_connection().await?;
+
+        diesel::delete(variants)
+            .filter(hash.eq(&input_hash))
+            .filter(variant.eq(&input_variant))
+            .execute(&mut conn)
+            .with_metrics(crate::init_metrics::POSTGRES_VARIANTS_REMOVE)
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)?
+            .map_err(PostgresError::Diesel)?;
 
         Ok(())
     }

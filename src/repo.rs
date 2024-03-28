@@ -103,6 +103,7 @@ pub(crate) trait FullRepo:
     + AliasRepo
     + QueueRepo
     + HashRepo
+    + VariantRepo
     + StoreMigrationRepo
     + AliasAccessRepo
     + VariantAccessRepo
@@ -653,20 +654,6 @@ pub(crate) trait HashRepo: BaseRepo {
 
     async fn identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError>;
 
-    async fn relate_variant_identifier(
-        &self,
-        hash: Hash,
-        variant: String,
-        identifier: &Arc<str>,
-    ) -> Result<Result<(), VariantAlreadyExists>, RepoError>;
-    async fn variant_identifier(
-        &self,
-        hash: Hash,
-        variant: String,
-    ) -> Result<Option<Arc<str>>, RepoError>;
-    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError>;
-    async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
-
     async fn relate_blurhash(&self, hash: Hash, blurhash: Arc<str>) -> Result<(), RepoError>;
     async fn blurhash(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError>;
 
@@ -726,6 +713,56 @@ where
         T::identifier(self, hash).await
     }
 
+    async fn relate_blurhash(&self, hash: Hash, blurhash: Arc<str>) -> Result<(), RepoError> {
+        T::relate_blurhash(self, hash, blurhash).await
+    }
+
+    async fn blurhash(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
+        T::blurhash(self, hash).await
+    }
+
+    async fn relate_motion_identifier(
+        &self,
+        hash: Hash,
+        identifier: &Arc<str>,
+    ) -> Result<(), RepoError> {
+        T::relate_motion_identifier(self, hash, identifier).await
+    }
+
+    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
+        T::motion_identifier(self, hash).await
+    }
+
+    async fn cleanup_hash(&self, hash: Hash) -> Result<(), RepoError> {
+        T::cleanup_hash(self, hash).await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+pub(crate) trait VariantRepo: BaseRepo {
+    async fn relate_variant_identifier(
+        &self,
+        hash: Hash,
+        variant: String,
+        identifier: &Arc<str>,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError>;
+
+    async fn variant_identifier(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Option<Arc<str>>, RepoError>;
+
+    async fn variants(&self, hash: Hash) -> Result<Vec<(String, Arc<str>)>, RepoError>;
+
+    async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
+}
+
+#[async_trait::async_trait(?Send)]
+impl<T> VariantRepo for Arc<T>
+where
+    T: VariantRepo,
+{
     async fn relate_variant_identifier(
         &self,
         hash: Hash,
@@ -749,30 +786,6 @@ where
 
     async fn remove_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         T::remove_variant(self, hash, variant).await
-    }
-
-    async fn relate_blurhash(&self, hash: Hash, blurhash: Arc<str>) -> Result<(), RepoError> {
-        T::relate_blurhash(self, hash, blurhash).await
-    }
-
-    async fn blurhash(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
-        T::blurhash(self, hash).await
-    }
-
-    async fn relate_motion_identifier(
-        &self,
-        hash: Hash,
-        identifier: &Arc<str>,
-    ) -> Result<(), RepoError> {
-        T::relate_motion_identifier(self, hash, identifier).await
-    }
-
-    async fn motion_identifier(&self, hash: Hash) -> Result<Option<Arc<str>>, RepoError> {
-        T::motion_identifier(self, hash).await
-    }
-
-    async fn cleanup_hash(&self, hash: Hash) -> Result<(), RepoError> {
-        T::cleanup_hash(self, hash).await
     }
 }
 
