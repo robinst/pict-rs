@@ -21,8 +21,9 @@ dependencies = [
 
 [[package]]
 name = "actix-form-data"
-version = "0.7.0-beta.6"
-source = "git+https://git.asonix.dog/asonix/actix-form-data#1c88a70021df9b8b394c2d9aee1265c5ef55d59b"
+version = "0.7.0-beta.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c2355a841a5d9a6c616d6a4f31336064116d206e6c1830de22730f983613a05"
 dependencies = [
  "actix-multipart",
  "actix-web",

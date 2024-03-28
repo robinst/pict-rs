@@ -19,7 +19,7 @@ poll-timer-warnings = []
 random-errors = ["dep:nanorand"]
 
 [dependencies]
-actix-form-data = { version = "0.7.0-beta.6", git = "https://git.asonix.dog/asonix/actix-form-data" }
+actix-form-data = "0.7.0-beta.7"
 actix-web = { version = "4.0.0", default-features = false, features = ["rustls-0_22"] }
 async-trait = "0.1.51"
 barrel = { version = "0.7.0", features = ["pg"] }
