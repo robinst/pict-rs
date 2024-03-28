@@ -35,7 +35,6 @@ mod stream;
 mod sync;
 mod tls;
 mod tmp_file;
-mod validate;
 
 use actix_form_data::{Field, Form, FormData, Multipart, Value};
 use actix_web::{
@@ -59,6 +58,7 @@ use std::{
     marker::PhantomData,
     path::Path,
     path::PathBuf,
+    rc::Rc,
     sync::{Arc, OnceLock},
     time::{Duration, SystemTime},
 };
@@ -147,22 +147,64 @@ async fn ensure_details_identifier<S: Store + 'static>(
     }
 }
 
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+struct UploadLimits {
+    max_width: Option<Serde<u16>>,
+    max_height: Option<Serde<u16>>,
+    max_area: Option<Serde<u32>>,
+    max_frame_count: Option<Serde<u32>>,
+    max_file_size: Option<Serde<usize>>,
+    allow_image: Serde<bool>,
+    allow_animation: Serde<bool>,
+    allow_video: Serde<bool>,
+}
+
+impl Default for UploadLimits {
+    fn default() -> Self {
+        Self {
+            max_width: None,
+            max_height: None,
+            max_area: None,
+            max_frame_count: None,
+            max_file_size: None,
+            allow_image: Serde::new(true),
+            allow_animation: Serde::new(true),
+            allow_video: Serde::new(true),
+        }
+    }
+}
+
+#[derive(Clone, Default, Debug, serde::Deserialize, serde::Serialize)]
+struct UploadQuery {
+    #[serde(flatten)]
+    limits: UploadLimits,
+
+    #[serde(with = "tuple_vec_map", flatten)]
+    operations: Vec<(String, String)>,
+}
+
 struct Upload<S>(Value<Session>, PhantomData<S>);
 
 impl<S: Store + 'static> FormData for Upload<S> {
     type Item = Session;
     type Error = Error;
 
-    fn form(req: &HttpRequest) -> Form<Self::Item, Self::Error> {
+    fn form(req: &HttpRequest) -> Result<Form<Self::Item, Self::Error>, Self::Error> {
         let state = req
             .app_data::<web::Data<State<S>>>()
             .expect("No state in request")
             .clone();
 
+        let web::Query(upload_query) = web::Query::<UploadQuery>::from_query(req.query_string())
+            .map_err(UploadError::InvalidQuery)?;
+
+        let upload_query = Rc::new(upload_query);
+
         // Create a new Multipart Form validator
         //
         // This form is expecting a single array field, 'images' with at most 10 files in it
-        Form::new()
+        Ok(Form::new()
             .max_files(state.config.server.max_file_count)
             .max_file_size(state.config.media.max_file_size * MEGABYTES)
             .transform_error(transform_error)
@@ -170,6 +212,7 @@ impl<S: Store + 'static> FormData for Upload<S> {
                 "images",
                 Field::array(Field::file(move |filename, _, stream| {
                     let state = state.clone();
+                    let upload_query = upload_query.clone();
 
                     metrics::counter!(crate::init_metrics::FILES, "upload" => "inline")
                         .increment(1);
@@ -184,13 +227,13 @@ impl<S: Store + 'static> FormData for Upload<S> {
 
                             let stream = crate::stream::from_err(stream);
 
-                            ingest::ingest(&state, stream, None).await
+                            ingest::ingest(&state, stream, None, &upload_query).await
                         }
                         .with_poll_timer("file-upload")
                         .instrument(span),
                     )
                 })),
-            )
+            ))
     }
 
     fn extract(value: Value<Self::Item>) -> Result<Self, Self::Error> {
@@ -204,16 +247,21 @@ impl<S: Store + 'static> FormData for Import<S> {
     type Item = Session;
     type Error = Error;
 
-    fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
+    fn form(req: &actix_web::HttpRequest) -> Result<Form<Self::Item, Self::Error>, Self::Error> {
         let state = req
             .app_data::<web::Data<State<S>>>()
             .expect("No state in request")
             .clone();
 
+        let web::Query(upload_query) = web::Query::<UploadQuery>::from_query(req.query_string())
+            .map_err(UploadError::InvalidQuery)?;
+
+        let upload_query = Rc::new(upload_query);
+
         // Create a new Multipart Form validator for internal imports
         //
         // This form is expecting a single array field, 'images' with at most 10 files in it
-        Form::new()
+        Ok(Form::new()
             .max_files(state.config.server.max_file_count)
             .max_file_size(state.config.media.max_file_size * MEGABYTES)
             .transform_error(transform_error)
@@ -221,6 +269,7 @@ impl<S: Store + 'static> FormData for Import<S> {
                 "images",
                 Field::array(Field::file(move |filename, _, stream| {
                     let state = state.clone();
+                    let upload_query = upload_query.clone();
 
                     metrics::counter!(crate::init_metrics::FILES, "import" => "inline")
                         .increment(1);
@@ -235,14 +284,19 @@ impl<S: Store + 'static> FormData for Import<S> {
 
                             let stream = crate::stream::from_err(stream);
 
-                            ingest::ingest(&state, stream, Some(Alias::from_existing(&filename)))
-                                .await
+                            ingest::ingest(
+                                &state,
+                                stream,
+                                Some(Alias::from_existing(&filename)),
+                                &upload_query,
+                            )
+                            .await
                         }
                         .with_poll_timer("file-import")
                         .instrument(span),
                     )
                 })),
-            )
+            ))
     }
 
     fn extract(value: Value<Self::Item>) -> Result<Self, Self::Error>
@@ -320,16 +374,16 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
     type Item = Backgrounded;
     type Error = Error;
 
-    fn form(req: &actix_web::HttpRequest) -> Form<Self::Item, Self::Error> {
-        // Create a new Multipart Form validator for backgrounded uploads
-        //
-        // This form is expecting a single array field, 'images' with at most 10 files in it
+    fn form(req: &actix_web::HttpRequest) -> Result<Form<Self::Item, Self::Error>, Self::Error> {
         let state = req
             .app_data::<web::Data<State<S>>>()
             .expect("No state in request")
             .clone();
 
-        Form::new()
+        // Create a new Multipart Form validator for backgrounded uploads
+        //
+        // This form is expecting a single array field, 'images' with at most 10 files in it
+        Ok(Form::new()
             .max_files(state.config.server.max_file_count)
             .max_file_size(state.config.media.max_file_size * MEGABYTES)
             .transform_error(transform_error)
@@ -357,7 +411,7 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
                         .instrument(span),
                     )
                 })),
-            )
+            ))
     }
 
     fn extract(value: Value<Self::Item>) -> Result<Self, Self::Error>
@@ -372,7 +426,10 @@ impl<S: Store + 'static> FormData for BackgroundedUpload<S> {
 async fn upload_backgrounded<S: Store>(
     Multipart(BackgroundedUpload(value, _)): Multipart<BackgroundedUpload<S>>,
     state: web::Data<State<S>>,
+    upload_query: web::Query<UploadQuery>,
 ) -> Result<HttpResponse, Error> {
+    let upload_query = upload_query.into_inner();
+
     let images = value
         .map()
         .and_then(|mut m| m.remove("images"))
@@ -389,7 +446,14 @@ async fn upload_backgrounded<S: Store>(
         let upload_id = image.result.upload_id().expect("Upload ID exists");
         let identifier = image.result.identifier().expect("Identifier exists");
 
-        queue::queue_ingest(&state.repo, identifier, upload_id, None).await?;
+        queue::queue_ingest(
+            &state.repo,
+            identifier,
+            upload_id,
+            None,
+            upload_query.clone(),
+        )
+        .await?;
 
         files.push(serde_json::json!({
             "upload_id": upload_id.to_string(),
@@ -462,11 +526,21 @@ struct UrlQuery {
     backgrounded: bool,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct DownloadQuery {
+    #[serde(flatten)]
+    url_query: UrlQuery,
+
+    #[serde(flatten)]
+    upload_query: UploadQuery,
+}
+
 async fn ingest_inline<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>>,
     state: &State<S>,
+    upload_query: &UploadQuery,
 ) -> Result<(Alias, DeleteToken, Details), Error> {
-    let session = ingest::ingest(state, stream, None).await?;
+    let session = ingest::ingest(state, stream, None, upload_query).await?;
 
     let alias = session.alias().expect("alias should exist").to_owned();
 
@@ -480,15 +554,20 @@ async fn ingest_inline<S: Store + 'static>(
 /// download an image from a URL
 #[tracing::instrument(name = "Downloading file", skip(state))]
 async fn download<S: Store + 'static>(
-    query: web::Query<UrlQuery>,
+    download_query: web::Query<DownloadQuery>,
     state: web::Data<State<S>>,
 ) -> Result<HttpResponse, Error> {
-    let stream = download_stream(&query.url, &state).await?;
+    let DownloadQuery {
+        url_query,
+        upload_query,
+    } = download_query.into_inner();
 
-    if query.backgrounded {
-        do_download_backgrounded(stream, state).await
+    let stream = download_stream(&url_query.url, &state).await?;
+
+    if url_query.backgrounded {
+        do_download_backgrounded(stream, state, upload_query).await
     } else {
-        do_download_inline(stream, &state).await
+        do_download_inline(stream, &state, &upload_query).await
     }
 }
 
@@ -518,10 +597,11 @@ async fn download_stream<S>(
 async fn do_download_inline<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>>,
     state: &State<S>,
+    upload_query: &UploadQuery,
 ) -> Result<HttpResponse, Error> {
     metrics::counter!(crate::init_metrics::FILES, "download" => "inline").increment(1);
 
-    let (alias, delete_token, details) = ingest_inline(stream, state).await?;
+    let (alias, delete_token, details) = ingest_inline(stream, state, upload_query).await?;
 
     Ok(HttpResponse::Created().json(&serde_json::json!({
         "msg": "ok",
@@ -537,6 +617,7 @@ async fn do_download_inline<S: Store + 'static>(
 async fn do_download_backgrounded<S: Store + 'static>(
     stream: impl Stream<Item = Result<web::Bytes, Error>>,
     state: web::Data<State<S>>,
+    upload_query: UploadQuery,
 ) -> Result<HttpResponse, Error> {
     metrics::counter!(crate::init_metrics::FILES, "download" => "background").increment(1);
 
@@ -545,7 +626,7 @@ async fn do_download_backgrounded<S: Store + 'static>(
     let upload_id = backgrounded.upload_id().expect("Upload ID exists");
     let identifier = backgrounded.identifier().expect("Identifier exists");
 
-    queue::queue_ingest(&state.repo, identifier, upload_id, None).await?;
+    queue::queue_ingest(&state.repo, identifier, upload_id, None, upload_query).await?;
 
     backgrounded.disarm();
 
@@ -1212,7 +1293,7 @@ async fn proxy_alias_from_query<S: Store + 'static>(
             } else if !state.config.server.read_only {
                 let stream = download_stream(proxy.as_str(), state).await?;
 
-                let (alias, _, _) = ingest_inline(stream, state).await?;
+                let (alias, _, _) = ingest_inline(stream, state, &Default::default()).await?;
 
                 state.repo.relate_url(proxy, alias.clone()).await?;
 
@@ -1497,6 +1578,16 @@ fn build_client() -> Result<ClientWithMiddleware, Error> {
         .build())
 }
 
+fn query_config() -> web::QueryConfig {
+    web::QueryConfig::default()
+        .error_handler(|err, _| Error::from(UploadError::InvalidQuery(err)).into())
+}
+
+fn json_config() -> web::JsonConfig {
+    web::JsonConfig::default()
+        .error_handler(|err, _| Error::from(UploadError::InvalidJson(err)).into())
+}
+
 fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
     config: &mut web::ServiceConfig,
     state: State<S>,
@@ -1504,6 +1595,8 @@ fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
     extra_config: F,
 ) {
     config
+        .app_data(query_config())
+        .app_data(json_config())
         .app_data(web::Data::new(state.clone()))
         .app_data(web::Data::new(process_map.clone()))
         .route("/healthz", web::get().to(healthz::<S>))

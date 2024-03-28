@@ -7,6 +7,7 @@ use crate::{
     serde_str::Serde,
     state::State,
     store::Store,
+    UploadQuery,
 };
 
 use std::{
@@ -56,6 +57,8 @@ enum Process {
         identifier: String,
         upload_id: Serde<UploadId>,
         declared_alias: Option<Serde<Alias>>,
+        #[serde(default)]
+        upload_query: UploadQuery,
     },
     Generate {
         target_format: InputProcessableFormat,
@@ -158,11 +161,13 @@ pub(crate) async fn queue_ingest(
     identifier: &Arc<str>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
+    upload_query: UploadQuery,
 ) -> Result<(), Error> {
     let job = serde_json::to_value(Process::Ingest {
         identifier: identifier.to_string(),
         declared_alias: declared_alias.map(Serde::new),
         upload_id: Serde::new(upload_id),
+        upload_query,
     })
     .map_err(UploadError::PushJob)?;
     repo.push(PROCESS_QUEUE, job, None).await?;

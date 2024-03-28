@@ -12,6 +12,7 @@ use crate::{
     serde_str::Serde,
     state::State,
     store::Store,
+    UploadQuery,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -37,12 +38,14 @@ where
                 identifier,
                 upload_id,
                 declared_alias,
+                upload_query,
             } => {
                 process_ingest(
                     state,
                     Arc::from(identifier),
                     Serde::into_inner(upload_id),
                     declared_alias.map(Serde::into_inner),
+                    upload_query,
                 )
                 .with_poll_timer("process-ingest")
                 .await?
@@ -110,6 +113,7 @@ async fn process_ingest<S>(
     unprocessed_identifier: Arc<str>,
     upload_id: UploadId,
     declared_alias: Option<Alias>,
+    upload_query: UploadQuery,
 ) -> JobResult
 where
     S: Store + 'static,
@@ -129,7 +133,8 @@ where
                 let stream =
                     crate::stream::from_err(state2.store.to_stream(&ident, None, None).await?);
 
-                let session = crate::ingest::ingest(&state2, stream, declared_alias).await?;
+                let session =
+                    crate::ingest::ingest(&state2, stream, declared_alias, &upload_query).await?;
 
                 Ok(session) as Result<Session, Error>
             }

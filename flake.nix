@@ -33,11 +33,13 @@
             cargo-outdated
             certstrap
             clippy
+            curl
             diesel-cli
             exiftool
             ffmpeg_6-full
             garage
             imagemagick
+            jq
             minio-client
             rust-analyzer
             rustc

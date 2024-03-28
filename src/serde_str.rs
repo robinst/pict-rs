@@ -3,7 +3,7 @@ use std::{
     str::FromStr,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Serde<T> {
     inner: T,
 }
@@ -41,6 +41,17 @@ impl<T> Deref for Serde<T> {
 impl<T> DerefMut for Serde<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+impl<T> Default for Serde<T>
+where
+    T: Default,
+{
+    fn default() -> Self {
+        Serde {
+            inner: T::default(),
+        }
     }
 }
 

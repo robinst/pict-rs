@@ -82,7 +82,7 @@ pub(crate) enum UploadError {
     Io(#[from] std::io::Error),
 
     #[error("Error validating upload")]
-    Validation(#[from] crate::validate::ValidationError),
+    Validation(#[from] crate::ingest::ValidationError),
 
     #[error("Error in store")]
     Store(#[source] crate::store::StoreError),
@@ -110,6 +110,12 @@ pub(crate) enum UploadError {
 
     #[error("Invalid job popped from job queue: {1}")]
     InvalidJob(#[source] serde_json::Error, String),
+
+    #[error("Invalid query supplied")]
+    InvalidQuery(#[source] actix_web::error::QueryPayloadError),
+
+    #[error("Invalid json supplied")]
+    InvalidJson(#[source] actix_web::error::JsonPayloadError),
 
     #[error("pict-rs is in read-only mode")]
     ReadOnly,
@@ -209,6 +215,8 @@ impl UploadError {
             Self::ProcessTimeout => ErrorCode::COMMAND_TIMEOUT,
             Self::FailedExternalValidation => ErrorCode::FAILED_EXTERNAL_VALIDATION,
             Self::InvalidJob(_, _) => ErrorCode::INVALID_JOB,
+            Self::InvalidQuery(_) => ErrorCode::INVALID_QUERY,
+            Self::InvalidJson(_) => ErrorCode::INVALID_JSON,
             #[cfg(feature = "random-errors")]
             Self::RandomError => ErrorCode::RANDOM_ERROR,
         }
@@ -248,7 +256,7 @@ impl ResponseError for Error {
     fn status_code(&self) -> StatusCode {
         match self.kind() {
             Some(UploadError::Upload(actix_form_data::Error::FileSize))
-            | Some(UploadError::Validation(crate::validate::ValidationError::Filesize)) => {
+            | Some(UploadError::Validation(crate::ingest::ValidationError::Filesize)) => {
                 StatusCode::PAYLOAD_TOO_LARGE
             }
             Some(
@@ -261,6 +269,8 @@ impl ResponseError for Error {
                 ))
                 | UploadError::Repo(crate::repo::RepoError::AlreadyClaimed)
                 | UploadError::Validation(_)
+                | UploadError::InvalidQuery(_)
+                | UploadError::InvalidJson(_)
                 | UploadError::UnsupportedProcessExtension
                 | UploadError::ReadOnly
                 | UploadError::FailedExternalValidation
