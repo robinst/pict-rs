@@ -121,6 +121,7 @@ async fn ensure_details<S: Store + 'static>(
     ensure_details_identifier(state, &identifier).await
 }
 
+#[tracing::instrument(skip(state))]
 async fn ensure_details_identifier<S: Store + 'static>(
     state: &State<S>,
     identifier: &Arc<str>,

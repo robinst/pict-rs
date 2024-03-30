@@ -748,6 +748,8 @@ pub(crate) trait VariantRepo: BaseRepo {
 
     async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
+    async fn fail_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
+
     async fn await_variant(
         &self,
         hash: Hash,
@@ -787,6 +789,10 @@ where
 
     async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         T::variant_heartbeat(self, hash, variant).await
+    }
+
+    async fn fail_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        T::fail_variant(self, hash, variant).await
     }
 
     async fn await_variant(

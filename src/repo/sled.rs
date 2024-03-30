@@ -1463,6 +1463,11 @@ impl VariantRepo for SledRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
+    async fn fail_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        todo!()
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn await_variant(
         &self,
         hash: Hash,

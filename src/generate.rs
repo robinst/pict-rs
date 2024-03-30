@@ -69,7 +69,7 @@ pub(crate) async fn generate<S: Store + 'static>(
         let variant = thumbnail_path.to_string_lossy().to_string();
 
         let mut attempts = 0;
-        let (details, identifier) = loop {
+        let tup = loop {
             if attempts > 4 {
                 todo!("return error");
             }
@@ -91,31 +91,44 @@ pub(crate) async fn generate<S: Store + 'static>(
                     )
                     .with_poll_timer("process-future");
 
-                    let tuple = heartbeat(state, hash.clone(), variant.clone(), process_future)
+                    let res = heartbeat(state, hash.clone(), variant.clone(), process_future)
                         .with_poll_timer("heartbeat-future")
-                        .await??;
+                        .await;
 
-                    break tuple;
+                    match res {
+                        Ok(Ok(tuple)) => break tuple,
+                        Ok(Err(e)) | Err(e) => {
+                            state
+                                .repo
+                                .fail_variant(hash.clone(), variant.clone())
+                                .await?;
+
+                            return Err(e);
+                        }
+                    }
                 }
-                Err(_) => match state
-                    .repo
-                    .await_variant(hash.clone(), variant.clone())
-                    .await?
-                {
-                    Some(identifier) => {
-                        let details = crate::ensure_details_identifier(state, &identifier).await?;
+                Err(_) => {
+                    match state
+                        .repo
+                        .await_variant(hash.clone(), variant.clone())
+                        .await?
+                    {
+                        Some(identifier) => {
+                            let details =
+                                crate::ensure_details_identifier(state, &identifier).await?;
 
-                        break (details, identifier);
+                            break (details, identifier);
+                        }
+                        None => {
+                            attempts += 1;
+                            continue;
+                        }
                     }
-                    None => {
-                        attempts += 1;
-                        continue;
-                    }
-                },
+                }
             }
         };
 
-        Ok((details, identifier))
+        Ok(tup)
     }
 }
 
