@@ -1449,6 +1449,29 @@ impl HashRepo for SledRepo {
 #[async_trait::async_trait(?Send)]
 impl VariantRepo for SledRepo {
     #[tracing::instrument(level = "trace", skip(self))]
+    async fn claim_variant_processing_rights(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
+        todo!()
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        todo!()
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn await_variant(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Option<Arc<str>>, RepoError> {
+        todo!()
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn relate_variant_identifier(
         &self,
         hash: Hash,

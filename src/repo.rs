@@ -740,6 +740,20 @@ where
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait VariantRepo: BaseRepo {
+    async fn claim_variant_processing_rights(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError>;
+
+    async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
+
+    async fn await_variant(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Option<Arc<str>>, RepoError>;
+
     async fn relate_variant_identifier(
         &self,
         hash: Hash,
@@ -763,6 +777,26 @@ impl<T> VariantRepo for Arc<T>
 where
     T: VariantRepo,
 {
+    async fn claim_variant_processing_rights(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
+        T::claim_variant_processing_rights(self, hash, variant).await
+    }
+
+    async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        T::variant_heartbeat(self, hash, variant).await
+    }
+
+    async fn await_variant(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Option<Arc<str>>, RepoError> {
+        T::await_variant(self, hash, variant).await
+    }
+
     async fn relate_variant_identifier(
         &self,
         hash: Hash,

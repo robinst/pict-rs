@@ -62,6 +62,7 @@ struct Inner {
     notifier_pool: Pool<AsyncPgConnection>,
     queue_notifications: DashMap<String, Arc<Notify>>,
     upload_notifications: DashMap<UploadId, Weak<Notify>>,
+    keyed_notifications: DashMap<String, Arc<Notify>>,
 }
 
 struct UploadInterest {
@@ -78,6 +79,10 @@ struct JobNotifierState<'a> {
 }
 
 struct UploadNotifierState<'a> {
+    inner: &'a Inner,
+}
+
+struct KeyedNotifierState<'a> {
     inner: &'a Inner,
 }
 
@@ -331,6 +336,7 @@ impl PostgresRepo {
             notifier_pool,
             queue_notifications: DashMap::new(),
             upload_notifications: DashMap::new(),
+            keyed_notifications: DashMap::new(),
         });
 
         let handle = crate::sync::abort_on_drop(crate::sync::spawn_sendable(
@@ -363,7 +369,54 @@ impl PostgresRepo {
             .with_poll_timer("postgres-get-notifier-connection")
             .await
     }
+
+    async fn insert_keyed_notifier(
+        &self,
+        input_key: &str,
+    ) -> Result<Result<(), AlreadyInserted>, PostgresError> {
+        use schema::keyed_notifications::dsl::*;
+
+        let mut conn = self.get_connection().await?;
+
+        let res = diesel::insert_into(keyed_notifications)
+            .values((key.eq(input_key)))
+            .execute(&mut conn)
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)?;
+
+        match res {
+            Ok(_) => Ok(Ok(())),
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => Ok(Err(AlreadyInserted)),
+            Err(e) => Err(PostgresError::Diesel(e).into()),
+        }
+    }
+
+    async fn listen_on_key(&self, input_key: &str) -> Result<Result<(), TimedOut>, PostgresError> {
+        todo!()
+    }
+
+    async fn clear_keyed_notifier(&self, input_key: &str) -> Result<(), PostgresError> {
+        use schema::keyed_notifications::dsl::*;
+
+        let mut conn = self.get_connection().await?;
+
+        diesel::delete(keyed_notifications)
+            .filter(key.eq(input_key))
+            .execute(&mut conn)
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)??;
+
+        Ok(())
+    }
 }
+
+struct TimedOut;
+struct AlreadyInserted;
 
 struct GetConnectionMetricsGuard {
     start: Instant,
@@ -511,6 +564,19 @@ impl<'a> UploadNotifierState<'a> {
     }
 }
 
+impl<'a> KeyedNotifierState<'a> {
+    fn handle(&self, key: &str) {
+        if let Some(notifier) = self
+            .inner
+            .keyed_notifications
+            .remove(key)
+            .and_then(|(_, weak)| weak.upgrade())
+        {
+            notifier.notify_waiters();
+        }
+    }
+}
+
 type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 type ConfigFn =
     Box<dyn Fn(&str) -> BoxFuture<'_, ConnectionResult<AsyncPgConnection>> + Send + Sync + 'static>;
@@ -529,6 +595,8 @@ async fn delegate_notifications(
 
     let upload_notifier_state = UploadNotifierState { inner: &inner };
 
+    let keyed_notifier_state = KeyedNotifierState { inner: &inner };
+
     while let Ok(notification) = receiver.recv_async().await {
         tracing::trace!("delegate_notifications: looping");
         metrics::counter!(crate::init_metrics::POSTGRES_NOTIFICATION).increment(1);
@@ -541,6 +609,10 @@ async fn delegate_notifications(
             "upload_completion_channel" => {
                 // new upload finished
                 upload_notifier_state.handle(notification.payload());
+            }
+            "keyed_notification_channel" => {
+                // new keyed notification
+                keyed_notifier_state.handle(notification.payload());
             }
             channel => {
                 tracing::info!(
@@ -981,6 +1053,29 @@ impl HashRepo for PostgresRepo {
 
 #[async_trait::async_trait(?Send)]
 impl VariantRepo for PostgresRepo {
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn claim_variant_processing_rights(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
+        todo!()
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        todo!()
+    }
+
+    #[tracing::instrument(level = "debug", skip(self))]
+    async fn await_variant(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<Option<Arc<str>>, RepoError> {
+        todo!()
+    }
+
     #[tracing::instrument(level = "debug", skip(self))]
     async fn relate_variant_identifier(
         &self,

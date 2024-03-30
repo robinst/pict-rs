@@ -1,7 +1,6 @@
 mod backgrounded;
 mod blurhash;
 mod bytes_stream;
-mod concurrent_processor;
 mod config;
 mod details;
 mod discover;
@@ -71,7 +70,6 @@ use tracing_actix_web::TracingLogger;
 
 use self::{
     backgrounded::Backgrounded,
-    concurrent_processor::ProcessMap,
     config::{Configuration, Operation},
     details::Details,
     either::Either,
@@ -848,13 +846,12 @@ async fn not_found_hash(repo: &ArcRepo) -> Result<Option<(Alias, Hash)>, Error> 
 }
 
 /// Process files
-#[tracing::instrument(name = "Serving processed image", skip(state, process_map))]
+#[tracing::instrument(name = "Serving processed image", skip(state))]
 async fn process<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     state: web::Data<State<S>>,
-    process_map: web::Data<ProcessMap>,
 ) -> Result<HttpResponse, Error> {
     let alias = proxy_alias_from_query(source.into(), &state).await?;
 
@@ -898,7 +895,6 @@ async fn process<S: Store + 'static>(
 
         generate::generate(
             &state,
-            &process_map,
             format,
             thumbnail_path,
             thumbnail_args,
@@ -1591,14 +1587,12 @@ fn json_config() -> web::JsonConfig {
 fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
     config: &mut web::ServiceConfig,
     state: State<S>,
-    process_map: ProcessMap,
     extra_config: F,
 ) {
     config
         .app_data(query_config())
         .app_data(json_config())
         .app_data(web::Data::new(state.clone()))
-        .app_data(web::Data::new(process_map.clone()))
         .route("/healthz", web::get().to(healthz::<S>))
         .service(
             web::scope("/image")
@@ -1706,12 +1700,12 @@ fn spawn_cleanup<S>(state: State<S>) {
     });
 }
 
-fn spawn_workers<S>(state: State<S>, process_map: ProcessMap)
+fn spawn_workers<S>(state: State<S>)
 where
     S: Store + 'static,
 {
     crate::sync::spawn("cleanup-worker", queue::process_cleanup(state.clone()));
-    crate::sync::spawn("process-worker", queue::process_images(state, process_map));
+    crate::sync::spawn("process-worker", queue::process_images(state));
 }
 
 fn watch_keys(tls: Tls, sender: ChannelSender) -> DropHandle<()> {
@@ -1737,8 +1731,6 @@ async fn launch<
     state: State<S>,
     extra_config: F,
 ) -> color_eyre::Result<()> {
-    let process_map = ProcessMap::new();
-
     let address = state.config.server.address;
 
     let tls = Tls::from_config(&state.config);
@@ -1748,18 +1740,15 @@ async fn launch<
     let server = HttpServer::new(move || {
         let extra_config = extra_config.clone();
         let state = state.clone();
-        let process_map = process_map.clone();
 
-        spawn_workers(state.clone(), process_map.clone());
+        spawn_workers(state.clone());
 
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
             .wrap(Metrics)
             .wrap(Payload::new())
-            .configure(move |sc| {
-                configure_endpoints(sc, state.clone(), process_map.clone(), extra_config)
-            })
+            .configure(move |sc| configure_endpoints(sc, state.clone(), extra_config))
     });
 
     if let Some(tls) = tls {

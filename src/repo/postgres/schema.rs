@@ -49,6 +49,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    keyed_notifications (key) {
+        key -> Text,
+        heartbeat -> Timestamp,
+    }
+}
+
+diesel::table! {
     proxies (url) {
         url -> Text,
         alias -> Text,
@@ -109,6 +116,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     details,
     hashes,
     job_queue,
+    keyed_notifications,
     proxies,
     refinery_schema_history,
     settings,

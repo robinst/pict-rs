@@ -2,7 +2,6 @@ mod ffmpeg;
 mod magick;
 
 use crate::{
-    concurrent_processor::ProcessMap,
     details::Details,
     error::{Error, UploadError},
     formats::{ImageFormat, InputProcessableFormat, InternalVideoFormat, ProcessableFormat},
@@ -13,6 +12,7 @@ use crate::{
 };
 
 use std::{
+    future::Future,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -48,10 +48,9 @@ impl Drop for MetricsGuard {
     }
 }
 
-#[tracing::instrument(skip(state, process_map, original_details, hash))]
+#[tracing::instrument(skip(state, original_details, hash))]
 pub(crate) async fn generate<S: Store + 'static>(
     state: &State<S>,
-    process_map: &ProcessMap,
     format: InputProcessableFormat,
     thumbnail_path: PathBuf,
     thumbnail_args: Vec<String>,
@@ -67,25 +66,89 @@ pub(crate) async fn generate<S: Store + 'static>(
 
         Ok((original_details.clone(), identifier))
     } else {
-        let process_fut = process(
-            state,
-            format,
-            thumbnail_path.clone(),
-            thumbnail_args,
-            original_details,
-            hash.clone(),
-        )
-        .with_poll_timer("process-future");
+        let variant = thumbnail_path.to_string_lossy().to_string();
 
-        let (details, identifier) = process_map
-            .process(hash, thumbnail_path, process_fut)
-            .with_poll_timer("process-map-future")
-            .with_timeout(Duration::from_secs(state.config.media.process_timeout * 4))
-            .with_metrics(crate::init_metrics::GENERATE_PROCESS)
-            .await
-            .map_err(|_| UploadError::ProcessTimeout)??;
+        let mut attempts = 0;
+        let (details, identifier) = loop {
+            if attempts > 4 {
+                todo!("return error");
+            }
+
+            match state
+                .repo
+                .claim_variant_processing_rights(hash.clone(), variant.clone())
+                .await?
+            {
+                Ok(()) => {
+                    // process
+                    let process_future = process(
+                        state,
+                        format,
+                        variant.clone(),
+                        thumbnail_args,
+                        original_details,
+                        hash.clone(),
+                    )
+                    .with_poll_timer("process-future");
+
+                    let tuple = heartbeat(state, hash.clone(), variant.clone(), process_future)
+                        .with_poll_timer("heartbeat-future")
+                        .await??;
+
+                    break tuple;
+                }
+                Err(_) => match state
+                    .repo
+                    .await_variant(hash.clone(), variant.clone())
+                    .await?
+                {
+                    Some(identifier) => {
+                        let details = crate::ensure_details_identifier(state, &identifier).await?;
+
+                        break (details, identifier);
+                    }
+                    None => {
+                        attempts += 1;
+                        continue;
+                    }
+                },
+            }
+        };
 
         Ok((details, identifier))
+    }
+}
+
+async fn heartbeat<S, O>(
+    state: &State<S>,
+    hash: Hash,
+    variant: String,
+    future: impl Future<Output = O>,
+) -> Result<O, Error> {
+    let repo = state.repo.clone();
+
+    let handle = crate::sync::abort_on_drop(crate::sync::spawn("heartbeat-task", async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+
+        loop {
+            interval.tick().await;
+
+            if let Err(e) = repo.variant_heartbeat(hash.clone(), variant.clone()).await {
+                break Error::from(e);
+            }
+        }
+    }));
+
+    let future = std::pin::pin!(future);
+
+    tokio::select! {
+        biased;
+        output = future => {
+            Ok(output)
+        }
+        res = handle => {
+            Err(res.map_err(|_| UploadError::Canceled)?)
+        }
     }
 }
 
@@ -93,7 +156,7 @@ pub(crate) async fn generate<S: Store + 'static>(
 async fn process<S: Store + 'static>(
     state: &State<S>,
     output_format: InputProcessableFormat,
-    thumbnail_path: PathBuf,
+    variant: String,
     thumbnail_args: Vec<String>,
     original_details: &Details,
     hash: Hash,
@@ -142,19 +205,21 @@ async fn process<S: Store + 'static>(
         )
         .await?;
 
-    if let Err(VariantAlreadyExists) = state
+    let identifier = if let Err(VariantAlreadyExists) = state
         .repo
-        .relate_variant_identifier(
-            hash,
-            thumbnail_path.to_string_lossy().to_string(),
-            &identifier,
-        )
+        .relate_variant_identifier(hash.clone(), variant.clone(), &identifier)
         .await?
     {
         state.store.remove(&identifier).await?;
-    }
-
-    state.repo.relate_details(&identifier, &details).await?;
+        state
+            .repo
+            .variant_identifier(hash, variant)
+            .await?
+            .ok_or(UploadError::MissingIdentifier)?
+    } else {
+        state.repo.relate_details(&identifier, &details).await?;
+        identifier
+    };
 
     guard.disarm();
 

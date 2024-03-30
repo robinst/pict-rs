@@ -1,5 +1,4 @@
 use crate::{
-    concurrent_processor::ProcessMap,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     future::{LocalBoxFuture, WithPollTimer},
@@ -196,8 +195,8 @@ pub(crate) async fn process_cleanup<S: Store + 'static>(state: State<S>) {
     process_jobs(state, CLEANUP_QUEUE, cleanup::perform).await
 }
 
-pub(crate) async fn process_images<S: Store + 'static>(state: State<S>, process_map: ProcessMap) {
-    process_image_jobs(state, process_map, PROCESS_QUEUE, process::perform).await
+pub(crate) async fn process_images<S: Store + 'static>(state: State<S>) {
+    process_jobs(state, PROCESS_QUEUE, process::perform).await
 }
 
 struct MetricsGuard {
@@ -357,7 +356,7 @@ where
             let (job_id, job) = state
                 .repo
                 .pop(queue, worker_id)
-                .with_poll_timer("pop-cleanup")
+                .with_poll_timer("pop-job")
                 .await?;
 
             let guard = MetricsGuard::guard(worker_id, queue);
@@ -369,99 +368,13 @@ where
                 job_id,
                 (callback)(state, job),
             )
-            .with_poll_timer("cleanup-job-and-heartbeat")
+            .with_poll_timer("job-and-heartbeat")
             .await;
 
             state
                 .repo
                 .complete_job(queue, worker_id, job_id, job_result(&res))
-                .with_poll_timer("cleanup-job-complete")
-                .await?;
-
-            res?;
-
-            guard.disarm();
-
-            Ok(()) as Result<(), Error>
-        }
-        .instrument(tracing::info_span!("tick", %queue, %worker_id))
-        .await?;
-    }
-}
-
-async fn process_image_jobs<S, F>(
-    state: State<S>,
-    process_map: ProcessMap,
-    queue: &'static str,
-    callback: F,
-) where
-    S: Store,
-    for<'a> F: Fn(&'a State<S>, &'a ProcessMap, serde_json::Value) -> JobFuture<'a> + Copy,
-{
-    let worker_id = uuid::Uuid::new_v4();
-
-    loop {
-        tracing::trace!("process_image_jobs: looping");
-
-        crate::sync::cooperate().await;
-
-        let res = image_job_loop(&state, &process_map, worker_id, queue, callback)
-            .with_poll_timer("image-job-loop")
-            .await;
-
-        if let Err(e) = res {
-            tracing::warn!("Error processing jobs: {}", format!("{e}"));
-            tracing::warn!("{}", format!("{e:?}"));
-
-            if e.is_disconnected() {
-                tokio::time::sleep(Duration::from_secs(10)).await;
-            }
-
-            continue;
-        }
-
-        break;
-    }
-}
-
-async fn image_job_loop<S, F>(
-    state: &State<S>,
-    process_map: &ProcessMap,
-    worker_id: uuid::Uuid,
-    queue: &'static str,
-    callback: F,
-) -> Result<(), Error>
-where
-    S: Store,
-    for<'a> F: Fn(&'a State<S>, &'a ProcessMap, serde_json::Value) -> JobFuture<'a> + Copy,
-{
-    loop {
-        tracing::trace!("image_job_loop: looping");
-
-        crate::sync::cooperate().await;
-
-        async {
-            let (job_id, job) = state
-                .repo
-                .pop(queue, worker_id)
-                .with_poll_timer("pop-process")
-                .await?;
-
-            let guard = MetricsGuard::guard(worker_id, queue);
-
-            let res = heartbeat(
-                &state.repo,
-                queue,
-                worker_id,
-                job_id,
-                (callback)(state, process_map, job),
-            )
-            .with_poll_timer("process-job-and-heartbeat")
-            .await;
-
-            state
-                .repo
-                .complete_job(queue, worker_id, job_id, job_result(&res))
+                .with_poll_timer("job-complete")
                 .await?;
 
             res?;

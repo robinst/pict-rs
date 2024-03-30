@@ -2,7 +2,6 @@ use time::Instant;
 use tracing::{Instrument, Span};
 
 use crate::{
-    concurrent_processor::ProcessMap,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     future::WithPollTimer,
@@ -18,11 +17,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use super::{JobContext, JobFuture, JobResult};
 
-pub(super) fn perform<'a, S>(
-    state: &'a State<S>,
-    process_map: &'a ProcessMap,
-    job: serde_json::Value,
-) -> JobFuture<'a>
+pub(super) fn perform<'a, S>(state: &'a State<S>, job: serde_json::Value) -> JobFuture<'a>
 where
     S: Store + 'static,
 {
@@ -58,7 +53,6 @@ where
             } => {
                 generate(
                     state,
-                    process_map,
                     target_format,
                     Serde::into_inner(source),
                     process_path,
@@ -178,10 +172,9 @@ where
     Ok(())
 }
 
-#[tracing::instrument(skip(state, process_map, process_path, process_args))]
+#[tracing::instrument(skip(state, process_path, process_args))]
 async fn generate<S: Store + 'static>(
     state: &State<S>,
-    process_map: &ProcessMap,
     target_format: InputProcessableFormat,
     source: Alias,
     process_path: PathBuf,
@@ -211,7 +204,6 @@ async fn generate<S: Store + 'static>(
 
     crate::generate::generate(
         state,
-        process_map,
         target_format,
         process_path,
         process_args,
