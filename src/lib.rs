@@ -783,9 +783,9 @@ fn prepare_process(
         .parse::<InputProcessableFormat>()
         .map_err(|_| UploadError::UnsupportedProcessExtension)?;
 
-    let (variant, thumbnail_args) = self::processor::build_chain(&operations, &format.to_string())?;
+    let (variant, variant_args) = self::processor::build_chain(&operations, &format.to_string())?;
 
-    Ok((format, variant, thumbnail_args))
+    Ok((format, variant, variant_args))
 }
 
 #[tracing::instrument(name = "Fetching derived details", skip(state))]
@@ -852,8 +852,7 @@ async fn process<S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let alias = proxy_alias_from_query(source.into(), &state).await?;
 
-    let (format, variant, thumbnail_args) =
-        prepare_process(&state.config, operations, ext.as_str())?;
+    let (format, variant, variant_args) = prepare_process(&state.config, operations, ext.as_str())?;
 
     let (hash, alias, not_found) = if let Some(hash) = state.repo.hash(&alias).await? {
         (hash, alias, false)
@@ -892,7 +891,7 @@ async fn process<S: Store + 'static>(
             &state,
             format,
             variant,
-            thumbnail_args,
+            variant_args,
             &original_details,
             hash,
         )

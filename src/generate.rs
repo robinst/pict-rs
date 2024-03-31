@@ -52,7 +52,7 @@ pub(crate) async fn generate<S: Store + 'static>(
     state: &State<S>,
     format: InputProcessableFormat,
     variant: String,
-    thumbnail_args: Vec<String>,
+    variant_args: Vec<String>,
     original_details: &Details,
     hash: Hash,
 ) -> Result<(Details, Arc<str>), Error> {
@@ -82,7 +82,7 @@ pub(crate) async fn generate<S: Store + 'static>(
                         state,
                         format,
                         variant.clone(),
-                        thumbnail_args,
+                        variant_args,
                         original_details,
                         hash.clone(),
                     )
@@ -167,7 +167,7 @@ async fn process<S: Store + 'static>(
     state: &State<S>,
     output_format: InputProcessableFormat,
     variant: String,
-    thumbnail_args: Vec<String>,
+    variant_args: Vec<String>,
     original_details: &Details,
     hash: Hash,
 ) -> Result<(Details, Arc<str>), Error> {
@@ -193,7 +193,7 @@ async fn process<S: Store + 'static>(
     let stream = state.store.to_stream(&identifier, None, None).await?;
 
     let bytes =
-        crate::magick::process_image_command(state, thumbnail_args, input_format, format, quality)
+        crate::magick::process_image_command(state, variant_args, input_format, format, quality)
             .await?
             .drive_with_stream(stream)
             .into_bytes_stream()
