@@ -5,6 +5,7 @@ use crate::{
     serde_str::Serde,
     stream::{from_iterator, LocalBoxStream},
 };
+use dashmap::DashMap;
 use sled::{transaction::TransactionError, Db, IVec, Transactional, Tree};
 use std::{
     collections::HashMap,
@@ -22,6 +23,7 @@ use uuid::Uuid;
 use super::{
     hash::Hash,
     metrics::{PopMetricsGuard, PushMetricsGuard, WaitMetricsGuard},
+    notification_map::{NotificationEntry, NotificationMap},
     Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, Details,
     DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, JobId, JobResult, OrderedHash,
     ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
@@ -113,6 +115,8 @@ pub(crate) struct SledRepo {
     migration_identifiers: Tree,
     cache_capacity: u64,
     export_path: PathBuf,
+    variant_process_map: DashMap<(Hash, String), time::OffsetDateTime>,
+    notifications: NotificationMap,
     db: Db,
 }
 
@@ -156,6 +160,8 @@ impl SledRepo {
             migration_identifiers: db.open_tree("pict-rs-migration-identifiers-tree")?,
             cache_capacity,
             export_path,
+            variant_process_map: DashMap::new(),
+            notifications: NotificationMap::new(),
             db,
         })
     }
@@ -1453,27 +1459,61 @@ impl VariantRepo for SledRepo {
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
-        todo!()
+    ) -> Result<Result<(), NotificationEntry>, RepoError> {
+        let key = (hash.clone(), variant.clone());
+        let now = time::OffsetDateTime::now_utc();
+        let entry = self
+            .notifications
+            .register_interest(Arc::from(format!("{}{variant}", hash.to_base64())));
+
+        match self.variant_process_map.entry(key.clone()) {
+            dashmap::mapref::entry::Entry::Occupied(mut occupied_entry) => {
+                if occupied_entry
+                    .get()
+                    .saturating_add(time::Duration::minutes(2))
+                    > now
+                {
+                    return Ok(Err(entry));
+                }
+
+                occupied_entry.insert(now);
+            }
+            dashmap::mapref::entry::Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(now);
+            }
+        }
+
+        if self.variant_identifier(hash, variant).await?.is_some() {
+            self.variant_process_map.remove(&key);
+            return Ok(Err(entry));
+        }
+
+        Ok(Ok(()))
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
     async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
-        todo!()
+        let key = (hash, variant);
+        let now = time::OffsetDateTime::now_utc();
+
+        if let dashmap::mapref::entry::Entry::Occupied(mut occupied_entry) =
+            self.variant_process_map.entry(key)
+        {
+            occupied_entry.insert(now);
+        }
+
+        Ok(())
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn fail_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
-        todo!()
-    }
+    async fn notify_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        let key = (hash.clone(), variant.clone());
+        self.variant_process_map.remove(&key);
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn await_variant(
-        &self,
-        hash: Hash,
-        variant: String,
-    ) -> Result<Option<Arc<str>>, RepoError> {
-        todo!()
+        let key = format!("{}{variant}", hash.to_base64());
+        self.notifications.notify(&key);
+
+        Ok(())
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
@@ -1490,7 +1530,7 @@ impl VariantRepo for SledRepo {
 
         let hash_variant_identifiers = self.hash_variant_identifiers.clone();
 
-        crate::sync::spawn_blocking("sled-io", move || {
+        let out = crate::sync::spawn_blocking("sled-io", move || {
             hash_variant_identifiers
                 .compare_and_swap(key, Option::<&[u8]>::None, Some(value.as_bytes()))
                 .map(|res| res.map_err(|_| VariantAlreadyExists))
@@ -1498,7 +1538,9 @@ impl VariantRepo for SledRepo {
         .await
         .map_err(|_| RepoError::Canceled)?
         .map_err(SledError::from)
-        .map_err(RepoError::from)
+        .map_err(RepoError::from)?;
+
+        Ok(out)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

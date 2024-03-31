@@ -11,7 +11,6 @@ use crate::{
 
 use std::{
     ops::Deref,
-    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -62,7 +61,7 @@ enum Process {
     Generate {
         target_format: InputProcessableFormat,
         source: Serde<Alias>,
-        process_path: PathBuf,
+        process_path: String,
         process_args: Vec<String>,
     },
 }
@@ -177,13 +176,13 @@ pub(crate) async fn queue_generate(
     repo: &ArcRepo,
     target_format: InputProcessableFormat,
     source: Alias,
-    process_path: PathBuf,
+    variant: String,
     process_args: Vec<String>,
 ) -> Result<(), Error> {
     let job = serde_json::to_value(Process::Generate {
         target_format,
         source: Serde::new(source),
-        process_path,
+        process_path: variant,
         process_args,
     })
     .map_err(UploadError::PushJob)?;

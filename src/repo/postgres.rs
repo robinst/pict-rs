@@ -21,7 +21,6 @@ use diesel_async::{
         bb8::{Pool, PooledConnection, RunError},
         AsyncDieselConnectionManager, ManagerConfig, PoolError,
     },
-    scoped_futures::ScopedFutureExt,
     AsyncConnection, AsyncPgConnection, RunQueryDsl,
 };
 use futures_core::Stream;
@@ -45,6 +44,7 @@ use self::job_status::JobStatus;
 
 use super::{
     metrics::{PopMetricsGuard, PushMetricsGuard, WaitMetricsGuard},
+    notification_map::{NotificationEntry, NotificationMap},
     Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, DetailsRepo,
     FullRepo, Hash, HashAlreadyExists, HashPage, HashRepo, JobId, JobResult, OrderedHash,
     ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
@@ -64,32 +64,7 @@ struct Inner {
     notifier_pool: Pool<AsyncPgConnection>,
     queue_notifications: DashMap<String, Arc<Notify>>,
     upload_notifications: DashMap<UploadId, Weak<Notify>>,
-    keyed_notifications: DashMap<Arc<str>, Weak<NotificationEntry>>,
-}
-
-struct NotificationEntry {
-    key: Arc<str>,
-    inner: Arc<Inner>,
-    notify: Notify,
-}
-
-impl Drop for NotificationEntry {
-    fn drop(&mut self) {
-        self.inner.keyed_notifications.remove(self.key.as_ref());
-    }
-}
-
-struct KeyListener {
-    entry: Arc<NotificationEntry>,
-}
-
-impl KeyListener {
-    fn notified_timeout(
-        &self,
-        timeout: Duration,
-    ) -> impl Future<Output = Result<(), tokio::time::error::Elapsed>> + '_ {
-        self.entry.notify.notified().with_timeout(timeout)
-    }
+    keyed_notifications: NotificationMap,
 }
 
 struct UploadInterest {
@@ -363,7 +338,7 @@ impl PostgresRepo {
             notifier_pool,
             queue_notifications: DashMap::new(),
             upload_notifications: DashMap::new(),
-            keyed_notifications: DashMap::new(),
+            keyed_notifications: NotificationMap::new(),
         });
 
         let handle = crate::sync::abort_on_drop(crate::sync::spawn_sendable(
@@ -451,29 +426,8 @@ impl PostgresRepo {
         Ok(())
     }
 
-    fn listen_on_key(&self, key: Arc<str>) -> KeyListener {
-        let new_entry = Arc::new(NotificationEntry {
-            key: key.clone(),
-            inner: Arc::clone(&self.inner),
-            notify: crate::sync::bare_notify(),
-        });
-
-        let mut entry = self
-            .inner
-            .keyed_notifications
-            .entry(key)
-            .or_insert_with(|| Arc::downgrade(&new_entry));
-
-        let upgraded = entry.value().upgrade();
-
-        let entry = if let Some(existing_entry) = upgraded {
-            existing_entry
-        } else {
-            *entry.value_mut() = Arc::downgrade(&new_entry);
-            new_entry
-        };
-
-        KeyListener { entry }
+    fn listen_on_key(&self, key: Arc<str>) -> NotificationEntry {
+        self.inner.keyed_notifications.register_interest(key)
     }
 
     async fn register_interest(&self) -> Result<(), PostgresError> {
@@ -658,14 +612,7 @@ impl<'a> UploadNotifierState<'a> {
 
 impl<'a> KeyedNotifierState<'a> {
     fn handle(&self, key: &str) {
-        if let Some(notification_entry) = self
-            .inner
-            .keyed_notifications
-            .get(key)
-            .and_then(|weak| weak.upgrade())
-        {
-            notification_entry.notify.notify_waiters();
-        }
+        self.inner.keyed_notifications.notify(key);
     }
 }
 
@@ -1150,20 +1097,23 @@ impl VariantRepo for PostgresRepo {
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
+    ) -> Result<Result<(), NotificationEntry>, RepoError> {
+        let key = Arc::from(format!("{}{variant}", hash.to_base64()));
+        let entry = self.listen_on_key(Arc::clone(&key));
+
+        self.register_interest().await?;
+
         if self
             .variant_identifier(hash.clone(), variant.clone())
             .await?
             .is_some()
         {
-            return Ok(Err(VariantAlreadyExists));
+            return Ok(Err(entry));
         }
-
-        let key = format!("{}{variant}", hash.to_base64());
 
         match self.insert_keyed_notifier(&key).await? {
             Ok(()) => Ok(Ok(())),
-            Err(AlreadyInserted) => Ok(Err(VariantAlreadyExists)),
+            Err(AlreadyInserted) => Ok(Err(entry)),
         }
     }
 
@@ -1177,38 +1127,10 @@ impl VariantRepo for PostgresRepo {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn fail_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+    async fn notify_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         let key = format!("{}{variant}", hash.to_base64());
 
         self.clear_keyed_notifier(key).await.map_err(Into::into)
-    }
-
-    #[tracing::instrument(level = "debug", skip(self))]
-    async fn await_variant(
-        &self,
-        hash: Hash,
-        variant: String,
-    ) -> Result<Option<Arc<str>>, RepoError> {
-        let key = Arc::from(format!("{}{variant}", hash.to_base64()));
-
-        let listener = self.listen_on_key(key);
-        let notified = listener.notified_timeout(Duration::from_secs(5));
-
-        self.register_interest().await?;
-
-        if let Some(identifier) = self
-            .variant_identifier(hash.clone(), variant.clone())
-            .await?
-        {
-            return Ok(Some(identifier));
-        }
-
-        match notified.await {
-            Ok(()) => tracing::debug!("notified"),
-            Err(_) => tracing::trace!("timeout"),
-        }
-
-        self.variant_identifier(hash, variant).await
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
@@ -1218,60 +1140,30 @@ impl VariantRepo for PostgresRepo {
         input_variant: String,
         input_identifier: &Arc<str>,
     ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
+        use schema::variants::dsl::*;
+
         let mut conn = self.get_connection().await?;
 
-        conn.transaction(|conn| {
-            async move {
-                let res = async {
-                    use schema::variants::dsl::*;
+        let res = diesel::insert_into(variants)
+            .values((
+                hash.eq(&input_hash),
+                variant.eq(&input_variant),
+                identifier.eq(input_identifier.to_string()),
+            ))
+            .execute(&mut conn)
+            .with_metrics(crate::init_metrics::POSTGRES_VARIANTS_RELATE_VARIANT_IDENTIFIER)
+            .with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|_| PostgresError::DbTimeout)?;
 
-                    diesel::insert_into(variants)
-                        .values((
-                            hash.eq(&input_hash),
-                            variant.eq(&input_variant),
-                            identifier.eq(input_identifier.to_string()),
-                        ))
-                        .execute(conn)
-                        .with_metrics(
-                            crate::init_metrics::POSTGRES_VARIANTS_RELATE_VARIANT_IDENTIFIER,
-                        )
-                        .with_timeout(Duration::from_secs(5))
-                        .await
-                        .map_err(|_| PostgresError::DbTimeout)
-                }
-                .await;
-
-                let notification_res = async {
-                    use schema::keyed_notifications::dsl::*;
-
-                    let input_key = format!("{}{input_variant}", input_hash.to_base64());
-                    diesel::delete(keyed_notifications)
-                        .filter(key.eq(input_key))
-                        .execute(conn)
-                        .with_timeout(Duration::from_secs(5))
-                        .await
-                        .map_err(|_| PostgresError::DbTimeout)
-                }
-                .await;
-
-                match notification_res? {
-                    Ok(_) => {}
-                    Err(e) => tracing::warn!("Failed to clear notifier: {e}"),
-                }
-
-                match res? {
-                    Ok(_) => Ok(Ok(())),
-                    Err(diesel::result::Error::DatabaseError(
-                        diesel::result::DatabaseErrorKind::UniqueViolation,
-                        _,
-                    )) => Ok(Err(VariantAlreadyExists)),
-                    Err(e) => Err(PostgresError::Diesel(e)),
-                }
-            }
-            .scope_boxed()
-        })
-        .await
-        .map_err(PostgresError::into)
+        match res {
+            Ok(_) => Ok(Ok(())),
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => Ok(Err(VariantAlreadyExists)),
+            Err(e) => Err(PostgresError::Diesel(e).into()),
+        }
     }
 
     #[tracing::instrument(level = "debug", skip(self))]

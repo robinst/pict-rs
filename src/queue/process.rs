@@ -13,7 +13,7 @@ use crate::{
     store::Store,
     UploadQuery,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use super::{JobContext, JobFuture, JobResult};
 
@@ -172,12 +172,12 @@ where
     Ok(())
 }
 
-#[tracing::instrument(skip(state, process_path, process_args))]
+#[tracing::instrument(skip(state, variant, process_args))]
 async fn generate<S: Store + 'static>(
     state: &State<S>,
     target_format: InputProcessableFormat,
     source: Alias,
-    process_path: PathBuf,
+    variant: String,
     process_args: Vec<String>,
 ) -> JobResult {
     let hash = state
@@ -188,10 +188,9 @@ async fn generate<S: Store + 'static>(
         .ok_or(UploadError::MissingAlias)
         .abort()?;
 
-    let path_string = process_path.to_string_lossy().to_string();
     let identifier_opt = state
         .repo
-        .variant_identifier(hash.clone(), path_string)
+        .variant_identifier(hash.clone(), variant.clone())
         .await
         .retry()?;
 
@@ -205,7 +204,7 @@ async fn generate<S: Store + 'static>(
     crate::generate::generate(
         state,
         target_format,
-        process_path,
+        variant,
         process_args,
         &original_details,
         hash,

@@ -3,6 +3,7 @@ mod delete_token;
 mod hash;
 mod metrics;
 mod migrate;
+mod notification_map;
 
 use crate::{
     config,
@@ -23,6 +24,8 @@ pub(crate) use alias::Alias;
 pub(crate) use delete_token::DeleteToken;
 pub(crate) use hash::Hash;
 pub(crate) use migrate::{migrate_04, migrate_repo};
+
+use self::notification_map::NotificationEntry;
 
 pub(crate) type ArcRepo = Arc<dyn FullRepo>;
 
@@ -744,17 +747,11 @@ pub(crate) trait VariantRepo: BaseRepo {
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Result<(), VariantAlreadyExists>, RepoError>;
+    ) -> Result<Result<(), NotificationEntry>, RepoError>;
 
     async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
-    async fn fail_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
-
-    async fn await_variant(
-        &self,
-        hash: Hash,
-        variant: String,
-    ) -> Result<Option<Arc<str>>, RepoError>;
+    async fn notify_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
     async fn relate_variant_identifier(
         &self,
@@ -783,7 +780,7 @@ where
         &self,
         hash: Hash,
         variant: String,
-    ) -> Result<Result<(), VariantAlreadyExists>, RepoError> {
+    ) -> Result<Result<(), NotificationEntry>, RepoError> {
         T::claim_variant_processing_rights(self, hash, variant).await
     }
 
@@ -791,16 +788,8 @@ where
         T::variant_heartbeat(self, hash, variant).await
     }
 
-    async fn fail_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
-        T::fail_variant(self, hash, variant).await
-    }
-
-    async fn await_variant(
-        &self,
-        hash: Hash,
-        variant: String,
-    ) -> Result<Option<Arc<str>>, RepoError> {
-        T::await_variant(self, hash, variant).await
+    async fn notify_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
+        T::notify_variant(self, hash, variant).await
     }
 
     async fn relate_variant_identifier(

@@ -56,7 +56,6 @@ use state::State;
 use std::{
     marker::PhantomData,
     path::Path,
-    path::PathBuf,
     rc::Rc,
     sync::{Arc, OnceLock},
     time::{Duration, SystemTime},
@@ -774,7 +773,7 @@ fn prepare_process(
     config: &Configuration,
     operations: Vec<(String, String)>,
     ext: &str,
-) -> Result<(InputProcessableFormat, PathBuf, Vec<String>), Error> {
+) -> Result<(InputProcessableFormat, String, Vec<String>), Error> {
     let operations = operations
         .into_iter()
         .filter(|(k, _)| config.media.filters.contains(&k.to_lowercase()))
@@ -784,10 +783,9 @@ fn prepare_process(
         .parse::<InputProcessableFormat>()
         .map_err(|_| UploadError::UnsupportedProcessExtension)?;
 
-    let (thumbnail_path, thumbnail_args) =
-        self::processor::build_chain(&operations, &format.to_string())?;
+    let (variant, thumbnail_args) = self::processor::build_chain(&operations, &format.to_string())?;
 
-    Ok((format, thumbnail_path, thumbnail_args))
+    Ok((format, variant, thumbnail_args))
 }
 
 #[tracing::instrument(name = "Fetching derived details", skip(state))]
@@ -798,7 +796,7 @@ async fn process_details<S: Store>(
 ) -> Result<HttpResponse, Error> {
     let alias = alias_from_query(source.into(), &state).await?;
 
-    let (_, thumbnail_path, _) = prepare_process(&state.config, operations, ext.as_str())?;
+    let (_, variant, _) = prepare_process(&state.config, operations, ext.as_str())?;
 
     let hash = state
         .repo
@@ -806,18 +804,16 @@ async fn process_details<S: Store>(
         .await?
         .ok_or(UploadError::MissingAlias)?;
 
-    let thumbnail_string = thumbnail_path.to_string_lossy().to_string();
-
     if !state.config.server.read_only {
         state
             .repo
-            .accessed_variant(hash.clone(), thumbnail_string.clone())
+            .accessed_variant(hash.clone(), variant.clone())
             .await?;
     }
 
     let identifier = state
         .repo
-        .variant_identifier(hash, thumbnail_string)
+        .variant_identifier(hash, variant)
         .await?
         .ok_or(UploadError::MissingAlias)?;
 
@@ -856,10 +852,8 @@ async fn process<S: Store + 'static>(
 ) -> Result<HttpResponse, Error> {
     let alias = proxy_alias_from_query(source.into(), &state).await?;
 
-    let (format, thumbnail_path, thumbnail_args) =
+    let (format, variant, thumbnail_args) =
         prepare_process(&state.config, operations, ext.as_str())?;
-
-    let path_string = thumbnail_path.to_string_lossy().to_string();
 
     let (hash, alias, not_found) = if let Some(hash) = state.repo.hash(&alias).await? {
         (hash, alias, false)
@@ -874,13 +868,13 @@ async fn process<S: Store + 'static>(
     if !state.config.server.read_only {
         state
             .repo
-            .accessed_variant(hash.clone(), path_string.clone())
+            .accessed_variant(hash.clone(), variant.clone())
             .await?;
     }
 
     let identifier_opt = state
         .repo
-        .variant_identifier(hash.clone(), path_string)
+        .variant_identifier(hash.clone(), variant.clone())
         .await?;
 
     let (details, identifier) = if let Some(identifier) = identifier_opt {
@@ -897,7 +891,7 @@ async fn process<S: Store + 'static>(
         generate::generate(
             &state,
             format,
-            thumbnail_path,
+            variant,
             thumbnail_args,
             &original_details,
             hash,
@@ -933,9 +927,8 @@ async fn process_head<S: Store + 'static>(
         }
     };
 
-    let (_, thumbnail_path, _) = prepare_process(&state.config, operations, ext.as_str())?;
+    let (_, variant, _) = prepare_process(&state.config, operations, ext.as_str())?;
 
-    let path_string = thumbnail_path.to_string_lossy().to_string();
     let Some(hash) = state.repo.hash(&alias).await? else {
         // Invalid alias
         return Ok(HttpResponse::NotFound().finish());
@@ -944,14 +937,11 @@ async fn process_head<S: Store + 'static>(
     if !state.config.server.read_only {
         state
             .repo
-            .accessed_variant(hash.clone(), path_string.clone())
+            .accessed_variant(hash.clone(), variant.clone())
             .await?;
     }
 
-    let identifier_opt = state
-        .repo
-        .variant_identifier(hash.clone(), path_string)
-        .await?;
+    let identifier_opt = state.repo.variant_identifier(hash.clone(), variant).await?;
 
     if let Some(identifier) = identifier_opt {
         let details = ensure_details_identifier(&state, &identifier).await?;
@@ -987,10 +977,9 @@ async fn process_backgrounded<S: Store>(
         }
     };
 
-    let (target_format, process_path, process_args) =
+    let (target_format, variant, process_args) =
         prepare_process(&state.config, operations, ext.as_str())?;
 
-    let path_string = process_path.to_string_lossy().to_string();
     let Some(hash) = state.repo.hash(&source).await? else {
         // Invalid alias
         return Ok(HttpResponse::BadRequest().finish());
@@ -998,7 +987,7 @@ async fn process_backgrounded<S: Store>(
 
     let identifier_opt = state
         .repo
-        .variant_identifier(hash.clone(), path_string)
+        .variant_identifier(hash.clone(), variant.clone())
         .await?;
 
     if identifier_opt.is_some() {
@@ -1009,14 +998,7 @@ async fn process_backgrounded<S: Store>(
         return Err(UploadError::ReadOnly.into());
     }
 
-    queue_generate(
-        &state.repo,
-        target_format,
-        source,
-        process_path,
-        process_args,
-    )
-    .await?;
+    queue_generate(&state.repo, target_format, source, variant, process_args).await?;
 
     Ok(HttpResponse::Accepted().finish())
 }

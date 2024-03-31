@@ -13,7 +13,6 @@ use crate::{
 
 use std::{
     future::Future,
-    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -52,7 +51,7 @@ impl Drop for MetricsGuard {
 pub(crate) async fn generate<S: Store + 'static>(
     state: &State<S>,
     format: InputProcessableFormat,
-    thumbnail_path: PathBuf,
+    variant: String,
     thumbnail_args: Vec<String>,
     original_details: &Details,
     hash: Hash,
@@ -66,12 +65,10 @@ pub(crate) async fn generate<S: Store + 'static>(
 
         Ok((original_details.clone(), identifier))
     } else {
-        let variant = thumbnail_path.to_string_lossy().to_string();
-
         let mut attempts = 0;
         let tup = loop {
-            if attempts > 4 {
-                todo!("return error");
+            if attempts > 2 {
+                return Err(UploadError::ProcessTimeout.into());
             }
 
             match state
@@ -95,35 +92,35 @@ pub(crate) async fn generate<S: Store + 'static>(
                         .with_poll_timer("heartbeat-future")
                         .await;
 
+                    state
+                        .repo
+                        .notify_variant(hash.clone(), variant.clone())
+                        .await?;
+
                     match res {
                         Ok(Ok(tuple)) => break tuple,
-                        Ok(Err(e)) | Err(e) => {
-                            state
-                                .repo
-                                .fail_variant(hash.clone(), variant.clone())
-                                .await?;
-
-                            return Err(e);
-                        }
+                        Ok(Err(e)) | Err(e) => return Err(e),
                     }
                 }
-                Err(_) => {
-                    match state
+                Err(mut entry) => {
+                    let notified = entry.notified_timeout(Duration::from_secs(20));
+
+                    if let Some(identifier) = state
                         .repo
-                        .await_variant(hash.clone(), variant.clone())
+                        .variant_identifier(hash.clone(), variant.clone())
                         .await?
                     {
-                        Some(identifier) => {
-                            let details =
-                                crate::ensure_details_identifier(state, &identifier).await?;
-
-                            break (details, identifier);
-                        }
-                        None => {
-                            attempts += 1;
-                            continue;
-                        }
+                        drop(notified);
+                        let details = crate::ensure_details_identifier(state, &identifier).await?;
+                        break (details, identifier);
                     }
+
+                    match notified.await {
+                        Ok(()) => tracing::debug!("notified"),
+                        Err(_) => tracing::warn!("timeout"),
+                    }
+
+                    attempts += 1;
                 }
             }
         };
