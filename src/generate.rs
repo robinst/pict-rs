@@ -90,17 +90,17 @@ pub(crate) async fn generate<S: Store + 'static>(
 
                     let res = heartbeat(state, hash.clone(), variant.clone(), process_future)
                         .with_poll_timer("heartbeat-future")
-                        .await;
+                        .with_timeout(Duration::from_secs(state.config.media.process_timeout * 4))
+                        .with_metrics(crate::init_metrics::GENERATE_PROCESS)
+                        .await
+                        .map_err(|_| Error::from(UploadError::ProcessTimeout));
 
                     state
                         .repo
                         .notify_variant(hash.clone(), variant.clone())
                         .await?;
 
-                    match res {
-                        Ok(Ok(tuple)) => break tuple,
-                        Ok(Err(e)) | Err(e) => return Err(e),
-                    }
+                    break res???;
                 }
                 Err(mut entry) => {
                     let notified = entry.notified_timeout(Duration::from_secs(20));
@@ -110,14 +110,14 @@ pub(crate) async fn generate<S: Store + 'static>(
                         .variant_identifier(hash.clone(), variant.clone())
                         .await?
                     {
-                        drop(notified);
                         let details = crate::ensure_details_identifier(state, &identifier).await?;
+
                         break (details, identifier);
                     }
 
                     match notified.await {
                         Ok(()) => tracing::debug!("notified"),
-                        Err(_) => tracing::warn!("timeout"),
+                        Err(_) => tracing::debug!("timeout"),
                     }
 
                     attempts += 1;
