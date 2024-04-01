@@ -403,7 +403,7 @@ impl PostgresRepo {
                 diesel::result::DatabaseErrorKind::UniqueViolation,
                 _,
             )) => Ok(Err(AlreadyInserted)),
-            Err(e) => Err(PostgresError::Diesel(e).into()),
+            Err(e) => Err(PostgresError::Diesel(e)),
         }
     }
 

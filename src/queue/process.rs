@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use super::{JobContext, JobFuture, JobResult};
 
-pub(super) fn perform<'a, S>(state: &'a State<S>, job: serde_json::Value) -> JobFuture<'a>
+pub(super) fn perform<S>(state: &State<S>, job: serde_json::Value) -> JobFuture<'_>
 where
     S: Store + 'static,
 {
