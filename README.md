@@ -253,8 +253,26 @@ Example:
 
 ### API
 pict-rs offers the following endpoints:
-- `POST /image` for uploading an image. Uploaded content must be valid multipart/form-data with an
+- `POST /image?{args}` for uploading an image. Uploaded content must be valid multipart/form-data with an
     image array located within the `images[]` key
+
+    The {args} query serves multiple purpose for image uploads. The first is to provide
+    request-level validations for the uploaded media. Available keys are as follows:
+    - max_width: maximum width, in pixels, allowed for the uploaded media
+    - max_height: maximum height, in pixels, allowed for the uploaded media
+    - max_area: maximum area, in pixels, allowed for the uploaded media
+    - max_frame_count: maximum number of frames permitted for animations and videos
+    - max_file_size: maximum size, in megabytes, allowed
+    - allow_image: whether to permit still images in the upload
+    - allow_animation: whether to permit animations in the upload
+    - allow_video: whether to permit video in the upload
+
+    These validations apply in addition to the validations specified in the pict-rs configuration,
+    so uploaded media will be rejected if any of the validations fail.
+
+    The second purpose for the {args} query is to provide preprocess steps for the uploaded image.
+    The format is the same as in the process.{ext} endpoint. The images uploaded with these steps
+    provided will be processed before saving.
 
     This endpoint returns the following JSON structure on success with a 201 Created status
     ```json
@@ -294,7 +312,9 @@ pict-rs offers the following endpoints:
         "msg": "ok"
     }
     ```
-- `POST /image/backgrounded` Upload an image, like the `/image` endpoint, but don't wait to validate and process it.
+- `POST /image/backgrounded?{args}` Upload an image, like the `/image` endpoint, but don't wait to validate and process it.
+    The {args} query is the same format is the inline image upload endpoint.
+
     This endpoint returns the following JSON structure on success with a 202 Accepted status
     ```json
     {
