@@ -6,7 +6,7 @@ use crate::{
     error::{Error, UploadError},
     formats::{ImageFormat, InputProcessableFormat, InternalVideoFormat, ProcessableFormat},
     future::{WithMetrics, WithPollTimer, WithTimeout},
-    repo::{Hash, VariantAlreadyExists},
+    repo::{Hash, NotificationEntry, VariantAlreadyExists},
     state::State,
     store::Store,
 };
@@ -102,22 +102,17 @@ pub(crate) async fn generate<S: Store + 'static>(
 
                     break res???;
                 }
-                Err(mut entry) => {
-                    let notified = entry.notified_timeout(Duration::from_secs(20));
-
-                    if let Some(identifier) = state
-                        .repo
-                        .variant_identifier(hash.clone(), variant.clone())
-                        .await?
+                Err(entry) => {
+                    if let Some(tuple) = wait_timeout(
+                        hash.clone(),
+                        variant.clone(),
+                        entry,
+                        state,
+                        Duration::from_secs(20),
+                    )
+                    .await?
                     {
-                        let details = crate::ensure_details_identifier(state, &identifier).await?;
-
-                        break (details, identifier);
-                    }
-
-                    match notified.await {
-                        Ok(()) => tracing::debug!("notified"),
-                        Err(_) => tracing::debug!("timeout"),
+                        break tuple;
                     }
 
                     attempts += 1;
@@ -127,6 +122,33 @@ pub(crate) async fn generate<S: Store + 'static>(
 
         Ok(tup)
     }
+}
+
+pub(crate) async fn wait_timeout<S: Store + 'static>(
+    hash: Hash,
+    variant: String,
+    mut entry: NotificationEntry,
+    state: &State<S>,
+    timeout: Duration,
+) -> Result<Option<(Details, Arc<str>)>, Error> {
+    let notified = entry.notified_timeout(timeout);
+
+    if let Some(identifier) = state
+        .repo
+        .variant_identifier(hash.clone(), variant.clone())
+        .await?
+    {
+        let details = crate::ensure_details_identifier(state, &identifier).await?;
+
+        return Ok(Some((details, identifier)));
+    }
+
+    match notified.await {
+        Ok(()) => tracing::debug!("notified"),
+        Err(_) => tracing::debug!("timeout"),
+    }
+
+    Ok(None)
 }
 
 async fn heartbeat<S, O>(

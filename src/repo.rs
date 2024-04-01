@@ -24,8 +24,7 @@ pub(crate) use alias::Alias;
 pub(crate) use delete_token::DeleteToken;
 pub(crate) use hash::Hash;
 pub(crate) use migrate::{migrate_04, migrate_repo};
-
-use self::notification_map::NotificationEntry;
+pub(crate) use notification_map::NotificationEntry;
 
 pub(crate) type ArcRepo = Arc<dyn FullRepo>;
 
@@ -749,6 +748,12 @@ pub(crate) trait VariantRepo: BaseRepo {
         variant: String,
     ) -> Result<Result<(), NotificationEntry>, RepoError>;
 
+    async fn variant_waiter(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<NotificationEntry, RepoError>;
+
     async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
 
     async fn notify_variant(&self, hash: Hash, variant: String) -> Result<(), RepoError>;
@@ -782,6 +787,14 @@ where
         variant: String,
     ) -> Result<Result<(), NotificationEntry>, RepoError> {
         T::claim_variant_processing_rights(self, hash, variant).await
+    }
+
+    async fn variant_waiter(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<NotificationEntry, RepoError> {
+        T::variant_waiter(self, hash, variant).await
     }
 
     async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError> {

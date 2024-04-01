@@ -1117,6 +1117,19 @@ impl VariantRepo for PostgresRepo {
         }
     }
 
+    async fn variant_waiter(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<NotificationEntry, RepoError> {
+        let key = Arc::from(format!("{}{variant}", hash.to_base64()));
+        let entry = self.listen_on_key(key);
+
+        self.register_interest().await?;
+
+        Ok(entry)
+    }
+
     #[tracing::instrument(level = "debug", skip(self))]
     async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         let key = format!("{}{variant}", hash.to_base64());

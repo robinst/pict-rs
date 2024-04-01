@@ -1491,6 +1491,18 @@ impl VariantRepo for SledRepo {
         Ok(Ok(()))
     }
 
+    async fn variant_waiter(
+        &self,
+        hash: Hash,
+        variant: String,
+    ) -> Result<NotificationEntry, RepoError> {
+        let entry = self
+            .notifications
+            .register_interest(Arc::from(format!("{}{variant}", hash.to_base64())));
+
+        Ok(entry)
+    }
+
     #[tracing::instrument(level = "trace", skip(self))]
     async fn variant_heartbeat(&self, hash: Hash, variant: String) -> Result<(), RepoError> {
         let key = (hash, variant);

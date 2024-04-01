@@ -885,17 +885,34 @@ async fn process<S: Store + 'static>(
             return Err(UploadError::ReadOnly.into());
         }
 
-        let original_details = ensure_details(&state, &alias).await?;
+        queue_generate(&state.repo, format, alias, variant.clone(), variant_args).await?;
 
-        generate::generate(
-            &state,
-            format,
-            variant,
-            variant_args,
-            &original_details,
-            hash,
-        )
-        .await?
+        let mut attempts = 0;
+        loop {
+            if attempts > 6 {
+                return Err(UploadError::ProcessTimeout.into());
+            }
+
+            let entry = state
+                .repo
+                .variant_waiter(hash.clone(), variant.clone())
+                .await?;
+
+            let opt = generate::wait_timeout(
+                hash.clone(),
+                variant.clone(),
+                entry,
+                &state,
+                Duration::from_secs(5),
+            )
+            .await?;
+
+            if let Some(tuple) = opt {
+                break tuple;
+            }
+
+            attempts += 1;
+        }
     };
 
     if let Some(public_url) = state.store.public_url(&identifier) {
@@ -959,7 +976,7 @@ async fn process_head<S: Store + 'static>(
 
 /// Process files
 #[tracing::instrument(name = "Spawning image process", skip(state))]
-async fn process_backgrounded<S: Store>(
+async fn process_backgrounded<S: Store + 'static>(
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     state: web::Data<State<S>>,
@@ -976,7 +993,7 @@ async fn process_backgrounded<S: Store>(
         }
     };
 
-    let (target_format, variant, process_args) =
+    let (target_format, variant, variant_args) =
         prepare_process(&state.config, operations, ext.as_str())?;
 
     let Some(hash) = state.repo.hash(&source).await? else {
@@ -997,7 +1014,7 @@ async fn process_backgrounded<S: Store>(
         return Err(UploadError::ReadOnly.into());
     }
 
-    queue_generate(&state.repo, target_format, source, variant, process_args).await?;
+    queue_generate(&state.repo, target_format, source, variant, variant_args).await?;
 
     Ok(HttpResponse::Accepted().finish())
 }
