@@ -1,7 +1,6 @@
 mod backgrounded;
 mod blurhash;
 mod bytes_stream;
-mod concurrent_processor;
 mod config;
 mod details;
 mod discover;
@@ -57,7 +56,6 @@ use state::State;
 use std::{
     marker::PhantomData,
     path::Path,
-    path::PathBuf,
     rc::Rc,
     sync::{Arc, OnceLock},
     time::{Duration, SystemTime},
@@ -71,7 +69,6 @@ use tracing_actix_web::TracingLogger;
 
 use self::{
     backgrounded::Backgrounded,
-    concurrent_processor::ProcessMap,
     config::{Configuration, Operation},
     details::Details,
     either::Either,
@@ -123,6 +120,7 @@ async fn ensure_details<S: Store + 'static>(
     ensure_details_identifier(state, &identifier).await
 }
 
+#[tracing::instrument(skip(state))]
 async fn ensure_details_identifier<S: Store + 'static>(
     state: &State<S>,
     identifier: &Arc<str>,
@@ -775,7 +773,7 @@ fn prepare_process(
     config: &Configuration,
     operations: Vec<(String, String)>,
     ext: &str,
-) -> Result<(InputProcessableFormat, PathBuf, Vec<String>), Error> {
+) -> Result<(InputProcessableFormat, String, Vec<String>), Error> {
     let operations = operations
         .into_iter()
         .filter(|(k, _)| config.media.filters.contains(&k.to_lowercase()))
@@ -785,10 +783,9 @@ fn prepare_process(
         .parse::<InputProcessableFormat>()
         .map_err(|_| UploadError::UnsupportedProcessExtension)?;
 
-    let (thumbnail_path, thumbnail_args) =
-        self::processor::build_chain(&operations, &format.to_string())?;
+    let (variant, variant_args) = self::processor::build_chain(&operations, &format.to_string())?;
 
-    Ok((format, thumbnail_path, thumbnail_args))
+    Ok((format, variant, variant_args))
 }
 
 #[tracing::instrument(name = "Fetching derived details", skip(state))]
@@ -799,7 +796,7 @@ async fn process_details<S: Store>(
 ) -> Result<HttpResponse, Error> {
     let alias = alias_from_query(source.into(), &state).await?;
 
-    let (_, thumbnail_path, _) = prepare_process(&state.config, operations, ext.as_str())?;
+    let (_, variant, _) = prepare_process(&state.config, operations, ext.as_str())?;
 
     let hash = state
         .repo
@@ -807,18 +804,16 @@ async fn process_details<S: Store>(
         .await?
         .ok_or(UploadError::MissingAlias)?;
 
-    let thumbnail_string = thumbnail_path.to_string_lossy().to_string();
-
     if !state.config.server.read_only {
         state
             .repo
-            .accessed_variant(hash.clone(), thumbnail_string.clone())
+            .accessed_variant(hash.clone(), variant.clone())
             .await?;
     }
 
     let identifier = state
         .repo
-        .variant_identifier(hash, thumbnail_string)
+        .variant_identifier(hash, variant)
         .await?
         .ok_or(UploadError::MissingAlias)?;
 
@@ -848,20 +843,16 @@ async fn not_found_hash(repo: &ArcRepo) -> Result<Option<(Alias, Hash)>, Error> 
 }
 
 /// Process files
-#[tracing::instrument(name = "Serving processed image", skip(state, process_map))]
+#[tracing::instrument(name = "Serving processed image", skip(state))]
 async fn process<S: Store + 'static>(
     range: Option<web::Header<Range>>,
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     state: web::Data<State<S>>,
-    process_map: web::Data<ProcessMap>,
 ) -> Result<HttpResponse, Error> {
     let alias = proxy_alias_from_query(source.into(), &state).await?;
 
-    let (format, thumbnail_path, thumbnail_args) =
-        prepare_process(&state.config, operations, ext.as_str())?;
-
-    let path_string = thumbnail_path.to_string_lossy().to_string();
+    let (format, variant, variant_args) = prepare_process(&state.config, operations, ext.as_str())?;
 
     let (hash, alias, not_found) = if let Some(hash) = state.repo.hash(&alias).await? {
         (hash, alias, false)
@@ -876,13 +867,13 @@ async fn process<S: Store + 'static>(
     if !state.config.server.read_only {
         state
             .repo
-            .accessed_variant(hash.clone(), path_string.clone())
+            .accessed_variant(hash.clone(), variant.clone())
             .await?;
     }
 
     let identifier_opt = state
         .repo
-        .variant_identifier(hash.clone(), path_string)
+        .variant_identifier(hash.clone(), variant.clone())
         .await?;
 
     let (details, identifier) = if let Some(identifier) = identifier_opt {
@@ -894,18 +885,34 @@ async fn process<S: Store + 'static>(
             return Err(UploadError::ReadOnly.into());
         }
 
-        let original_details = ensure_details(&state, &alias).await?;
+        queue_generate(&state.repo, format, alias, variant.clone(), variant_args).await?;
 
-        generate::generate(
-            &state,
-            &process_map,
-            format,
-            thumbnail_path,
-            thumbnail_args,
-            &original_details,
-            hash,
-        )
-        .await?
+        let mut attempts = 0;
+        loop {
+            if attempts > 6 {
+                return Err(UploadError::ProcessTimeout.into());
+            }
+
+            let entry = state
+                .repo
+                .variant_waiter(hash.clone(), variant.clone())
+                .await?;
+
+            let opt = generate::wait_timeout(
+                hash.clone(),
+                variant.clone(),
+                entry,
+                &state,
+                Duration::from_secs(5),
+            )
+            .await?;
+
+            if let Some(tuple) = opt {
+                break tuple;
+            }
+
+            attempts += 1;
+        }
     };
 
     if let Some(public_url) = state.store.public_url(&identifier) {
@@ -936,9 +943,8 @@ async fn process_head<S: Store + 'static>(
         }
     };
 
-    let (_, thumbnail_path, _) = prepare_process(&state.config, operations, ext.as_str())?;
+    let (_, variant, _) = prepare_process(&state.config, operations, ext.as_str())?;
 
-    let path_string = thumbnail_path.to_string_lossy().to_string();
     let Some(hash) = state.repo.hash(&alias).await? else {
         // Invalid alias
         return Ok(HttpResponse::NotFound().finish());
@@ -947,14 +953,11 @@ async fn process_head<S: Store + 'static>(
     if !state.config.server.read_only {
         state
             .repo
-            .accessed_variant(hash.clone(), path_string.clone())
+            .accessed_variant(hash.clone(), variant.clone())
             .await?;
     }
 
-    let identifier_opt = state
-        .repo
-        .variant_identifier(hash.clone(), path_string)
-        .await?;
+    let identifier_opt = state.repo.variant_identifier(hash.clone(), variant).await?;
 
     if let Some(identifier) = identifier_opt {
         let details = ensure_details_identifier(&state, &identifier).await?;
@@ -973,7 +976,7 @@ async fn process_head<S: Store + 'static>(
 
 /// Process files
 #[tracing::instrument(name = "Spawning image process", skip(state))]
-async fn process_backgrounded<S: Store>(
+async fn process_backgrounded<S: Store + 'static>(
     web::Query(ProcessQuery { source, operations }): web::Query<ProcessQuery>,
     ext: web::Path<String>,
     state: web::Data<State<S>>,
@@ -990,10 +993,9 @@ async fn process_backgrounded<S: Store>(
         }
     };
 
-    let (target_format, process_path, process_args) =
+    let (target_format, variant, variant_args) =
         prepare_process(&state.config, operations, ext.as_str())?;
 
-    let path_string = process_path.to_string_lossy().to_string();
     let Some(hash) = state.repo.hash(&source).await? else {
         // Invalid alias
         return Ok(HttpResponse::BadRequest().finish());
@@ -1001,7 +1003,7 @@ async fn process_backgrounded<S: Store>(
 
     let identifier_opt = state
         .repo
-        .variant_identifier(hash.clone(), path_string)
+        .variant_identifier(hash.clone(), variant.clone())
         .await?;
 
     if identifier_opt.is_some() {
@@ -1012,14 +1014,7 @@ async fn process_backgrounded<S: Store>(
         return Err(UploadError::ReadOnly.into());
     }
 
-    queue_generate(
-        &state.repo,
-        target_format,
-        source,
-        process_path,
-        process_args,
-    )
-    .await?;
+    queue_generate(&state.repo, target_format, source, variant, variant_args).await?;
 
     Ok(HttpResponse::Accepted().finish())
 }
@@ -1591,14 +1586,12 @@ fn json_config() -> web::JsonConfig {
 fn configure_endpoints<S: Store + 'static, F: Fn(&mut web::ServiceConfig)>(
     config: &mut web::ServiceConfig,
     state: State<S>,
-    process_map: ProcessMap,
     extra_config: F,
 ) {
     config
         .app_data(query_config())
         .app_data(json_config())
         .app_data(web::Data::new(state.clone()))
-        .app_data(web::Data::new(process_map.clone()))
         .route("/healthz", web::get().to(healthz::<S>))
         .service(
             web::scope("/image")
@@ -1706,12 +1699,12 @@ fn spawn_cleanup<S>(state: State<S>) {
     });
 }
 
-fn spawn_workers<S>(state: State<S>, process_map: ProcessMap)
+fn spawn_workers<S>(state: State<S>)
 where
     S: Store + 'static,
 {
     crate::sync::spawn("cleanup-worker", queue::process_cleanup(state.clone()));
-    crate::sync::spawn("process-worker", queue::process_images(state, process_map));
+    crate::sync::spawn("process-worker", queue::process_images(state));
 }
 
 fn watch_keys(tls: Tls, sender: ChannelSender) -> DropHandle<()> {
@@ -1737,8 +1730,6 @@ async fn launch<
     state: State<S>,
     extra_config: F,
 ) -> color_eyre::Result<()> {
-    let process_map = ProcessMap::new();
-
     let address = state.config.server.address;
 
     let tls = Tls::from_config(&state.config);
@@ -1748,18 +1739,15 @@ async fn launch<
     let server = HttpServer::new(move || {
         let extra_config = extra_config.clone();
         let state = state.clone();
-        let process_map = process_map.clone();
 
-        spawn_workers(state.clone(), process_map.clone());
+        spawn_workers(state.clone());
 
         App::new()
             .wrap(TracingLogger::default())
             .wrap(Deadline)
             .wrap(Metrics)
             .wrap(Payload::new())
-            .configure(move |sc| {
-                configure_endpoints(sc, state.clone(), process_map.clone(), extra_config)
-            })
+            .configure(move |sc| configure_endpoints(sc, state.clone(), extra_config))
     });
 
     if let Some(tls) = tls {

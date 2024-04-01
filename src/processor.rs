@@ -91,7 +91,7 @@ impl ResizeKind {
 pub(crate) fn build_chain(
     args: &[(String, String)],
     ext: &str,
-) -> Result<(PathBuf, Vec<String>), Error> {
+) -> Result<(String, Vec<String>), Error> {
     fn parse<P: Processor>(key: &str, value: &str) -> Result<Option<P>, Error> {
         if key == P::NAME {
             return Ok(Some(P::parse(key, value).ok_or(UploadError::ParsePath)?));
@@ -122,7 +122,7 @@ pub(crate) fn build_chain(
 
     path.push(ext);
 
-    Ok((path, args))
+    Ok((path.to_string_lossy().to_string(), args))
 }
 
 impl Processor for Identity {

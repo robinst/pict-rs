@@ -2,7 +2,6 @@ use time::Instant;
 use tracing::{Instrument, Span};
 
 use crate::{
-    concurrent_processor::ProcessMap,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
     future::WithPollTimer,
@@ -14,15 +13,11 @@ use crate::{
     store::Store,
     UploadQuery,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use super::{JobContext, JobFuture, JobResult};
 
-pub(super) fn perform<'a, S>(
-    state: &'a State<S>,
-    process_map: &'a ProcessMap,
-    job: serde_json::Value,
-) -> JobFuture<'a>
+pub(super) fn perform<S>(state: &State<S>, job: serde_json::Value) -> JobFuture<'_>
 where
     S: Store + 'static,
 {
@@ -58,7 +53,6 @@ where
             } => {
                 generate(
                     state,
-                    process_map,
                     target_format,
                     Serde::into_inner(source),
                     process_path,
@@ -178,13 +172,12 @@ where
     Ok(())
 }
 
-#[tracing::instrument(skip(state, process_map, process_path, process_args))]
+#[tracing::instrument(skip(state, variant, process_args))]
 async fn generate<S: Store + 'static>(
     state: &State<S>,
-    process_map: &ProcessMap,
     target_format: InputProcessableFormat,
     source: Alias,
-    process_path: PathBuf,
+    variant: String,
     process_args: Vec<String>,
 ) -> JobResult {
     let hash = state
@@ -195,10 +188,9 @@ async fn generate<S: Store + 'static>(
         .ok_or(UploadError::MissingAlias)
         .abort()?;
 
-    let path_string = process_path.to_string_lossy().to_string();
     let identifier_opt = state
         .repo
-        .variant_identifier(hash.clone(), path_string)
+        .variant_identifier(hash.clone(), variant.clone())
         .await
         .retry()?;
 
@@ -211,9 +203,8 @@ async fn generate<S: Store + 'static>(
 
     crate::generate::generate(
         state,
-        process_map,
         target_format,
-        process_path,
+        variant,
         process_args,
         &original_details,
         hash,
