@@ -1,10 +1,7 @@
-use dashmap::DashMap;
+use dashmap::{mapref::entry::Entry, DashMap};
 use std::{
     future::Future,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Weak,
-    },
+    sync::{Arc, Weak},
     time::Duration,
 };
 use tokio::sync::Notify;
@@ -26,7 +23,6 @@ struct NotificationEntryInner {
     key: Arc<str>,
     map: Map,
     notify: Notify,
-    armed: AtomicBool,
 }
 
 impl NotificationMap {
@@ -37,30 +33,34 @@ impl NotificationMap {
     }
 
     pub(super) fn register_interest(&self, key: Arc<str>) -> NotificationEntry {
-        let new_entry = Arc::new(NotificationEntryInner {
-            key: key.clone(),
-            map: self.map.clone(),
-            notify: crate::sync::bare_notify(),
-            armed: AtomicBool::new(false),
-        });
+        match self.map.entry(key.clone()) {
+            Entry::Occupied(mut occupied) => {
+                if let Some(inner) = occupied.get().upgrade() {
+                    NotificationEntry { inner }
+                } else {
+                    let inner = Arc::new(NotificationEntryInner {
+                        key,
+                        map: self.map.clone(),
+                        notify: crate::sync::bare_notify(),
+                    });
 
-        let mut key_entry = self
-            .map
-            .entry(key)
-            .or_insert_with(|| Arc::downgrade(&new_entry));
+                    occupied.insert(Arc::downgrade(&inner));
 
-        let upgraded_entry = key_entry.value().upgrade();
+                    NotificationEntry { inner }
+                }
+            }
+            Entry::Vacant(vacant) => {
+                let inner = Arc::new(NotificationEntryInner {
+                    key,
+                    map: self.map.clone(),
+                    notify: crate::sync::bare_notify(),
+                });
 
-        let inner = if let Some(entry) = upgraded_entry {
-            entry
-        } else {
-            *key_entry.value_mut() = Arc::downgrade(&new_entry);
-            new_entry
-        };
+                vacant.insert(Arc::downgrade(&inner));
 
-        inner.armed.store(true, Ordering::Release);
-
-        NotificationEntry { inner }
+                NotificationEntry { inner }
+            }
+        }
     }
 
     pub(super) fn notify(&self, key: &str) {
@@ -87,8 +87,6 @@ impl Default for NotificationMap {
 
 impl Drop for NotificationEntryInner {
     fn drop(&mut self) {
-        if self.armed.load(Ordering::Acquire) {
-            self.map.remove(&self.key);
-        }
+        self.map.remove(&self.key);
     }
 }
