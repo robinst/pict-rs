@@ -1868,7 +1868,8 @@ impl<P: AsRef<Path>, T: serde::Serialize> ConfigSource<P, T> {
     /// fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     let configuration = pict_rs::ConfigSource::memory(serde_json::json!({
     ///         "server": {
-    ///             "address": "127.0.0.1:8080"
+    ///             "address": "127.0.0.1:8080",
+    ///             "temporary_directory": "/tmp/t1"
     ///         },
     ///         "repo": {
     ///             "type": "sled",
@@ -1945,13 +1946,16 @@ impl PictRsConfiguration {
     /// #[tokio::main]
     /// async fn main() -> color_eyre::Result<()> {
     ///     let pict_rs_server = pict_rs::ConfigSource::memory(serde_json::json!({
+    ///         "server": {
+    ///             "temporary_directory": "/tmp/t2"
+    ///         },
     ///         "repo": {
     ///             "type": "sled",
-    ///             "path": "/tmp/pict-rs/run-on-localset/sled-repo",
+    ///             "path": "/tmp/pict-rs-run-on-localset/sled-repo",
     ///         },
     ///         "store": {
     ///             "type": "filesystem",
-    ///             "path": "/tmp/pict-rs/run-on-localset/files",
+    ///             "path": "/tmp/pict-rs-run-on-localset/files",
     ///         },
     ///     }))
     ///         .init::<&str>(None)?
@@ -1976,13 +1980,16 @@ impl PictRsConfiguration {
     /// fn main() -> color_eyre::Result<()> {
     ///     actix_web::rt::System::new().block_on(async move {
     ///         let pict_rs_server = pict_rs::ConfigSource::memory(serde_json::json!({
+    ///             "server": {
+    ///                 "temporary_directory": "/tmp/t3"
+    ///             },
     ///             "repo": {
     ///                 "type": "sled",
-    ///                 "path": "/tmp/pict-rs/run/sled-repo",
+    ///                 "path": "/tmp/pict-rs-run/sled-repo",
     ///             },
     ///             "store": {
     ///                 "type": "filesystem",
-    ///                 "path": "/tmp/pict-rs/run/files",
+    ///                 "path": "/tmp/pict-rs-run/files",
     ///             },
     ///         }))
     ///         .init::<&str>(None)?
