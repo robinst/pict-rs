@@ -97,6 +97,3 @@ webpki-roots = "0.26.0"
 version = "0.7.10"
 default-features = false
 features = ["emit_event_on_error", "opentelemetry_0_22"]
-
-[dev-dependencies]
-tokio-uring = { version = "0.4", features = ["bytes"] }
