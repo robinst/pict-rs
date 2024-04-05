@@ -35,7 +35,7 @@ impl BytesStream {
         tracing::debug!(
             "BytesStream with {} chunks, avg length {}",
             bs.chunks_len(),
-            bs.len() / bs.chunks_len()
+            bs.len() / bs.chunks_len().max(1)
         );
 
         Ok(bs)
