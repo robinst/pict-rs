@@ -18,6 +18,7 @@ impl Args {
             log_format,
             log_targets,
             log_spans,
+            no_log_ansi,
             console_address,
             console_buffer_capacity,
             opentelemetry_url,
@@ -38,6 +39,7 @@ impl Args {
                 format: log_format,
                 targets: log_targets.map(Serde::new),
                 log_spans,
+                no_ansi: no_log_ansi,
             },
             console: Console {
                 address: console_address,
@@ -581,6 +583,8 @@ struct Logging {
     targets: Option<Serde<Targets>>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     log_spans: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    no_ansi: bool,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -924,6 +928,10 @@ pub(super) struct Args {
     /// Whether to log openning and closing of tracing spans to stdout
     #[arg(long)]
     log_spans: bool,
+
+    #[arg(long)]
+    /// Whether to disable color-codes in log output
+    no_log_ansi: bool,
 
     /// Address and port to expose tokio-console metrics
     #[arg(long)]

@@ -1,4 +1,5 @@
 use crate::config::{LogFormat, OpenTelemetry, Tracing};
+use color_eyre::config::Theme;
 use console_subscriber::ConsoleLayer;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
@@ -11,7 +12,15 @@ use tracing_subscriber::{
 };
 
 pub(super) fn init_tracing(tracing: &Tracing) -> color_eyre::Result<()> {
-    color_eyre::install()?;
+    let eyre_theme = if tracing.logging.no_ansi {
+        Theme::new()
+    } else {
+        Theme::dark()
+    };
+
+    color_eyre::config::HookBuilder::new()
+        .theme(eyre_theme)
+        .install()?;
 
     LogTracer::init()?;
 
@@ -23,7 +32,9 @@ pub(super) fn init_tracing(tracing: &Tracing) -> color_eyre::Result<()> {
         FmtSpan::NONE
     };
 
-    let format_layer = tracing_subscriber::fmt::layer().with_span_events(fmt_span);
+    let format_layer = tracing_subscriber::fmt::layer()
+        .with_span_events(fmt_span)
+        .with_ansi(!tracing.logging.no_ansi);
 
     match tracing.logging.format {
         LogFormat::Compact => with_format(format_layer.compact(), tracing),

@@ -98,6 +98,11 @@ targets = 'info'
 # default: false
 log_spans = false
 
+## Optional: whether to disable colorized log output
+# environment variable: PICTRS__TRACING__LOGGING__NO_ANSI
+# default: false
+no_ansi = false
+
 
 ## Console configuration
 [tracing.console]
