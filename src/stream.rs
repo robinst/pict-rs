@@ -91,7 +91,7 @@ where
     S: Stream + 'static,
     S::Item: Send + Sync,
 {
-    let (tx, rx) = crate::sync::channel(1);
+    let (tx, mut rx) = crate::sync::channel(1);
 
     let handle = crate::sync::abort_on_drop(crate::sync::spawn("send-stream", async move {
         let stream = std::pin::pin!(stream);
@@ -100,16 +100,14 @@ where
         while let Some(res) = streamer.next().await {
             tracing::trace!("make send tx: looping");
 
-            if tx.send_async(res).await.is_err() {
+            if tx.send(res).await.is_err() {
                 break;
             }
         }
     }));
 
     streem::from_fn(|yiedler| async move {
-        let mut stream = rx.into_stream().into_streamer();
-
-        while let Some(res) = stream.next().await {
+        while let Some(res) = rx.recv().await {
             tracing::trace!("make send rx: looping");
 
             yiedler.yield_(res).await;
@@ -124,20 +122,18 @@ where
     I: IntoIterator + Send + 'static,
     I::Item: Send + Sync,
 {
-    let (tx, rx) = crate::sync::channel(buffer);
+    let (tx, mut rx) = crate::sync::channel(buffer);
 
     let handle = crate::sync::spawn_blocking("blocking-iterator", move || {
         for value in iterator {
-            if tx.send(value).is_err() {
+            if tx.blocking_send(value).is_err() {
                 break;
             }
         }
     });
 
     streem::from_fn(|yielder| async move {
-        let mut stream = rx.into_stream().into_streamer();
-
-        while let Some(res) = stream.next().await {
+        while let Some(res) = rx.recv().await {
             tracing::trace!("from_iterator: looping");
 
             yielder.yield_(res).await;

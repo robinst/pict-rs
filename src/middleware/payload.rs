@@ -45,10 +45,10 @@ impl Drop for MetricsGuard {
     }
 }
 
-async fn drain(rx: flume::Receiver<actix_web::dev::Payload>) {
+async fn drain(mut rx: tokio::sync::mpsc::Receiver<actix_web::dev::Payload>) {
     let mut set = JoinSet::new();
 
-    while let Ok(payload) = rx.recv_async().await {
+    while let Some(payload) = rx.recv().await {
         tracing::trace!("drain: looping");
 
         // draining a payload is a best-effort task - if we can't collect in 2 minutes we bail
@@ -94,18 +94,18 @@ async fn drain(rx: flume::Receiver<actix_web::dev::Payload>) {
 struct DrainHandle(Option<Rc<tokio::task::JoinHandle<()>>>);
 
 pub(crate) struct Payload {
-    sender: flume::Sender<actix_web::dev::Payload>,
+    sender: tokio::sync::mpsc::Sender<actix_web::dev::Payload>,
     handle: DrainHandle,
 }
 pub(crate) struct PayloadMiddleware<S> {
     inner: S,
-    sender: flume::Sender<actix_web::dev::Payload>,
+    sender: tokio::sync::mpsc::Sender<actix_web::dev::Payload>,
     _handle: DrainHandle,
 }
 
 pub(crate) struct PayloadStream {
     inner: Option<actix_web::dev::Payload>,
-    sender: flume::Sender<actix_web::dev::Payload>,
+    sender: tokio::sync::mpsc::Sender<actix_web::dev::Payload>,
 }
 
 impl DrainHandle {

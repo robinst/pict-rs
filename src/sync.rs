@@ -39,11 +39,13 @@ impl<T> std::future::Future for DropHandle<T> {
 }
 
 #[track_caller]
-pub(crate) fn channel<T>(bound: usize) -> (flume::Sender<T>, flume::Receiver<T>) {
+pub(crate) fn channel<T>(
+    bound: usize,
+) -> (tokio::sync::mpsc::Sender<T>, tokio::sync::mpsc::Receiver<T>) {
     let span = tracing::trace_span!(parent: None, "make channel");
     let guard = span.enter();
 
-    let channel = flume::bounded(bound);
+    let channel = tokio::sync::mpsc::channel(bound);
 
     drop(guard);
     channel

@@ -265,7 +265,7 @@ where
 
 async fn build_pool(
     postgres_url: &Url,
-    tx: flume::Sender<Notification>,
+    tx: tokio::sync::mpsc::Sender<Notification>,
     connector: Option<MakeRustlsConnect>,
     max_size: u32,
 ) -> Result<Pool<AsyncPgConnection>, ConnectPostgresError> {
@@ -319,7 +319,7 @@ impl PostgresRepo {
             .map(|u| u.into())
             .unwrap_or(1_usize);
 
-        let (tx, rx) = flume::bounded(10);
+        let (tx, rx) = crate::sync::channel(10);
 
         let pool = build_pool(
             &postgres_url,
@@ -621,7 +621,7 @@ type ConfigFn =
     Box<dyn Fn(&str) -> BoxFuture<'_, ConnectionResult<AsyncPgConnection>> + Send + Sync + 'static>;
 
 async fn delegate_notifications(
-    receiver: flume::Receiver<Notification>,
+    mut receiver: tokio::sync::mpsc::Receiver<Notification>,
     inner: Arc<Inner>,
     capacity: usize,
 ) {
@@ -636,7 +636,7 @@ async fn delegate_notifications(
 
     let keyed_notifier_state = KeyedNotifierState { inner: &inner };
 
-    while let Ok(notification) = receiver.recv_async().await {
+    while let Some(notification) = receiver.recv().await {
         tracing::trace!("delegate_notifications: looping");
         metrics::counter!(crate::init_metrics::POSTGRES_NOTIFICATION).increment(1);
 
@@ -666,7 +666,7 @@ async fn delegate_notifications(
 }
 
 fn build_handler(
-    sender: flume::Sender<Notification>,
+    sender: tokio::sync::mpsc::Sender<Notification>,
     connector: Option<MakeRustlsConnect>,
 ) -> ConfigFn {
     Box::new(
@@ -708,7 +708,7 @@ fn build_handler(
 }
 
 fn spawn_db_notification_task<S>(
-    sender: flume::Sender<Notification>,
+    sender: tokio::sync::mpsc::Sender<Notification>,
     mut conn: Connection<Socket, S>,
 ) where
     S: tokio_postgres::tls::TlsStream + Send + Unpin + 'static,
@@ -729,7 +729,7 @@ fn spawn_db_notification_task<S>(
                     tracing::warn!("Database Notice {e:?}");
                 }
                 Ok(AsyncMessage::Notification(notification)) => {
-                    if sender.send_async(notification).await.is_err() {
+                    if sender.send(notification).await.is_err() {
                         tracing::warn!("Missed notification. Are we shutting down?");
                     }
                 }
