@@ -1,6 +1,6 @@
 { exiftool
-, ffmpeg_6-full
-, imagemagick
+, ffmpeg6_pict-rs
+, imagemagick7_pict-rs
 , lib
 , makeWrapper
 , nixosTests
@@ -27,7 +27,7 @@ rustPlatform.buildRustPackage {
 
   postInstall = ''
     wrapProgram $out/bin/pict-rs \
-        --prefix PATH : "${lib.makeBinPath [ imagemagick ffmpeg_6-full exiftool ]}"
+        --prefix PATH : "${lib.makeBinPath [ imagemagick7_pict-rs ffmpeg6_pict-rs exiftool ]}"
   '';
 
   passthru.tests = { inherit (nixosTests) pict-rs; };

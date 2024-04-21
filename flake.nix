@@ -15,11 +15,27 @@
       in
       {
         packages = rec {
+          imagemagick7_pict-rs = pkgs.callPackage ./nix/pkgs/imagemagick_pict-rs {};
+          ffmpeg6_pict-rs = pkgs.callPackage ./nix/pkgs/ffmpeg_pict-rs {};
+
           pict-rs = pkgs.callPackage ./pict-rs.nix {
             inherit (pkgs.darwin.apple_sdk.frameworks) Security;
+            inherit imagemagick7_pict-rs ffmpeg6_pict-rs;
           };
 
           default = pict-rs;
+        };
+
+        docker = pkgs.dockerTools.buildLayeredImage {
+          name = "pict-rs";
+          tag = "latest";
+
+          contents = [ pkgs.tini self.packages.${system}.pict-rs ];
+
+          config = {
+            Entrypoint = [ "/bin/tini" "--" "/bin/pict-rs" ];
+            Cmd = [ "run" ];
+          };
         };
 
         apps = rec {
@@ -36,9 +52,9 @@
             curl
             diesel-cli
             exiftool
-            ffmpeg_6-full
             garage
-            imagemagick
+            self.packages.${system}.imagemagick7_pict-rs
+            self.packages.${system}.ffmpeg6_pict-rs
             jq
             minio-client
             rust-analyzer
