@@ -30,7 +30,7 @@
           name = "pict-rs";
           tag = "latest";
 
-          contents = [ pkgs.tini self.packages.${system}.pict-rs ];
+          contents = [ pkgs.tini self.packages.${system}.pict-rs pkgs.bash ];
 
           config = {
             Entrypoint = [ "/bin/tini" "--" "/bin/pict-rs" ];
