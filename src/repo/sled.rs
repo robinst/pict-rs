@@ -807,7 +807,7 @@ impl QueueRepo for SledRepo {
                 .read()
                 .unwrap()
                 .get(&queue_name)
-                .map(Arc::clone);
+                .cloned();
 
             let notify = if let Some(notify) = opt {
                 notify
