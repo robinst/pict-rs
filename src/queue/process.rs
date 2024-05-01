@@ -1,4 +1,3 @@
-use time::Instant;
 use tracing::{Instrument, Span};
 
 use crate::{
@@ -13,7 +12,7 @@ use crate::{
     store::Store,
     UploadQuery,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use super::{JobContext, JobFuture, JobResult};
 
@@ -90,7 +89,7 @@ impl UploadGuard {
 impl Drop for UploadGuard {
     fn drop(&mut self) {
         metrics::counter!(crate::init_metrics::BACKGROUND_UPLOAD_INGEST, "completed" => (!self.armed).to_string()).increment(1);
-        metrics::histogram!(crate::init_metrics::BACKGROUND_UPLOAD_INGEST_DURATION, "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_seconds_f64());
+        metrics::histogram!(crate::init_metrics::BACKGROUND_UPLOAD_INGEST_DURATION, "completed" => (!self.armed).to_string()).record(self.start.elapsed().as_secs_f64());
 
         if self.armed {
             tracing::warn!(
