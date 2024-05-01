@@ -1816,7 +1816,7 @@ dependencies = [
  "actix-web",
  "async-trait",
  "barrel",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bb8",
  "blurhash-update",
  "clap",
