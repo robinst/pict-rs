@@ -444,7 +444,6 @@ where
 pub(crate) trait SettingsRepo: BaseRepo {
     async fn set(&self, key: &'static str, value: Arc<[u8]>) -> Result<(), RepoError>;
     async fn get(&self, key: &'static str) -> Result<Option<Arc<[u8]>>, RepoError>;
-    async fn remove(&self, key: &'static str) -> Result<(), RepoError>;
 }
 
 #[async_trait::async_trait(?Send)]
@@ -458,10 +457,6 @@ where
 
     async fn get(&self, key: &'static str) -> Result<Option<Arc<[u8]>>, RepoError> {
         T::get(self, key).await
-    }
-
-    async fn remove(&self, key: &'static str) -> Result<(), RepoError> {
-        T::remove(self, key).await
     }
 }
 

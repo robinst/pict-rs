@@ -945,13 +945,6 @@ impl SettingsRepo for SledRepo {
 
         Ok(opt.map(|ivec| Arc::from(ivec.to_vec())))
     }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn remove(&self, key: &'static str) -> Result<(), RepoError> {
-        b!(self.settings, settings.remove(key));
-
-        Ok(())
-    }
 }
 
 fn variant_access_key(hash: &[u8], variant: &str) -> Vec<u8> {
