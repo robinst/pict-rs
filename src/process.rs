@@ -59,9 +59,6 @@ impl Drop for MetricsGuard {
     }
 }
 
-#[derive(Debug)]
-struct StatusError(ExitStatus);
-
 pub(crate) struct Process {
     command: Arc<str>,
     child: Child,
@@ -487,11 +484,3 @@ impl ProcessRead {
         }
     }
 }
-
-impl std::fmt::Display for StatusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Command failed with bad status: {}", self.0)
-    }
-}
-
-impl std::error::Error for StatusError {}
