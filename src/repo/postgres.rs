@@ -142,7 +142,7 @@ pub(crate) enum TlsError {
     Invalid,
 
     #[error("Couldn't add certificate to root store")]
-    Add(#[source] rustls023::Error),
+    Add(#[source] rustls::Error),
 }
 
 impl PostgresError {
@@ -174,7 +174,7 @@ impl PostgresError {
 async fn build_tls_connector(
     certificate_file: Option<PathBuf>,
 ) -> Result<MakeRustlsConnect<AwsLcRsDigest>, TlsError> {
-    let mut cert_store = rustls023::RootCertStore {
+    let mut cert_store = rustls::RootCertStore {
         roots: Vec::from(webpki_roots::TLS_SERVER_ROOTS),
     };
 
@@ -195,7 +195,7 @@ async fn build_tls_connector(
         cert_store.add(cert).map_err(TlsError::Add)?;
     }
 
-    let config = rustls023::ClientConfig::builder()
+    let config = rustls::ClientConfig::builder()
         .with_root_certificates(cert_store)
         .with_no_client_auth();
 

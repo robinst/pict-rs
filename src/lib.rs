@@ -1764,7 +1764,7 @@ async fn launch<
 
         tracing::info!("Starting pict-rs with TLS on {address}");
 
-        server.bind_rustls_0_22(address, config)?.run().await?;
+        server.bind_rustls_0_23(address, config)?.run().await?;
 
         handle.abort();
         let _ = handle.await;
@@ -1942,7 +1942,7 @@ impl PictRsConfiguration {
     ///
     /// This would happen automatically anyway unless rustls crate features get mixed up
     pub fn install_crypto_provider(self) -> Self {
-        if rustls023::crypto::aws_lc_rs::default_provider()
+        if rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
             .is_err()
         {
