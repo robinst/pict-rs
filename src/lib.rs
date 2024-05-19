@@ -1764,7 +1764,7 @@ async fn launch<
 
         tracing::info!("Starting pict-rs with TLS on {address}");
 
-        server.bind_rustls_0_22(address, config)?.run().await?;
+        server.bind_rustls_0_23(address, config)?.run().await?;
 
         handle.abort();
         let _ = handle.await;
