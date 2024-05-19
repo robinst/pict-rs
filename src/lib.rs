@@ -14,6 +14,7 @@ mod file_path;
 mod formats;
 mod future;
 mod generate;
+mod http1;
 mod ingest;
 mod init_metrics;
 mod init_tracing;
@@ -580,7 +581,7 @@ async fn download_stream<S>(
     let res = state.client.get(url).send().await?;
 
     if !res.status().is_success() {
-        return Err(UploadError::Download(res.status()).into());
+        return Err(UploadError::Download(http1::to_actix_status(res.status())).into());
     }
 
     let stream = crate::stream::limit(

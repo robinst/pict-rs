@@ -72,7 +72,7 @@ impl From<crate::store::object_store::ObjectError> for StoreError {
     fn from(value: crate::store::object_store::ObjectError) -> Self {
         match value {
             e @ crate::store::object_store::ObjectError::Status(
-                actix_web::http::StatusCode::NOT_FOUND,
+                reqwest::StatusCode::NOT_FOUND,
                 _,
                 _,
             ) => Self::ObjectNotFound(e),
