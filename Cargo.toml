@@ -38,7 +38,7 @@ futures-core = "0.3"
 hex = "0.4.3"
 md-5 = "0.10.5"
 metrics = "0.22.0"
-metrics-exporter-prometheus = { version = "0.13.0", default-features = false, features = ["http-listener"] }
+metrics-exporter-prometheus = { version = "0.14.0", default-features = false, features = ["http-listener"] }
 mime = "0.3.1"
 nanorand = { version = "0.7", optional = true }
 opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"] }

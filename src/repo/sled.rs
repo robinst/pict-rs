@@ -807,7 +807,7 @@ impl QueueRepo for SledRepo {
                 .read()
                 .unwrap()
                 .get(&queue_name)
-                .map(Arc::clone);
+                .cloned();
 
             let notify = if let Some(notify) = opt {
                 notify
@@ -944,13 +944,6 @@ impl SettingsRepo for SledRepo {
         let opt = b!(self.settings, settings.get(key));
 
         Ok(opt.map(|ivec| Arc::from(ivec.to_vec())))
-    }
-
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn remove(&self, key: &'static str) -> Result<(), RepoError> {
-        b!(self.settings, settings.remove(key));
-
-        Ok(())
     }
 }
 

@@ -1412,24 +1412,6 @@ impl SettingsRepo for PostgresRepo {
 
         Ok(opt)
     }
-
-    #[tracing::instrument(level = "debug", skip(self))]
-    async fn remove(&self, input_key: &'static str) -> Result<(), RepoError> {
-        use schema::settings::dsl::*;
-
-        let mut conn = self.get_connection().await?;
-
-        diesel::delete(settings)
-            .filter(key.eq(input_key))
-            .execute(&mut conn)
-            .with_metrics(crate::init_metrics::POSTGRES_SETTINGS_REMOVE)
-            .with_timeout(Duration::from_secs(5))
-            .await
-            .map_err(|_| PostgresError::DbTimeout)?
-            .map_err(PostgresError::Diesel)?;
-
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait(?Send)]
