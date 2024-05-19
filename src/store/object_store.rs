@@ -4,16 +4,16 @@ use crate::{
 };
 use actix_web::{
     error::BlockingError,
-    http::{
-        header::{ByteRangeSpec, Range, CONTENT_LENGTH},
-        StatusCode,
-    },
+    http::header::{ByteRangeSpec, Range},
     rt::task::JoinError,
     web::Bytes,
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use futures_core::Stream;
-use reqwest::{header::RANGE, Body, Response};
+use reqwest::{
+    header::{CONTENT_LENGTH, RANGE},
+    Body, Response, StatusCode,
+};
 use reqwest_middleware::{ClientWithMiddleware, RequestBuilder};
 use rusty_s3::{
     actions::{CreateMultipartUpload, S3Action},
