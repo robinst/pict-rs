@@ -1938,6 +1938,19 @@ impl PictRsConfiguration {
         Ok(self)
     }
 
+    /// Install aws-lc-rs as the default crypto provider
+    ///
+    /// This would happen automatically anyway unless rustls crate features get mixed up
+    pub fn install_crypto_provider(self) -> Self {
+        if rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .is_err()
+        {
+            tracing::info!("rustls crypto provider already installed");
+        }
+        self
+    }
+
     /// Run the pict-rs application on a tokio `LocalSet`
     ///
     /// This must be called from within `tokio::main` directly

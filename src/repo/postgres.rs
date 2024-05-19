@@ -26,7 +26,7 @@ use diesel_async::{
 use futures_core::Stream;
 use tokio::sync::Notify;
 use tokio_postgres::{AsyncMessage, Connection, NoTls, Notification, Socket};
-use tokio_postgres_rustls::MakeRustlsConnect;
+use tokio_postgres_generic_rustls::{AwsLcRsDigest, MakeRustlsConnect};
 use tracing::Instrument;
 use url::Url;
 use uuid::Uuid;
@@ -142,7 +142,7 @@ pub(crate) enum TlsError {
     Invalid,
 
     #[error("Couldn't add certificate to root store")]
-    Add(#[source] rustls022::Error),
+    Add(#[source] rustls::Error),
 }
 
 impl PostgresError {
@@ -173,8 +173,8 @@ impl PostgresError {
 
 async fn build_tls_connector(
     certificate_file: Option<PathBuf>,
-) -> Result<MakeRustlsConnect, TlsError> {
-    let mut cert_store = rustls022::RootCertStore {
+) -> Result<MakeRustlsConnect<AwsLcRsDigest>, TlsError> {
+    let mut cert_store = rustls::RootCertStore {
         roots: Vec::from(webpki_roots::TLS_SERVER_ROOTS),
     };
 
@@ -195,18 +195,18 @@ async fn build_tls_connector(
         cert_store.add(cert).map_err(TlsError::Add)?;
     }
 
-    let config = rustls022::ClientConfig::builder()
+    let config = rustls::ClientConfig::builder()
         .with_root_certificates(cert_store)
         .with_no_client_auth();
 
-    let tls = MakeRustlsConnect::new(config);
+    let tls = MakeRustlsConnect::new(config, AwsLcRsDigest);
 
     Ok(tls)
 }
 
 async fn connect_for_migrations(
     postgres_url: &Url,
-    tls_connector: Option<MakeRustlsConnect>,
+    tls_connector: Option<MakeRustlsConnect<AwsLcRsDigest>>,
 ) -> Result<
     (
         tokio_postgres::Client,
@@ -266,7 +266,7 @@ where
 async fn build_pool(
     postgres_url: &Url,
     tx: tokio::sync::mpsc::Sender<Notification>,
-    connector: Option<MakeRustlsConnect>,
+    connector: Option<MakeRustlsConnect<AwsLcRsDigest>>,
     max_size: u32,
 ) -> Result<Pool<AsyncPgConnection>, ConnectPostgresError> {
     let mut config = ManagerConfig::default();
@@ -667,7 +667,7 @@ async fn delegate_notifications(
 
 fn build_handler(
     sender: tokio::sync::mpsc::Sender<Notification>,
-    connector: Option<MakeRustlsConnect>,
+    connector: Option<MakeRustlsConnect<AwsLcRsDigest>>,
 ) -> ConfigFn {
     Box::new(
         move |config: &str| -> BoxFuture<'_, ConnectionResult<AsyncPgConnection>> {

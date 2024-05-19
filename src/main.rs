@@ -4,6 +4,7 @@ fn main() -> color_eyre::Result<()> {
         pict_rs::PictRsConfiguration::build_default()?
             .install_tracing()?
             .install_metrics()?
+            .install_crypto_provider()
             .run()
             .await
     })
@@ -18,6 +19,7 @@ fn main() -> color_eyre::Result<()> {
             pict_rs::PictRsConfiguration::build_default()?
                 .install_tracing()?
                 .install_metrics()?
+                .install_crypto_provider()
                 .run_on_localset()
                 .await
         })

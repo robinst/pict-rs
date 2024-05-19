@@ -49,8 +49,7 @@ refinery = { version = "0.8.10", features = ["tokio-postgres", "postgres"] }
 reqwest = { version = "0.12.0", default-features = false, features = ["json", "rustls-tls", "stream"] }
 reqwest-middleware = "0.3.0"
 reqwest-tracing = "0.5.0"
-# pinned to tokio-postgres-rustls
-rustls022 = { package = "rustls", version = "0.22.0" }
+# pinned to tokio-postgres-generic-rustls
 # pinned to actix-web
 rustls = "0.23"
 # pinned to rustls
@@ -70,7 +69,7 @@ thiserror = "1.0"
 time = { version = "0.3.0", features = ["serde", "serde-well-known"] }
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-postgres = { version = "0.7.10", features = ["with-uuid-1", "with-time-0_3", "with-serde_json-1"] }
-tokio-postgres-rustls = "0.11.0"
+tokio-postgres-generic-rustls = { version = "0.1.0", default-features = false, features = ["aws-lc-rs"] }
 tokio-uring = { version = "0.4", optional = true, features = ["bytes"] }
 tokio-util = { version = "0.7", default-features = false, features = [
   "codec",
