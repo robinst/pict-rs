@@ -20,7 +20,7 @@ random-errors = ["dep:nanorand"]
 
 [dependencies]
 actix-form-data = "0.7.0-beta.7"
-actix-web = { version = "4.0.0", default-features = false, features = ["rustls-0_22"] }
+actix-web = { version = "4.6.0", default-features = false, features = ["rustls-0_23"] }
 async-trait = "0.1.51"
 barrel = { version = "0.7.0", features = ["pg"] }
 base64 = "0.22.0"
@@ -50,9 +50,11 @@ reqwest = { version = "0.12.0", default-features = false, features = ["json", "r
 reqwest-middleware = "0.3.0"
 reqwest-tracing = "0.5.0"
 # pinned to tokio-postgres-rustls
-rustls = "0.22.0"
+rustls022 = { package = "rustls", version = "0.22.0" }
+# pinned to actix-web
+rustls = "0.23"
 # pinned to rustls
-rustls-channel-resolver = "0.2.0"
+rustls-channel-resolver = "0.3.0"
 # pinned to rustls
 rustls-pemfile = "2.0.0"
 rusty-s3 = "0.5.0"

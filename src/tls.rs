@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use rustls::{crypto::ring::sign::any_supported_type, sign::CertifiedKey, Error};
+use rustls::{crypto::aws_lc_rs::sign::any_supported_type, sign::CertifiedKey, Error};
 
 pub(super) struct Tls {
     certificate: PathBuf,
