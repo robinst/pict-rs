@@ -1,11 +1,11 @@
 use crate::formats::{
-    AlphaCodec, AnimationFormat, ImageFormat, ImageInput, InputFile, InputVideoFormat, Mp4Codec,
-    WebmAlphaCodec, WebmCodec,
+    AlphaCodec, AnimationFormat, ImageFormat, ImageInput, InputFile, InputVideoFormat,
+    Mp4AudioCodec, Mp4Codec, WebmAlphaCodec, WebmCodec,
 };
 
 use super::{Discovery, FfMpegDiscovery, PixelFormatOutput};
 
-fn details_tests() -> [(&'static str, Option<Discovery>); 13] {
+fn details_tests() -> [(&'static str, Option<Discovery>); 14] {
     [
         (
             "animated_webp",
@@ -149,6 +149,18 @@ fn details_tests() -> [(&'static str, Option<Discovery>); 13] {
                 width: 1200,
                 height: 1387,
                 frames: None,
+            }),
+        ),
+        (
+            "mov",
+            Some(Discovery {
+                input: InputFile::Video(InputVideoFormat::Mp4 {
+                    video_codec: Mp4Codec::H265,
+                    audio_codec: Some(Mp4AudioCodec::Aac),
+                }),
+                width: 1920,
+                height: 1080,
+                frames: Some(187),
             }),
         ),
     ]

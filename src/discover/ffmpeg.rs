@@ -53,6 +53,7 @@ impl FfMpegStreams {
                 FfMpegStream::Unknown { codec_name } => {
                     tracing::info!("Encountered unknown stream {codec_name}");
                 }
+                FfMpegStream::Empty {} => {}
             }
         }
 
@@ -135,6 +136,7 @@ enum FfMpegStream {
     Audio(FfMpegAudioStream),
     Video(FfMpegVideoStream),
     Unknown { codec_name: String },
+    Empty {},
 }
 
 #[derive(Debug, serde::Deserialize)]

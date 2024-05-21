@@ -1,0 +1,35 @@
+{
+    "programs": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "hevc",
+            "width": 1920,
+            "height": 1080,
+            "pix_fmt": "yuv420p10le",
+            "nb_read_frames": "187",
+            "side_data_list": [
+                {
+
+                }
+            ]
+        },
+        {
+            "codec_name": "aac",
+            "nb_read_frames": "135"
+        },
+        {
+
+        },
+        {
+
+        },
+        {
+
+        }
+    ],
+    "format": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2"
+    }
+}
