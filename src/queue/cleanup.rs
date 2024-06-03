@@ -153,9 +153,9 @@ pub(crate) async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> J
 
     let hash = repo.hash(&alias).await.retry()?;
 
-    repo.cleanup_alias(&alias).await.retry()?;
     repo.remove_relation(alias.clone()).await.retry()?;
     repo.remove_alias_access(alias.clone()).await.retry()?;
+    repo.cleanup_alias(&alias).await.retry()?;
 
     let hash = hash.ok_or(UploadError::MissingAlias).abort()?;
 
