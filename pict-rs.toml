@@ -103,6 +103,11 @@ log_spans = false
 # default: false
 no_ansi = false
 
+## Optional: whether to log upon request completion
+# environment variable: PICTRS__TRACING__LOGGING__LOG_REQUESTS
+# default: false
+log_requests = false
+
 
 ## Console configuration
 [tracing.console]
