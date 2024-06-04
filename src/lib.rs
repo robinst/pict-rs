@@ -42,18 +42,12 @@ use actix_web::{
     http::header::{CacheControl, CacheDirective, LastModified, Range, ACCEPT_RANGES},
     web, App, HttpRequest, HttpResponse, HttpResponseBuilder, HttpServer,
 };
-use details::{ApiDetails, HumanDate};
-use future::{WithPollTimer, WithTimeout};
 use futures_core::Stream;
-use magick::ArcPolicyDir;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use middleware::{Metrics, Payload};
-use repo::ArcRepo;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
 use rustls_channel_resolver::ChannelSender;
 use rusty_s3::UrlStyle;
-use state::State;
 use std::{
     marker::PhantomData,
     path::Path,
@@ -62,8 +56,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 use streem::IntoStreamer;
-use sync::DropHandle;
-use tmp_file::{ArcTmpDir, TmpDir};
 use tokio::sync::Semaphore;
 use tracing::Instrument;
 use tracing_actix_web::TracingLogger;
@@ -71,20 +63,25 @@ use tracing_actix_web::TracingLogger;
 use self::{
     backgrounded::Backgrounded,
     config::{Configuration, Operation},
-    details::Details,
+    details::{ApiDetails, Details, HumanDate},
     either::Either,
     error::{Error, UploadError},
     formats::InputProcessableFormat,
+    future::{WithPollTimer, WithTimeout},
     ingest::Session,
     init_tracing::init_tracing,
-    middleware::{Deadline, Internal},
+    magick::ArcPolicyDir,
+    middleware::{Deadline, Internal, Log, Metrics, Payload},
     migrate_store::migrate_store,
     queue::queue_generate,
-    repo::{sled::SledRepo, Alias, DeleteToken, Hash, Repo, UploadId, UploadResult},
+    repo::{sled::SledRepo, Alias, ArcRepo, DeleteToken, Hash, Repo, UploadId, UploadResult},
     serde_str::Serde,
+    state::State,
     store::{file_store::FileStore, object_store::ObjectStore, Store},
     stream::empty,
+    sync::DropHandle,
     tls::Tls,
+    tmp_file::{ArcTmpDir, TmpDir},
 };
 
 pub use self::config::{ConfigSource, PictRsConfiguration};
@@ -1744,6 +1741,7 @@ async fn launch<
         spawn_workers(state.clone());
 
         App::new()
+            .wrap(Log)
             .wrap(TracingLogger::default())
             .wrap(Deadline)
             .wrap(Metrics)

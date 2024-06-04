@@ -96,4 +96,4 @@ webpki-roots = "0.26.0"
 [dependencies.tracing-actix-web]
 version = "0.7.10"
 default-features = false
-features = ["emit_event_on_error", "opentelemetry_0_22"]
+features = ["opentelemetry_0_22"]
