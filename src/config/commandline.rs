@@ -18,6 +18,7 @@ impl Args {
             log_format,
             log_targets,
             log_spans,
+            log_requests,
             no_log_ansi,
             console_address,
             console_buffer_capacity,
@@ -40,6 +41,7 @@ impl Args {
                 targets: log_targets.map(Serde::new),
                 log_spans,
                 no_ansi: no_log_ansi,
+                log_requests,
             },
             console: Console {
                 address: console_address,
@@ -584,6 +586,8 @@ struct Logging {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     log_spans: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    log_requests: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     no_ansi: bool,
 }
 
@@ -928,6 +932,9 @@ pub(super) struct Args {
     /// Whether to log openning and closing of tracing spans to stdout
     #[arg(long)]
     log_spans: bool,
+    /// Whether to log request completions at an INFO level
+    #[arg(long)]
+    log_requests: bool,
 
     #[arg(long)]
     /// Whether to disable color-codes in log output

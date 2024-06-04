@@ -7,16 +7,30 @@ use actix_web::{
     ResponseError,
 };
 
-pub(crate) struct Log;
+pub(crate) struct Log {
+    info: bool,
+}
 pub(crate) struct LogMiddleware<S> {
+    info: bool,
     inner: S,
 }
 
+impl Log {
+    pub(crate) fn new(info: bool) -> Self {
+        Self { info }
+    }
+}
+
 #[derive(Debug)]
-pub(crate) struct LogError(actix_web::Error);
+pub(crate) struct LogError {
+    info: bool,
+    error: actix_web::Error,
+}
 
 pin_project_lite::pin_project! {
     pub(crate) struct LogFuture<F> {
+        info: bool,
+
         #[pin]
         inner: F,
     }
@@ -24,6 +38,8 @@ pin_project_lite::pin_project! {
 
 pin_project_lite::pin_project! {
     pub(crate) struct LogBody<B> {
+        info: bool,
+
         status: Option<StatusCode>,
 
         #[pin]
@@ -45,7 +61,10 @@ where
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        ready(Ok(LogMiddleware { inner: service }))
+        ready(Ok(LogMiddleware {
+            info: self.info,
+            inner: service,
+        }))
     }
 }
 
@@ -64,13 +83,20 @@ where
         &self,
         ctx: &mut core::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner
-            .poll_ready(ctx)
-            .map(|res| res.map_err(|e| LogError(e.into()).into()))
+        self.inner.poll_ready(ctx).map(|res| {
+            res.map_err(|e| {
+                LogError {
+                    info: self.info,
+                    error: e.into(),
+                }
+                .into()
+            })
+        })
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         LogFuture {
+            info: self.info,
             inner: self.inner.call(req),
         }
     }
@@ -88,6 +114,7 @@ where
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
+        let info = self.info;
         let this = self.project();
 
         std::task::Poll::Ready(match std::task::ready!(this.inner.poll(cx)) {
@@ -95,15 +122,23 @@ where
                 let status = response.status();
 
                 let status = if response.response().body().size().is_eof() {
-                    emit(status);
+                    emit(status, info);
                     None
                 } else {
                     Some(status)
                 };
 
-                Ok(response.map_body(|_, inner| LogBody { status, inner }))
+                Ok(response.map_body(|_, inner| LogBody {
+                    info,
+                    status,
+                    inner,
+                }))
             }
-            Err(e) => Err(LogError(e.into()).into()),
+            Err(e) => Err(LogError {
+                info,
+                error: e.into(),
+            }
+            .into()),
         })
     }
 }
@@ -128,7 +163,7 @@ where
 
         if opt.is_none() {
             if let Some(status) = this.status.take() {
-                emit(status);
+                emit(status, *this.info);
             }
         }
 
@@ -138,31 +173,32 @@ where
 
 impl std::fmt::Display for LogError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        self.error.fmt(f)
     }
 }
 
 impl std::error::Error for LogError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.0.source()
+        self.error.source()
     }
 }
 
 impl ResponseError for LogError {
     fn status_code(&self) -> actix_web::http::StatusCode {
-        self.0.as_response_error().status_code()
+        self.error.as_response_error().status_code()
     }
 
     fn error_response(&self) -> actix_web::HttpResponse<actix_web::body::BoxBody> {
-        let response = self.0.error_response();
+        let response = self.error.error_response();
         let status = response.status();
 
         if response.body().size().is_eof() {
-            emit(status);
+            emit(status, self.info);
             response
         } else {
             response.map_body(|_, inner| {
                 LogBody {
+                    info: self.info,
                     status: Some(status),
                     inner,
                 }
@@ -172,14 +208,16 @@ impl ResponseError for LogError {
     }
 }
 
-fn emit(status: StatusCode) {
+fn emit(status: StatusCode, info: bool) {
     if status.is_server_error() {
         tracing::error!("server error");
     } else if status.is_client_error() {
         tracing::warn!("client error");
     } else if status.is_redirection() {
         tracing::info!("redirected");
-    } else {
+    } else if info {
         tracing::info!("completed");
+    } else {
+        tracing::debug!("completed");
     }
 }

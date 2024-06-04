@@ -55,6 +55,7 @@ struct LoggingDefaults {
     format: LogFormat,
     targets: Serde<Targets>,
     log_spans: bool,
+    log_requests: bool,
     no_ansi: bool,
 }
 
@@ -236,6 +237,7 @@ impl Default for LoggingDefaults {
             format: LogFormat::Normal,
             targets: "info".parse().expect("Valid targets string"),
             log_spans: false,
+            log_requests: false,
             no_ansi: false,
         }
     }

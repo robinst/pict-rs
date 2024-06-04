@@ -1741,7 +1741,7 @@ async fn launch<
         spawn_workers(state.clone());
 
         App::new()
-            .wrap(Log)
+            .wrap(Log::new(state.config.tracing.logging.log_requests))
             .wrap(TracingLogger::default())
             .wrap(Deadline)
             .wrap(Metrics)

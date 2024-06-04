@@ -165,6 +165,8 @@ pub(crate) struct Logging {
     pub(crate) log_spans: bool,
 
     pub(crate) no_ansi: bool,
+
+    pub(crate) log_requests: bool,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
