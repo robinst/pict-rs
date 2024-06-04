@@ -17,6 +17,7 @@ format = "normal"
 targets = "info"
 log_spans = false
 no_ansi = false
+log_requests = false
 
 [tracing.console]
 buffer_capacity = 102400
