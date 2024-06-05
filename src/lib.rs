@@ -519,7 +519,7 @@ struct UrlQuery {
     url: String,
 
     #[serde(default)]
-    backgrounded: bool,
+    backgrounded: Serde<bool>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -560,7 +560,7 @@ async fn download<S: Store + 'static>(
 
     let stream = download_stream(&url_query.url, &state).await?;
 
-    if url_query.backgrounded {
+    if *url_query.backgrounded {
         do_download_backgrounded(stream, state, upload_query).await
     } else {
         do_download_inline(stream, &state, &upload_query).await

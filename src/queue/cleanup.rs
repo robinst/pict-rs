@@ -147,6 +147,15 @@ async fn hash(repo: &ArcRepo, hash: Hash) -> JobResult {
 pub(crate) async fn alias(repo: &ArcRepo, alias: Alias, token: DeleteToken) -> JobResult {
     let saved_delete_token = repo.delete_token(&alias).await.retry()?;
 
+    if saved_delete_token.is_none() {
+        let hash = repo.hash(&alias).await.retry()?;
+
+        // already deleted
+        if hash.is_none() {
+            return Ok(());
+        }
+    }
+
     if !saved_delete_token.is_some_and(|t| t.ct_eq(&token)) {
         return Err(UploadError::InvalidToken).abort();
     }
