@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.5.15"
+version = "0.5.16"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -37,13 +37,13 @@ diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 futures-core = "0.3"
 hex = "0.4.3"
 md-5 = "0.10.5"
-metrics = "0.22.0"
-metrics-exporter-prometheus = { version = "0.14.0", default-features = false, features = ["http-listener"] }
+metrics = "0.23.0"
+metrics-exporter-prometheus = { version = "0.15.0", default-features = false, features = ["http-listener"] }
 mime = "0.3.1"
 nanorand = { version = "0.7", optional = true }
-opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"] }
-opentelemetry = "0.22"
-opentelemetry-otlp = "0.15"
+opentelemetry_sdk = { version = "0.23", features = ["rt-tokio"] }
+opentelemetry = "0.23"
+opentelemetry-otlp = "0.16"
 pin-project-lite = "0.2.7"
 refinery = { version = "0.8.10", features = ["tokio-postgres", "postgres"] }
 reqwest = { version = "0.12.0", default-features = false, features = ["json", "rustls-tls-no-provider", "stream"] }
@@ -70,7 +70,7 @@ time = { version = "0.3.0", features = ["serde", "serde-well-known"] }
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-postgres = { version = "0.7.10", features = ["with-uuid-1", "with-time-0_3", "with-serde_json-1"] }
 tokio-postgres-generic-rustls = { version = "0.1.0", default-features = false, features = ["aws-lc-rs"] }
-tokio-uring = { version = "0.4", optional = true, features = ["bytes"] }
+tokio-uring = { version = "0.5", optional = true, features = ["bytes"] }
 tokio-util = { version = "0.7", default-features = false, features = [
   "codec",
   "io",
@@ -79,7 +79,7 @@ toml = "0.8.0"
 tracing = "0.1.15"
 tracing-error = "0.2.0"
 tracing-log = "0.2.0"
-tracing-opentelemetry = "0.23"
+tracing-opentelemetry = "0.24"
 tracing-subscriber = { version = "0.3.0", features = [
   "ansi",
   "env-filter",
@@ -96,7 +96,7 @@ webpki-roots = "0.26.0"
 [dependencies.tracing-actix-web]
 version = "0.7.10"
 default-features = false
-features = ["opentelemetry_0_22"]
+features = ["opentelemetry_0_23"]
 
 [patch.crates-io]
 reqwest = { git = "https://github.com/asonix/reqwest", branch = "asonix/limit-openssl-probe" }
