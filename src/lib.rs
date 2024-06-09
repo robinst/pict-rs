@@ -1342,7 +1342,7 @@ struct PruneResponse {
 
 #[derive(Debug, serde::Deserialize)]
 struct PruneQuery {
-    force: bool,
+    force: Serde<bool>,
 }
 
 #[tracing::instrument(name = "Prune missing identifiers", skip(state))]
@@ -1370,7 +1370,7 @@ async fn prune_missing<S>(
 
     let started = state.repo.get("prune-missing-started").await?.is_some();
 
-    if !started || query.is_some_and(|q| q.force) {
+    if !started || query.is_some_and(|q| *q.force) {
         queue::prune_missing(&state.repo).await?;
     }
 
