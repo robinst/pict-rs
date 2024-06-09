@@ -99,4 +99,4 @@ default-features = false
 features = ["opentelemetry_0_22"]
 
 [patch.crates-io]
-reqwest = { git = "https://github.com/seanmonstar/reqwest" }
+reqwest = { git = "https://github.com/asonix/reqwest", branch = "asonix/limit-openssl-probe" }
