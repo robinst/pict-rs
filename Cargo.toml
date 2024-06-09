@@ -41,9 +41,9 @@ metrics = "0.23.0"
 metrics-exporter-prometheus = { version = "0.15.0", default-features = false, features = ["http-listener"] }
 mime = "0.3.1"
 nanorand = { version = "0.7", optional = true }
-opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"] }
-opentelemetry = "0.22"
-opentelemetry-otlp = "0.15"
+opentelemetry_sdk = { version = "0.23", features = ["rt-tokio"] }
+opentelemetry = "0.23"
+opentelemetry-otlp = "0.16"
 pin-project-lite = "0.2.7"
 refinery = { version = "0.8.10", features = ["tokio-postgres", "postgres"] }
 reqwest = { version = "0.12.0", default-features = false, features = ["json", "rustls-tls", "stream"] }
@@ -79,7 +79,7 @@ toml = "0.8.0"
 tracing = "0.1.15"
 tracing-error = "0.2.0"
 tracing-log = "0.2.0"
-tracing-opentelemetry = "0.23"
+tracing-opentelemetry = "0.24"
 tracing-subscriber = { version = "0.3.0", features = [
   "ansi",
   "env-filter",
@@ -96,4 +96,4 @@ webpki-roots = "0.26.0"
 [dependencies.tracing-actix-web]
 version = "0.7.10"
 default-features = false
-features = ["opentelemetry_0_22"]
+features = ["opentelemetry_0_23"]
