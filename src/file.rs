@@ -167,10 +167,10 @@ mod io_uring {
             while let Some(res) = stream.next().await {
                 tracing::trace!("write_from_stream while: looping");
 
-                let mut buf = res?;
+                let buf = res?;
 
                 let len = buf.len();
-                let mut position = 0;
+                let mut position: usize = 0;
 
                 loop {
                     tracing::trace!("write_from_stream: looping");
@@ -179,9 +179,8 @@ mod io_uring {
                         break;
                     }
 
-                    let position_u64: u64 = position.try_into().unwrap();
-                    let (res, slice) = self
-                        .write_at(buf.slice(position..len), cursor + position_u64)
+                    let (res, _buf) = self
+                        .write_at(buf.slice(position..), cursor + (position as u64))
                         .await;
 
                     let n = res?;
@@ -190,12 +189,10 @@ mod io_uring {
                     }
 
                     position += n;
-
-                    buf = slice.into_inner();
                 }
 
-                let position: u64 = position.try_into().unwrap();
-                cursor += position;
+                let len: u64 = len.try_into().unwrap();
+                cursor += len;
             }
 
             self.inner.sync_all().await?;
@@ -220,7 +217,7 @@ mod io_uring {
         }
 
         async fn write_at<T: IoBuf>(&self, buf: T, pos: u64) -> BufResult<usize, T> {
-            self.inner.write_at(buf, pos).await
+            self.inner.write_at(buf, pos).submit().await
         }
     }
 

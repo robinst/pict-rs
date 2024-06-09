@@ -103,31 +103,69 @@ pub(crate) enum ConnectPostgresError {
     BuildPool(#[source] PoolError),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub(crate) enum PostgresError {
-    #[error("Error in db pool")]
-    Pool(#[source] RunError),
-
-    #[error("Error in database")]
-    Diesel(#[from] diesel::result::Error),
-
-    #[error("Error deserializing hex value")]
-    Hex(#[source] hex::FromHexError),
-
-    #[error("Error serializing details")]
-    SerializeDetails(#[source] serde_json::Error),
-
-    #[error("Error deserializing details")]
-    DeserializeDetails(#[source] serde_json::Error),
-
-    #[error("Error serializing upload result")]
-    SerializeUploadResult(#[source] serde_json::Error),
-
-    #[error("Error deserializing upload result")]
-    DeserializeUploadResult(#[source] serde_json::Error),
-
-    #[error("Timed out waiting for postgres")]
+    Pool(RunError),
+    Diesel(diesel::result::Error),
+    Hex(hex::FromHexError),
+    SerializeDetails(serde_json::Error),
+    DeserializeDetails(serde_json::Error),
+    SerializeUploadResult(serde_json::Error),
+    DeserializeUploadResult(serde_json::Error),
     DbTimeout,
+}
+
+impl std::fmt::Display for PostgresError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pool(_) => write!(f, "Error in db pool"),
+            Self::Diesel(e) => match e {
+                diesel::result::Error::DatabaseError(kind, _) => {
+                    write!(f, "Error in diesel: {kind:?}")
+                }
+                diesel::result::Error::InvalidCString(_) => {
+                    write!(f, "Error in diesel: Invalid c string")
+                }
+                diesel::result::Error::QueryBuilderError(_) => {
+                    write!(f, "Error in diesel: Query builder")
+                }
+                diesel::result::Error::SerializationError(_) => {
+                    write!(f, "Error in diesel: Serialization")
+                }
+                diesel::result::Error::DeserializationError(_) => {
+                    write!(f, "Error in diesel: Deserialization")
+                }
+                _ => write!(f, "Error in diesel"),
+            },
+            Self::Hex(_) => write!(f, "Error deserializing hex value"),
+            Self::SerializeDetails(_) => write!(f, "Error serializing details"),
+            Self::DeserializeDetails(_) => write!(f, "Error deserializing details"),
+            Self::SerializeUploadResult(_) => write!(f, "Error serializing upload result"),
+            Self::DeserializeUploadResult(_) => write!(f, "Error deserializing upload result"),
+            Self::DbTimeout => write!(f, "Timed out waiting for postgres"),
+        }
+    }
+}
+
+impl std::error::Error for PostgresError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Pool(e) => Some(e),
+            Self::Diesel(e) => Some(e),
+            Self::Hex(e) => Some(e),
+            Self::SerializeDetails(e) => Some(e),
+            Self::DeserializeDetails(e) => Some(e),
+            Self::SerializeUploadResult(e) => Some(e),
+            Self::DeserializeUploadResult(e) => Some(e),
+            Self::DbTimeout => None,
+        }
+    }
+}
+
+impl From<diesel::result::Error> for PostgresError {
+    fn from(value: diesel::result::Error) -> Self {
+        Self::Diesel(value)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
