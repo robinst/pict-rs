@@ -26,8 +26,8 @@ use super::{
     notification_map::{NotificationEntry, NotificationMap},
     Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, Details,
     DetailsRepo, FullRepo, HashAlreadyExists, HashPage, HashRepo, JobId, JobResult, OrderedHash,
-    ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
-    UploadResult, VariantAccessRepo, VariantAlreadyExists, VariantRepo,
+    ProxyAlreadyExists, ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo,
+    UploadId, UploadRepo, UploadResult, VariantAccessRepo, VariantAlreadyExists, VariantRepo,
 };
 
 macro_rules! b {
@@ -218,20 +218,32 @@ impl FullRepo for SledRepo {
 
 #[async_trait::async_trait(?Send)]
 impl ProxyRepo for SledRepo {
-    async fn relate_url(&self, url: Url, alias: Alias) -> Result<(), RepoError> {
+    async fn relate_url(
+        &self,
+        url: Url,
+        alias: Alias,
+    ) -> Result<Result<(), ProxyAlreadyExists>, RepoError> {
         let proxy = self.proxy.clone();
         let inverse_proxy = self.inverse_proxy.clone();
 
-        crate::sync::spawn_blocking("sled-io", move || {
-            proxy.insert(url.as_str().as_bytes(), alias.to_bytes())?;
-            inverse_proxy.insert(alias.to_bytes(), url.as_str().as_bytes())?;
+        let res = crate::sync::spawn_blocking("sled-io", move || {
+            match proxy.compare_and_swap(
+                url.as_str().as_bytes(),
+                Option::<sled::IVec>::None,
+                Some(alias.to_bytes()),
+            )? {
+                Ok(_) => {
+                    inverse_proxy.insert(alias.to_bytes(), url.as_str().as_bytes())?;
 
-            Ok(()) as Result<(), SledError>
+                    Ok(Ok(())) as Result<Result<(), ProxyAlreadyExists>, SledError>
+                }
+                Err(_) => Ok(Err(ProxyAlreadyExists)),
+            }
         })
         .await
         .map_err(|_| RepoError::Canceled)??;
 
-        Ok(())
+        Ok(res)
     }
 
     async fn related(&self, url: Url) -> Result<Option<Alias>, RepoError> {

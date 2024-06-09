@@ -46,6 +46,8 @@ pub(crate) struct HashAlreadyExists;
 pub(crate) struct AliasAlreadyExists;
 #[derive(Debug)]
 pub(crate) struct VariantAlreadyExists;
+#[derive(Debug)]
+pub(crate) struct ProxyAlreadyExists;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct UploadId {
@@ -151,7 +153,11 @@ impl<T> BaseRepo for Arc<T> where T: BaseRepo {}
 
 #[async_trait::async_trait(?Send)]
 pub(crate) trait ProxyRepo: BaseRepo {
-    async fn relate_url(&self, url: Url, alias: Alias) -> Result<(), RepoError>;
+    async fn relate_url(
+        &self,
+        url: Url,
+        alias: Alias,
+    ) -> Result<Result<(), ProxyAlreadyExists>, RepoError>;
 
     async fn related(&self, url: Url) -> Result<Option<Alias>, RepoError>;
 
@@ -163,7 +169,11 @@ impl<T> ProxyRepo for Arc<T>
 where
     T: ProxyRepo,
 {
-    async fn relate_url(&self, url: Url, alias: Alias) -> Result<(), RepoError> {
+    async fn relate_url(
+        &self,
+        url: Url,
+        alias: Alias,
+    ) -> Result<Result<(), ProxyAlreadyExists>, RepoError> {
         T::relate_url(self, url, alias).await
     }
 

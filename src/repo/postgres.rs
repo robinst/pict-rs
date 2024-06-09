@@ -47,8 +47,8 @@ use super::{
     notification_map::{NotificationEntry, NotificationMap},
     Alias, AliasAccessRepo, AliasAlreadyExists, AliasRepo, BaseRepo, DeleteToken, DetailsRepo,
     FullRepo, Hash, HashAlreadyExists, HashPage, HashRepo, JobId, JobResult, OrderedHash,
-    ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo, UploadId, UploadRepo,
-    UploadResult, VariantAccessRepo, VariantAlreadyExists, VariantRepo,
+    ProxyAlreadyExists, ProxyRepo, QueueRepo, RepoError, SettingsRepo, StoreMigrationRepo,
+    UploadId, UploadRepo, UploadResult, VariantAccessRepo, VariantAlreadyExists, VariantRepo,
 };
 
 #[derive(Clone)]
@@ -1884,21 +1884,31 @@ impl StoreMigrationRepo for PostgresRepo {
 #[async_trait::async_trait(?Send)]
 impl ProxyRepo for PostgresRepo {
     #[tracing::instrument(level = "debug", skip(self))]
-    async fn relate_url(&self, input_url: Url, input_alias: Alias) -> Result<(), RepoError> {
+    async fn relate_url(
+        &self,
+        input_url: Url,
+        input_alias: Alias,
+    ) -> Result<Result<(), ProxyAlreadyExists>, RepoError> {
         use schema::proxies::dsl::*;
 
         let mut conn = self.get_connection().await?;
 
-        diesel::insert_into(proxies)
+        let res = diesel::insert_into(proxies)
             .values((url.eq(input_url.as_str()), alias.eq(&input_alias)))
             .execute(&mut conn)
             .with_metrics(crate::init_metrics::POSTGRES_PROXY_RELATE_URL)
             .with_timeout(Duration::from_secs(5))
             .await
-            .map_err(|_| PostgresError::DbTimeout)?
-            .map_err(PostgresError::Diesel)?;
+            .map_err(|_| PostgresError::DbTimeout)?;
 
-        Ok(())
+        match res {
+            Ok(_) => Ok(Ok(())),
+            Err(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => Ok(Err(ProxyAlreadyExists)),
+            Err(e) => Err(PostgresError::Diesel(e).into()),
+        }
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
