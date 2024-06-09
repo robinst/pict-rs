@@ -74,7 +74,10 @@ use self::{
     middleware::{Deadline, Internal, Log, Metrics, Payload},
     migrate_store::migrate_store,
     queue::queue_generate,
-    repo::{sled::SledRepo, Alias, ArcRepo, DeleteToken, Hash, Repo, UploadId, UploadResult},
+    repo::{
+        sled::SledRepo, Alias, ArcRepo, DeleteToken, Hash, ProxyAlreadyExists, Repo, UploadId,
+        UploadResult,
+    },
     serde_str::Serde,
     state::State,
     store::{file_store::FileStore, object_store::ObjectStore, Store},
@@ -1286,11 +1289,28 @@ async fn proxy_alias_from_query<S: Store + 'static>(
             } else if !state.config.server.read_only {
                 let stream = download_stream(proxy.as_str(), state).await?;
 
-                let (alias, _, _) = ingest_inline(stream, state, &Default::default()).await?;
+                // some time has passed, see if we've proxied elsewhere
+                if let Some(alias) = state.repo.related(proxy.clone()).await? {
+                    alias
+                } else {
+                    let (alias, token, _) =
+                        ingest_inline(stream, state, &Default::default()).await?;
 
-                state.repo.relate_url(proxy, alias.clone()).await?;
+                    // last check, do we succeed or fail to relate the proxy alias
+                    if let Err(ProxyAlreadyExists) =
+                        state.repo.relate_url(proxy.clone(), alias.clone()).await?
+                    {
+                        queue::cleanup_alias(&state.repo, alias, token).await?;
 
-                alias
+                        state
+                            .repo
+                            .related(proxy)
+                            .await?
+                            .ok_or(UploadError::MissingAlias)?
+                    } else {
+                        alias
+                    }
+                }
             } else {
                 return Err(UploadError::ReadOnly.into());
             };
