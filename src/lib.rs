@@ -1579,10 +1579,18 @@ fn transform_error(error: actix_form_data::Error) -> actix_web::Error {
     error
 }
 
+fn build_client_config() -> rustls::ClientConfig {
+    rustls::ClientConfig::builder()
+        .with_root_certificates(rustls::RootCertStore {
+            roots: Vec::from(webpki_roots::TLS_SERVER_ROOTS),
+        })
+        .with_no_client_auth()
+}
+
 fn build_client() -> Result<ClientWithMiddleware, Error> {
     let client = reqwest::Client::builder()
         .user_agent("pict-rs v0.5.0-main")
-        .use_rustls_tls()
+        .use_preconfigured_tls(build_client_config())
         .build()
         .map_err(UploadError::BuildClient)?;
 
