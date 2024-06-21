@@ -46,6 +46,7 @@
         devShell = with pkgs; mkShell {
           nativeBuildInputs = [
             cargo
+            cargo-deny
             cargo-outdated
             certstrap
             clippy
