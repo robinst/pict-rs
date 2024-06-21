@@ -425,7 +425,7 @@ max_frame_count = 900
 #
 # available options: apng, avif, gif, webp
 # When set, all uploaded animated images will be converted to this file type. For balancing quality
-# vs file size vs browser support, 'avif', 'jxl', and 'webp' should be considered. By default,
+# vs file size vs browser support, 'avif', and 'webp' should be considered. By default,
 # images are stored in their original file type.
 format = "webp"
 
