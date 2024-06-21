@@ -36,7 +36,7 @@ jobs:
         name: Cargo Cache
         uses: https://git.asonix.dog/asonix/actions/cache-rust-dependencies@main
       -
-        name: Clippy
+        name: Cargo Deny
         run: |
           cargo deny check
 
