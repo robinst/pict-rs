@@ -10,7 +10,7 @@ jobs:
   clippy:
     runs-on: docker
     container:
-      image: docker.io/asonix/actions-base-image:0.1
+      image: docker.io/asonix/actions-base-image:0.1.21
     steps:
       -
         name: Checkout pict-rs
@@ -24,10 +24,26 @@ jobs:
           cargo clippy --no-default-features -- -D warnings
           cargo clippy --no-default-features --features io-uring -- -D warnings
 
+  deny:
+    runs-on: docker
+    container:
+      image: docker.io/asonix/actions-base-image:0.1.21
+    steps:
+      -
+        name: Checkout pict-rs
+        uses: https://github.com/actions/checkout@v4
+      -
+        name: Cargo Cache
+        uses: https://git.asonix.dog/asonix/actions/cache-rust-dependencies@main
+      -
+        name: Clippy
+        run: |
+          cargo deny check
+
   tests:
     runs-on: docker
     container:
-      image: docker.io/asonix/actions-base-image:0.1
+      image: docker.io/asonix/actions-base-image:0.1.21
     steps:
       -
         name: Checkout pict-rs
@@ -49,7 +65,7 @@ jobs:
           - aarch64-unknown-linux-musl
     runs-on: docker
     container:
-      image: docker.io/asonix/actions-base-image:0.1
+      image: docker.io/asonix/actions-base-image:0.1.21
     steps:
       -
         name: Checkout pict-rs
