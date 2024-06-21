@@ -224,7 +224,6 @@ skip = [
     "regex-syntax",
     "siphasher",
     "sync_wrapper",
-    "tonic",
     "untrusted",
 
     # Ignore duplicates for systems we don't target
