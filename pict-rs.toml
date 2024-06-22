@@ -742,12 +742,12 @@ secret_key = 'SECRET_KEY'
 session_token = 'SESSION_TOKEN'
 
 ## Optional: set how long object storage signatures are valid for (in seconds)
-# environment variable: PICTRS__STORE__SIGNATURE_EXPIRATION
+# environment variable: PICTRS__STORE__SIGNATURE_DURATION
 # default: 15
 #
 # This can be useful if your object storage might take a while to process requests. It should not be
 # increased more than needed to prevent replay attacks.
-signature_expiration = 15
+signature_duration = 15
 
 ## Optional: set how long pict-rs will wait (in seconds) for a response from object storage
 # environment variable: PICTRS__STORE__CLIENT_TIMEOUT
