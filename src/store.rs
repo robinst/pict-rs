@@ -71,10 +71,8 @@ impl From<crate::store::file_store::FileError> for StoreError {
 impl From<crate::store::object_store::ObjectError> for StoreError {
     fn from(value: crate::store::object_store::ObjectError) -> Self {
         match value {
-            e @ crate::store::object_store::ObjectError::Status(
-                reqwest::StatusCode::NOT_FOUND,
-                _,
-                _,
+            e @ crate::store::object_store::ObjectError::Request(
+                ::object_store::Error::NotFound { .. },
             ) => Self::ObjectNotFound(e),
             e => Self::ObjectStore(e),
         }

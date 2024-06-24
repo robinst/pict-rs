@@ -95,6 +95,27 @@ pub(crate) struct ObjectStorage {
     pub(crate) public_endpoint: Option<Url>,
 }
 
+impl From<crate::config::primitives::ObjectStorage> for ObjectStorage {
+    fn from(value: crate::config::primitives::ObjectStorage) -> Self {
+        let defaults = crate::config::defaults::ObjectStorageDefaults::default();
+
+        Self {
+            endpoint: value.endpoint,
+            use_path_style: value.use_path_style,
+            bucket_name: value.bucket_name,
+            region: value.region,
+            access_key: value.access_key,
+            secret_key: value.secret_key,
+            session_token: value.session_token,
+            signature_duration: value
+                .signature_duration
+                .unwrap_or(defaults.signature_duration),
+            client_timeout: value.client_timeout.unwrap_or(defaults.client_timeout),
+            public_endpoint: value.public_endpoint,
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]

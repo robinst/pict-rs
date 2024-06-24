@@ -47,7 +47,6 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::TracingMiddleware;
 use rustls_channel_resolver::ChannelSender;
-use rusty_s3::UrlStyle;
 use std::{
     marker::PhantomData,
     path::Path,
@@ -1833,36 +1832,8 @@ where
 
             migrate_store(from, to, skip_missing_files, concurrency).await?
         }
-        config::primitives::Store::ObjectStorage(config::primitives::ObjectStorage {
-            endpoint,
-            bucket_name,
-            use_path_style,
-            region,
-            access_key,
-            secret_key,
-            session_token,
-            signature_duration,
-            client_timeout,
-            public_endpoint,
-        }) => {
-            let store = ObjectStore::build(
-                endpoint.clone(),
-                bucket_name,
-                if use_path_style {
-                    UrlStyle::Path
-                } else {
-                    UrlStyle::VirtualHost
-                },
-                region,
-                access_key,
-                secret_key,
-                session_token,
-                signature_duration.unwrap_or(15),
-                client_timeout.unwrap_or(30),
-                public_endpoint,
-            )
-            .await?
-            .build(client.clone());
+        config::primitives::Store::ObjectStorage(object_config) => {
+            let store = ObjectStore::new(object_config.into()).await?;
 
             let to = State {
                 config,
@@ -2087,38 +2058,8 @@ impl PictRsConfiguration {
                         )
                         .await?;
                     }
-                    config::primitives::Store::ObjectStorage(
-                        config::primitives::ObjectStorage {
-                            endpoint,
-                            bucket_name,
-                            use_path_style,
-                            region,
-                            access_key,
-                            secret_key,
-                            session_token,
-                            signature_duration,
-                            client_timeout,
-                            public_endpoint,
-                        },
-                    ) => {
-                        let from = ObjectStore::build(
-                            endpoint,
-                            bucket_name,
-                            if use_path_style {
-                                UrlStyle::Path
-                            } else {
-                                UrlStyle::VirtualHost
-                            },
-                            region,
-                            access_key,
-                            secret_key,
-                            session_token,
-                            signature_duration.unwrap_or(15),
-                            client_timeout.unwrap_or(30),
-                            public_endpoint,
-                        )
-                        .await?
-                        .build(client.clone());
+                    config::primitives::Store::ObjectStorage(object_config) => {
+                        let from = ObjectStore::new(object_config.into()).await?;
 
                         migrate_inner(
                             config,
@@ -2187,38 +2128,10 @@ impl PictRsConfiguration {
                     }
                 }
             }
-            config::Store::ObjectStorage(config::ObjectStorage {
-                endpoint,
-                bucket_name,
-                use_path_style,
-                region,
-                access_key,
-                secret_key,
-                session_token,
-                signature_duration,
-                client_timeout,
-                public_endpoint,
-            }) => {
+            config::Store::ObjectStorage(object_config) => {
                 let arc_repo = repo.to_arc();
 
-                let store = ObjectStore::build(
-                    endpoint,
-                    bucket_name,
-                    if use_path_style {
-                        UrlStyle::Path
-                    } else {
-                        UrlStyle::VirtualHost
-                    },
-                    region,
-                    access_key,
-                    secret_key,
-                    session_token,
-                    signature_duration,
-                    client_timeout,
-                    public_endpoint,
-                )
-                .await?
-                .build(client.clone());
+                let store = ObjectStore::new(object_config).await?;
 
                 let state = State {
                     tmp_dir: tmp_dir.clone(),

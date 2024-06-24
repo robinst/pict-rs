@@ -45,9 +45,6 @@ impl ErrorCode {
     pub(crate) const OBJECT_IO_ERROR: ErrorCode = ErrorCode {
         code: "object-io-error",
     };
-    pub(crate) const PARSE_OBJECT_ID_ERROR: ErrorCode = ErrorCode {
-        code: "parse-object-id-error",
-    };
     pub(crate) const PANIC: ErrorCode = ErrorCode { code: "panic" };
     pub(crate) const ALREADY_CLAIMED: ErrorCode = ErrorCode {
         code: "already-claimed",

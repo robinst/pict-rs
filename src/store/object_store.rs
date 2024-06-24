@@ -1,27 +1,17 @@
 use crate::{
     bytes_stream::BytesStream, error_code::ErrorCode, future::WithMetrics, store::Store,
-    stream::LocalBoxStream, sync::DropHandle,
+    stream::LocalBoxStream,
 };
-use actix_web::{
-    error::BlockingError,
-    http::header::{ByteRangeSpec, Range},
-    rt::task::JoinError,
-    web::Bytes,
-};
-use base64::{prelude::BASE64_STANDARD, Engine};
+use actix_web::{rt::task::JoinError, web::Bytes};
 use futures_core::Stream;
-use reqwest::{
-    header::{CONTENT_LENGTH, RANGE},
-    Body, Response, StatusCode,
+use object_store::{
+    aws::{AmazonS3, AmazonS3Builder},
+    path::Path,
+    Attribute, AttributeValue, Attributes, GetOptions, ObjectStore as ObjectStoreTrait, PutMode,
+    PutMultipartOpts, PutOptions, PutPayload, PutPayloadMut,
 };
-use reqwest_middleware::{ClientWithMiddleware, RequestBuilder};
-use rusty_s3::{
-    actions::{CreateMultipartUpload, S3Action},
-    Bucket, BucketError, Credentials, UrlStyle,
-};
-use std::{string::FromUtf8Error, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use streem::IntoStreamer;
-use tracing::Instrument;
 use url::Url;
 
 use super::StoreError;
@@ -30,72 +20,24 @@ const CHUNK_SIZE: usize = 8_388_608; // 8 Mebibytes, min is 5 (5_242_880);
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ObjectError {
-    #[error("Failed to generate request")]
-    S3(#[from] BucketError),
-
     #[error("IO Error")]
     IO(#[from] std::io::Error),
 
-    #[error("Error making request")]
-    RequestMiddleware(#[from] reqwest_middleware::Error),
-
     #[error("Error in request response")]
-    Request(#[from] reqwest::Error),
+    Request(#[from] object_store::Error),
 
-    #[error("Failed to parse string")]
-    Utf8(#[from] FromUtf8Error),
-
-    #[error("Failed to parse xml")]
-    Xml(#[source] XmlError),
-
-    #[error("Invalid length")]
-    Length,
-
-    #[error("Invalid etag response")]
-    Etag,
+    #[error("Failed to build object store client")]
+    BuildClient(#[source] object_store::Error),
 
     #[error("Task cancelled")]
     Canceled,
-
-    #[error("Invalid status {0} for {2:?} - {1}")]
-    Status(StatusCode, String, Option<Arc<str>>),
-}
-
-#[derive(Debug)]
-pub(crate) struct XmlError {
-    inner: Box<dyn std::error::Error + Send + Sync>,
-}
-
-impl XmlError {
-    fn new<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
-        XmlError { inner: Box::new(e) }
-    }
-}
-
-impl std::fmt::Display for XmlError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.inner.fmt(f)
-    }
-}
-
-impl std::error::Error for XmlError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.inner.source()
-    }
 }
 
 impl ObjectError {
     pub(super) const fn error_code(&self) -> ErrorCode {
         match self {
-            Self::S3(_)
-            | Self::RequestMiddleware(_)
-            | Self::Request(_)
-            | Self::Xml(_)
-            | Self::Length
-            | Self::Etag
-            | Self::Status(_, _, _) => ErrorCode::OBJECT_REQUEST_ERROR,
+            Self::BuildClient(_) | Self::Request(_) => ErrorCode::OBJECT_REQUEST_ERROR,
             Self::IO(_) => ErrorCode::OBJECT_IO_ERROR,
-            Self::Utf8(_) => ErrorCode::PARSE_OBJECT_ID_ERROR,
             Self::Canceled => ErrorCode::PANIC,
         }
     }
@@ -107,46 +49,10 @@ impl From<JoinError> for ObjectError {
     }
 }
 
-impl From<BlockingError> for ObjectError {
-    fn from(_: BlockingError) -> Self {
-        Self::Canceled
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct ObjectStore {
-    bucket: Bucket,
-    credentials: Credentials,
-    client: ClientWithMiddleware,
-    signature_expiration: Duration,
-    client_timeout: Duration,
+    s3_client: Arc<AmazonS3>,
     public_endpoint: Option<Url>,
-}
-
-#[derive(Clone)]
-pub(crate) struct ObjectStoreConfig {
-    bucket: Bucket,
-    credentials: Credentials,
-    signature_expiration: u64,
-    client_timeout: u64,
-    public_endpoint: Option<Url>,
-}
-
-impl ObjectStoreConfig {
-    pub(crate) fn build(self, client: ClientWithMiddleware) -> ObjectStore {
-        ObjectStore {
-            bucket: self.bucket,
-            credentials: self.credentials,
-            client,
-            signature_expiration: Duration::from_secs(self.signature_expiration),
-            client_timeout: Duration::from_secs(self.client_timeout),
-            public_endpoint: self.public_endpoint,
-        }
-    }
-}
-
-fn payload_to_io_error(e: reqwest::Error) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
 }
 
 #[tracing::instrument(level = "debug", skip(stream))]
@@ -171,38 +77,44 @@ where
     tracing::debug!(
         "BytesStream with {} chunks, avg length {}",
         buf.chunks_len(),
-        buf.len() / buf.chunks_len()
+        buf.len() / buf.chunks_len().max(1)
     );
 
     Ok(buf)
 }
 
-async fn status_error(response: Response, object: Option<Arc<str>>) -> StoreError {
-    let status = response.status();
+impl From<BytesStream> for PutPayload {
+    fn from(value: BytesStream) -> Self {
+        let mut payload = PutPayloadMut::new();
 
-    let body = match response.text().await {
-        Err(e) => return ObjectError::Request(e).into(),
-        Ok(body) => body,
-    };
+        for bytes in value {
+            payload.push(bytes);
+        }
 
-    ObjectError::Status(status, body, object).into()
+        payload.freeze()
+    }
 }
 
 impl Store for ObjectStore {
     async fn health_check(&self) -> Result<(), StoreError> {
-        let response = self
-            .head_bucket_request()
-            .await?
-            .send()
-            .with_metrics(crate::init_metrics::OBJECT_STORAGE_HEAD_BUCKET_REQUEST)
-            .await
-            .map_err(ObjectError::from)?;
+        let res = self
+            .s3_client
+            .put_opts(
+                &Path::from("health-check"),
+                PutPayload::new(),
+                PutOptions {
+                    mode: PutMode::Overwrite,
+                    ..Default::default()
+                },
+            )
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_PUT_OBJECT_REQUEST)
+            .await;
 
-        if !response.status().is_success() {
-            return Err(status_error(response, None).await);
+        match res {
+            Ok(_) => Ok(()),
+            Err(object_store::Error::NotModified { .. }) => Ok(()),
+            Err(e) => Err(ObjectError::Request(e).into()),
         }
-
-        Ok(())
     }
 
     #[tracing::instrument(skip_all)]
@@ -215,68 +127,97 @@ impl Store for ObjectStore {
     where
         S: Stream<Item = std::io::Result<Bytes>>,
     {
-        match self
-            .start_upload(
-                crate::stream::error_injector(stream),
-                content_type.clone(),
-                extension,
-            )
-            .await?
-        {
-            UploadState::Single(first_chunk) => {
-                let (req, object_id) = self
-                    .put_object_request(first_chunk.len(), content_type, extension)
-                    .await?;
+        let mut stream = std::pin::pin!(stream);
+        let first_chunk = read_chunk(&mut stream).await?;
 
-                let response = req
-                    .body(Body::wrap_stream(first_chunk.into_io_stream()))
-                    .send()
-                    .with_metrics(crate::init_metrics::OBJECT_STORAGE_PUT_OBJECT_REQUEST)
+        let object_id: Arc<str> = Arc::from(self.next_file(extension));
+        let path = Path::from(object_id.as_ref());
+
+        let mut attributes = Attributes::new();
+        attributes.insert(
+            Attribute::ContentType,
+            AttributeValue::from(content_type.to_string()),
+        );
+
+        if first_chunk.len() < CHUNK_SIZE {
+            self.s3_client
+                .put_opts(
+                    &path,
+                    first_chunk.into(),
+                    PutOptions {
+                        attributes,
+                        ..Default::default()
+                    },
+                )
+                .with_metrics(crate::init_metrics::OBJECT_STORAGE_PUT_OBJECT_REQUEST)
+                .await
+                .map_err(ObjectError::from)?;
+
+            return Ok(object_id);
+        }
+
+        let mut multipart = self
+            .s3_client
+            .put_multipart_opts(
+                &path,
+                PutMultipartOpts {
+                    attributes,
+                    ..Default::default()
+                },
+            )
+            .with_metrics(crate::init_metrics::OBJECT_STORAGE_CREATE_MULTIPART_REQUEST)
+            .await
+            .map_err(ObjectError::from)?;
+
+        let res = async {
+            let mut first_chunk = Some(first_chunk);
+            let mut complete = false;
+
+            let mut futures = Vec::new();
+
+            while !complete {
+                let buf = if let Some(chunk) = first_chunk.take() {
+                    chunk
+                } else {
+                    read_chunk(&mut stream).await?
+                };
+
+                complete = buf.len() < CHUNK_SIZE;
+
+                futures.push(crate::sync::abort_on_drop(crate::sync::spawn(
+                    "put-multipart-part",
+                    multipart.put_part(buf.into()).with_metrics(
+                        crate::init_metrics::OBJECT_STORAGE_CREATE_UPLOAD_PART_REQUEST,
+                    ),
+                )));
+            }
+
+            for future in futures {
+                future
+                    .await
+                    .map_err(ObjectError::from)?
+                    .map_err(ObjectError::from)?;
+            }
+
+            multipart
+                .complete()
+                .with_metrics(crate::init_metrics::OBJECT_STORAGE_COMPLETE_MULTIPART_REQUEST)
+                .await
+                .map_err(ObjectError::from)?;
+
+            Ok(())
+        }
+        .await;
+
+        match res {
+            Ok(()) => Ok(object_id),
+            Err(e) => {
+                multipart
+                    .abort()
+                    .with_metrics(crate::init_metrics::OBJECT_STORAGE_ABORT_MULTIPART_REQUEST)
                     .await
                     .map_err(ObjectError::from)?;
-
-                if !response.status().is_success() {
-                    return Err(status_error(response, None).await);
-                }
-
-                return Ok(object_id);
-            }
-            UploadState::Multi(object_id, upload_id, futures) => {
-                // hack-ish: use async block as Result boundary
-                let res = async {
-                    let mut etags = Vec::new();
-
-                    for future in futures {
-                        etags.push(future.await.map_err(ObjectError::from)??);
-                    }
-
-                    let response = self
-                        .send_complete_multipart_request(
-                            &object_id,
-                            &upload_id,
-                            etags.iter().map(|s| s.as_ref()),
-                        )
-                        .await
-                        .map_err(ObjectError::from)?;
-
-                    if !response.status().is_success() {
-                        return Err(status_error(response, None).await);
-                    }
-
-                    Ok(()) as Result<(), StoreError>
-                }
-                .await;
-
-                if let Err(e) = res {
-                    self.create_abort_multipart_request(&object_id, &upload_id)
-                        .send()
-                        .with_metrics(crate::init_metrics::OBJECT_STORAGE_ABORT_MULTIPART_REQUEST)
-                        .await
-                        .map_err(ObjectError::from)?;
-                    return Err(e);
-                }
-
-                Ok(object_id)
+                Err(e)
             }
         }
     }
@@ -299,429 +240,112 @@ impl Store for ObjectStore {
         from_start: Option<u64>,
         len: Option<u64>,
     ) -> Result<LocalBoxStream<'static, std::io::Result<Bytes>>, StoreError> {
-        let response = self
-            .get_object_request(identifier, from_start, len)
-            .send()
+        let from_start = from_start.map(|u| u as usize);
+        let len = len.map(|u| u as usize);
+
+        let range = match (from_start, len) {
+            (Some(start), Some(length)) => Some((start..start + length).into()),
+            (Some(start), None) => Some((start..).into()),
+            (None, Some(length)) => Some((..length).into()),
+            (None, None) => None,
+        };
+
+        let path = Path::from(identifier.as_ref());
+
+        let get_result = self
+            .s3_client
+            .get_opts(
+                &path,
+                GetOptions {
+                    range,
+                    ..Default::default()
+                },
+            )
             .with_metrics(crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST)
             .await
             .map_err(ObjectError::from)?;
 
-        if !response.status().is_success() {
-            return Err(status_error(response, Some(identifier.clone())).await);
-        }
-
-        Ok(Box::pin(crate::stream::error_injector(
-            crate::stream::metrics(
-                crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST_STREAM,
-                crate::stream::map_err(response.bytes_stream(), payload_to_io_error),
-            ),
+        Ok(Box::pin(crate::stream::metrics(
+            crate::init_metrics::OBJECT_STORAGE_GET_OBJECT_REQUEST_STREAM,
+            crate::stream::map_err(get_result.into_stream(), |e| {
+                std::io::Error::new(std::io::ErrorKind::Other, e)
+            }),
         )))
     }
 
     #[tracing::instrument(skip(self))]
     async fn len(&self, identifier: &Arc<str>) -> Result<u64, StoreError> {
-        let response = self
-            .head_object_request(identifier)
-            .send()
+        let path = Path::from(identifier.as_ref());
+
+        let object_meta = self
+            .s3_client
+            .head(&path)
             .with_metrics(crate::init_metrics::OBJECT_STORAGE_HEAD_OBJECT_REQUEST)
             .await
             .map_err(ObjectError::from)?;
 
-        if !response.status().is_success() {
-            return Err(status_error(response, Some(identifier.clone())).await);
-        }
-
-        let length = response
-            .headers()
-            .get(CONTENT_LENGTH)
-            .ok_or(ObjectError::Length)?
-            .to_str()
-            .map_err(|_| ObjectError::Length)?
-            .parse::<u64>()
-            .map_err(|_| ObjectError::Length)?;
-
-        Ok(length)
+        Ok(object_meta.size as _)
     }
 
     #[tracing::instrument(skip(self))]
     async fn remove(&self, identifier: &Arc<str>) -> Result<(), StoreError> {
-        let response = self
-            .delete_object_request(identifier)
-            .send()
+        let path = Path::from(identifier.as_ref());
+
+        self.s3_client
+            .delete(&path)
             .with_metrics(crate::init_metrics::OBJECT_STORAGE_DELETE_OBJECT_REQUEST)
             .await
             .map_err(ObjectError::from)?;
-
-        if !response.status().is_success() {
-            return Err(status_error(response, Some(identifier.clone())).await);
-        }
 
         Ok(())
     }
 }
 
-enum UploadState {
-    Single(BytesStream),
-    Multi(
-        Arc<str>,
-        String,
-        Vec<DropHandle<Result<String, StoreError>>>,
-    ),
-}
-
 impl ObjectStore {
     #[allow(clippy::too_many_arguments)]
     #[tracing::instrument(skip(access_key, secret_key, session_token))]
-    pub(crate) async fn build(
-        endpoint: Url,
-        bucket_name: String,
-        url_style: UrlStyle,
-        region: String,
-        access_key: String,
-        secret_key: String,
-        session_token: Option<String>,
-        signature_expiration: u64,
-        client_timeout: u64,
-        public_endpoint: Option<Url>,
-    ) -> Result<ObjectStoreConfig, StoreError> {
-        Ok(ObjectStoreConfig {
-            bucket: Bucket::new(endpoint, url_style, bucket_name, region)
-                .map_err(ObjectError::from)?,
-            credentials: if let Some(token) = session_token {
-                Credentials::new_with_token(access_key, secret_key, token)
-            } else {
-                Credentials::new(access_key, secret_key)
-            },
-            signature_expiration,
+    pub(crate) async fn new(
+        crate::config::ObjectStorage {
+            endpoint,
+            bucket_name,
+            use_path_style,
+            region,
+            access_key,
+            secret_key,
+            session_token,
             client_timeout,
             public_endpoint,
-        })
-    }
+            signature_duration: _,
+        }: crate::config::ObjectStorage,
+    ) -> Result<ObjectStore, StoreError> {
+        let https = endpoint.scheme() == "https";
 
-    #[tracing::instrument(skip_all)]
-    async fn start_upload<S>(
-        &self,
-        stream: S,
-        content_type: mime::Mime,
-        extension: Option<&str>,
-    ) -> Result<UploadState, StoreError>
-    where
-        S: Stream<Item = std::io::Result<Bytes>>,
-    {
-        let mut stream = std::pin::pin!(stream);
+        let client_options = object_store::ClientOptions::new()
+            .with_timeout(Duration::from_secs(client_timeout))
+            .with_allow_http(!https);
 
-        let first_chunk = read_chunk(&mut stream).await?;
+        let builder = AmazonS3Builder::new()
+            .with_endpoint(endpoint)
+            .with_bucket_name(bucket_name)
+            .with_virtual_hosted_style_request(!use_path_style)
+            .with_region(region)
+            .with_access_key_id(access_key)
+            .with_secret_access_key(secret_key)
+            .with_allow_http(!https)
+            .with_client_options(client_options);
 
-        if first_chunk.len() < CHUNK_SIZE {
-            return Ok(UploadState::Single(first_chunk));
-        }
-
-        let mut first_chunk = Some(first_chunk);
-
-        let (req, object_id) = self
-            .create_multipart_request(content_type, extension)
-            .await?;
-        let response = req
-            .send()
-            .with_metrics(crate::init_metrics::OBJECT_STORAGE_CREATE_MULTIPART_REQUEST)
-            .await
-            .map_err(ObjectError::from)?;
-
-        if !response.status().is_success() {
-            return Err(status_error(response, None).await);
-        }
-
-        let body = response.text().await.map_err(ObjectError::Request)?;
-        let body = CreateMultipartUpload::parse_response(&body)
-            .map_err(XmlError::new)
-            .map_err(ObjectError::Xml)?;
-        let upload_id = body.upload_id();
-
-        // hack-ish: use async block as Result boundary
-        let res = async {
-            let mut complete = false;
-            let mut part_number = 0;
-            let mut futures = Vec::new();
-
-            while !complete {
-                tracing::trace!("save_stream: looping");
-
-                part_number += 1;
-
-                let buf = if let Some(buf) = first_chunk.take() {
-                    buf
-                } else {
-                    read_chunk(&mut stream).await?
-                };
-
-                complete = buf.len() < CHUNK_SIZE;
-
-                let this = self.clone();
-
-                let object_id2 = object_id.clone();
-                let upload_id2 = upload_id.to_string();
-                let handle = crate::sync::abort_on_drop(crate::sync::spawn(
-                    "upload-multipart-part",
-                    async move {
-                        let response = this
-                            .create_upload_part_request(
-                                buf.clone(),
-                                &object_id2,
-                                part_number,
-                                &upload_id2,
-                            )
-                            .await?
-                            .body(Body::wrap_stream(buf.into_io_stream()))
-                            .send()
-                            .with_metrics(
-                                crate::init_metrics::OBJECT_STORAGE_CREATE_UPLOAD_PART_REQUEST,
-                            )
-                            .await
-                            .map_err(ObjectError::from)?;
-
-                        if !response.status().is_success() {
-                            return Err(status_error(response, None).await);
-                        }
-
-                        let etag = response
-                            .headers()
-                            .get("etag")
-                            .ok_or(ObjectError::Etag)?
-                            .to_str()
-                            .map_err(|_| ObjectError::Etag)?
-                            .to_string();
-
-                        // early-drop response to close its tracing spans
-                        drop(response);
-
-                        Ok(etag) as Result<String, StoreError>
-                    }
-                    .instrument(tracing::Span::current()),
-                ));
-
-                futures.push(handle);
-            }
-
-            Ok(futures)
-        }
-        .await;
-
-        match res {
-            Ok(futures) => Ok(UploadState::Multi(
-                object_id,
-                upload_id.to_string(),
-                futures,
-            )),
-            Err(e) => {
-                self.create_abort_multipart_request(&object_id, upload_id)
-                    .send()
-                    .with_metrics(crate::init_metrics::OBJECT_STORAGE_ABORT_MULTIPART_REQUEST)
-                    .await
-                    .map_err(ObjectError::from)?;
-                Err(e)
-            }
-        }
-    }
-
-    async fn head_bucket_request(&self) -> Result<RequestBuilder, StoreError> {
-        let action = self.bucket.head_bucket(Some(&self.credentials));
-
-        Ok(self.build_request(action))
-    }
-
-    async fn put_object_request(
-        &self,
-        length: usize,
-        content_type: mime::Mime,
-        extension: Option<&str>,
-    ) -> Result<(RequestBuilder, Arc<str>), StoreError> {
-        let path = self.next_file(extension);
-
-        let mut action = self.bucket.put_object(Some(&self.credentials), &path);
-
-        action
-            .headers_mut()
-            .insert("content-type", content_type.as_ref());
-        action
-            .headers_mut()
-            .insert("content-length", length.to_string());
-
-        Ok((self.build_request(action), Arc::from(path)))
-    }
-
-    async fn create_multipart_request(
-        &self,
-        content_type: mime::Mime,
-        extension: Option<&str>,
-    ) -> Result<(RequestBuilder, Arc<str>), StoreError> {
-        let path = self.next_file(extension);
-
-        let mut action = self
-            .bucket
-            .create_multipart_upload(Some(&self.credentials), &path);
-
-        action
-            .headers_mut()
-            .insert("content-type", content_type.as_ref());
-
-        Ok((self.build_request(action), Arc::from(path)))
-    }
-
-    async fn create_upload_part_request(
-        &self,
-        buf: BytesStream,
-        object_id: &Arc<str>,
-        part_number: u16,
-        upload_id: &str,
-    ) -> Result<RequestBuilder, ObjectError> {
-        use md5::Digest;
-
-        let mut action = self.bucket.upload_part(
-            Some(&self.credentials),
-            object_id.as_ref(),
-            part_number,
-            upload_id,
-        );
-
-        let length = buf.len();
-
-        let hashing_span = tracing::debug_span!("Hashing request body");
-        let hash_string = crate::sync::spawn_blocking("hash-buf", move || {
-            let guard = hashing_span.enter();
-            let mut hasher = md5::Md5::new();
-            for bytes in buf {
-                hasher.update(&bytes);
-            }
-            let hash = hasher.finalize();
-            let hash_string = BASE64_STANDARD.encode(hash);
-            drop(guard);
-            hash_string
-        })
-        .await
-        .map_err(ObjectError::from)?;
-
-        action
-            .headers_mut()
-            .insert("content-type", "application/octet-stream");
-        action.headers_mut().insert("content-md5", hash_string);
-        action
-            .headers_mut()
-            .insert("content-length", length.to_string());
-
-        Ok(self.build_request(action))
-    }
-
-    async fn send_complete_multipart_request<'a, I: Iterator<Item = &'a str>>(
-        &'a self,
-        object_id: &'a Arc<str>,
-        upload_id: &'a str,
-        etags: I,
-    ) -> Result<Response, reqwest_middleware::Error> {
-        let mut action = self.bucket.complete_multipart_upload(
-            Some(&self.credentials),
-            object_id.as_ref(),
-            upload_id,
-            etags,
-        );
-
-        action
-            .headers_mut()
-            .insert("content-type", "application/octet-stream");
-
-        let (req, action) = self.build_request_inner(action);
-
-        let body: Vec<u8> = action.body().into();
-
-        req.header(CONTENT_LENGTH, body.len())
-            .body(body)
-            .send()
-            .with_metrics(crate::init_metrics::OBJECT_STORAGE_COMPLETE_MULTIPART_REQUEST)
-            .await
-    }
-
-    fn create_abort_multipart_request(
-        &self,
-        object_id: &Arc<str>,
-        upload_id: &str,
-    ) -> RequestBuilder {
-        let action = self.bucket.abort_multipart_upload(
-            Some(&self.credentials),
-            object_id.as_ref(),
-            upload_id,
-        );
-
-        self.build_request(action)
-    }
-
-    fn build_request<'a, A: S3Action<'a>>(&'a self, action: A) -> RequestBuilder {
-        let (req, _) = self.build_request_inner(action);
-        req
-    }
-
-    fn build_request_inner<'a, A: S3Action<'a>>(&'a self, mut action: A) -> (RequestBuilder, A) {
-        let method = match A::METHOD {
-            rusty_s3::Method::Head => reqwest::Method::HEAD,
-            rusty_s3::Method::Get => reqwest::Method::GET,
-            rusty_s3::Method::Post => reqwest::Method::POST,
-            rusty_s3::Method::Put => reqwest::Method::PUT,
-            rusty_s3::Method::Delete => reqwest::Method::DELETE,
+        let builder = if let Some(token) = session_token {
+            builder.with_token(token)
+        } else {
+            builder
         };
 
-        let url = action.sign(self.signature_expiration);
+        let s3_client = builder.build().map_err(ObjectError::BuildClient)?;
 
-        let req = self
-            .client
-            .request(method, url.as_str())
-            .timeout(self.client_timeout);
-
-        let req = action
-            .headers_mut()
-            .iter()
-            .fold(req, |req, (name, value)| req.header(name, value));
-
-        (req, action)
-    }
-
-    fn get_object_request(
-        &self,
-        identifier: &Arc<str>,
-        from_start: Option<u64>,
-        len: Option<u64>,
-    ) -> RequestBuilder {
-        let action = self
-            .bucket
-            .get_object(Some(&self.credentials), identifier.as_ref());
-
-        let req = self.build_request(action);
-
-        let start = from_start.unwrap_or(0);
-        let end = len.map(|len| start + len - 1);
-
-        req.header(
-            RANGE,
-            Range::Bytes(vec![if let Some(end) = end {
-                ByteRangeSpec::FromTo(start, end)
-            } else {
-                ByteRangeSpec::From(start)
-            }])
-            .to_string(),
-        )
-    }
-
-    fn head_object_request(&self, identifier: &Arc<str>) -> RequestBuilder {
-        let action = self
-            .bucket
-            .head_object(Some(&self.credentials), identifier.as_ref());
-
-        self.build_request(action)
-    }
-
-    fn delete_object_request(&self, identifier: &Arc<str>) -> RequestBuilder {
-        let action = self
-            .bucket
-            .delete_object(Some(&self.credentials), identifier.as_ref());
-
-        self.build_request(action)
+        Ok(ObjectStore {
+            s3_client: Arc::new(s3_client),
+            public_endpoint,
+        })
     }
 
     fn next_file(&self, extension: Option<&str>) -> String {
@@ -731,9 +355,6 @@ impl ObjectStore {
 
 impl std::fmt::Debug for ObjectStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ObjectStore")
-            .field("bucket", &self.bucket.name())
-            .field("region", &self.bucket.region())
-            .finish()
+        f.debug_struct("ObjectStore").finish()
     }
 }

@@ -41,7 +41,7 @@ metrics = "0.23.0"
 metrics-exporter-prometheus = { version = "0.15.0", default-features = false, features = ["http-listener"] }
 mime = "0.3.17"
 nanorand = { version = "0.7.0", optional = true }
-# object_store = { version = "0.10.1", features = ["aws"] }
+object_store = { version = "0.10.1", features = ["aws"] }
 opentelemetry_sdk = { version = "0.23.0", features = ["rt-tokio"] }
 opentelemetry = "0.23.0"
 opentelemetry-otlp = "0.16.0"
@@ -57,7 +57,6 @@ rustls = { version = "0.23.10", default-features = false, features = ["logging",
 rustls-channel-resolver = "0.3.0"
 # pinned to rustls
 rustls-pemfile = "2.1.2"
-rusty-s3 = "0.5.0"
 serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.117"
 serde-tuple-vec-map = "1.0.1"
