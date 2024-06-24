@@ -26,7 +26,7 @@ use diesel_async::{
 use futures_core::Stream;
 use tokio::sync::Notify;
 use tokio_postgres::{AsyncMessage, Connection, NoTls, Notification, Socket};
-use tokio_postgres_generic_rustls::{AwsLcRsDigest, MakeRustlsConnect};
+use tokio_postgres_generic_rustls::{MakeRustlsConnect, RingDigest};
 use tracing::Instrument;
 use url::Url;
 use uuid::Uuid;
@@ -211,7 +211,7 @@ impl PostgresError {
 
 async fn build_tls_connector(
     certificate_file: Option<PathBuf>,
-) -> Result<MakeRustlsConnect<AwsLcRsDigest>, TlsError> {
+) -> Result<MakeRustlsConnect<RingDigest>, TlsError> {
     let mut cert_store = rustls::RootCertStore {
         roots: Vec::from(webpki_roots::TLS_SERVER_ROOTS),
     };
@@ -237,14 +237,14 @@ async fn build_tls_connector(
         .with_root_certificates(cert_store)
         .with_no_client_auth();
 
-    let tls = MakeRustlsConnect::new(config, AwsLcRsDigest);
+    let tls = MakeRustlsConnect::new(config, RingDigest);
 
     Ok(tls)
 }
 
 async fn connect_for_migrations(
     postgres_url: &Url,
-    tls_connector: Option<MakeRustlsConnect<AwsLcRsDigest>>,
+    tls_connector: Option<MakeRustlsConnect<RingDigest>>,
 ) -> Result<
     (
         tokio_postgres::Client,
@@ -304,7 +304,7 @@ where
 async fn build_pool(
     postgres_url: &Url,
     tx: tokio::sync::mpsc::Sender<Notification>,
-    connector: Option<MakeRustlsConnect<AwsLcRsDigest>>,
+    connector: Option<MakeRustlsConnect<RingDigest>>,
     max_size: u32,
 ) -> Result<Pool<AsyncPgConnection>, ConnectPostgresError> {
     let mut config = ManagerConfig::default();
@@ -705,7 +705,7 @@ async fn delegate_notifications(
 
 fn build_handler(
     sender: tokio::sync::mpsc::Sender<Notification>,
-    connector: Option<MakeRustlsConnect<AwsLcRsDigest>>,
+    connector: Option<MakeRustlsConnect<RingDigest>>,
 ) -> ConfigFn {
     Box::new(
         move |config: &str| -> BoxFuture<'_, ConnectionResult<AsyncPgConnection>> {

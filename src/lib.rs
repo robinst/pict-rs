@@ -1968,7 +1968,7 @@ impl PictRsConfiguration {
     ///
     /// This would happen automatically anyway unless rustls crate features get mixed up
     pub fn install_crypto_provider(self) -> Self {
-        if rustls::crypto::aws_lc_rs::default_provider()
+        if rustls::crypto::ring::default_provider()
             .install_default()
             .is_err()
         {
