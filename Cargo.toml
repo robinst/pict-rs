@@ -1,7 +1,7 @@
 [package]
 name = "pict-rs"
 description = "A simple image hosting service"
-version = "0.5.16"
+version = "0.5.17-pre.1"
 authors = ["asonix <asonix@asonix.dog>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -30,7 +30,7 @@ clap = { version = "4.5.7", features = ["derive"] }
 color-eyre = "0.6.3"
 config = { version = "0.14.0", default-features = false, features = ["json", "ron", "toml", "yaml"] }
 console-subscriber = "0.3"
-dashmap = "5.5.3"
+dashmap = "6.0.1"
 diesel = { version = "2.1.6", features = ["postgres_backend", "serde_json", "time", "uuid"] }
 diesel-async = { version = "0.4.1", features = ["bb8", "postgres"] }
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
@@ -64,7 +64,7 @@ serde_urlencoded = "0.7.1"
 sha2 = "0.10.8"
 sled = { version = "0.34.7" }
 streem = "0.2.0"
-subtle = { version = "2.6.0", default-features = false }
+subtle = { version = "2.6.1", default-features = false }
 thiserror = "1.0.61"
 time = { version = "0.3.36", features = ["serde", "serde-well-known"] }
 tokio = { version = "1.38.0", features = ["full", "tracing"] }
