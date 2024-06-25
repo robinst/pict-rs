@@ -81,11 +81,6 @@ pub(crate) struct ObjectStorage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) session_token: Option<String>,
 
-    /// How long signatures for object storage requests are valid (in seconds)
-    ///
-    /// This defaults to 15 seconds
-    pub(crate) signature_duration: u64,
-
     /// How long a client can wait on an object storage request before giving up (in seconds)
     ///
     /// This defaults to 30 seconds
@@ -107,9 +102,6 @@ impl From<crate::config::primitives::ObjectStorage> for ObjectStorage {
             access_key: value.access_key,
             secret_key: value.secret_key,
             session_token: value.session_token,
-            signature_duration: value
-                .signature_duration
-                .unwrap_or(defaults.signature_duration),
             client_timeout: value.client_timeout.unwrap_or(defaults.client_timeout),
             public_endpoint: value.public_endpoint,
         }

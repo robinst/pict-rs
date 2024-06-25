@@ -1490,13 +1490,6 @@ struct ObjectStorage {
     #[serde(skip_serializing_if = "Option::is_none")]
     session_token: Option<String>,
 
-    /// How long signatures for object storage requests are valid (in seconds)
-    ///
-    /// This defaults to 15 seconds
-    #[arg(long)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature_duration: Option<u64>,
-
     /// How long a client can wait on an object storage request before giving up (in seconds)
     ///
     /// This defaults to 30 seconds

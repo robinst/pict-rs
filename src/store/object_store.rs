@@ -20,6 +20,9 @@ const CHUNK_SIZE: usize = 8_388_608; // 8 Mebibytes, min is 5 (5_242_880);
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ObjectError {
+    #[error("Failed to set the vhost-style bucket name")]
+    SetHost,
+
     #[error("IO Error")]
     IO(#[from] std::io::Error),
 
@@ -36,7 +39,9 @@ pub(crate) enum ObjectError {
 impl ObjectError {
     pub(super) const fn error_code(&self) -> ErrorCode {
         match self {
-            Self::BuildClient(_) | Self::Request(_) => ErrorCode::OBJECT_REQUEST_ERROR,
+            Self::SetHost | Self::BuildClient(_) | Self::Request(_) => {
+                ErrorCode::OBJECT_REQUEST_ERROR
+            }
             Self::IO(_) => ErrorCode::OBJECT_IO_ERROR,
             Self::Canceled => ErrorCode::PANIC,
         }
@@ -306,7 +311,7 @@ impl ObjectStore {
     #[tracing::instrument(skip(access_key, secret_key, session_token))]
     pub(crate) async fn new(
         crate::config::ObjectStorage {
-            endpoint,
+            mut endpoint,
             bucket_name,
             use_path_style,
             region,
@@ -315,7 +320,6 @@ impl ObjectStore {
             session_token,
             client_timeout,
             public_endpoint,
-            signature_duration: _,
         }: crate::config::ObjectStorage,
     ) -> Result<ObjectStore, StoreError> {
         let https = endpoint.scheme() == "https";
@@ -324,10 +328,23 @@ impl ObjectStore {
             .with_timeout(Duration::from_secs(client_timeout))
             .with_allow_http(!https);
 
+        let use_vhost_style = !use_path_style;
+
+        if use_vhost_style {
+            if let Some(host) = endpoint.host() {
+                if !host.to_string().starts_with(&bucket_name) {
+                    let new_host = format!("{bucket_name}.{host}");
+                    endpoint
+                        .set_host(Some(&new_host))
+                        .map_err(|_| ObjectError::SetHost)?;
+                }
+            }
+        }
+
         let builder = AmazonS3Builder::new()
-            .with_endpoint(endpoint)
+            .with_endpoint(endpoint.as_str().trim_end_matches('/'))
             .with_bucket_name(bucket_name)
-            .with_virtual_hosted_style_request(!use_path_style)
+            .with_virtual_hosted_style_request(use_vhost_style)
             .with_region(region)
             .with_access_key_id(access_key)
             .with_secret_access_key(secret_key)

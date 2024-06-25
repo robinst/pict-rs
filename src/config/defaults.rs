@@ -201,8 +201,6 @@ pub(super) struct FilesystemDefaults {
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) struct ObjectStorageDefaults {
-    pub(super) signature_duration: u64,
-
     pub(super) client_timeout: u64,
 }
 
@@ -390,10 +388,7 @@ impl Default for FilesystemDefaults {
 
 impl Default for ObjectStorageDefaults {
     fn default() -> Self {
-        Self {
-            signature_duration: 15,
-            client_timeout: 30,
-        }
+        Self { client_timeout: 30 }
     }
 }
 
